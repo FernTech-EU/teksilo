@@ -8,7 +8,9 @@
 //! ALSO bound to a read-only `RichTextEditor::read_only` in the
 //! second pane. Both editors subscribe to `doc.on_change()`
 //! independently, so edits in the left pane propagate to the right
-//! pane on the next frame tick.
+//! pane on the next frame tick. An input method's composition shows only
+//! in the left pane, the view it is made in: the preview shows the text as
+//! recorded until the composition is committed or cancelled.
 //!
 //! Try it:
 //!   * Type to insert text; bursts are batched through `pending_chars`
@@ -25,6 +27,22 @@
 //!     payloads on copy so rich paste into Firefox, Word, or Google
 //!     Docs keeps the formatting; paste from those apps parses their
 //!     HTML back into the document.
+//!   * The Edit menu (Undo / Redo / Cut / Copy / Paste / Paste without
+//!     formatting / Select All) is a native menu bar on macOS, an in-window
+//!     one elsewhere. On macOS the system adds its own rows to it: Start
+//!     Dictation, Emoji & Symbols, AutoFill and Writing Tools. Try them with
+//!     the focus in the editor, then in the Title field.
+//!   * The Title field above the panes is a plain `TextInput`, to compare
+//!     with the editor when the system inserts text. Its own "Title: typed
+//!     ..." line counts what reached it, the same way.
+//!   * The "Writing Tools (macOS)" checkbox next to the Title turns the
+//!     system's Writing Tools off and on for both the Title field and the
+//!     editor (`.writing_tools(..)`). With it off, the Writing Tools row of
+//!     the Edit menu and the context menu should grey out in both.
+//!   * The "Editor: typed ..." line under the panes counts the characters
+//!     that reached the editable editor, per source (`on_text_inserted`):
+//!     typed, IME, dictated, Writing Tools, pasted, assistive technology,
+//!     programmatic.
 //!   * Right-click opens the built-in Cut / Copy / Paste / Paste
 //!     Unformatted / Select All menu. Items reflect the live
 //!     selection / policy state — Cut and Copy are greyed when there
@@ -66,7 +84,7 @@
 //! way the shadow formatting never touches stored content (invisible to
 //! undo / copy / export). See `highlighters.rs` and `highlight_controls.rs`.
 //!
-//! Run with: `cargo run -p rich-text-editor --features "rich-text clipboard"`
+//! Run with: `cargo run -p rich-text-editor`
 
 mod format_toolbar;
 mod highlight_controls;
@@ -74,9 +92,11 @@ mod highlighters;
 
 use teksilo::prelude::*;
 use teksilo::text_document::{Alignment, BlockFormat, MoveMode, TextDocument};
+use teksilo::widgets::EditSource;
 use teksilo::widgets::rich_text::{RichTextEditor, ScrollPolicy};
 use teksilo::widgets::{
-    Expand, HStack, Orientation, PaneDescriptor, Spacer, Splitter, SplitterModel, Toolbar,
+    Checkbox, Expand, HStack, MenuBar, MenuEntry, MenuModel, NativeMenuMode, Orientation,
+    PaneDescriptor, Spacer, Splitter, SplitterModel, StandardMenu, TextInput, TextWidget, Toolbar,
 };
 
 use format_toolbar::FormatToolbar;
@@ -148,6 +168,93 @@ fn apply_alignment_demos(doc: &TextDocument) {
             bottom_margin: prior.bottom_margin,
             ..BlockFormat::default()
         });
+    }
+}
+
+/// The minimum menu bar: the App menu and an Edit menu. AppKit adds its own
+/// rows (Start Dictation, Emoji & Symbols, AutoFill, Writing Tools) to the menu
+/// titled "Edit".
+fn menu_model() -> MenuModel {
+    MenuModel::new()
+        .standard_menu(StandardMenu::app())
+        .menu(lit!("&Edit"), |m| {
+            m.item(
+                MenuEntry::new(lit!("&Undo"))
+                    .intent("edit.undo")
+                    .shortcut("edit.undo"),
+            )
+            .item(
+                MenuEntry::new(lit!("&Redo"))
+                    .intent("edit.redo")
+                    .shortcut("edit.redo"),
+            )
+            .separator()
+            .item(
+                MenuEntry::new(lit!("Cu&t"))
+                    .intent("edit.cut")
+                    .shortcut("edit.cut"),
+            )
+            .item(
+                MenuEntry::new(lit!("&Copy"))
+                    .intent("edit.copy")
+                    .shortcut("edit.copy"),
+            )
+            .item(
+                MenuEntry::new(lit!("&Paste"))
+                    .intent("edit.paste")
+                    .shortcut("edit.paste"),
+            )
+            .item(
+                MenuEntry::new(lit!("Paste without &formatting"))
+                    .intent("edit.paste_plain")
+                    .shortcut("edit.paste_plain"),
+            )
+            .item(
+                MenuEntry::new(lit!("Select &All"))
+                    .intent("edit.select_all")
+                    .shortcut("edit.select_all"),
+            )
+        })
+}
+
+/// Characters that reached one field, per source.
+#[derive(Default, Clone, Copy)]
+struct Arrivals {
+    typed: usize,
+    ime: usize,
+    dictated: usize,
+    writing_tools: usize,
+    pasted: usize,
+    assistive: usize,
+    programmatic: usize,
+}
+
+impl Arrivals {
+    /// Exhaustive on purpose: a new `EditSource` must break this build.
+    fn record(&mut self, source: EditSource, chars: usize) {
+        match source {
+            EditSource::Keyboard => self.typed += chars,
+            EditSource::Ime => self.ime += chars,
+            EditSource::Dictation => self.dictated += chars,
+            EditSource::WritingTools => self.writing_tools += chars,
+            EditSource::Clipboard => self.pasted += chars,
+            EditSource::Accessibility => self.assistive += chars,
+            EditSource::Programmatic => self.programmatic += chars,
+        }
+    }
+
+    fn line(&self, field: &str) -> String {
+        format!(
+            "{field}: typed {}, IME {}, dictated {}, writing tools {}, pasted {}, assistive {}, \
+             programmatic {}",
+            self.typed,
+            self.ime,
+            self.dictated,
+            self.writing_tools,
+            self.pasted,
+            self.assistive,
+            self.programmatic
+        )
     }
 }
 
@@ -383,6 +490,10 @@ fn main() {
         .expect("markdown import completes");
     apply_default_margins(&doc);
     apply_alignment_demos(&doc);
+    // The two passes above are recorded edits. Left in the history, an undo
+    // past the writer's first edit takes the sample's margins and alignments
+    // away one block at a time, which reads as undo doing nothing.
+    doc.clear_undo_redo();
 
     TeksiloAppBuilder::new()
         .install_automation_bridge_in_debug()
@@ -396,9 +507,21 @@ fn main() {
                     // Build the editable view first so the formatting
                     // toolbar can borrow it for signal / handle wiring,
                     // then move the editor into the SplitView.
+                    let editor_arrivals = Signal::new(Arrivals::default());
+                    let editor_line = editor_arrivals.map(|a| a.line("Editor"));
+                    let writing_tools = Signal::new(true);
                     let editor = RichTextEditor::editor(doc.clone())
                         .content_padding_symmetric(0.0, 10.0)
-                        .label(lit!("Editor"));
+                        .writing_tools(writing_tools.clone())
+                        .label(lit!("Editor"))
+                        .on_text_inserted(move |source, chars| {
+                            let mut a = editor_arrivals.get();
+                            a.record(source, chars);
+                            editor_arrivals.set(a);
+                        });
+                    let title = Signal::new(String::new());
+                    let title_arrivals = Signal::new(Arrivals::default());
+                    let title_line = title_arrivals.map(|a| a.line("Title"));
                     let toolbar = FormatToolbar::new(&editor);
                     let highlight_controls = HighlightControls::new(&doc);
                     let doc_preview = doc.clone();
@@ -413,7 +536,39 @@ fn main() {
                     );
                     tree.add(
                         teksilo::widgets::VStack::new()
+                            .child(
+                                MenuBar::from_model(menu_model())
+                                    .native_on_macos(NativeMenuMode::Suppress),
+                            )
                             .child(dark_mode_toolbar())
+                            .child(
+                                HStack::new()
+                                    .spacing(8.0)
+                                    // The field is named by `label`; the visible
+                                    // caption is hidden from AT so it is not read twice.
+                                    .child(TextWidget::new(lit!("Title")).a11y_hidden())
+                                    // `horizontal()`: the default `Expand::new()` also
+                                    // claims the vertical axis at a zero basis, so it
+                                    // reports a height of 0 to the row, which then sizes
+                                    // to the caption and lets the taller field spill
+                                    // over the toolbar below.
+                                    .child(
+                                        Expand::horizontal().child(
+                                            TextInput::new(title)
+                                                .label(lit!("Title"))
+                                                .writing_tools(writing_tools.clone())
+                                                .on_text_inserted(move |source, chars| {
+                                                    let mut a = title_arrivals.get();
+                                                    a.record(source, chars);
+                                                    title_arrivals.set(a);
+                                                }),
+                                        ),
+                                    )
+                                    .child(
+                                        Checkbox::new(writing_tools)
+                                            .label(lit!("Writing Tools (macOS)")),
+                                    ),
+                            )
                             .child(toolbar)
                             .child(highlight_controls)
                             .child(
@@ -423,15 +578,21 @@ fn main() {
                                         // `read_only` defaults to
                                         // `show_highlights(false)`. A read-only
                                         // *syntax* viewer would opt back in with
-                                        // `.show_highlights(true)`.
+                                        // `.show_highlights(true)`. A
+                                        // composition shows in the editor it
+                                        // is made in only.
                                         RichTextEditor::read_only(doc_preview)
                                             .v_scroll_policy(ScrollPolicy::Auto)
                                             .label(lit!("Preview")),
                                     ),
                                 ),
-                            ),
+                            )
+                            // One line per field.
+                            .child(TextWidget::new(lit!("")).text(title_line))
+                            .child(TextWidget::new(lit!("")).text(editor_line)),
                     )
                 }),
         )
+        .install_native_menu()
         .run();
 }

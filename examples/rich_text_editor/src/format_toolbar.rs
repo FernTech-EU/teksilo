@@ -26,9 +26,11 @@
 //!   for the table-operations row, which disables when the caret is
 //!   outside any table.
 //!
-//! Every button is `.focusable(false)` so the editor keeps focus
-//! across toolbar clicks — Ctrl+B typed after a toolbar click still
-//! reaches the editor.
+//! Every button is built with `.focus_on_click(false)`, as a tool button
+//! is: a click leaves focus in the editor (Ctrl+B typed after a toolbar
+//! click still reaches it), and the editor first commits what it holds (an
+//! input method's composition ends, its text kept), so the button's command
+//! acts on what the writer sees. Tab still reaches the buttons.
 
 use teksilo::canvas::svg::SvgIcon;
 use teksilo::core::widget::WidgetPlacement;
@@ -587,25 +589,25 @@ fn toggle_btn(
     tooltip: &'static str,
     state: Signal<bool>,
     on_click: impl Fn(&mut EventContext) + 'static,
-) -> IconButton {
+) -> impl Widget {
     IconButton::new(IconWidget::from_svg_icon(icon))
         .toolbar()
-        .focusable(false)
         .tooltip(lit!(tooltip))
         .toggle(state)
         .on_activate_fn(on_click)
+        .focus_on_click(false)
 }
 
 fn plain_btn(
     icon: &'static SvgIcon,
     tooltip: &'static str,
     on_click: impl Fn(&mut EventContext) + 'static,
-) -> IconButton {
+) -> impl Widget {
     IconButton::new(IconWidget::from_svg_icon(icon))
         .toolbar()
-        .focusable(false)
         .tooltip(lit!(tooltip))
         .on_activate_fn(on_click)
+        .focus_on_click(false)
 }
 
 /// Build the activation closure for an alignment button. After
