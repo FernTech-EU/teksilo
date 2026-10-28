@@ -129,7 +129,8 @@ by crate for clarity, not because crates version independently.
 - **A password field takes no input method on Windows and X11**: a
   `PasswordField`, or any field with `ImePurpose::Password`, takes its text
   there from the keys alone, as native password fields do. Compositions, the
-  emoji panel and Windows voice typing no longer reach it. On Wayland and
+  emoji panel and Windows voice typing no longer reach it, and on Windows
+  leaving it gives the input method back the state it had. On Wayland and
   macOS the input method stays, told that the field is a password (on
   Wayland the on-screen keyboard and the input method's direct mode follow
   it); macOS secure event input is not done yet.

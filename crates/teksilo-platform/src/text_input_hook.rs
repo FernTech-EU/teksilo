@@ -337,6 +337,21 @@ pub fn set_input_purpose(window: &ParentHandle, purpose: teksilo_core::ImePurpos
     let _ = (window, purpose);
 }
 
+/// Tell the platform's input system that winit has just allowed (or
+/// disallowed) the window's input method. Main thread only, right after
+/// winit's `set_ime_allowed`, from the application's handling of an event.
+///
+/// On Windows, an input method allowed again after a password field gets
+/// back the open status it had before the field took the focus, which the
+/// Microsoft Japanese IME otherwise loses (it comes back closed), as a
+/// WinForms password box gives it back. Elsewhere it does nothing.
+pub fn input_method_allowed(window: &ParentHandle, allowed: bool) {
+    #[cfg(target_os = "windows")]
+    windows::input_method_allowed(window, allowed);
+    #[cfg(not(target_os = "windows"))]
+    let _ = (window, allowed);
+}
+
 /// Attach to a window's native surface. Main thread only, once the window
 /// exists. A no-op where the platform needs nothing.
 ///

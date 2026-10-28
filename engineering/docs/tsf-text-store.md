@@ -409,6 +409,14 @@ cannot compose breaks every IME.
   disallowed for passwords; `SetInputScope` per purpose. It also serves `CodeEditor`, the terminal
   and, later, ATOK and Mozc under TSF. Then re-run Japanese reconversion and prediction and Korean
   Hanja on a committed syllable (round 6 saw no request for the latter; to be measured).
+  Measured on 9c6641ae (`cross_tasks/tsf-phase-minus-1-windows-findings.md`): candidate placement,
+  Japanese reconversion of a selection and at the caret, `IMR_DOCUMENTFEED` and the password refusal
+  work. **Hanja on a committed Korean syllable sends no `WM_IME_REQUEST` at all**: the Hanja key
+  reaches the window as a plain `WM_KEYDOWN` (`VK_HANJA`), with the caret after the syllable or the
+  syllable selected, while Notepad reconverts it. The Korean IME does this through TSF only, so it is
+  left for the store (Phase 2 and 3). Leaving a password field closed the Japanese IME (it came back
+  `A`, where a WinForms password box gives it back open): the hook now gives the input context back
+  the open status it had as the field took the focus.
 - **Phase 0, measure** (about 1,000 lines). Chromium's key model, a store answering reads from the
   document and taking writes into a private mirror (kept afterwards as a debug fallback), the empty
   disabled context, `ITfKeyTraceEventSink`, `ITfTextEditSink` with `EnumProperties`, tracing.

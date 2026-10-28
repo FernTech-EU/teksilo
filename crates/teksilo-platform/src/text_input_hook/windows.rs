@@ -218,7 +218,8 @@ use windows::Win32::UI::Input::Ime::{
     IMN_SETOPENSTATUS, IMN_SETSENTENCEMODE, IMN_SETSTATUSWINDOWPOS, IMN_SOFTKBDDESTROYED,
     IMR_CANDIDATEWINDOW, IMR_COMPOSITIONFONT, IMR_COMPOSITIONWINDOW, IMR_CONFIRMRECONVERTSTRING,
     IMR_DOCUMENTFEED, IMR_QUERYCHARPOSITION, IMR_RECONVERTSTRING, ImmGetCompositionStringW,
-    ImmGetContext, ImmNotifyIME, ImmReleaseContext, NI_COMPOSITIONSTR, RECONVERTSTRING,
+    ImmGetContext, ImmGetOpenStatus, ImmNotifyIME, ImmReleaseContext, ImmSetOpenStatus,
+    NI_COMPOSITIONSTR, RECONVERTSTRING,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_PACKET, VK_PROCESSKEY};
 use windows::Win32::UI::Input::{
@@ -289,6 +290,9 @@ thread_local! {
     /// The windows [`set_input_purpose`] gave a scope other than
     /// `IS_DEFAULT`, which must get it back before they are destroyed.
     static SCOPED: RefCell<HashSet<isize>> = RefCell::new(HashSet::new());
+    /// The open status of each window's input context as a password field
+    /// took the focus, for [`input_method_allowed`] to give back.
+    static OPEN_BEFORE_PASSWORD: RefCell<HashMap<isize, bool>> = RefCell::new(HashMap::new());
 }
 
 /// What the subclass procedure reads through `dwRefData`.
@@ -406,6 +410,8 @@ pub(super) fn detach(window_id: TeksiloWindowId) {
     let hwnd = WINDOWS.with_borrow_mut(|windows| windows.remove(&window_id));
     if let Some(hwnd) = hwnd {
         reset_input_scope(hwnd);
+        let _ =
+            OPEN_BEFORE_PASSWORD.try_with(|saved| saved.borrow_mut().remove(&(hwnd.0 as isize)));
     }
     // Taken out of the map first and dropped after the borrow ends, so
     // nothing `RemoveWindowSubclass` might run can find the map borrowed.
@@ -1460,6 +1466,12 @@ fn answer_request(state: &TapState, hwnd: HWND, command: u32, lparam: LPARAM) ->
             }),
             IMR_CONFIRMRECONVERTSTRING => {
                 read_reconvert_string(lparam).map(|(units, composition)| {
+                    if super::trace_enabled() {
+                        tap_trace!(
+                            "  confirm: composition units {composition:?} of {:?}",
+                            String::from_utf16_lossy(&units)
+                        );
+                    }
                     let accepted =
                         state
                             .reconversion
@@ -1587,6 +1599,19 @@ fn write_reconvert_string(string: &ReconvertString, lparam: LPARAM) -> Option<LR
             string.units.len() * 2,
         );
     }
+    if super::trace_enabled() {
+        tap_trace!(
+            "  RECONVERTSTRING size={} str_len={} comp={}+{} target={}+{} (byte offset+units), from character {}: {:?}",
+            fields.size,
+            fields.str_len,
+            fields.comp_offset,
+            fields.comp_len,
+            fields.target_offset,
+            fields.target_len,
+            string.start,
+            String::from_utf16_lossy(&string.units)
+        );
+    }
     Some(LRESULT(fields.size as isize))
 }
 
@@ -1662,8 +1687,12 @@ pub(super) fn set_input_purpose(parent: &ParentHandle, purpose: ImePurpose) {
     }
 }
 
-/// Give `hwnd` the input scope of `purpose`.
+/// Give `hwnd` the input scope of `purpose`. For a password, first note
+/// whether the input method is open, for [`input_method_allowed`].
 fn apply_input_scope(hwnd: HWND, purpose: ImePurpose) {
+    if purpose == ImePurpose::Password {
+        remember_open_status(hwnd);
+    }
     let scope = input_scope(purpose);
     if scope == IS_DEFAULT {
         reset_input_scope(hwnd);
@@ -1682,6 +1711,70 @@ fn apply_input_scope(hwnd: HWND, purpose: ImePurpose) {
     );
     if result.is_ok() {
         let _ = SCOPED.try_with(|scoped| scoped.borrow_mut().insert(hwnd.0 as isize));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The open status across a password field
+// ---------------------------------------------------------------------------
+
+/// See [`super::input_method_allowed`].
+pub(super) fn input_method_allowed(parent: &ParentHandle, allowed: bool) {
+    if allowed && let Some(hwnd) = hwnd_of(parent) {
+        restore_open_status(hwnd);
+    }
+}
+
+/// Note whether `hwnd`'s input method is open, as a password field takes
+/// the focus and before winit takes the window's input context away. Kept
+/// from the first password field of a run of them; nothing is noted for a
+/// window with no context then (the focus came from a widget that takes no
+/// text, and the context keeps its own status while it is away).
+fn remember_open_status(hwnd: HWND) {
+    let key = hwnd.0 as isize;
+    if OPEN_BEFORE_PASSWORD
+        .try_with(|saved| saved.borrow().contains_key(&key))
+        .unwrap_or(true)
+    {
+        return;
+    }
+    let himc = unsafe { ImmGetContext(hwnd) };
+    if himc.is_invalid() {
+        return;
+    }
+    let open = unsafe { ImmGetOpenStatus(himc) }.as_bool();
+    unsafe {
+        let _ = ImmReleaseContext(hwnd, himc);
+    }
+    tap_trace!("open status as the password field takes the focus: {open}");
+    let _ = OPEN_BEFORE_PASSWORD.try_with(|saved| saved.borrow_mut().insert(key, open));
+}
+
+/// Give `hwnd`'s input context back the open status noted as a password
+/// field took the focus, once winit has given the window its context again:
+/// what WinForms does around a password box (`ImeMode.Disable`, then the
+/// next control's mode restored). Measured on Windows 11 with the Microsoft
+/// Japanese IME: left alone, the input method came back closed (`A`) after
+/// the password field, where a WinForms password box gives it back open.
+fn restore_open_status(hwnd: HWND) {
+    let Some(open) = OPEN_BEFORE_PASSWORD
+        .try_with(|saved| saved.borrow_mut().remove(&(hwnd.0 as isize)))
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let himc = unsafe { ImmGetContext(hwnd) };
+    if himc.is_invalid() {
+        return;
+    }
+    let now = unsafe { ImmGetOpenStatus(himc) }.as_bool();
+    if now != open {
+        let set = unsafe { ImmSetOpenStatus(himc, open) }.as_bool();
+        tap_trace!("open status after the password field was {now}: set back to {open}, {set}");
+    }
+    unsafe {
+        let _ = ImmReleaseContext(hwnd, himc);
     }
 }
 
@@ -2563,5 +2656,65 @@ mod tests {
         }
         assert!(!scoped(), "given back as the window is destroyed");
         detach(window_id);
+    }
+
+    /// The Microsoft Japanese IME comes back closed after a password field
+    /// (measured): the open status noted as the field took the focus is given
+    /// back once winit has given the window its context again.
+    #[test]
+    fn the_open_status_comes_back_after_a_password_field() {
+        use windows::Win32::UI::Input::Ime::{IACE_CHILDREN, IACE_DEFAULT, ImmAssociateContextEx};
+
+        let hwnd = hidden_window();
+        let open = || unsafe {
+            let himc = ImmGetContext(hwnd);
+            assert!(!himc.is_invalid(), "the window has its default context");
+            let open = ImmGetOpenStatus(himc).as_bool();
+            let _ = ImmReleaseContext(hwnd, himc);
+            open
+        };
+        let himc = unsafe { ImmGetContext(hwnd) };
+        if himc.is_invalid() {
+            // IMM gives no window a context in a session with no desktop
+            // (session 0, over ssh): run it on a desktop session.
+            eprintln!("skipped: this session gives windows no input context");
+            unsafe {
+                let _ = DestroyWindow(hwnd);
+            }
+            return;
+        }
+        assert!(unsafe { ImmSetOpenStatus(himc, true) }.as_bool());
+        assert!(open());
+
+        // The password field takes the focus: the scope, then winit takes
+        // the context away.
+        apply_input_scope(hwnd, ImePurpose::Password);
+        unsafe {
+            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), IACE_CHILDREN);
+            // The input method closes it meanwhile, as measured.
+            let _ = ImmSetOpenStatus(himc, false);
+            let _ = ImmReleaseContext(hwnd, himc);
+        }
+        // Back in an ordinary field: the scope, then winit gives the context
+        // back, then the hook.
+        apply_input_scope(hwnd, ImePurpose::Normal);
+        unsafe {
+            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), IACE_DEFAULT);
+        }
+        assert!(!open(), "premise: it came back closed");
+        restore_open_status(hwnd);
+        assert!(open(), "given back open");
+
+        // Given back once: a status changed later is the user's.
+        let himc = unsafe { ImmGetContext(hwnd) };
+        unsafe {
+            let _ = ImmSetOpenStatus(himc, false);
+            let _ = ImmReleaseContext(hwnd, himc);
+        }
+        restore_open_status(hwnd);
+        assert!(!open());
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
     }
 }

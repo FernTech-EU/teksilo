@@ -729,6 +729,13 @@ impl crate::input_loop::InputChrome for WindowChrome<'_> {
         }
         if let Some(allowed) = allowed {
             self.window.window().set_ime_allowed(allowed);
+            // On Windows, the input method's open status as it was before a
+            // password field.
+            if let Some(parent) =
+                teksilo_core::raw_handle::ParentHandle::from_window(self.window.window())
+            {
+                teksilo_platform::text_input_hook::input_method_allowed(&parent, allowed);
+            }
         }
     }
 
