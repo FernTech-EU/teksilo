@@ -182,6 +182,23 @@ by crate for clarity, not because crates version independently.
   with no italic, oblique or slant axis is now slanted about the baseline
   by fontconfig's synthetic oblique angle; the advances do not change, so
   the caret and selection stay where they were. Needs text-typeset 3.0.
+- **Chinese, Japanese and Korean text a fallback font draws comes from the
+  font the system uses for that language.** On Windows 中你好 was drawn in BIZ
+  UDGothic, a Japanese font, and 日本 next to 한글 in Batang, a thin Korean
+  serif: fallback took the first installed font that had the characters.
+  It now prefers Yu Gothic UI, Microsoft YaHei UI, Microsoft JhengHei UI or
+  Malgun Gothic on Windows, Hiragino Sans, PingFang or Apple SD Gothic Neo
+  on the Mac, and Noto Sans CJK (or Source Han Sans, IPA, VL Gothic,
+  WenQuanYi, Nanum) on Linux, matched to the weight of the text. Chinese
+  characters are drawn for Japanese next to kana and for Korean next to
+  hangul, and otherwise for Simplified Chinese. Needs text-typeset 3.0.
+- **Headings keep their proportion to the body text.** A heading in a
+  `RichTextEditor` or `RichTextViewer` was sized from a fixed 16 px (32 px
+  for a Heading 1) whatever the text size, so with Teksilo's 14 px body
+  headings were too large, and under the font-size scale they kept their
+  excess. A heading is now twice, 1.5, 1.25 and 1.1 times the body size
+  for levels 1 to 4. **Behaviour change:** with a 14 px body a Heading 1
+  is 28 px where it was 32. Needs text-typeset 3.0.
 
 #### Widgets
 
