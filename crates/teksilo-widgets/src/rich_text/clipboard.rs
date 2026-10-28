@@ -276,7 +276,7 @@ pub(crate) fn paste(state: &mut EditorState, ctx: &EventContext) {
     //    afterwards, because this is the one paste path where the text itself is
     //    in hand. A paragraph break counts: it is text that arrived.
     let arrived = insert_plain_text(state, &text);
-    state.report_inserted_chars(super::EditSource::Clipboard, arrived);
+    state.report_inserted_chars(crate::EditSource::Clipboard, arrived);
     state.cursor.clear_selection();
     state.pending_text_changed = true;
 }
@@ -332,7 +332,7 @@ pub(crate) fn paste_unformatted(state: &mut EditorState, ctx: &EventContext) {
     // filter forbids taking text away.
     super::keyboard::collapse_selection_before_insert(state);
     let arrived = insert_plain_text(state, &text);
-    state.report_inserted_chars(super::EditSource::Clipboard, arrived);
+    state.report_inserted_chars(crate::EditSource::Clipboard, arrived);
     state.cursor.clear_selection();
     state.pending_text_changed = true;
 }
@@ -439,6 +439,6 @@ fn report_measured<R>(state: &mut EditorState, insert: impl FnOnce(&mut EditorSt
     let out = insert(state);
     let after = state.document.character_count();
     let arrived = (after + replaced).saturating_sub(before);
-    state.report_inserted_chars(super::EditSource::Clipboard, arrived);
+    state.report_inserted_chars(crate::EditSource::Clipboard, arrived);
     out
 }

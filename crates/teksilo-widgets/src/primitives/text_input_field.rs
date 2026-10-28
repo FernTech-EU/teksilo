@@ -95,14 +95,15 @@ use teksilo_text::text_document::SelectionType;
 use teksilo_text::{CursorAffinity, CursorDisplay, RichTextEngine, SharedTypesetter};
 use teksilo_tokens::{HAlignment, InputTokens, TextStyle, TypographyTokens};
 
+use crate::EditSource;
 use crate::button::InteractionState;
 use crate::menu_item::MenuItem;
 use crate::menu_list::{MenuList, MenuSeparator};
 use crate::rich_text::paint::{PaintParams, paint_frame};
 
 use self::state::{
-    AtPublished, SharedState, TextInputConfig, TextInputState, publish_cursor_signals,
-    sync_cursor_signals,
+    AtPublished, SharedState, TextInputConfig, TextInputState, TextInserted,
+    publish_cursor_signals, sync_cursor_signals,
 };
 pub(crate) use self::state::{CharFilter, CommandFactory};
 
@@ -225,6 +226,11 @@ pub struct TextInputField {
     placeholder: String,
     on_submit: Option<CommandFactory>,
     on_access_set_value: Option<super::text_input_field::state::AccessSetValue>,
+    /// See [`on_text_inserted`](Self::on_text_inserted). Kept as an `Rc` and
+    /// cloned into the state, so a rebuild keeps reporting.
+    on_text_inserted: Option<TextInserted>,
+    /// See [`writing_tools`](Self::writing_tools).
+    writing_tools: Prop<bool>,
     on_blur: Option<CommandFactory>,
     on_commit: Option<CommandFactory>,
     char_filter: Option<CharFilter>,
@@ -356,6 +362,8 @@ impl TextInputField {
             placeholder: String::new(),
             on_submit: None,
             on_access_set_value: None,
+            on_text_inserted: None,
+            writing_tools: Prop::Static(true),
             on_blur: None,
             on_commit: None,
             char_filter: None,
@@ -456,6 +464,53 @@ impl TextInputField {
         f: impl Fn(&str, &mut EventContext) -> bool + 'static,
     ) -> Self {
         self.on_access_set_value = Some(std::rc::Rc::new(f));
+        self
+    }
+
+    /// Install a callback fired **where text lands** in the field, with the
+    /// [`EditSource`] it came through and how many characters it was.
+    ///
+    /// Counts only, never content, so it is as safe on a password field as on
+    /// any other. The count is of what actually landed: after the single-line
+    /// strip, the [`char_filter`](Self::char_filter) and the
+    /// [`max_length`](Self::max_length) truncation, so characters a filter
+    /// refused were never written and are not reported.
+    ///
+    /// Fires for text arriving through:
+    ///
+    /// - the keyboard ([`EditSource::Keyboard`]), once per batched run of
+    ///   typed characters;
+    /// - the platform's text input system: an IME composition's settled
+    ///   result, the emoji viewer and AutoFill ([`EditSource::Ime`]),
+    ///   dictation ([`EditSource::Dictation`]) and Writing Tools
+    ///   ([`EditSource::WritingTools`]), never for an intermediate
+    ///   composition state;
+    /// - a paste ([`EditSource::Clipboard`]);
+    /// - an assistive technology, through AccessKit's `SetValue` and
+    ///   `ReplaceSelectedText` ([`EditSource::Accessibility`]).
+    ///
+    /// It does **not** fire when the application writes the bound
+    /// `Signal<String>`, nor for undo or redo: none of those is text arriving.
+    ///
+    /// The field is mid-edit while the callback runs, so it counts rather than
+    /// reads the field back. Replaces any prior callback on this field.
+    pub fn on_text_inserted(mut self, f: impl Fn(EditSource, usize) + 'static) -> Self {
+        self.on_text_inserted = Some(Rc::new(f));
+        self
+    }
+
+    /// Whether the system's Writing Tools may act on this field: on macOS,
+    /// whether they may read its text and replace it with what they produce.
+    /// Other platforms have no such feature, and there this changes nothing.
+    ///
+    /// Defaults to `true`. Pass `false`, or a `Signal<bool>` the application
+    /// flips, for a field whose text must stay what the user wrote. A
+    /// [`secure`](Self::secure) field never lets them in, whatever this says.
+    ///
+    /// Text Writing Tools do write arrives as [`EditSource::WritingTools`] in
+    /// [`on_text_inserted`](Self::on_text_inserted).
+    pub fn writing_tools(mut self, allowed: impl Into<Prop<bool>>) -> Self {
+        self.writing_tools = allowed.into();
         self
     }
 
@@ -1215,7 +1270,17 @@ fn handle_access_action(
                     sync_cursor_signals(state);
                     EventResponse::Ignored
                 }
-                _ => EventResponse::Handled,
+                _ => {
+                    // Reported once the host has kept it: a string it refused
+                    // and reverted never landed. Reported as itself, never as
+                    // typing: for some people an assistive technology's write
+                    // *is* typing, and folding it into `Keyboard` would erase
+                    // how they work.
+                    state
+                        .borrow()
+                        .report_inserted_chars(EditSource::Accessibility, value.chars().count());
+                    EventResponse::Handled
+                }
             }
         }
         (Action::ReplaceSelectedText, Some(ActionData::Value(value))) => {
@@ -1227,6 +1292,8 @@ fn handle_access_action(
             // the action in `accessibility()`, so we must service it.
             let st = state.borrow();
             let _ = st.cursor.insert_text(value.as_ref());
+            // Same reason as `SetValue` above.
+            st.report_inserted_chars(EditSource::Accessibility, value.chars().count());
             drop(st);
             sync_cursor_signals(state);
             ctx.request_frame();
@@ -1591,6 +1658,12 @@ mod standard_edit_tests;
 /// focus leaves it as it was.
 #[cfg(test)]
 mod focus_origin_tests;
+
+/// **Where the text came from**: each arrival reported by its route and
+/// counted as it landed, the input system's replacements, and whether Writing
+/// Tools may act on the field.
+#[cfg(test)]
+mod arrival_tests;
 
 /// A live handle on a [`TextInputField`] — its text-editing commands, for a
 /// caller outside the widget.

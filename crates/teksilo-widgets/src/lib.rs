@@ -52,6 +52,7 @@ pub use data_views::{ActivateOn, DragTransferMode, RowDragData, ViewId};
 pub(crate) mod drag_preview;
 pub mod drop_target;
 pub mod drop_zone;
+mod edit_source;
 pub mod file_picker_field;
 pub mod focus_scope;
 pub mod font_picker;
@@ -171,6 +172,7 @@ pub use docking::{
 };
 pub use drop_target::{DropRegionSpec, DropTarget};
 pub use drop_zone::DropZone;
+pub use edit_source::EditSource;
 pub use file_picker_field::{FilePickerField, FilePickerKind};
 pub use focus_scope::FocusScope;
 pub use font_picker::{FontMeta, FontPicker, FontPreviewMode, FontSpacingFilter};

@@ -162,6 +162,8 @@ impl Widget for TextInputField {
             read_only: read_only_effective,
             on_submit,
             on_access_set_value: self.on_access_set_value.clone(),
+            on_text_inserted: self.on_text_inserted.clone(),
+            writing_tools: self.writing_tools.clone(),
             on_blur,
             on_commit,
             char_filter: self.char_filter.take(),

@@ -126,7 +126,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::color_prop::ColorProp;
 use teksilo_core::shortcut::StandardEdit;
-use teksilo_core::signal::Signal;
+use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{
     RichTextEditorStyle, RichTextEditorStyleConfig, SharedRichTextEditorStyle,
 };
@@ -144,6 +144,7 @@ use teksilo_text::{
 
 use self::paint::{PaintParams, paint_frame};
 use self::state::{EditorState, SharedState};
+use crate::EditSource;
 use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
 use crate::styles::RecipeRichTextEditorStyle;
@@ -159,42 +160,6 @@ pub enum ScrollPolicy {
     /// Never show the scroll bar; useful when embedding the editor inside an outer
     /// `ScrollArea` or in headless tests.
     AlwaysOff,
-}
-
-/// How a piece of text reached the document — the **channel**, not the author.
-///
-/// Deliberately framework-generic, and deliberately small. These are the routes
-/// a toolkit can actually observe: which input path the characters came down.
-/// What that *means* is the application's to decide, and every application will
-/// decide differently — a writing tool cares that dictation is not typing, a
-/// code editor cares that a snippet is not either, and a form cares about none
-/// of it. Teksilo says what it saw; it does not interpret.
-///
-/// ⚠ **Not evidence of who wrote anything.** Text typed one character at a time
-/// was typed one character at a time, and that is the entire claim. Anything
-/// further — who, or whether a person at all — is an inference this cannot make
-/// and no consumer of it should pretend to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EditSource {
-    /// Typed, one key at a time.
-    Keyboard,
-    /// The settled result of an IME composition — CJK/Kana candidate selection,
-    /// a dead-key accent. Separate from [`Self::Keyboard`] because the
-    /// characters that land are not the keys that were pressed.
-    Ime,
-    /// Pasted, as plain text or as HTML.
-    Clipboard,
-    /// Arrived through an assistive technology: AccessKit's `SetValue` or
-    /// `ReplaceSelectedText`, which is how dictation and a braille display
-    /// write.
-    ///
-    /// **Never folded into [`Self::Keyboard`].** For some people this *is*
-    /// typing, and a toolkit that reported it as something else — or as nothing
-    /// — would be quietly erasing how they work.
-    Accessibility,
-    /// Inserted by the application itself rather than by anything the person at
-    /// the keyboard did: a template, a substitution, a completion.
-    Programmatic,
 }
 
 /// The main rich text widget. Construct via [`RichTextEditor::read_only`]
@@ -878,6 +843,11 @@ impl RichTextEditor {
     /// - the keyboard, once per batched run of typed characters;
     /// - an IME commit, once for the settled result and never for the
     ///   intermediate composition states;
+    /// - the platform's text input system writing on its own account:
+    ///   dictation ([`EditSource::Dictation`]), Writing Tools
+    ///   ([`EditSource::WritingTools`]), the emoji viewer and AutoFill
+    ///   ([`EditSource::Ime`]), once per commit, including one that replaces a
+    ///   range of the text;
     /// - a paste, of plain text or HTML;
     /// - an assistive technology, through AccessKit's `SetValue` and
     ///   `ReplaceSelectedText`.
@@ -889,6 +859,23 @@ impl RichTextEditor {
     /// Replaces any prior callback on this editor. Runs on the UI thread.
     pub fn on_text_inserted(self, f: impl Fn(EditSource, usize) + 'static) -> Self {
         self.state.borrow_mut().on_text_inserted = Some(Rc::new(f));
+        self
+    }
+
+    /// Whether the system's Writing Tools may act on this editor: on macOS,
+    /// whether they may read its text and replace it with what they produce.
+    /// Other platforms have no such feature, and there this changes nothing.
+    ///
+    /// Defaults to `true`. Pass `false`, or a `Signal<bool>` that the
+    /// application flips, for an editor whose text must stay the writer's own:
+    /// a field where machine-rewritten text has no place, or a session that
+    /// has to account for every character. Read whenever a session would
+    /// start, so a bound signal takes effect at once, without a rebuild.
+    ///
+    /// Text Writing Tools do write arrives as [`EditSource::WritingTools`] in
+    /// [`on_text_inserted`](Self::on_text_inserted).
+    pub fn writing_tools(self, allowed: impl Into<Prop<bool>>) -> Self {
+        self.state.borrow_mut().writing_tools = allowed.into();
         self
     }
 

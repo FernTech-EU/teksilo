@@ -14,6 +14,7 @@ use teksilo_platform::clipboard::ClipboardHandle;
 use teksilo_text::CursorAffinity;
 use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
+use crate::EditSource;
 use crate::common::text_nav::{CaretStep, caret_step, deletes_word};
 
 use super::state::{SharedState, TextInputState, sync_cursor_signals};
@@ -61,12 +62,23 @@ pub(crate) fn handle_key(
     if let WidgetEvent::ImeComposition { text, .. } = event {
         return handle_ime_composition(state, ctx, text);
     }
-    // IME commit — finalized grapheme cluster. Drop any live preedit first
-    // (some backends skip the empty-preedit clear), then batch into
-    // pending_chars like ordinary typed input.
-    if let WidgetEvent::ImeCommit { text, .. } = event {
+    // IME commit: a finalized grapheme cluster, or text the input system wrote
+    // on its own account (dictation, Writing Tools, the emoji viewer). Drop any
+    // live preedit first (some backends skip the empty-preedit clear), then
+    // batch into pending_chars like ordinary typed input, or replace the range
+    // the input system named.
+    if let WidgetEvent::ImeCommit {
+        text,
+        origin,
+        replacement,
+    } = event
+    {
         clear_ime_preedit(state);
-        return push_pending_chars(state, ctx, text);
+        let source = EditSource::from_ime_origin(*origin);
+        return match replacement {
+            Some(range) => replace_from_input_system(state, ctx, text, range.clone(), source),
+            None => push_pending_chars(state, ctx, text, source),
+        };
     }
 
     let WidgetEvent::KeyDown {
@@ -218,8 +230,12 @@ pub(crate) fn handle_key(
                                     return EventResponse::Handled;
                                 }
                                 let truncated: String = clean.chars().take(remaining).collect();
+                                st.pending_arrivals
+                                    .note(EditSource::Keyboard, truncated.chars().count());
                                 st.pending_chars.push_str(&truncated);
                             } else {
+                                st.pending_arrivals
+                                    .note(EditSource::Keyboard, clean.chars().count());
                                 st.pending_chars.push_str(&clean);
                             }
                             true
@@ -474,8 +490,13 @@ pub(crate) fn clear_ime_preedit(state: &SharedState) {
     st.ime_preedit = None;
 }
 
-/// Batch pending characters from an IME commit.
-fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -> EventResponse {
+/// Batch pending characters from an IME commit, counted under `source`.
+fn push_pending_chars(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    text: &str,
+    source: EditSource,
+) -> EventResponse {
     let read_only = state.borrow().read_only;
     if read_only {
         return EventResponse::Handled;
@@ -517,10 +538,77 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
                 return EventResponse::Handled;
             }
             let truncated: String = clean.chars().take(remaining).collect();
+            st.pending_arrivals.note(source, truncated.chars().count());
             st.pending_chars.push_str(&truncated);
         } else {
+            st.pending_arrivals.note(source, clean.chars().count());
             st.pending_chars.push_str(&clean);
         }
+    }
+    sync_cursor_signals(state);
+    report_ime_cursor_area(state, ctx);
+    ctx.request_frame();
+    EventResponse::Handled
+}
+
+/// Replace `range` with `text`, as the input system asked: a dictation
+/// correction, a Writing Tools rewrite. One undo step, reported once under
+/// `source`.
+///
+/// `range` is in character offsets, the units of `TextCursor::position`, and
+/// is clamped to the text: the input system read it a moment ago and may name
+/// a range an edit since has shortened. The text goes through the rules typing
+/// does (the single-line strip, the `char_filter`, the `max_length` cap, here
+/// counted with the range already gone), and what survives is what is
+/// reported. A text the rules refuse entirely leaves the field as it was, as a
+/// refused keystroke or paste does; an empty text deletes the range.
+fn replace_from_input_system(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    text: &str,
+    range: std::ops::Range<usize>,
+    source: EditSource,
+) -> EventResponse {
+    if state.borrow().read_only {
+        return EventResponse::Handled;
+    }
+    {
+        let mut st = state.borrow_mut();
+        // The typing batched ahead of this commit lands first, so the range is
+        // read against the text the input system saw.
+        st.apply_pending_chars();
+        let doc_end = st.document.character_count();
+        let start = range.start.min(doc_end);
+        let end = range.end.min(doc_end).max(start);
+        let clean: String = text
+            .chars()
+            .filter(|c| single_line_admits(*c))
+            .filter(|c| st.char_filter_admits(*c))
+            .collect();
+        let clean: String = match st.max_length {
+            Some(max) => {
+                let kept = doc_end - (end - start);
+                clean.chars().take(max.saturating_sub(kept)).collect()
+            }
+            None => clean,
+        };
+        if clean.is_empty() && !text.is_empty() {
+            // Refused by the field's rules: nothing lands, nothing goes.
+            return EventResponse::Handled;
+        }
+        st.cursor.begin_edit_block();
+        st.cursor.set_position(start, MoveMode::MoveAnchor);
+        st.cursor.set_position(end, MoveMode::KeepAnchor);
+        if clean.is_empty() {
+            if start < end {
+                let _ = st.cursor.remove_selected_text();
+            }
+        } else {
+            let _ = st.cursor.insert_text(&clean);
+        }
+        st.cursor.end_edit_block();
+        st.pending_text_changed = true;
+        st.report_inserted_chars(source, clean.chars().count());
     }
     sync_cursor_signals(state);
     report_ime_cursor_area(state, ctx);
@@ -617,8 +705,10 @@ pub(crate) fn clipboard_paste(state: &mut TextInputState, ctx: &EventContext) {
         }
         let truncated: String = clean.chars().take(remaining).collect();
         let _ = state.cursor.insert_text(&truncated);
+        state.report_inserted_chars(EditSource::Clipboard, truncated.chars().count());
     } else {
         let _ = state.cursor.insert_text(&clean);
+        state.report_inserted_chars(EditSource::Clipboard, clean.chars().count());
     }
     state.cursor.clear_selection();
     state.pending_text_changed = true;

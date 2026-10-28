@@ -353,8 +353,6 @@ pub(crate) fn flush_pending_chars(state: &mut EditorState) {
         // one exists — which is precisely why a forward-only filter has
         // to collapse the selection here first, one layer above the
         // insert that would otherwise swallow it.
-        let typed = std::mem::take(&mut state.pending_typed_chars);
-        let composed = std::mem::take(&mut state.pending_ime_chars);
         super::keyboard::collapse_selection_before_insert(state);
         if batch.contains('\u{2029}') {
             // A typed paragraph separator ends the paragraph, as a pasted one
@@ -366,10 +364,9 @@ pub(crate) fn flush_pending_chars(state: &mut EditorState) {
         }
         // Counted as the characters went in, which is what was written. A caret
         // delta would be a different number whenever the insert above replaced a
-        // selection, and the two routes are reported apart because a settled IME
-        // composition is not a keystroke.
-        state.report_inserted_chars(super::EditSource::Keyboard, typed);
-        state.report_inserted_chars(super::EditSource::Ime, composed);
+        // selection, and the routes are reported apart because a settled IME
+        // composition is not a keystroke, nor dictation either.
+        state.report_pending_arrivals();
         state.pending_text_changed = true;
     }
 }

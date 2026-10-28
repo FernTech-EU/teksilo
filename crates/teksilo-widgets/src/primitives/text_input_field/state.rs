@@ -14,7 +14,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use teksilo_canvas::Point;
-use teksilo_core::signal::Signal;
+use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::EventContext;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_text::text_document::{
@@ -25,7 +25,9 @@ use teksilo_text::{EmbeddedInterRegistrar, RichTextEngine, WrapMode};
 use teksilo_tokens::{HAlignment, TextStyle};
 
 use super::{AtRevealPolicy, EchoMode};
+use crate::EditSource;
 use crate::common::editor_runtime::{CaretBlink, Debounce};
+use crate::common::pending_arrivals::PendingArrivals;
 use crate::rich_text::image_cache::ImageCache;
 
 /// Type-erased action closure, identical to the one in `button.rs`.
@@ -48,6 +50,10 @@ pub(crate) type CharFilter = Rc<dyn Fn(char) -> bool>;
 /// the action unhandled rather than telling the technology a write it refused
 /// succeeded.
 pub(crate) type AccessSetValue = Rc<dyn Fn(&str, &mut EventContext) -> bool>;
+
+/// The application's arrivals callback: where some text came from, and how
+/// many characters it was. See `TextInputField::on_text_inserted`.
+pub(crate) type TextInserted = Rc<dyn Fn(EditSource, usize)>;
 
 pub(crate) type SharedState = Rc<RefCell<TextInputState>>;
 
@@ -99,6 +105,10 @@ pub(crate) struct TextInputState {
 
     // ── Pending chars (batched per frame) ────────────────────────────
     pub pending_chars: String,
+    /// How many of [`pending_chars`](Self::pending_chars) came down each input
+    /// route, reported when the batch is inserted. See
+    /// [`apply_pending_chars`](Self::apply_pending_chars).
+    pub pending_arrivals: PendingArrivals,
     pub pending_text_changed: bool,
     /// Text update deferred from tick() to avoid RefCell double-borrow.
     /// The frame-tick effect reads and applies this after dropping the
@@ -185,6 +195,15 @@ pub(crate) struct TextInputState {
     /// a host reading the signal here would parse the text from *before* this
     /// edit and revert.
     pub on_access_set_value: Option<AccessSetValue>,
+    /// The application's arrivals callback, fired where text lands. Only ever
+    /// called through [`report_inserted_chars`](Self::report_inserted_chars)
+    /// and [`apply_pending_chars`](Self::apply_pending_chars), neither of
+    /// which reports zero characters.
+    pub on_text_inserted: Option<TextInserted>,
+    /// Whether the application lets the system's Writing Tools act on the
+    /// field. Read through [`writing_tools_allowed`](Self::writing_tools_allowed),
+    /// which also answers for a secure field.
+    pub writing_tools: Prop<bool>,
     /// The app's blur callback: fired exactly once per focus-loss, AFTER
     /// the caret has been hidden, scroll reset and the field committed
     /// ([`on_commit`](Self::on_commit)); the selection is deliberately
@@ -326,6 +345,8 @@ pub(crate) struct TextInputConfig {
     /// a host reading the signal here would parse the text from *before* this
     /// edit and revert.
     pub on_access_set_value: Option<AccessSetValue>,
+    pub on_text_inserted: Option<TextInserted>,
+    pub writing_tools: Prop<bool>,
     pub on_blur: Option<Rc<CommandFactory>>,
     pub on_commit: Option<Rc<CommandFactory>>,
     pub char_filter: Option<CharFilter>,
@@ -352,6 +373,8 @@ impl TextInputState {
             read_only,
             on_submit,
             on_access_set_value,
+            on_text_inserted,
+            writing_tools,
             on_blur,
             on_commit,
             char_filter,
@@ -406,6 +429,7 @@ impl TextInputState {
             viewport_height: 0.0,
             viewport_origin: Point::ZERO,
             pending_chars: String::new(),
+            pending_arrivals: PendingArrivals::default(),
             pending_text_changed: false,
             deferred_text_update: None,
             debounce: Debounce::new(), // starts expired so the first tick flushes
@@ -429,6 +453,8 @@ impl TextInputState {
             read_only,
             on_submit,
             on_access_set_value,
+            on_text_inserted,
+            writing_tools,
             on_blur,
             on_commit,
             committed_text: None,
@@ -466,6 +492,9 @@ impl TextInputState {
     /// a keystroke and the next tick the document lags what the user has
     /// typed. The tick calls this, and so does anything that has to read the
     /// text as typed before the tick comes round.
+    ///
+    /// The batch is reported to the application's arrivals callback here, per
+    /// input route, as it lands.
     pub fn apply_pending_chars(&mut self) {
         if self.pending_chars.is_empty() {
             return;
@@ -473,6 +502,38 @@ impl TextInputState {
         let batch = std::mem::take(&mut self.pending_chars);
         let _ = self.cursor.insert_text(&batch);
         self.pending_text_changed = true;
+        let callback = self.on_text_inserted.as_ref();
+        self.pending_arrivals.flush(|source, chars| {
+            if let Some(callback) = callback {
+                callback(source, chars);
+            }
+        });
+    }
+
+    /// Tell the application that `chars` characters just landed through
+    /// `source`. Call it beside the insertion, with the count of what was
+    /// inserted after filtering and truncation, not of what was offered.
+    ///
+    /// Zero reports nothing: there is no such thing as zero characters
+    /// arriving.
+    pub fn report_inserted_chars(&self, source: EditSource, chars: usize) {
+        if chars == 0 {
+            return;
+        }
+        if let Some(callback) = self.on_text_inserted.as_ref() {
+            callback(source, chars);
+        }
+    }
+
+    /// Whether the system's Writing Tools may act on the field now: read its
+    /// text and replace it. `false` when the application turned them off with
+    /// `TextInputField::writing_tools`, and always `false` for a secure field,
+    /// whose text must not leave it, whatever the application set.
+    ///
+    /// The question a platform bridge asks before letting a Writing Tools
+    /// session start; the field's own editing does not depend on it.
+    pub(crate) fn writing_tools_allowed(&self) -> bool {
+        !self.secure && self.writing_tools.get()
     }
 
     // ── Secure-field masking ────────────────────────────────────────
@@ -798,6 +859,8 @@ mod secure_tests {
             read_only: false,
             on_submit: None,
             on_access_set_value: None,
+            on_text_inserted: None,
+            writing_tools: Prop::Static(true),
             on_blur: None,
             on_commit: None,
             char_filter: None,

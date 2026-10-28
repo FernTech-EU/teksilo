@@ -69,6 +69,12 @@ impl Widget for TextInput {
         if let Some(cb) = self.on_access_set_value.clone() {
             field = field.on_access_set_value(move |text, ctx| (cb)(text, ctx));
         }
+        // Cloned rather than taken, like `on_access_set_value`: a rebuild must
+        // keep reporting arrivals.
+        if let Some(cb) = self.on_text_inserted.clone() {
+            field = field.on_text_inserted(move |source, chars| (cb)(source, chars));
+        }
+        field = field.writing_tools(self.writing_tools.clone());
         if let Some(cb) = self.on_submit.take() {
             field = field.on_submit_fn(move |ctx| (cb)(ctx));
         }

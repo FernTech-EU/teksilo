@@ -72,6 +72,7 @@ use teksilo_core::widget_builder::{HandlerSet, WidgetBuilder};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{CornerRadius, HAlignment, SurfaceRole, TextRole, TextStyleRole};
 
+use crate::EditSource;
 use crate::icon_button::BuiltInIcons;
 use crate::primitives::{
     Center, FixedSize, MinSize, Padding, RectWidget, TextWidget, VStack, ZStack,
@@ -114,6 +115,10 @@ pub struct SearchField {
     min_chars: usize,
     on_select: Option<OnSelect>,
     on_submit: Option<OnSubmit>,
+    /// Forwarded to the inner `TextInput`; see [`SearchField::on_text_inserted`].
+    on_text_inserted: Option<Rc<dyn Fn(EditSource, usize)>>,
+    /// Forwarded to the inner `TextInput`; see [`SearchField::writing_tools`].
+    writing_tools: Prop<bool>,
     /// ARIA combobox wiring for an **externally owned** listbox — a command
     /// palette's result list, not this field's own suggestion popup — forwarded
     /// to the inner `TextInput` and from there to the focusable
@@ -175,6 +180,8 @@ impl SearchField {
             min_chars: 1,
             on_select: None,
             on_submit: None,
+            on_text_inserted: None,
+            writing_tools: Prop::Static(true),
             external_active_descendant: None,
             external_controls: None,
             root_child_id: None,
@@ -241,6 +248,27 @@ impl SearchField {
     /// Install a callback invoked when the user presses Enter (or activates the search action).
     pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_submit = Some(Rc::new(f));
+        self
+    }
+
+    /// Callback fired where text lands in the field, with the [`EditSource`]
+    /// it came through and how many characters it was. Counts only, never
+    /// content; not fired when the application writes the bound
+    /// `Signal<String>`, nor when a picked suggestion replaces the query.
+    /// Forwarded to the inner field; see
+    /// [`TextInputField::on_text_inserted`](crate::primitives::TextInputField::on_text_inserted).
+    pub fn on_text_inserted(mut self, f: impl Fn(EditSource, usize) + 'static) -> Self {
+        self.on_text_inserted = Some(Rc::new(f));
+        self
+    }
+
+    /// Whether the system's Writing Tools may act on this field: on macOS,
+    /// whether they may read its text and replace it. Other platforms have no
+    /// such feature. Defaults to `true`; static or a `Signal<bool>`. Forwarded
+    /// to the inner field; see
+    /// [`TextInputField::writing_tools`](crate::primitives::TextInputField::writing_tools).
+    pub fn writing_tools(mut self, allowed: impl Into<Prop<bool>>) -> Self {
+        self.writing_tools = allowed.into();
         self
     }
 
@@ -402,6 +430,10 @@ impl Widget for SearchField {
         if let Some(label) = &self.label {
             input = input.label(label.clone());
         }
+        if let Some(cb) = self.on_text_inserted.clone() {
+            input = input.on_text_inserted(move |source, chars| (cb)(source, chars));
+        }
+        input = input.writing_tools(self.writing_tools.clone());
         if let Some(active) = self.external_active_descendant.clone() {
             input = input.active_descendant(active);
         }

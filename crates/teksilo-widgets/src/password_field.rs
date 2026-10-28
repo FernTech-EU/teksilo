@@ -59,6 +59,7 @@ use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Alignment, TextRole, TextStyleRole};
 
+use crate::EditSource;
 use crate::icon_button::{BuiltInIcons, IconButton};
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback, ValidationOutcome};
 use crate::primitives::validation_strip::ValidationStrip;
@@ -109,6 +110,7 @@ pub struct PasswordField {
     validator: Option<Rc<dyn Fn(&str) -> ValidationOutcome>>,
     on_submit: Option<Box<dyn Fn(&mut teksilo_core::widget::EventContext)>>,
     on_blur: Option<Box<dyn Fn(&mut teksilo_core::widget::EventContext)>>,
+    on_text_inserted: Option<Rc<dyn Fn(EditSource, usize)>>,
     min_width: Option<f32>,
     variant: TextInputVariant,
     style_override: Option<SharedTextInputStyle>,
@@ -156,6 +158,7 @@ impl PasswordField {
             validator: None,
             on_submit: None,
             on_blur: None,
+            on_text_inserted: None,
             min_width: None,
             variant: TextInputVariant::default(),
             style_override: None,
@@ -238,6 +241,16 @@ impl PasswordField {
         f: impl Fn(&mut teksilo_core::widget::EventContext) + 'static,
     ) -> Self {
         self.on_blur = Some(Box::new(f));
+        self
+    }
+
+    /// Callback fired where text lands in the field, with the [`EditSource`]
+    /// it came through and how many characters it was. Counts only, never the
+    /// password itself; not fired when the application writes the bound
+    /// `Signal<String>`. Forwarded 1:1 to
+    /// [`TextInputField::on_text_inserted`], where the details live.
+    pub fn on_text_inserted(mut self, f: impl Fn(EditSource, usize) + 'static) -> Self {
+        self.on_text_inserted = Some(Rc::new(f));
         self
     }
 
@@ -425,6 +438,10 @@ impl Widget for PasswordField {
         }
         if let Some(cb) = self.on_blur.take() {
             field = field.on_blur_fn(move |ctx| (cb)(ctx));
+        }
+        // Cloned rather than taken, so a rebuild keeps reporting arrivals.
+        if let Some(cb) = self.on_text_inserted.clone() {
+            field = field.on_text_inserted(move |source, chars| (cb)(source, chars));
         }
         if let Some(validator) = self.validator.take() {
             field = field.validator(move |s| (validator)(s));

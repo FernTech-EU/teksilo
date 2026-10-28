@@ -79,6 +79,7 @@ use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{Alignment, HAlignment, TextRole, TextStyleRole};
 
+use crate::EditSource;
 use crate::button::InteractionState;
 use crate::primitives::text_input_field::{TextInputField, ValidationFeedback};
 use crate::primitives::validation_strip::ValidationStrip;
@@ -125,6 +126,8 @@ pub struct TextInput {
     max_length: Option<usize>,
     on_submit: Option<Box<dyn Fn(&mut EventContext)>>,
     on_access_set_value: Option<std::rc::Rc<dyn Fn(&str, &mut EventContext) -> bool>>,
+    on_text_inserted: Option<Rc<dyn Fn(EditSource, usize)>>,
+    writing_tools: Prop<bool>,
     on_blur: Option<Box<dyn Fn(&mut EventContext)>>,
     on_commit: Option<Box<dyn Fn(&mut EventContext)>>,
     char_filter: Option<std::rc::Rc<dyn Fn(char) -> bool>>,
@@ -229,6 +232,8 @@ impl TextInput {
             max_length: None,
             on_submit: None,
             on_access_set_value: None,
+            on_text_inserted: None,
+            writing_tools: Prop::Static(true),
             on_blur: None,
             on_commit: None,
             char_filter: None,
@@ -441,6 +446,26 @@ impl TextInput {
         f: impl Fn(&str, &mut EventContext) -> bool + 'static,
     ) -> Self {
         self.on_access_set_value = Some(std::rc::Rc::new(f));
+        self
+    }
+
+    /// Callback fired where text lands in the field, with the [`EditSource`]
+    /// it came through and how many characters it was: typed, committed by
+    /// the input system (an IME, dictation, Writing Tools), pasted, or written
+    /// by an assistive technology. Counts only, never content; not fired when
+    /// the application writes the bound `Signal<String>`. Forwarded 1:1 to
+    /// [`TextInputField::on_text_inserted`], where the details live.
+    pub fn on_text_inserted(mut self, f: impl Fn(EditSource, usize) + 'static) -> Self {
+        self.on_text_inserted = Some(Rc::new(f));
+        self
+    }
+
+    /// Whether the system's Writing Tools may act on this field: on macOS,
+    /// whether they may read its text and replace it. Other platforms have no
+    /// such feature. Defaults to `true`; static or a `Signal<bool>`. Forwarded
+    /// 1:1 to [`TextInputField::writing_tools`].
+    pub fn writing_tools(mut self, allowed: impl Into<Prop<bool>>) -> Self {
+        self.writing_tools = allowed.into();
         self
     }
 

@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 
 use teksilo_core::Signal;
 use teksilo_core::kinetic::KineticScroller;
+use teksilo_core::signal::Prop;
 use teksilo_text::text_document::{
     DocumentEvent, DocumentFragment, HighlightMask, Subscription, TextCursor, TextDocument,
 };
@@ -47,6 +48,7 @@ pub struct TextAnnotationSpan {
 use super::image_cache::ImageCache;
 use super::policy::{CaretPolicy, PolicyBundle};
 use crate::common::editor_runtime::{CaretBlink, Debounce};
+use crate::common::pending_arrivals::PendingArrivals;
 
 pub(crate) type SharedState = Rc<RefCell<EditorState>>;
 
@@ -83,10 +85,15 @@ pub(crate) struct EditorState {
     /// drain batch and says only *that* something changed, which is the right
     /// shape for a dirty flag and the wrong one for counting. A batch can carry
     /// a typed run and a paste, and after the fact nothing can separate them.
-    pub on_text_inserted: Option<Rc<dyn Fn(super::EditSource, usize)>>,
+    pub on_text_inserted: Option<Rc<dyn Fn(crate::EditSource, usize)>>,
     // NOTE: `report_inserted` below is the only correct way to fire it. Calling
     // the callback directly from an insertion site would fire it for an empty
     // string, which is not text arriving.
+    /// Whether the system's Writing Tools may read and replace this editor's
+    /// text. Set via
+    /// [`RichTextEditor::writing_tools`](super::RichTextEditor::writing_tools);
+    /// read through [`Self::writing_tools_allowed`].
+    pub writing_tools: Prop<bool>,
     pub has_selection: Signal<bool>,
     pub caret_visible: Signal<bool>,
     pub cursor_position: Signal<usize>,
@@ -487,18 +494,17 @@ pub(crate) struct EditorState {
     /// incremental relayout and debounced `text_changed` emission stay
     /// O(burst) instead of O(keystrokes).
     pub pending_chars: String,
-    /// How many of [`Self::pending_chars`] were typed, and how many were the
-    /// settled result of an IME composition.
+    /// How many of [`Self::pending_chars`] came down each input route: typed,
+    /// or committed by the input system (and from which part of it).
     ///
-    /// Two counters rather than one label on the batch, because both routes push
-    /// into the same string and the frame loop flushes it as a unit. A single
-    /// label would have to pick one for a mixed batch — and while mixing is
-    /// vanishingly unlikely (an active IME swallows the raw keys), a count that
-    /// is exact costs two `usize`s and never has to be reasoned about again.
+    /// A count per route rather than one label on the batch, because every
+    /// route pushes into the same string and the frame loop flushes it as a
+    /// unit. A single label would have to pick one for a mixed batch, and while
+    /// mixing is unlikely (an active IME swallows the raw keys), a count that is
+    /// exact never has to be reasoned about again.
     ///
-    /// Reset with the batch. See [`Self::report_inserted_chars`].
-    pub pending_typed_chars: usize,
-    pub pending_ime_chars: usize,
+    /// Flushed with the batch. See [`Self::report_pending_arrivals`].
+    pub pending_arrivals: PendingArrivals,
 
     /// Active IME preedit text — the unfinalised string the input
     /// method renders while the user is composing (CJK, Korean,
@@ -798,7 +804,7 @@ impl EditorState {
     ///
     /// Empty insertions report nothing — there is no such thing as zero
     /// characters arriving, and a consumer would have to filter them out again.
-    pub fn report_inserted(&self, source: super::EditSource, text: &str) {
+    pub fn report_inserted(&self, source: crate::EditSource, text: &str) {
         self.report_inserted_chars(source, text.chars().count());
     }
 
@@ -806,13 +812,34 @@ impl EditorState {
     ///
     /// Zero reports nothing — there is no such thing as zero characters
     /// arriving, and a consumer would only have to filter it out again.
-    pub fn report_inserted_chars(&self, source: super::EditSource, chars: usize) {
+    pub fn report_inserted_chars(&self, source: crate::EditSource, chars: usize) {
         if chars == 0 {
             return;
         }
         if let Some(callback) = self.on_text_inserted.as_ref() {
             callback(source, chars);
         }
+    }
+
+    /// Report every route's share of the pending batch, which the caller has
+    /// just inserted. See [`Self::pending_arrivals`].
+    pub fn report_pending_arrivals(&mut self) {
+        let callback = self.on_text_inserted.as_ref();
+        self.pending_arrivals.flush(|source, chars| {
+            if let Some(callback) = callback {
+                callback(source, chars);
+            }
+        });
+    }
+
+    /// Whether the system's Writing Tools may act on this editor now: read its
+    /// text and replace it. `false` while the application has turned them off
+    /// with [`RichTextEditor::writing_tools`](super::RichTextEditor::writing_tools).
+    ///
+    /// The question a platform bridge asks before letting a Writing Tools
+    /// session start; the editor's own editing does not depend on it.
+    pub(crate) fn writing_tools_allowed(&self) -> bool {
+        self.writing_tools.get()
     }
 
     pub fn new(
@@ -856,6 +883,7 @@ impl EditorState {
             document_loaded_count: Signal::new(0),
             on_change: None,
             on_text_inserted: None,
+            writing_tools: Prop::Static(true),
             has_selection: Signal::new(false),
             caret_visible,
             cursor_position: Signal::new(0),
@@ -922,8 +950,7 @@ impl EditorState {
             frame_request: None,
             frame_wake_at: None,
             pending_chars: String::new(),
-            pending_typed_chars: 0,
-            pending_ime_chars: 0,
+            pending_arrivals: PendingArrivals::default(),
             ime_preedit: None,
             ime_preedit_range: None,
             last_chase_pos: None,
@@ -1371,7 +1398,7 @@ impl EditorState {
                 // channel some text arrived through, alongside the
                 // `ContentsChanged` that already told this state everything it
                 // needs. This widget reports arrivals through its own
-                // [`EditSource`](crate::rich_text::EditSource) callback, which
+                // [`EditSource`](crate::EditSource) callback, which
                 // knows the channel at the point of the keystroke rather than
                 // inferring it from a document event.
                 DocumentEvent::TextInserted { .. }

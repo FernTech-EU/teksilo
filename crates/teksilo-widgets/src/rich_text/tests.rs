@@ -9158,7 +9158,7 @@ fn editor_on_change_stays_silent_for_a_load_that_carries_formatting() {
     );
 }
 
-use super::EditSource;
+use crate::EditSource;
 
 // ── Where text came from ────────────────────────────────────────────────────
 //
@@ -9318,6 +9318,236 @@ fn an_editor_with_no_callback_is_undisturbed() {
     }
 
     assert_eq!(doc.to_plain_text().unwrap_or_default(), "abcdef");
+}
+
+// ── What the platform's text input system writes ────────────────────────────
+//
+// Dictation, Writing Tools, the emoji viewer and AutoFill all arrive as an
+// `ImeCommit` that says which part of the input system wrote it, and sometimes
+// which range of the text it replaces.
+
+/// An editable editor over `text`, focused, reporting its arrivals.
+fn editor_reporting_arrivals(
+    text: &str,
+) -> (
+    TextDocument,
+    crate::rich_text::EditorHandle,
+    WidgetTree,
+    Arrivals,
+) {
+    let doc = TextDocument::new();
+    doc.set_plain_text(text).unwrap();
+    let arrivals = Arrivals::default();
+    let editor = RichTextEditor::editor(doc.clone()).on_text_inserted({
+        let arrivals = arrivals.clone();
+        move |source, chars| arrivals.0.borrow_mut().push((source, chars))
+    });
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    (doc, handle, tree, arrivals)
+}
+
+/// Dispatch an input-system commit and let the frame loop insert it.
+fn commit_from(
+    tree: &mut WidgetTree,
+    text: &str,
+    origin: teksilo_core::event::ImeOrigin,
+    replacement: Option<std::ops::Range<usize>>,
+) {
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::ImeCommit {
+        text: text.to_string(),
+        origin,
+        replacement,
+    });
+    for _ in 0..3 {
+        tick_once(tree);
+    }
+}
+
+#[test]
+fn an_input_system_commit_reports_the_source_its_origin_names() {
+    use teksilo_core::event::ImeOrigin;
+    for (origin, source) in [
+        (ImeOrigin::Composition, EditSource::Ime),
+        (ImeOrigin::Insertion, EditSource::Ime),
+        (ImeOrigin::Dictation, EditSource::Dictation),
+        (ImeOrigin::WritingTools, EditSource::WritingTools),
+    ] {
+        let (doc, handle, mut tree, arrivals) = editor_reporting_arrivals("abc");
+        handle.select_range(3, 3);
+        commit_from(&mut tree, "de", origin, None);
+        assert_eq!(doc.to_plain_text().unwrap_or_default(), "abcde");
+        assert_eq!(
+            arrivals.seen(),
+            vec![(source, 2)],
+            "{origin:?} reports as {source:?}, once, counting what landed"
+        );
+    }
+}
+
+/// The emoji viewer and AutoFill write with no composition before them: no
+/// preedit to clear, the text lands at the caret.
+#[test]
+fn an_insertion_with_no_composition_lands_at_the_caret() {
+    let (doc, handle, mut tree, arrivals) = editor_reporting_arrivals("abc");
+    handle.select_range(1, 1);
+    commit_from(
+        &mut tree,
+        "\u{1F600}",
+        teksilo_core::event::ImeOrigin::Insertion,
+        None,
+    );
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "a\u{1F600}bc");
+    assert_eq!(arrivals.seen(), vec![(EditSource::Ime, 1)]);
+}
+
+/// Writing Tools name the range they rewrite. Exactly that range goes, the new
+/// text takes its place, and one undo puts the writer's own words back.
+#[test]
+fn a_replacement_replaces_its_range_in_one_undo_step() {
+    let (doc, handle, mut tree, arrivals) = editor_reporting_arrivals("the quick fox");
+    handle.select_range(13, 13);
+    commit_from(
+        &mut tree,
+        "slow",
+        teksilo_core::event::ImeOrigin::WritingTools,
+        Some(4..9),
+    );
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "the slow fox");
+    assert_eq!(
+        arrivals.seen(),
+        vec![(EditSource::WritingTools, 4)],
+        "reported once, as the four characters written, not as the net change"
+    );
+
+    doc.undo().unwrap();
+    assert_eq!(
+        doc.to_plain_text().unwrap_or_default(),
+        "the quick fox",
+        "one undo step restores the replaced words whole"
+    );
+}
+
+/// A newline in the replacement ends a paragraph, as in a paste.
+#[test]
+fn a_replacement_with_a_newline_makes_a_paragraph() {
+    let (doc, _handle, mut tree, arrivals) = editor_reporting_arrivals("one two");
+    commit_from(
+        &mut tree,
+        "one\ntwo",
+        teksilo_core::event::ImeOrigin::Dictation,
+        Some(0..7),
+    );
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "one\ntwo");
+    assert_eq!(
+        doc.block_count(),
+        2,
+        "two paragraphs, not one holding a newline"
+    );
+    assert_eq!(arrivals.seen(), vec![(EditSource::Dictation, 7)]);
+}
+
+/// The input system read the text a moment ago. A range past its end is
+/// clamped to it rather than dropped or allowed to panic.
+#[test]
+fn a_replacement_past_the_end_is_clamped() {
+    let (doc, _handle, mut tree, arrivals) = editor_reporting_arrivals("abc");
+    commit_from(
+        &mut tree,
+        "Z",
+        teksilo_core::event::ImeOrigin::Dictation,
+        Some(2..99),
+    );
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "abZ");
+    commit_from(
+        &mut tree,
+        "!",
+        teksilo_core::event::ImeOrigin::Dictation,
+        Some(50..60),
+    );
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "abZ!");
+    assert_eq!(
+        arrivals.seen(),
+        vec![(EditSource::Dictation, 1), (EditSource::Dictation, 1)]
+    );
+}
+
+/// Characters typed in the same frame land before the replacement, and each
+/// route is reported as itself.
+#[test]
+fn typing_batched_ahead_of_a_replacement_lands_first() {
+    let (doc, handle, mut tree, arrivals) = editor_reporting_arrivals("abc");
+    handle.select_range(3, 3);
+    press_char(&mut tree, 'd');
+    commit_from(
+        &mut tree,
+        "X",
+        teksilo_core::event::ImeOrigin::Dictation,
+        Some(0..1),
+    );
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "Xbcd");
+    assert_eq!(
+        arrivals.seen(),
+        vec![(EditSource::Keyboard, 1), (EditSource::Dictation, 1)]
+    );
+}
+
+#[test]
+fn a_read_only_editor_refuses_what_the_input_system_writes() {
+    let (doc, handle, mut tree, arrivals) = editor_reporting_arrivals("keep");
+    handle.set_command_filter(super::policy::CommandFilter::ReadOnly);
+    commit_from(
+        &mut tree,
+        "x",
+        teksilo_core::event::ImeOrigin::Dictation,
+        None,
+    );
+    commit_from(
+        &mut tree,
+        "rewritten",
+        teksilo_core::event::ImeOrigin::WritingTools,
+        Some(0..4),
+    );
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "keep");
+    assert!(arrivals.seen().is_empty(), "{:?}", arrivals.seen());
+}
+
+/// Under forward-only drafting nothing the writer committed may go: the
+/// rewrite lands after the range instead of in its place, as typing over a
+/// selection does there.
+#[test]
+fn a_forward_only_editor_keeps_the_range_a_replacement_names() {
+    let (doc, handle, mut tree, arrivals) = editor_reporting_arrivals("keep this");
+    handle.set_command_filter(super::policy::CommandFilter::ForwardOnly);
+    commit_from(
+        &mut tree,
+        " too",
+        teksilo_core::event::ImeOrigin::WritingTools,
+        Some(0..4),
+    );
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "keep too this");
+    assert_eq!(arrivals.seen(), vec![(EditSource::WritingTools, 4)]);
+}
+
+#[test]
+fn writing_tools_are_allowed_unless_the_application_says_otherwise() {
+    let allowed = |editor: RichTextEditor| editor.state.borrow().writing_tools_allowed();
+    assert!(allowed(RichTextEditor::editor(TextDocument::new())));
+    assert!(!allowed(
+        RichTextEditor::editor(TextDocument::new()).writing_tools(false)
+    ));
+
+    let switch = teksilo_core::signal::Signal::new(true);
+    let editor = RichTextEditor::editor(TextDocument::new()).writing_tools(switch.clone());
+    assert!(editor.state.borrow().writing_tools_allowed());
+    switch.set(false);
+    assert!(
+        !editor.state.borrow().writing_tools_allowed(),
+        "a bound signal is read as the question is asked"
+    );
 }
 
 // ── Following a link: a viewer takes a plain click, an editor asks for Ctrl ──

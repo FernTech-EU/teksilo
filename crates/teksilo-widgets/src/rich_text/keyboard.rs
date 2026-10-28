@@ -25,6 +25,7 @@ use teksilo_text::text_document::{
 };
 use teksilo_text::{CursorAffinity, TextDirection};
 
+use crate::EditSource;
 use crate::common::text_nav::{self, CaretStep, LineStep};
 
 use super::clipboard;
@@ -168,11 +169,22 @@ pub(super) fn handle_key(
     }
 
     // IME commit — the user picked a candidate or typed a printable
-    // key that finalises the sequence. Clear any active preedit and
-    // insert the committed text via the normal `pending_chars` batch.
-    if let WidgetEvent::ImeCommit { text, .. } = event {
+    // key that finalises the sequence, or the input system wrote text of its
+    // own (dictation, Writing Tools, the emoji viewer). Clear any active
+    // preedit, then either batch the text into `pending_chars` like typing, or
+    // replace the range the input system named.
+    if let WidgetEvent::ImeCommit {
+        text,
+        origin,
+        replacement,
+    } = event
+    {
         clear_ime_preedit(state);
-        return push_pending_chars(state, ctx, text);
+        let source = EditSource::from_ime_origin(*origin);
+        return match replacement {
+            Some(range) => replace_from_input_system(state, ctx, text, range.clone(), source),
+            None => push_pending_chars(state, ctx, text, source),
+        };
     }
 
     let WidgetEvent::KeyDown {
@@ -583,7 +595,8 @@ pub(super) fn handle_key(
                     if filter.accepts(EditCommandKind::InsertChar) {
                         let clean: String = t.chars().filter(|c| !c.is_control()).collect();
                         if !clean.is_empty() {
-                            st.pending_typed_chars += clean.chars().count();
+                            st.pending_arrivals
+                                .note(EditSource::Keyboard, clean.chars().count());
                             st.pending_chars.push_str(&clean);
                             KeyAction::ClearPreferredX
                         } else {
@@ -1370,8 +1383,14 @@ pub(super) fn clear_ime_preedit(state: &SharedState) {
 
 /// Helper for IME-commit character ingestion: push the text
 /// into `pending_chars`, clear sticky `preferred_x`, request a frame.
-/// Called only from the IME commit path.
-fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -> EventResponse {
+/// Called only from the IME commit path, which names the [`EditSource`] the
+/// text is counted under.
+fn push_pending_chars(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    text: &str,
+    source: EditSource,
+) -> EventResponse {
     if text.is_empty() {
         return EventResponse::Ignored;
     }
@@ -1386,10 +1405,11 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
     {
         let mut st = state.borrow_mut();
         // The **only** caller is the `ImeCommit` arm above, so what lands here
-        // is a settled composition rather than a keystroke: the characters that
-        // arrive are not the keys that were pressed, and counting them as typed
-        // would be wrong about every writer of a language with an input method.
-        st.pending_ime_chars += clean.chars().count();
+        // came from the input system rather than a keystroke: the characters
+        // that arrive are not the keys that were pressed, and counting them as
+        // typed would be wrong about every writer of a language with an input
+        // method, and about everyone who dictates.
+        st.pending_arrivals.note(source, clean.chars().count());
         st.pending_chars.push_str(&clean);
         st.preferred_x = None;
         // Typing always lands the caret at a logical position; any
@@ -1402,6 +1422,59 @@ fn push_pending_chars(state: &SharedState, ctx: &mut EventContext, text: &str) -
     // PRE-insert position; `chase_caret_into_view`'s one-line look-ahead
     // reveals the line a wrap would land on so the page keeps up without
     // waiting for the next keystroke.
+    chase_caret_into_view(state, ctx);
+    ctx.request_frame();
+    EventResponse::Handled
+}
+
+/// Replace `range` with `text`, as the input system asked: a dictation
+/// correction, a Writing Tools rewrite. One undo step, reported once under
+/// `source`.
+///
+/// `range` is in document character offsets, the units of
+/// `TextCursor::position`, and is clamped to the document: the input system
+/// read the text a moment ago and may name a range an edit since has
+/// shortened. The template is AccessKit's `ReplaceSelectedText` arm: the same
+/// filter check, the typing batched ahead of it inserted first so it lands
+/// before rather than after, and the text inserted as plain text, so a newline
+/// becomes a paragraph. Under a forward-only filter the range is not removed:
+/// the text lands after it, as typing over a selection does there.
+fn replace_from_input_system(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    text: &str,
+    range: std::ops::Range<usize>,
+    source: EditSource,
+) -> EventResponse {
+    let filter = state.borrow().policy.command_filter;
+    if !filter.accepts(EditCommandKind::InsertChar) {
+        return EventResponse::Ignored;
+    }
+    {
+        let mut st = state.borrow_mut();
+        super::frame_loop::flush_pending_chars(&mut st);
+        let doc_end = st.document.character_count();
+        let start = range.start.min(doc_end);
+        let end = range.end.min(doc_end).max(start);
+        st.cursor.set_position(start, MoveMode::MoveAnchor);
+        st.cursor.set_position(end, MoveMode::KeepAnchor);
+        collapse_selection_before_insert(&st);
+        if text.is_empty() {
+            // Nothing to write, so the replacement is a deletion. Under a
+            // forward-only filter the collapse above left nothing selected.
+            if st.cursor.has_selection() {
+                let _ = st.cursor.remove_selected_text();
+            }
+        } else {
+            let arrived = clipboard::insert_plain_text(&st, text);
+            st.report_inserted_chars(source, arrived);
+        }
+        st.preferred_x = None;
+        st.cursor_affinity = CursorAffinity::Downstream;
+        st.pending_text_changed = true;
+    }
+    sync_cursor_signals(state);
+    report_ime_cursor_area(state, ctx);
     chase_caret_into_view(state, ctx);
     ctx.request_frame();
     EventResponse::Handled
