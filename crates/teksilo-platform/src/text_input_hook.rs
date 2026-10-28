@@ -13,9 +13,10 @@
 //!   so the string is discarded. The same view answers every question about
 //!   the document (`selectedRange`, `attributedSubstringForProposedRange:`)
 //!   with "nothing", so nothing that reads or corrects text can work.
-//! - **Windows.** Text injected as Unicode keystrokes (`VK_PACKET`) reaches
-//!   winit as a key it cannot name, and a character outside the BMP arrives
-//!   as two lone surrogates.
+//! - **Windows.** winit reads the input system through IMM32 alone. The
+//!   emoji panel and voice typing reach it as IMM results, so they arrive as
+//!   compositions: nothing tells voice typing apart without a TSF text store,
+//!   and winit cannot end a composition the field has already kept.
 //!
 //! This module attaches to each window's native surface once it exists and
 //! detaches when it closes. Text the input system inserts outside a key press
@@ -39,7 +40,9 @@
 //! Where it stands, measured on macOS 27: Emoji & Symbols, the press-and-hold
 //! accent popup, Dictation and Writing Tools (in its panel) insert into the
 //! focused field. Dictation is told apart from a composition through private
-//! AppKit methods (see the macOS backend). Windows only traces.
+//! AppKit methods (see the macOS backend). On Windows the hook ends a
+//! composition the field has kept ([`finish_composition`]) and, when asked,
+//! traces.
 //!
 //! With `TEKSILO_TEXT_INPUT_TRACE=1` set the hooks also log every call they
 //! see to stderr, which is how the per-OS behaviour they rely on was measured.
@@ -53,6 +56,7 @@ use teksilo_core::window::TeksiloWindowId;
 use teksilo_core::{AppEventPoster, ImeOrigin};
 
 mod answers;
+mod composition;
 mod dictation;
 mod key_press;
 #[cfg(target_os = "macos")]
@@ -193,7 +197,11 @@ pub fn key_was_swallowed(window_id: TeksiloWindowId) -> bool {
 /// back to resetting the input method by toggling winit's IME on the window
 /// (`set_ime_allowed(false)` then `set_ime_allowed(true)`).
 ///
-/// `false` on every platform for now.
+/// macOS does it for an attached window: the view ends winit's marked text
+/// and has the input method discard its composition. Windows cancels the
+/// composition in the window's input context (`ImmNotifyIME` with
+/// `CPS_CANCEL`). Elsewhere, and for a window with nothing to cancel in,
+/// `false`.
 pub fn finish_composition(window_id: TeksiloWindowId) -> bool {
     #[cfg(target_os = "macos")]
     {

@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Windows: a subclass tap on winit's window.
+//! Windows: ending a composition, and a subclass tap that traces.
+//!
+//! Every attached window's HWND is kept, so that [`finish_composition`] can
+//! end the window's IME composition when the focused field has already kept
+//! the text it showed; see that function for what winit does around it.
 //!
 //! winit 0.30 reads the text input system through IMM32 alone: a commit is
 //! the `GCS_RESULTSTR` of a `WM_IME_COMPOSITION`, and everything else is a
-//! key press. How voice typing (Win+H) and the emoji panel (Win+.) deliver
-//! their text to such a window, as an IMM composition the system bridges
-//! from TSF or as injected `VK_PACKET` keystrokes, is not documented, and
-//! telling voice typing apart from typing needs that answer.
+//! key press. Measured on Windows 11, voice typing (Win+H) and the emoji
+//! panel (Win+.) both deliver their text to such a window as IMM results,
+//! which CUAS bridges from TSF, and neither the messages nor TSF's
+//! compartments tell them apart from each other or from an input method's
+//! commit. Telling voice typing apart needs a TSF text store of our own
+//! (`engineering/docs/tsf-text-store.md`).
 //!
 //! The tap is a `SetWindowSubclass` on winit's HWND, so it sees every message
 //! winit sees, just before winit does. It is a tap, never a filter: **every**
@@ -17,15 +23,15 @@
 //! sharing an HWND with the title bar's, the pen's and AccessKit's subclasses:
 //! a subclass id from a private range, and always chaining.
 //!
-//! # In this commit it only traces
+//! # The tap only traces
 //!
 //! It is installed only when `TEKSILO_TEXT_INPUT_TRACE` is set, and then logs
 //! to stderr the keyboard, character and IME messages the window receives,
 //! each with where `GetCurrentInputMessageSource` says it came from and its
-//! `GetMessageExtraInfo`. After winit has handled the start of a composition
-//! or a composition message, it also logs:
+//! `GetMessageExtraInfo`. After winit has handled the start of a composition,
+//! a composition message or the end of one, it also logs:
 //!
-//! - the IMM composition and result strings (compositions only);
+//! - the IMM composition and result strings (not at the start);
 //! - who owns the compositions in TSF's focused context;
 //! - the active keyboard TIP.
 //!
@@ -147,7 +153,7 @@ use windows::Win32::System::Variant::{
     VariantClear,
 };
 use windows::Win32::UI::Input::Ime::{
-    CS_INSERTCHAR, CS_NOMOVECARET, GCS_COMPATTR, GCS_COMPCLAUSE, GCS_COMPREADATTR,
+    CPS_CANCEL, CS_INSERTCHAR, CS_NOMOVECARET, GCS_COMPATTR, GCS_COMPCLAUSE, GCS_COMPREADATTR,
     GCS_COMPREADCLAUSE, GCS_COMPREADSTR, GCS_COMPSTR, GCS_CURSORPOS, GCS_DELTASTART,
     GCS_RESULTCLAUSE, GCS_RESULTREADCLAUSE, GCS_RESULTREADSTR, GCS_RESULTSTR, HIMC,
     IME_COMPOSITION_STRING, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_CLOSESTATUSWINDOW,
@@ -156,7 +162,7 @@ use windows::Win32::UI::Input::Ime::{
     IMN_SETSENTENCEMODE, IMN_SETSTATUSWINDOWPOS, IMN_SOFTKBDDESTROYED, IMR_CANDIDATEWINDOW,
     IMR_COMPOSITIONFONT, IMR_COMPOSITIONWINDOW, IMR_CONFIRMRECONVERTSTRING, IMR_DOCUMENTFEED,
     IMR_QUERYCHARPOSITION, IMR_RECONVERTSTRING, ImmGetCompositionStringW, ImmGetContext,
-    ImmReleaseContext,
+    ImmNotifyIME, ImmReleaseContext, NI_COMPOSITIONSTR,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_PACKET, VK_PROCESSKEY};
 use windows::Win32::UI::Input::{
@@ -199,7 +205,7 @@ macro_rules! tap_trace {
 }
 
 // ---------------------------------------------------------------------------
-// Installing and removing the tap
+// Attaching, and installing and removing the tap
 // ---------------------------------------------------------------------------
 
 /// Subclass ids for this tap: a private range, distinct from the title bar's
@@ -211,6 +217,10 @@ static NEXT_SUBCLASS_ID: AtomicUsize = AtomicUsize::new(0xFE_114_000);
 static NEXT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
+    /// Every attached window's HWND, tracing or not: what
+    /// [`finish_composition`] acts on. `attach`, `detach` and
+    /// `finish_composition` run on the UI thread, which owns every HWND.
+    static WINDOWS: RefCell<HashMap<TeksiloWindowId, HWND>> = RefCell::new(HashMap::new());
     /// The installed taps. `attach` and `detach` run on the UI thread, which
     /// owns every HWND they touch.
     static TAPS: RefCell<HashMap<TeksiloWindowId, Tap>> = RefCell::new(HashMap::new());
@@ -260,11 +270,8 @@ pub(super) fn attach(
     poster: Arc<dyn AppEventPoster>,
     surfaces: TextSurfaces,
 ) {
-    // Nothing is posted or answered yet: the tap only traces.
+    // Nothing is posted or answered yet.
     let _ = (poster, surfaces);
-    if !super::trace_enabled() {
-        return;
-    }
     let RawWindowHandle::Win32(handle) = parent.raw_window_handle() else {
         return;
     };
@@ -272,7 +279,14 @@ pub(super) fn attach(
 
     // A second attach for one window replaces the first.
     detach(window_id);
+    WINDOWS.with_borrow_mut(|windows| windows.insert(window_id, hwnd));
+    if super::trace_enabled() {
+        install_tap(window_id, hwnd);
+    }
+}
 
+/// Install the trace subclass on a window.
+fn install_tap(window_id: TeksiloWindowId, hwnd: HWND) {
     let tap = Tap {
         hwnd,
         subclass_id: NEXT_SUBCLASS_ID.fetch_add(1, Ordering::Relaxed),
@@ -304,6 +318,7 @@ pub(super) fn attach(
 }
 
 pub(super) fn detach(window_id: TeksiloWindowId) {
+    WINDOWS.with_borrow_mut(|windows| windows.remove(&window_id));
     // Taken out of the map first and dropped after the borrow ends, so
     // nothing `RemoveWindowSubclass` might run can find the map borrowed.
     let tap = TAPS.with_borrow_mut(|taps| taps.remove(&window_id));
@@ -455,14 +470,21 @@ fn log_message(state: &TapState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Op
         describe(msg, wparam, lparam),
         arrival.mark()
     );
-    let probed = matches!(msg, WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION);
+    let probed = matches!(
+        msg,
+        WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION
+    );
     (probed && arrival == Arrival::Direct).then_some(seq)
 }
 
 /// Probe IMM and TSF for a composition message winit has just handled.
+///
+/// The IMM strings after `WM_IME_ENDCOMPOSITION` are what winit's own handling
+/// of it read: while it still holds a preedit there, it commits the result
+/// string again (see [`finish_composition`]).
 fn probe_message(hwnd: HWND, msg: u32, seq: u64) {
     let _probing = Probing::enter();
-    if msg == WM_IME_COMPOSITION {
+    if matches!(msg, WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION) {
         probe_imm(hwnd, seq);
     }
     probe_tsf(seq, Reach::Message);
@@ -1233,8 +1255,83 @@ fn process_image(pid: u32) -> String {
     }
 }
 
-/// End the window's composition without committing it again. Not done yet:
-/// `false` makes the caller reset the input method through winit.
-pub(super) fn finish_composition(_window_id: TeksiloWindowId) -> bool {
-    false
+// ---------------------------------------------------------------------------
+// Ending a composition
+// ---------------------------------------------------------------------------
+
+/// End the window's composition without the input method delivering its text:
+/// the focused field has already kept what the composition showed (a click
+/// elsewhere, a focus change).
+///
+/// It cancels the composition (`ImmNotifyIME(NI_COMPOSITIONSTR, CPS_CANCEL)`)
+/// rather than completing it: `CPS_COMPLETE` would hand the composition's text
+/// over as a result, and winit would commit it a second time. What winit then
+/// receives, and why it commits nothing:
+///
+/// 1. The input method clears the composition and sends `WM_IME_COMPOSITION`
+///    with `lParam` 0. winit turns that into an empty `Ime::Preedit` and stays
+///    in its preedit state (only a result moves it out).
+/// 2. It sends `WM_IME_ENDCOMPOSITION`. winit, still in its preedit state,
+///    reads `GCS_RESULTSTR` and commits it (a workaround for Hangul input
+///    methods, which send their last result after this message). winit counts
+///    an empty string as text, so it sends an empty `Ime::Preedit` and an
+///    empty `Ime::Commit`, then `Ime::Disabled`.
+///
+/// The result string is empty there: a cancel produces no result, and CUAS
+/// (which serves every TSF input method to an IMM32 window like winit's)
+/// writes the context's composition strings afresh at each update, so a
+/// result an earlier message carried does not survive into the cancel's. An
+/// empty commit inserts nothing in any Teksilo text field. An input method
+/// that kept an earlier result through a cancel would have it committed
+/// again; the trace logs the strings before and after the cancel, and after
+/// winit has handled `WM_IME_ENDCOMPOSITION`, to show it.
+///
+/// The field must stop treating the composition as live before it calls this:
+/// winit delivers the empty preedit after the call (it holds events while the
+/// application handles one), and a field still holding the preedit's range
+/// would delete the text it meant to keep.
+///
+/// Returns whether the window had an input context to cancel in. `false` when
+/// the window is not attached or has none (its IME is not allowed, so nothing
+/// is composing), and the caller's fallback, toggling winit's IME, then finds
+/// nothing to reset either.
+pub(super) fn finish_composition(window_id: TeksiloWindowId) -> bool {
+    let hwnd = WINDOWS
+        .try_with(|windows| windows.borrow().get(&window_id).copied())
+        .ok()
+        .flatten();
+    let seq = next_sequence();
+    let Some(hwnd) = hwnd else {
+        tap_trace!("#{seq} {window_id} finish composition: the window is not attached");
+        return false;
+    };
+    let himc = unsafe { ImmGetContext(hwnd) };
+    if himc.is_invalid() {
+        tap_trace!("#{seq} {window_id} finish composition: the window has no input context");
+        return false;
+    }
+    let tracing = super::trace_enabled();
+    if tracing {
+        tap_trace!(
+            "#{seq} {window_id} finish composition: comp={} result={}",
+            composition_string(himc, GCS_COMPSTR),
+            composition_string(himc, GCS_RESULTSTR)
+        );
+    }
+    // The input method sends its messages to the window from inside this
+    // call; winit handles them as they come and holds the events they make
+    // until the application is done with the one it is handling.
+    let cancelled = unsafe { ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_CANCEL, 0) };
+    if tracing {
+        tap_trace!(
+            "#{seq}   cancel returned {}; now comp={} result={}",
+            cancelled.as_bool(),
+            composition_string(himc, GCS_COMPSTR),
+            composition_string(himc, GCS_RESULTSTR)
+        );
+    }
+    unsafe {
+        let _ = ImmReleaseContext(hwnd, himc);
+    }
+    true
 }

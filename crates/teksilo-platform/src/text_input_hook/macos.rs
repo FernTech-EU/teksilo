@@ -141,10 +141,31 @@
 //! swallowed. When winit buffers the event because its handler is busy, it
 //! arrives after the `keyDown:` and its text is typed, as before.
 //!
-//! Not handled yet, and traced as such for the next measurement to decide:
-//! an `insertText:` with a replacement range inside a key press, and a
-//! `setMarkedText:` with one. Both still go to winit, which ignores the
-//! range.
+//! # Compositions that replace text, and ending one from the field
+//!
+//! A `setMarkedText:` can name a replacement range: the input method marks
+//! over text the field already holds. Korean Hanja is the measured case
+//! (macOS 27): it commits a syllable in the key press, then marks its Hanja
+//! over it. winit drops the range, so the composition showed beside the
+//! syllable. The view converts the range to the focused document's
+//! characters and records it ([`MarkedReplacement`]) before winit runs;
+//! winit reports the preedit synchronously from that call, and the
+//! application attaches the range to it with [`take_marked_replacement`].
+//! The next `setMarkedText:` replaces the record, and the next key press and
+//! the end of the composition clear it, so a range no preedit took never
+//! rides on a later one.
+//!
+//! A field can also end the composition itself (a click elsewhere, focus
+//! moving to another field), having kept what it showed:
+//! [`finish_composition`] runs winit's own `unmarkText`, which clears winit's
+//! marked text and has the input context discard the input method's, so the
+//! composition does not come back at the old place or in the other field.
+//! Measured on macOS 27 before this: a click during a composition reached
+//! neither winit nor the input method, and the composition went on.
+//!
+//! Still traced as not handled, for a measurement to decide: an
+//! `insertText:` with a replacement range inside a key press, which goes to
+//! winit and loses its range (none was seen on macOS 27).
 //!
 //! # How the classes are patched
 //!
@@ -227,6 +248,7 @@ use teksilo_core::window::TeksiloWindowId;
 use teksilo_core::{AppEventPoster, ImeOrigin};
 
 use super::answers::{self, NOT_FOUND, Substring, Utf16Range};
+use super::composition::MarkedReplacement;
 use super::dictation::{DictationEvent, DictationSession};
 use super::key_press::KeyPress;
 use super::{CommitSignals, ImeCommitPayload};
@@ -258,6 +280,9 @@ struct AttachedView {
     /// marked text, until that composition is over. See
     /// [`DictationSession`].
     dictation: Cell<DictationSession>,
+    /// The field characters the latest marked text replaces, until winit's
+    /// preedit for it takes them ([`take_marked_replacement`]).
+    marked_replacement: RefCell<MarkedReplacement>,
 }
 
 thread_local! {
@@ -267,6 +292,11 @@ thread_local! {
 
     /// How many `keyDown:` calls are running, innermost included.
     static KEY_DOWN_DEPTH: Cell<u32> = const { Cell::new(0) };
+
+    /// Whether [`finish_composition`] is running: what the input method
+    /// commits meanwhile, as it discards its composition, the field has
+    /// already kept.
+    static FINISHING: Cell<bool> = const { Cell::new(false) };
 
     /// The running `keyDown:` calls, innermost last: the view's address and
     /// what the input method did with the key.
@@ -302,6 +332,7 @@ pub(super) fn attach(
                 surfaces,
                 writing_tools: Cell::new(false),
                 dictation: Cell::new(DictationSession::Closed),
+                marked_replacement: RefCell::new(MarkedReplacement::default()),
             },
         );
     });
@@ -1778,6 +1809,9 @@ enum Inserted {
     /// Empty, and replacing nothing: nothing to post. A composition the view
     /// held is over.
     Empty,
+    /// Dropped: the input method committed it while discarding its
+    /// composition for [`finish_composition`], and the field already kept it.
+    Finished,
     /// Posted to the view's window from this origin, replacing these
     /// characters of the focused document (the selection, for none).
     Posted(ImeOrigin, Option<std::ops::Range<usize>>),
@@ -1789,6 +1823,7 @@ impl fmt::Display for Inserted {
             Self::ByWinit => f.write_str("winit's own"),
             Self::Control => f.write_str("dropped (a control character)"),
             Self::Empty => f.write_str("nothing to post (empty)"),
+            Self::Finished => f.write_str("dropped (the field already kept the composition)"),
             Self::Posted(origin, None) => write!(f, "posted as {origin:?}"),
             Self::Posted(origin, Some(chars)) => write!(
                 f,
@@ -1818,6 +1853,9 @@ fn insert_out_of_band(
             });
         }
         return Inserted::ByWinit;
+    }
+    if FINISHING.try_with(Cell::get).unwrap_or(false) {
+        return Inserted::Finished;
     }
     let Some((window_id, poster, writing_tools, dictation)) = with_attached(view, |attached| {
         (
@@ -1895,11 +1933,153 @@ fn insert_out_of_band(
     Inserted::Posted(origin, replacement_chars)
 }
 
-/// The view's composition is over (committed, unmarked, emptied, or a key
-/// was pressed): a dictation session left ending for it closes. `by` names
+/// Record, for the preedit winit reports from the coming `setMarkedText:`,
+/// the field characters that marked text replaces: `replacement` (UTF-16,
+/// as the input method counts) converted by the focused document, which
+/// inserts typing it has not inserted yet before answering. A marked text
+/// with no range, or one no document could map, records none, so no range
+/// left untaken rides on it. Inside a key press too: Korean Hanja marks its
+/// conversion over the syllable it committed in the same key press.
+fn record_marked_replacement(view: *mut AnyObject, replacement: NSRange) {
+    let replacement = utf16_range(replacement);
+    let chars = replacement.to_range().and_then(|_| {
+        let chars = ask_document(view, |document| {
+            answers::replacement_chars(document, replacement)
+        });
+        log(|line| {
+            let _ = write!(
+                line,
+                "setMarkedText:selectedRange:replacementRange: marked replacement={} ",
+                Range(ns_range(replacement))
+            );
+            match &chars {
+                Some(chars) => {
+                    let _ = write!(line, "-> chars {}..{}", chars.start, chars.end);
+                }
+                None => line.push_str("not mapped: no document answered"),
+            }
+        });
+        chars
+    });
+    let _ = with_attached(view, |attached| {
+        if let Ok(mut slot) = attached.marked_replacement.try_borrow_mut() {
+            slot.record(chars);
+        }
+    });
+}
+
+/// The attached view of `window_id`, by address.
+fn view_of_window(window_id: TeksiloWindowId) -> Option<usize> {
+    VIEWS
+        .try_with(|views| {
+            let views = views.try_borrow().ok()?;
+            views
+                .iter()
+                .find(|(_, attached)| attached.window_id == window_id)
+                .map(|(&view, _)| view)
+        })
+        .ok()
+        .flatten()
+}
+
+/// See [`super::take_marked_replacement`]: the range
+/// [`record_marked_replacement`] recorded on `window_id`'s view, once.
+pub(super) fn take_marked_replacement(
+    window_id: TeksiloWindowId,
+) -> Option<std::ops::Range<usize>> {
+    let view = view_of_window(window_id)?;
+    let chars = with_attached(view as *const AnyObject, |attached| {
+        attached
+            .marked_replacement
+            .try_borrow_mut()
+            .ok()
+            .and_then(|mut slot| slot.take())
+    })
+    .flatten();
+    if let Some(chars) = &chars {
+        log(|line| {
+            let _ = write!(
+                line,
+                "take_marked_replacement: chars {}..{} go with the preedit {}",
+                chars.start,
+                chars.end,
+                Context::of(view as *mut AnyObject)
+            );
+        });
+    }
+    chars
+}
+
+/// See [`super::finish_composition`]. The field has kept the composition's
+/// text; the platform must forget it without delivering it again. winit's
+/// own `unmarkText` does both halves: it clears winit's marked text (and its
+/// composing state, so the next key press is not taken for the end of a
+/// commit), then has the view's input context `discardMarkedText`, so the
+/// input method drops its composition, in that order; it also queues an
+/// empty preedit, which the field ignores once it has finished. Calling
+/// `discardMarkedText` again would change nothing. Should the input method
+/// commit its composition synchronously as it discards it, the commit is
+/// dropped ([`Inserted::Finished`]); one it sent later would arrive as an
+/// ordinary insertion, which the trace would show. `false` with no attached
+/// `WinitView` for the window, or without winit's `unmarkText`, and the
+/// caller resets the input method through winit instead.
+pub(super) fn finish_composition(window_id: TeksiloWindowId) -> bool {
+    let Some(view) = view_of_window(window_id) else {
+        return false;
+    };
+    let view = view as *mut AnyObject;
+    let finished = guarded(
+        || {
+            let had_marked_text = original_has_marked_text(view)?;
+            /// [`FINISHING`], lowered for as long as the value lives
+            /// (unwinding included).
+            struct Finishing;
+            impl Drop for Finishing {
+                fn drop(&mut self) {
+                    let _ = FINISHING.try_with(|finishing| finishing.set(false));
+                }
+            }
+            let _ = FINISHING.try_with(|finishing| finishing.set(true));
+            let finishing = Finishing;
+            let unmarked = winit_unmark_text(view);
+            drop(finishing);
+            Some((had_marked_text, unmarked))
+        },
+        || None,
+    );
+    let Some((had_marked_text, true)) = finished else {
+        log(|line| {
+            let _ = write!(
+                line,
+                "finish_composition: not finished here, winit's IME is reset instead {}",
+                Context::of(view)
+            );
+        });
+        return false;
+    };
+    composition_over(view, "finish_composition");
+    log(|line| {
+        let _ = write!(
+            line,
+            "finish_composition: winit's unmarkText ended the composition \
+             (had marked text: {had_marked_text}) and the input method discarded its own {}",
+            Context::of(view)
+        );
+    });
+    true
+}
+
+/// The view's composition is over (committed, unmarked, emptied, finished
+/// by the field, or a key was pressed): a dictation session left ending for
+/// it closes, and a replacement range no preedit took is dropped. `by` names
 /// the call, for the trace.
 fn composition_over(view: *mut AnyObject, by: &str) {
     set_dictation(view, DictationEvent::CompositionOver, by);
+    let _ = with_attached(view, |attached| {
+        if let Ok(mut slot) = attached.marked_replacement.try_borrow_mut() {
+            slot.clear();
+        }
+    });
 }
 
 /// The text `insertText:` was handed, and whether it carries text
@@ -1942,8 +2122,10 @@ fn carries_text_alternatives(text: &NSAttributedString) -> bool {
 }
 
 /// Always installed, for the key press it may answer (a dead key, an input
-/// method composing); winit's own method runs. An empty string ends the
-/// composition, and so a dictation session left ending.
+/// method composing); winit's own method runs. Before it does, the range of
+/// field text the marked text replaces is recorded for winit's preedit
+/// ([`record_marked_replacement`]). An empty string ends the composition,
+/// and so a dictation session left ending.
 extern "C-unwind" fn set_marked_text(
     this: *mut AnyObject,
     cmd: Sel,
@@ -1966,16 +2148,7 @@ extern "C-unwind" fn set_marked_text(
             Range(replacement)
         );
     });
-    if replacement.location != NOT_FOUND {
-        log(|line| {
-            let _ = write!(
-                line,
-                "setMarkedText:selectedRange:replacementRange: marked replacement not handled: \
-                 replacement={} left to winit, which ignores it",
-                Range(replacement)
-            );
-        });
-    }
+    guarded(|| record_marked_replacement(this, replacement), || ());
     call_original!(
         Slot::SetMarkedText.index(),
         SetMarkedTextFn,
@@ -2881,18 +3054,4 @@ mod tests {
         assert!(class.instance_method(sel!(markedRange)).is_none());
         assert!(ORIGINALS[Slot::MarkedRange.index()].get().is_none());
     }
-}
-
-/// End the window's composition without committing it again. Not done yet:
-/// `false` makes the caller reset the input method through winit.
-pub(super) fn finish_composition(_window_id: TeksiloWindowId) -> bool {
-    false
-}
-
-/// The replacement range of the latest `setMarkedText:`, taken once. Not
-/// recorded yet.
-pub(super) fn take_marked_replacement(
-    _window_id: TeksiloWindowId,
-) -> Option<std::ops::Range<usize>> {
-    None
 }
