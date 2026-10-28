@@ -512,10 +512,7 @@ pub(super) fn handle_key(
                     let _ = st.cursor.unwrap_current_block_from_blockquote();
                 } else {
                     collapse_selection_before_insert(&st);
-                    // The caret's format goes on in the new paragraph.
-                    super::typing_format::insert_paragraph(&mut st, |st| {
-                        let _ = st.cursor.insert_block();
-                    });
+                    split_paragraph(&mut st);
                 }
                 KeyAction::ClearPreferredX
             }
@@ -845,9 +842,7 @@ pub(super) fn run_format_shortcut(
                 // Always a new block, bypassing table-cell navigation.
                 // Matches the godot reference's forced-block-insert branch.
                 collapse_selection_before_insert(&st);
-                super::typing_format::insert_paragraph(&mut st, |st| {
-                    let _ = st.cursor.insert_block();
-                });
+                split_paragraph(&mut st);
             }
             _ => return false,
         }
@@ -1294,6 +1289,42 @@ pub(super) fn apply_select_all_ladder(st: &mut EditorState) {
     if st.select_all_level == 0 {
         st.select_all_anchor_cell = None;
     }
+}
+
+/// Enter: a paragraph break at the caret, as LibreOffice Writer makes it.
+///
+/// * At the end of a heading (an empty one included), the new paragraph is a
+///   body paragraph: Writer gives it the heading style's next style, "Text
+///   Body". Only the heading level goes. Writer keeps the paragraph's direct
+///   attributes on the new paragraph (alignment, indentation) and resets list
+///   attributes only where the style change takes a list style away, which a
+///   list here, always a direct attribute of the paragraph, never comes from;
+///   so alignment, indentation and list membership carry on as `insert_block`
+///   leaves them (`SwTextNode::MakeNewTextNode` and `lcl_ResetParAttrs` in
+///   Writer's `sw/source/core/txtnode/ndtxt.cxx`).
+/// * In the middle of a heading, both halves stay headings, and at the start
+///   of a non-empty one the empty paragraph above is a heading too, the text
+///   staying one: Writer applies the next style only at a paragraph's end.
+///
+/// The break and the level change are one undo step. The caret's character
+/// format goes on in the new paragraph (see `typing_format::insert_paragraph`).
+fn split_paragraph(st: &mut EditorState) {
+    let ends_heading = !st.cursor.has_selection()
+        && st.cursor.at_block_end()
+        && st
+            .cursor
+            .block_format()
+            .is_ok_and(|format| format.heading_level.is_some_and(|level| level > 0));
+    super::typing_format::insert_paragraph(st, |st| {
+        st.cursor.begin_edit_block();
+        if st.cursor.insert_block().is_ok() && ends_heading {
+            let _ = st.cursor.set_block_format(&BlockFormat {
+                heading_level: Some(0),
+                ..Default::default()
+            });
+        }
+        st.cursor.end_edit_block();
+    });
 }
 
 /// Which `TextFormat` bit a Ctrl+B/I/U toggle flips.

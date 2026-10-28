@@ -442,22 +442,19 @@ fn a_link_is_not_carried() {
     assert_eq!(x.anchor_href, None, "the link is not");
 }
 
-/// Enter at the end of a bold heading: the heading logic decides the new
-/// paragraph's level as before, and the bold goes on.
+/// Enter at the end of a bold heading: the new paragraph is a body paragraph
+/// (LibreOffice Writer's "Text Body"), and the bold goes on.
 #[test]
 fn enter_after_a_bold_heading_keeps_the_bold() {
     let mut e = Editor::new("Title", 5);
     e.handle.set_heading_level(1);
     e.bold_range(0, 5, 5);
-    let level_without_carry = {
-        // What the heading logic gives the new paragraph, without typing.
-        e.key(Key::Enter, Modifiers::NONE);
-        e.handle.get_heading_level()
-    };
+    e.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(e.handle.get_heading_level(), 0, "a body paragraph");
     e.type_keys("X");
     assert_eq!(e.text(), "Title\nX");
     assert!(e.bold_at(6), "the bold goes on");
-    assert_eq!(e.handle.get_heading_level(), level_without_carry);
+    assert_eq!(e.heading_at(0), 1, "the heading stays one");
 }
 
 /// In a list, Enter makes the next item, which goes on bold.
@@ -470,4 +467,108 @@ fn a_new_list_item_goes_on_bold() {
     assert_eq!(e.block_count(), 2);
     e.type_keys("X");
     assert!(e.bold_at(5));
+}
+
+// ── Enter in a heading, as LibreOffice Writer does it ─────────────────────────
+
+impl Editor {
+    /// The heading level of the paragraph holding `at`.
+    fn heading_at(&self, at: usize) -> u8 {
+        self.doc
+            .cursor_at(at)
+            .block_format()
+            .unwrap_or_default()
+            .heading_level
+            .unwrap_or(0)
+    }
+
+    /// An editor holding `text` as a level-2 heading, centred, caret at `caret`.
+    fn heading(text: &str, caret: usize) -> Self {
+        let mut e = Self::new(text, caret);
+        e.handle.set_heading_level(2);
+        e.handle
+            .set_alignment(teksilo_text::text_document::Alignment::Center);
+        e.doc.clear_undo_redo();
+        e.settle();
+        e
+    }
+}
+
+/// At the end of a heading, Enter starts a body paragraph; its other
+/// paragraph formats (the alignment here) go on, as in Writer. One undo takes
+/// the break and the level change back together.
+#[test]
+fn enter_at_the_end_of_a_heading_starts_a_body_paragraph() {
+    let mut e = Editor::heading("Title", 5);
+    e.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(e.text(), "Title\n");
+    assert_eq!(e.heading_at(0), 2, "the heading stays a heading");
+    assert_eq!(e.heading_at(6), 0, "the new paragraph is body text");
+    assert_eq!(
+        e.doc.cursor_at(6).block_format().unwrap().alignment,
+        Some(teksilo_text::text_document::Alignment::Center),
+        "its alignment goes on"
+    );
+    e.type_keys("body");
+    assert_eq!(e.heading_at(6), 0);
+
+    e.undo();
+    e.undo();
+    assert_eq!(
+        e.text(),
+        "Title",
+        "the typing, then the break, each one undo"
+    );
+    assert_eq!(e.heading_at(0), 2);
+    assert!(
+        !e.doc.can_undo(),
+        "the break and the level change were one step"
+    );
+}
+
+/// Enter on an empty heading is at its end too.
+#[test]
+fn enter_on_an_empty_heading_starts_a_body_paragraph() {
+    let mut e = Editor::heading("", 0);
+    e.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(e.heading_at(0), 2);
+    assert_eq!(e.heading_at(1), 0);
+}
+
+/// In the middle of a heading, Enter splits it into two headings.
+#[test]
+fn enter_in_the_middle_of_a_heading_splits_it_into_two() {
+    let mut e = Editor::heading("Title", 2);
+    e.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(e.text(), "Ti\ntle");
+    assert_eq!((e.heading_at(0), e.heading_at(3)), (2, 2));
+    e.undo();
+    assert_eq!(e.text(), "Title");
+    assert!(!e.doc.can_undo());
+}
+
+/// At the start of a non-empty heading, Enter puts an empty heading above it,
+/// and the text stays a heading.
+#[test]
+fn enter_at_the_start_of_a_heading_puts_an_empty_heading_above() {
+    let mut e = Editor::heading("Title", 0);
+    e.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(e.text(), "\nTitle");
+    assert_eq!((e.heading_at(0), e.heading_at(1)), (2, 2));
+    assert_eq!(
+        e.state.borrow().cursor.position(),
+        1,
+        "the caret stays on the text"
+    );
+    e.undo();
+    assert_eq!(e.text(), "Title");
+    assert_eq!(e.heading_at(0), 2);
+}
+
+/// Ctrl+Enter, the forced paragraph, at the end of a heading: body text too.
+#[test]
+fn the_forced_paragraph_after_a_heading_is_body_text() {
+    let mut e = Editor::heading("Title", 5);
+    e.key(Key::Enter, Modifiers::COMMAND);
+    assert_eq!(e.heading_at(6), 0);
 }

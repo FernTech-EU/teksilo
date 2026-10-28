@@ -99,6 +99,11 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **Enter in a `RichTextEditor` heading works as in LibreOffice Writer.** At
+  the end of a heading it starts a body paragraph, which keeps the heading's
+  alignment, indentation and list, where it started another heading; in the
+  middle it splits the heading in two, and at the start it puts an empty
+  heading above. One undo takes the break back with the level change.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.
