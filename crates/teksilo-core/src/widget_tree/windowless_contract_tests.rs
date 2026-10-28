@@ -37,6 +37,7 @@ use super::WidgetTree;
 #[derive(Default)]
 struct RecordingOps {
     opened: Vec<Option<String>>,
+    finished_compositions: usize,
 }
 
 impl WindowOps for RecordingOps {
@@ -60,6 +61,10 @@ impl WindowOps for RecordingOps {
     fn focus_window(&mut self, _id: TeksiloWindowId) {}
 
     fn close_window_by_id(&mut self, _id: TeksiloWindowId) {}
+
+    fn finish_ime_composition(&mut self) {
+        self.finished_compositions += 1;
+    }
 }
 
 /// A zero-size root that registers one global action, `app.open`, which
@@ -128,6 +133,14 @@ fn an_application_callback_reaches_a_root_action_and_the_window_operations() {
     });
     assert_eq!(*invoked_by.borrow(), [0]);
     assert_eq!(ops.opened, [Some("opened".to_string())]);
+}
+
+#[test]
+fn finish_ime_composition_reaches_the_window_operations() {
+    let mut tree = WidgetTree::new();
+    let mut ops = RecordingOps::default();
+    tree.run_with_event_context(&mut ops, |ctx| ctx.finish_ime_composition());
+    assert_eq!(ops.finished_compositions, 1);
 }
 
 #[test]

@@ -625,13 +625,7 @@ fn execute_op(
             };
             focus_for_typing(tree, ops, widget);
             if let Some(text) = preedit {
-                tree.dispatch_event_with_ops(
-                    WidgetEvent::ImeComposition {
-                        text: text.clone(),
-                        cursor: None,
-                    },
-                    ops,
-                );
+                tree.dispatch_event_with_ops(WidgetEvent::ime_composition(text.clone(), None), ops);
             }
             if let Some(text) = commit {
                 tree.dispatch_event_with_ops(

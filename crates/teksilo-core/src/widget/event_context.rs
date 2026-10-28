@@ -1532,6 +1532,16 @@ impl<'ops> EventContext<'ops> {
         }
     }
 
+    /// Tell the platform's input method that the focused field's composition
+    /// is over, without delivering its text again: the field has already kept
+    /// what the composition showed (a click elsewhere, a focus change).
+    /// No-op outside a dispatch / on a standalone tree.
+    pub fn finish_ime_composition(&mut self) {
+        if let Some(ops) = self.window_ops.as_deref_mut() {
+            ops.finish_ime_composition();
+        }
+    }
+
     /// Resolve the platform parent handle of the window currently
     /// dispatching the event. Used by native-dialog integrations
     /// (`teksilo_platform::file_dialog`) to parent OS dialogs to the

@@ -1232,3 +1232,9 @@ fn process_image(pid: u32) -> String {
         Err(error) => format!("<{}>", hresult(&error)),
     }
 }
+
+/// End the window's composition without committing it again. Not done yet:
+/// `false` makes the caller reset the input method through winit.
+pub(super) fn finish_composition(_window_id: TeksiloWindowId) -> bool {
+    false
+}

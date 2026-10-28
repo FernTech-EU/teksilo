@@ -245,10 +245,8 @@ fn a_composition_in_progress_is_its_range() {
     let mut f = Field::new("ab", |field| field);
     f.select(1, 1);
     assert_eq!(f.ask(|d| d.composition_range()), None);
-    f.tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: None,
-    });
+    f.tree
+        .dispatch_event(WidgetEvent::ime_composition("ni".to_string(), None));
     assert_eq!(f.ask(|d| d.composition_range()), Some(1..3));
     f.tree.dispatch_event(WidgetEvent::ImeCommit {
         text: "\u{4F60}".to_string(),
@@ -276,10 +274,8 @@ fn each_candidate_reports_the_caret_after_the_preedit() {
     for preedit in ["n", "ni", "nih", "niha", "nihao"] {
         // Each key of the syllable is a new candidate: measure its own report.
         f.state().borrow_mut().last_ime_area = None;
-        f.tree.dispatch_event(WidgetEvent::ImeComposition {
-            text: preedit.to_string(),
-            cursor: None,
-        });
+        f.tree
+            .dispatch_event(WidgetEvent::ime_composition(preedit.to_string(), None));
         let reported = f
             .state()
             .borrow()
@@ -312,10 +308,8 @@ fn a_composition_goes_after_the_typing_of_its_frame() {
         "cd",
         "premise: the keys wait for the frame tick"
     );
-    f.tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: None,
-    });
+    f.tree
+        .dispatch_event(WidgetEvent::ime_composition("ni".to_string(), None));
     f.settle();
     assert_eq!(f.text.get(), "abcdni");
     assert_eq!(f.ask(|d| d.composition_range()), Some(4..6));
@@ -335,10 +329,8 @@ fn a_candidate_that_scrolls_the_field_reports_the_scrolled_caret() {
     assert!(f.state().borrow().scroll_x > 0.0, "the text overflows");
     for preedit in ["n", "ni", "nih", "niha", "nihao"] {
         f.state().borrow_mut().last_ime_area = None;
-        f.tree.dispatch_event(WidgetEvent::ImeComposition {
-            text: preedit.to_string(),
-            cursor: None,
-        });
+        f.tree
+            .dispatch_event(WidgetEvent::ime_composition(preedit.to_string(), None));
         let reported = f
             .state()
             .borrow()

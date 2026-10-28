@@ -211,10 +211,7 @@ fn secure_field_composition_never_exposes_plaintext_to_at() {
         .first_focusable_descendant(id)
         .expect("PasswordField exposes a focusable inner field");
     t.focus(field);
-    t.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: Some(2..2),
-    });
+    t.dispatch_event(WidgetEvent::ime_composition("ni".to_string(), Some(2..2)));
     tick(&mut t);
     tick(&mut t);
 

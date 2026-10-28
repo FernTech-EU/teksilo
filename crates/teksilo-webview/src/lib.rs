@@ -1603,10 +1603,12 @@ fn forwarded_key(event: &teksilo_core::event::WidgetEvent) -> Option<WebViewInpu
                 text: None,
             })
         }
-        WidgetEvent::ImeComposition { text, cursor } => Some(WebViewInputEvent::ImeComposition {
-            text: text.clone(),
-            cursor: cursor.clone(),
-        }),
+        WidgetEvent::ImeComposition { text, cursor, .. } => {
+            Some(WebViewInputEvent::ImeComposition {
+                text: text.clone(),
+                cursor: cursor.clone(),
+            })
+        }
         WidgetEvent::ImeCommit { text, .. } => {
             Some(WebViewInputEvent::ImeCommit { text: text.clone() })
         }

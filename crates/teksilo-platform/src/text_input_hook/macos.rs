@@ -2882,3 +2882,17 @@ mod tests {
         assert!(ORIGINALS[Slot::MarkedRange.index()].get().is_none());
     }
 }
+
+/// End the window's composition without committing it again. Not done yet:
+/// `false` makes the caller reset the input method through winit.
+pub(super) fn finish_composition(_window_id: TeksiloWindowId) -> bool {
+    false
+}
+
+/// The replacement range of the latest `setMarkedText:`, taken once. Not
+/// recorded yet.
+pub(super) fn take_marked_replacement(
+    _window_id: TeksiloWindowId,
+) -> Option<std::ops::Range<usize>> {
+    None
+}

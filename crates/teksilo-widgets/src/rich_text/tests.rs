@@ -2193,17 +2193,11 @@ fn editor_ime_composition_then_commit_inserts_finalised_text() {
     tree.layout(SizeProposal::exact(400.0, 300.0));
     focus_editor(&mut tree, id);
 
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "n".to_string(),
-        cursor: None,
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("n".to_string(), None));
     tree.tick_animations(std::time::Duration::from_millis(16));
     assert_eq!(doc.to_plain_text().unwrap_or_default(), "n");
 
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: None,
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("ni".to_string(), None));
     tree.tick_animations(std::time::Duration::from_millis(16));
     assert_eq!(doc.to_plain_text().unwrap_or_default(), "ni");
 
@@ -2238,18 +2232,12 @@ fn editor_ime_composition_cancelled_leaves_document_clean() {
         teksilo_core::event::Modifiers::CTRL,
     );
 
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "abc".to_string(),
-        cursor: None,
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("abc".to_string(), None));
     tree.tick_animations(std::time::Duration::from_millis(16));
     assert_eq!(doc.to_plain_text().unwrap_or_default(), "before abc");
 
     // Cancel: empty composition.
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: String::new(),
-        cursor: None,
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition(String::new(), None));
     tick_past_debounce(&mut tree);
     assert_eq!(
         doc.to_plain_text().unwrap_or_default(),
@@ -2281,10 +2269,7 @@ fn a_composition_over_a_forward_selection_replaces_it_once() {
         focus_editor(&mut tree, id);
         handle.select_range(anchor, position);
 
-        tree.dispatch_event(WidgetEvent::ImeComposition {
-            text: "n".to_string(),
-            cursor: None,
-        });
+        tree.dispatch_event(WidgetEvent::ime_composition("n".to_string(), None));
         tree.tick_animations(std::time::Duration::from_millis(16));
         assert_eq!(
             doc.to_plain_text().unwrap_or_default(),
@@ -2297,10 +2282,7 @@ fn a_composition_over_a_forward_selection_replaces_it_once() {
             "selected {anchor}..{position}: the preedit is where the selection was"
         );
 
-        tree.dispatch_event(WidgetEvent::ImeComposition {
-            text: "ni".to_string(),
-            cursor: None,
-        });
+        tree.dispatch_event(WidgetEvent::ime_composition("ni".to_string(), None));
         tree.tick_animations(std::time::Duration::from_millis(16));
         assert_eq!(
             doc.to_plain_text().unwrap_or_default(),
@@ -5292,10 +5274,7 @@ fn editor_on_change_stays_silent_during_ime_composition_then_fires_once_on_commi
     }
     fired.set(0);
 
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "n".to_string(),
-        cursor: None,
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("n".to_string(), None));
     tree.tick_animations(std::time::Duration::from_millis(16));
     assert_eq!(
         doc.to_plain_text().unwrap_or_default(),
@@ -5308,10 +5287,7 @@ fn editor_on_change_stays_silent_during_ime_composition_then_fires_once_on_commi
         "an intermediate IME composition step must not fire on_change"
     );
 
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: None,
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("ni".to_string(), None));
     tree.tick_animations(std::time::Duration::from_millis(16));
     assert_eq!(
         fired.get(),
@@ -6559,10 +6535,7 @@ mod affinity_tests {
         tree.layout(sz);
 
         for _ in 0..20 {
-            tree.dispatch_event(WidgetEvent::ImeComposition {
-                text: String::new(),
-                cursor: None,
-            });
+            tree.dispatch_event(WidgetEvent::ime_composition(String::new(), None));
             tree.tick_animations(std::time::Duration::from_millis(16));
             tree.layout(sz);
         }
@@ -6609,10 +6582,7 @@ mod affinity_tests {
         tree.layout(sz);
 
         // First preedit "x": caret advances to 1, the page follows it into view.
-        tree.dispatch_event(WidgetEvent::ImeComposition {
-            text: "x".to_string(),
-            cursor: None,
-        });
+        tree.dispatch_event(WidgetEvent::ime_composition("x".to_string(), None));
         tree.tick_animations(std::time::Duration::from_millis(16));
         tree.layout(sz);
         assert!(
@@ -6626,10 +6596,7 @@ mod affinity_tests {
         tree.layout(sz);
 
         // Same preedit re-sent → caret lands at the same position 1 → no re-follow.
-        tree.dispatch_event(WidgetEvent::ImeComposition {
-            text: "x".to_string(),
-            cursor: None,
-        });
+        tree.dispatch_event(WidgetEvent::ime_composition("x".to_string(), None));
         tree.tick_animations(std::time::Duration::from_millis(16));
         tree.layout(sz);
         assert!(
@@ -8842,10 +8809,7 @@ fn forward_only_ime_composition_does_not_eat_a_selection() {
     let (doc, handle, mut tree) = forward_only_editor("garder");
     handle.select_range(0, 6);
 
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "n".to_string(),
-        cursor: None,
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("n".to_string(), None));
     tree.tick_animations(std::time::Duration::from_millis(16));
     tree.dispatch_event(WidgetEvent::ime_commit("你"));
     tick_past_debounce(&mut tree);

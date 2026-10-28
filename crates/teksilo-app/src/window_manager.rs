@@ -5094,6 +5094,12 @@ pub struct WindowOpsImpl<'a> {
     /// while the dispatching window is temporarily out of
     /// `WindowManager::windows`.
     current_window_arc: Option<std::sync::Arc<winit::window::Window>>,
+    /// Whether the dispatching window's IME is currently allowed (its
+    /// `ManagedWindow::ime_allowed` is `Some(true)`), which the window being
+    /// out of the manager during dispatch hides from this sink. Set with
+    /// [`with_ime_allowed`](Self::with_ime_allowed); `false` when not told,
+    /// so a path that does not say never resets the input method.
+    current_ime_allowed: bool,
 }
 
 impl<'a> WindowOpsImpl<'a> {
@@ -5108,7 +5114,16 @@ impl<'a> WindowOpsImpl<'a> {
             event_loop,
             current_id: Some(current_id),
             current_window_arc,
+            current_ime_allowed: false,
         }
+    }
+
+    /// Say whether the dispatching window's IME is currently allowed, so
+    /// `finish_ime_composition` can reset winit's IME when the platform
+    /// cannot end a composition itself.
+    pub(crate) fn with_ime_allowed(mut self, allowed: bool) -> Self {
+        self.current_ime_allowed = allowed;
+        self
     }
 
     /// The sink for code that runs in no window: the application tree's
@@ -5125,6 +5140,7 @@ impl<'a> WindowOpsImpl<'a> {
             event_loop,
             current_id: None,
             current_window_arc: None,
+            current_ime_allowed: false,
         }
     }
 }
@@ -5297,6 +5313,22 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
                 winit::dpi::LogicalPosition::new(area.x, area.y),
                 winit::dpi::LogicalSize::new(area.width.max(1.0), area.height.max(1.0)),
             );
+        }
+    }
+
+    fn finish_ime_composition(&mut self) {
+        let (Some(id), Some(arc)) = (self.current_id, self.current_window_arc.as_ref()) else {
+            return;
+        };
+        if teksilo_platform::text_input_hook::finish_composition(id) {
+            return;
+        }
+        // The platform cannot end it: reset the input method by toggling
+        // winit's IME. The window ends allowed, as its bookkeeping
+        // (`ManagedWindow::ime_allowed`) already says.
+        if self.current_ime_allowed {
+            arc.set_ime_allowed(false);
+            arc.set_ime_allowed(true);
         }
     }
 

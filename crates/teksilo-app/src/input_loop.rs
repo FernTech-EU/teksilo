@@ -1112,10 +1112,7 @@ mod tests {
             tree.focus(id);
             // A composition in flight, exactly as an IME leaves it between
             // keystrokes.
-            tree.dispatch_event(WidgetEvent::ImeComposition {
-                text: "ni".to_string(),
-                cursor: None,
-            });
+            tree.dispatch_event(WidgetEvent::ime_composition("ni".to_string(), None));
             tree.tick_animations(Duration::from_millis(16));
             assert_eq!(
                 doc.to_plain_text().unwrap_or_default(),

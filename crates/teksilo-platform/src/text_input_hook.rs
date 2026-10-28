@@ -183,6 +183,54 @@ pub fn key_was_swallowed(window_id: TeksiloWindowId) -> bool {
     }
 }
 
+/// Ask the platform's input method to end the window's composition without
+/// committing it again.
+///
+/// For a field that has already kept what the composition showed (a click
+/// elsewhere, a focus change): without this the input method still holds the
+/// composition and delivers its text later, at the old place or in another
+/// field. Returns whether the platform did it; `false` means the caller falls
+/// back to resetting the input method by toggling winit's IME on the window
+/// (`set_ime_allowed(false)` then `set_ime_allowed(true)`).
+///
+/// `false` on every platform for now.
+pub fn finish_composition(window_id: TeksiloWindowId) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::finish_composition(window_id)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        windows::finish_composition(window_id)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = window_id;
+        false
+    }
+}
+
+/// The range of the focused field's text (its character offsets) that the
+/// macOS input method gave its latest `setMarkedText:` as the text the
+/// composition replaces, taken once.
+///
+/// The app calls it while it translates winit's `Ime::Preedit` for the
+/// window, and sets the result as the `replacement` of
+/// [`WidgetEvent::ImeComposition`](teksilo_core::WidgetEvent::ImeComposition).
+/// `None` when the input method named none, for another window, a second
+/// time for the same update, and on every platform but macOS.
+pub fn take_marked_replacement(window_id: TeksiloWindowId) -> Option<Range<usize>> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::take_marked_replacement(window_id)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window_id;
+        None
+    }
+}
+
 /// Attach to a window's native surface. Main thread only, once the window
 /// exists. A no-op where the platform needs nothing.
 ///

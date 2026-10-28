@@ -170,10 +170,8 @@ fn typing_reports_keyboard() {
 #[test]
 fn a_composition_commit_reports_ime() {
     let mut f = Field::new("", |field| field);
-    f.tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: None,
-    });
+    f.tree
+        .dispatch_event(WidgetEvent::ime_composition("ni".to_string(), None));
     f.settle();
     assert!(f.arrivals.seen().is_empty(), "a preedit is not an arrival");
     f.tree.dispatch_event(WidgetEvent::ime_commit("\u{4F60}"));

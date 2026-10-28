@@ -343,10 +343,9 @@ fn a_composition_in_progress_is_its_range() {
     editor.handle.select_range(1, 1);
     assert_eq!(editor.doc().composition_range(), None);
 
-    editor.tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: None,
-    });
+    editor
+        .tree
+        .dispatch_event(WidgetEvent::ime_composition("ni".to_string(), None));
     assert_eq!(editor.doc().composition_range(), Some(1..3));
     assert_eq!(editor.doc().text_in(1..3).as_deref(), Some("ni"));
 
@@ -364,15 +363,13 @@ fn a_composition_in_progress_is_its_range() {
 fn a_composition_at_the_end_of_a_later_paragraph_is_replaced_whole() {
     let mut editor = Editor::with_text("one\ntwo", 400.0);
     editor.handle.select_range(7, 7);
-    editor.tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: None,
-    });
+    editor
+        .tree
+        .dispatch_event(WidgetEvent::ime_composition("ni".to_string(), None));
     assert_eq!(editor.doc().composition_range(), Some(7..9));
-    editor.tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "nih".to_string(),
-        cursor: None,
-    });
+    editor
+        .tree
+        .dispatch_event(WidgetEvent::ime_composition("nih".to_string(), None));
     assert_eq!(editor.doc().composition_range(), Some(7..10));
     assert_eq!(editor.doc().text_in(4..10).as_deref(), Some("twonih"));
 
@@ -401,10 +398,9 @@ fn each_candidate_reports_the_caret_after_the_preedit() {
     for preedit in ["n", "ni", "nih", "niha", "nihao"] {
         // Each key of the syllable is a new candidate: measure its own report.
         editor.handle.state.borrow_mut().last_ime_area = None;
-        editor.tree.dispatch_event(WidgetEvent::ImeComposition {
-            text: preedit.to_string(),
-            cursor: None,
-        });
+        editor
+            .tree
+            .dispatch_event(WidgetEvent::ime_composition(preedit.to_string(), None));
         let reported = editor
             .handle
             .state

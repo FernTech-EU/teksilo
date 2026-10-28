@@ -2191,7 +2191,8 @@ impl TeksiloAppHandler {
                 event_loop,
                 current_id,
                 current_arc,
-            );
+            )
+            .with_ime_allowed(current.ime_allowed == Some(true));
             current.tree.dispatch_event_with_ops(event, &mut ops);
         }
 
@@ -2228,7 +2229,8 @@ impl TeksiloAppHandler {
                 event_loop,
                 current_id,
                 current_arc,
-            );
+            )
+            .with_ime_allowed(current.ime_allowed == Some(true));
             let mut chrome = WindowChrome::new(
                 &current.platform_window,
                 &current.redraw,
@@ -4546,10 +4548,24 @@ impl TeksiloAppHandler {
                     false
                 };
                 if !skip {
-                    let maybe_evt = if self.wm.get_by_winit_mut(window_id).is_some() {
-                        event_translation::translate_ime(ime)
-                    } else {
-                        None
+                    let teksilo_id = self.wm.get_by_winit_mut(window_id).map(|m| m.teksilo_id);
+                    let maybe_evt = match teksilo_id {
+                        Some(teksilo_id) => {
+                            let is_preedit = matches!(ime, winit::event::Ime::Preedit(..));
+                            event_translation::translate_ime(ime).map(|mut evt| {
+                                if is_preedit
+                                    && let WidgetEvent::ImeComposition { replacement, .. } =
+                                        &mut evt
+                                {
+                                    *replacement =
+                                        teksilo_platform::text_input_hook::take_marked_replacement(
+                                            teksilo_id,
+                                        );
+                                }
+                                evt
+                            })
+                        }
+                        None => None,
                     };
                     if let Some(evt) = maybe_evt {
                         self.dispatch_in_window(window_id, evt, event_loop);

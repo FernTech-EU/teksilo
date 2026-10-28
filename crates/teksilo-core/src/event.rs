@@ -757,9 +757,20 @@ pub enum WidgetEvent {
         key: Key,
         modifiers: Modifiers,
     },
+    /// One update of the platform input method's composition (preedit).
     ImeComposition {
+        /// The composition's current text. Empty ends the composition.
         text: String,
+        /// The caret or selection inside `text`, in byte offsets of `text`.
         cursor: Option<std::ops::Range<usize>>,
+        /// The range of the focused field's text (its character offsets) the
+        /// composition takes the place of, when the input method re-marks
+        /// text already in the field (Korean Hanja conversion,
+        /// reconversion). Sent with the composition's first update; the
+        /// field removes that text and shows the composition where it was,
+        /// and puts it back if the composition is cancelled. `None` shows
+        /// the composition at the selection.
+        replacement: Option<std::ops::Range<usize>>,
     },
     /// Text the platform's input system committed into the focused field.
     ImeCommit {
@@ -844,6 +855,19 @@ impl WidgetEvent {
         Self::ImeCommit {
             text: text.into(),
             origin: ImeOrigin::Composition,
+            replacement: None,
+        }
+    }
+
+    /// An [`ImeComposition`](Self::ImeComposition) update that takes the
+    /// place of no existing text (`replacement` is `None`).
+    pub fn ime_composition(
+        text: impl Into<String>,
+        cursor: Option<std::ops::Range<usize>>,
+    ) -> Self {
+        Self::ImeComposition {
+            text: text.into(),
+            cursor,
             replacement: None,
         }
     }
@@ -1055,6 +1079,22 @@ mod modifier_tests {
 #[cfg(test)]
 mod ime_commit_tests {
     use super::*;
+
+    #[test]
+    fn ime_composition_constructor_replaces_nothing() {
+        match WidgetEvent::ime_composition("x", Some(0..1)) {
+            WidgetEvent::ImeComposition {
+                text,
+                cursor,
+                replacement,
+            } => {
+                assert_eq!(text, "x");
+                assert_eq!(cursor, Some(0..1));
+                assert!(replacement.is_none());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
 
     #[test]
     fn ime_commit_constructor_is_a_plain_composition_commit() {

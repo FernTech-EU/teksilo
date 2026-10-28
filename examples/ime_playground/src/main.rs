@@ -38,18 +38,9 @@ use teksilo::widgets::{Expand, PasswordField, TextInput, TextWidget, VStack};
 /// is winit's synthetic clear emitted right before the commit.
 fn pinyin_script() -> Vec<WidgetEvent> {
     vec![
-        WidgetEvent::ImeComposition {
-            text: "ni".to_string(),
-            cursor: Some(2..2),
-        },
-        WidgetEvent::ImeComposition {
-            text: "nihao".to_string(),
-            cursor: Some(5..5),
-        },
-        WidgetEvent::ImeComposition {
-            text: String::new(),
-            cursor: None,
-        },
+        WidgetEvent::ime_composition("ni".to_string(), Some(2..2)),
+        WidgetEvent::ime_composition("nihao".to_string(), Some(5..5)),
+        WidgetEvent::ime_composition(String::new(), None),
         WidgetEvent::ime_commit("你好"),
     ]
 }
@@ -57,14 +48,8 @@ fn pinyin_script() -> Vec<WidgetEvent> {
 /// Dead-key accent: `^` preedit, then commit the composed `ê`.
 fn dead_key_script() -> Vec<WidgetEvent> {
     vec![
-        WidgetEvent::ImeComposition {
-            text: "^".to_string(),
-            cursor: Some(1..1),
-        },
-        WidgetEvent::ImeComposition {
-            text: String::new(),
-            cursor: None,
-        },
+        WidgetEvent::ime_composition("^".to_string(), Some(1..1)),
+        WidgetEvent::ime_composition(String::new(), None),
         WidgetEvent::ime_commit("ê"),
     ]
 }
@@ -72,14 +57,8 @@ fn dead_key_script() -> Vec<WidgetEvent> {
 /// Begin composing `ni`, then cancel — an empty preedit with no commit.
 fn cancel_script() -> Vec<WidgetEvent> {
     vec![
-        WidgetEvent::ImeComposition {
-            text: "ni".to_string(),
-            cursor: Some(2..2),
-        },
-        WidgetEvent::ImeComposition {
-            text: String::new(),
-            cursor: None,
-        },
+        WidgetEvent::ime_composition("ni".to_string(), Some(2..2)),
+        WidgetEvent::ime_composition(String::new(), None),
     ]
 }
 

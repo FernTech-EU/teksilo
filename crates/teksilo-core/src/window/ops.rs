@@ -97,6 +97,13 @@ pub trait WindowOps {
     /// No-op on the standalone / test sink.
     fn set_ime_cursor_area(&mut self, _area: teksilo_canvas::Rect) {}
 
+    /// Tell the platform's input method that the focused field's composition
+    /// is over, without delivering its text again: the field has already
+    /// kept what the composition showed (a click elsewhere, a focus change).
+    ///
+    /// No-op on the standalone / test sink.
+    fn finish_ime_composition(&mut self) {}
+
     /// Hand an OS-level drag to the platform when an in-app drag escalates at
     /// the window boundary (the pointer left the window carrying an
     /// OS-exportable payload). The platform backend

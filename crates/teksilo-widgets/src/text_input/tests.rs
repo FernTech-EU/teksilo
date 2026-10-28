@@ -291,27 +291,21 @@ fn ime_composition_then_commit_inserts_finalised_text() {
     focus_field(&mut tree, id);
 
     // Two intermediate compositions, then a commit.
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: Some(2..2),
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("ni".to_string(), Some(2..2)));
     tick(&mut tree);
     tick(&mut tree);
     assert_eq!(text.get(), "ni", "preedit shows tentatively in the value");
 
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "nihao".to_string(),
-        cursor: Some(5..5),
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition(
+        "nihao".to_string(),
+        Some(5..5),
+    ));
     tick(&mut tree);
     tick(&mut tree);
     assert_eq!(text.get(), "nihao");
 
     // winit clears the preedit just before the commit.
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: String::new(),
-        cursor: None,
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition(String::new(), None));
     tree.dispatch_event(WidgetEvent::ime_commit("你好"));
     tick(&mut tree);
     tick(&mut tree);
@@ -326,19 +320,13 @@ fn ime_composition_then_commit_inserts_finalised_text() {
 fn ime_composition_cancelled_leaves_field_clean() {
     let (mut tree, text, id) = setup("");
     focus_field(&mut tree, id);
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: Some(2..2),
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("ni".to_string(), Some(2..2)));
     tick(&mut tree);
     tick(&mut tree);
     assert_eq!(text.get(), "ni");
 
     // Cancel: empty composition, no commit.
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: String::new(),
-        cursor: None,
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition(String::new(), None));
     tick(&mut tree);
     tick(&mut tree);
     assert_eq!(text.get(), "", "cancelled preedit is removed entirely");
@@ -355,10 +343,7 @@ fn empty_ime_composition_flood_is_inert() {
     focus_field(&mut tree, id);
 
     for _ in 0..20 {
-        tree.dispatch_event(WidgetEvent::ImeComposition {
-            text: String::new(),
-            cursor: None,
-        });
+        tree.dispatch_event(WidgetEvent::ime_composition(String::new(), None));
         tick(&mut tree);
     }
     assert_eq!(
@@ -368,10 +353,7 @@ fn empty_ime_composition_flood_is_inert() {
     );
 
     // Still functional: a real composition + commit lands text.
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "c".to_string(),
-        cursor: Some(1..1),
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("c".to_string(), Some(1..1)));
     tick(&mut tree);
     tree.dispatch_event(WidgetEvent::ime_commit("c"));
     tick(&mut tree);
@@ -392,10 +374,7 @@ fn ime_preedit_removed_on_focus_loss() {
     tick(&mut tree);
     focus_field(&mut tree, id);
 
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "ni".to_string(),
-        cursor: Some(2..2),
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition("ni".to_string(), Some(2..2)));
     tick(&mut tree);
     tick(&mut tree);
     assert_eq!(text.get(), "ni");
@@ -585,10 +564,10 @@ fn empty_focused_field_still_emits_a_text_run() {
 fn composing_field_exposes_the_composition_as_an_at_selection() {
     let (mut tree, _text, id) = setup("");
     focus_field(&mut tree, id);
-    tree.dispatch_event(WidgetEvent::ImeComposition {
-        text: "nihao".to_string(),
-        cursor: Some(5..5),
-    });
+    tree.dispatch_event(WidgetEvent::ime_composition(
+        "nihao".to_string(),
+        Some(5..5),
+    ));
     tick(&mut tree);
     tick(&mut tree);
 

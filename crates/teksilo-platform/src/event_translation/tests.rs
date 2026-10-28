@@ -169,7 +169,7 @@ fn ime_preedit_to_composition_preserves_cursor_bytes() {
     let evt = translate_ime(winit::event::Ime::Preedit("a".to_string(), Some((1, 1)))).unwrap();
     assert!(matches!(
         evt,
-        WidgetEvent::ImeComposition { ref text, cursor: Some(ref r) }
+        WidgetEvent::ImeComposition { ref text, cursor: Some(ref r), .. }
             if text == "a" && *r == (1..1)
     ));
 }
@@ -179,7 +179,7 @@ fn ime_preedit_hide_cursor_maps_to_none() {
     let evt = translate_ime(winit::event::Ime::Preedit(String::new(), None)).unwrap();
     assert!(matches!(
         evt,
-        WidgetEvent::ImeComposition { ref text, cursor: None } if text.is_empty()
+        WidgetEvent::ImeComposition { ref text, cursor: None, .. } if text.is_empty()
     ));
 }
 

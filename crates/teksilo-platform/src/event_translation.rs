@@ -1335,15 +1335,17 @@ pub fn translate_cursor_moved(
 ///   `(begin, end)` index into the preedit `text` and are preserved as a
 ///   `Range`. `None` (hide-cursor) and empty `text` (winit's synthetic
 ///   clear, emitted right before `Commit`) flow through faithfully.
+///   The result never names a replacement; the caller sets it from the
+///   platform input method (`text_input_hook::take_marked_replacement`).
 /// - `Commit(text)` → `ImeCommit`.
 /// - `Enabled` / `Disabled` are OS acknowledgements (enablement is driven
 ///   by the focused node's descriptor) and produce no tree event.
 pub fn translate_ime(ime: winit::event::Ime) -> Option<WidgetEvent> {
     match ime {
-        winit::event::Ime::Preedit(text, cursor) => Some(WidgetEvent::ImeComposition {
+        winit::event::Ime::Preedit(text, cursor) => Some(WidgetEvent::ime_composition(
             text,
-            cursor: cursor.map(|(begin, end)| begin..end),
-        }),
+            cursor.map(|(begin, end)| begin..end),
+        )),
         winit::event::Ime::Commit(text) => Some(WidgetEvent::ime_commit(text)),
         winit::event::Ime::Enabled | winit::event::Ime::Disabled => None,
     }
