@@ -160,3 +160,48 @@ fn no_i18n_config_keeps_manager_unset_and_set_locale_is_noop() {
     // resolve_message without a manager returns the literal key.
     assert_eq!(resolve_message("anything", &[]), "anything");
 }
+
+/// The generation the shared typesetter's font service bumps when something
+/// that shaped text depended on changes (here, its default language).
+fn text_generation(app: &teksilo_app::HeadlessApp) -> u64 {
+    app.tree
+        .app_context()
+        .app_state::<teksilo_app::teksilo_text::SharedTypesetter>()
+        .expect("the typesetter is registered")
+        .bridge()
+        .borrow()
+        .service()
+        .scale_generation()
+}
+
+/// The typesetter draws Chinese characters with no kana or hangul around
+/// them for the UI language: it takes the initial locale at build and
+/// follows every switch, and a switch between languages that are not
+/// Chinese, Japanese or Korean changes nothing for it.
+#[test]
+fn the_typesetter_follows_the_ui_language() {
+    let mut app = TeksiloAppBuilder::new()
+        .i18n(
+            I18nConfig::test_only("ja-JP", &[("greeting", "こんにちは")])
+                .with_locale("en-US", &[("greeting", "Hello")])
+                .with_locale("fr-FR", &[("greeting", "Bonjour")])
+                .with_locale("zh-TW", &[("greeting", "你好")]),
+        )
+        .build_headless();
+    let start = text_generation(&app);
+
+    // Japanese at build: leaving it for English is a change.
+    app.set_locale(lid("en-US"));
+    let english = text_generation(&app);
+    assert_ne!(english, start, "the initial ja-JP was not applied");
+
+    app.set_locale(lid("fr-FR"));
+    assert_eq!(
+        text_generation(&app),
+        english,
+        "fr-FR names no CJK language"
+    );
+
+    app.set_locale(lid("zh-TW"));
+    assert_ne!(text_generation(&app), english);
+}

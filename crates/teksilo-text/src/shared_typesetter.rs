@@ -51,6 +51,16 @@ impl SharedTypesetter {
     pub fn set_scale_factor(&self, scale_factor: f32) {
         self.inner.borrow_mut().set_scale_factor(scale_factor);
     }
+
+    /// Set the language, as a BCP 47 tag (the UI locale), that Chinese
+    /// characters with no kana or hangul around them, in a block that names
+    /// no language, are drawn for: Japanese, Korean, Simplified or
+    /// Traditional Chinese each have their own forms of them, and glyph
+    /// fallback picks a font for one. `teksilo-app` keeps it on the active
+    /// locale. A change marks the text laid out so far for layout again.
+    pub fn set_default_language(&self, language: Option<&str>) {
+        self.inner.borrow_mut().set_default_language(language);
+    }
 }
 
 impl Default for SharedTypesetter {

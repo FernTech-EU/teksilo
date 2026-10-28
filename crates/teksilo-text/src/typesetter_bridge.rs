@@ -369,6 +369,19 @@ impl TypesetterBridge {
         self.default_font = Some(face_id);
     }
 
+    /// Set the language Chinese characters a fallback font draws are drawn
+    /// for when their text does not say (see
+    /// [`TextFontService::set_default_language`]). A change drops the label
+    /// layouts cached here and marks every rich-text layout of the service
+    /// stale, so the next layout picks its faces anew.
+    pub(crate) fn set_default_language(&mut self, language: Option<&str>) {
+        let generation = self.service.scale_generation();
+        self.service.set_default_language(language);
+        if self.service.scale_generation() != generation {
+            self.clear_layout_caches();
+        }
+    }
+
     /// Get atlas information for GPU upload.
     ///
     /// Only advances the glyph cache generation and runs eviction

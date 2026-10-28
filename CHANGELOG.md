@@ -44,6 +44,14 @@ by crate for clarity, not because crates version independently.
   the platform where its selection is, what its text is and where a range is
   drawn, so Dictation and Writing Tools work in it on macOS.
 
+#### Text
+
+- **`SharedTypesetter::set_default_language`** sets the language, as a BCP
+  47 tag, that Chinese characters with nothing around them to say which
+  language they are in are drawn for. `teksilo-app` keeps it on the active
+  locale; an application without `teksilo-app`, or with a typesetter of its
+  own, calls it.
+
 #### Widgets
 
 - **`TextInputField::on_text_inserted`**, forwarded by `TextInput`,
@@ -191,7 +199,11 @@ by crate for clarity, not because crates version independently.
   on the Mac, and Noto Sans CJK (or Source Han Sans, IPA, VL Gothic,
   WenQuanYi, Nanum) on Linux, matched to the weight of the text. Chinese
   characters are drawn for Japanese next to kana and for Korean next to
-  hangul, and otherwise for Simplified Chinese. Needs text-typeset 3.0.
+  hangul, and otherwise for the UI language when it is Chinese, Japanese
+  or Korean (Simplified Chinese when it is none of them): the application
+  passes its active locale to the shared typesetter at startup and on every
+  locale switch, and text already laid out is laid out again in the fonts
+  of the new language. Needs text-typeset 3.0.
 - **Headings keep their proportion to the body text.** A heading in a
   `RichTextEditor` or `RichTextViewer` was sized from a fixed 16 px (32 px
   for a Heading 1) whatever the text size, so with Teksilo's 14 px body

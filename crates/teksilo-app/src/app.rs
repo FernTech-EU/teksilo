@@ -6580,6 +6580,15 @@ impl TeksiloAppBuilder {
         // the root builder runs so that any `tr!` calls inside `build()`
         // resolve against the correct locale on first build.
         let i18n_manager = self.i18n.as_ref().map(|cfg| install_i18n(&mut tree, cfg));
+        if let Some(follower) = i18n_manager
+            .as_ref()
+            .and_then(|mgr| UiLanguageFollower::install(&self.app_state_registry, mgr))
+        {
+            self.app_state_registry.insert(
+                std::any::TypeId::of::<UiLanguageFollower>(),
+                Box::new(follower),
+            );
+        }
         teksilo_widgets::localize_standard_shortcuts(tree.shortcut_registry_mut());
         if let (Some(app_tree), Some(mgr)) = (app_tree.as_mut(), i18n_manager.as_ref()) {
             app_tree.set_locale(mgr.locale_signal().get().to_string());
@@ -6856,6 +6865,16 @@ impl TeksiloAppBuilder {
             std::any::TypeId::of::<SharedTypesetter>(),
             Box::new(typesetter.clone()),
         );
+        if let Some(follower) = teksilo_i18n::thread_local::with_active(|mgr| {
+            UiLanguageFollower::install(&self.app_state_registry, mgr)
+        })
+        .flatten()
+        {
+            self.app_state_registry.insert(
+                std::any::TypeId::of::<UiLanguageFollower>(),
+                Box::new(follower),
+            );
+        }
         // Every application has an application menu's holder, empty until
         // the application tree declares one.
         self.app_state_registry
@@ -7008,6 +7027,36 @@ mod application_menu_tests;
 impl Default for TeksiloAppBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Keeps the shared typesetter's default language on the active UI locale,
+/// so Chinese characters with no kana or hangul around them are drawn in the
+/// fonts of the user's language (Japanese, Korean, Simplified or Traditional
+/// Chinese). Held in the app-state registry for the application's life: its
+/// observer goes with it.
+struct UiLanguageFollower {
+    _observer: teksilo_core::ObserverHandle,
+}
+
+impl UiLanguageFollower {
+    /// Set the language from `mgr`'s locale now and on every switch, on the
+    /// typesetter registered in `app_state`. `None` without a typesetter.
+    fn install(
+        app_state: &std::collections::HashMap<std::any::TypeId, Box<dyn std::any::Any>>,
+        mgr: &I18nManager,
+    ) -> Option<Self> {
+        let typesetter = app_state
+            .get(&std::any::TypeId::of::<SharedTypesetter>())?
+            .downcast_ref::<SharedTypesetter>()?
+            .clone();
+        typesetter.set_default_language(Some(&mgr.locale_signal().get().to_string()));
+        let observer = mgr
+            .locale_signal()
+            .observe(move |locale| typesetter.set_default_language(Some(&locale.to_string())));
+        Some(Self {
+            _observer: observer,
+        })
     }
 }
 

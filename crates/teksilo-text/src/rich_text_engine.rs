@@ -1481,6 +1481,33 @@ mod tests {
         assert_eq!(a_glyphs, a_glyphs_again);
     }
 
+    /// A change of the UI language decides anew which fonts draw Chinese
+    /// characters, so it marks a laid-out engine for layout again and drops
+    /// the label layouts the bridge cached; the language it already has
+    /// changes nothing.
+    #[test]
+    fn default_language_change_invalidates_engine_layout() {
+        use teksilo_canvas::TextBackend;
+        let shared = SharedTypesetter::new_with_default_font();
+        let mut engine = RichTextEngine::from_shared(shared.clone());
+        engine.set_viewport(400.0, 300.0);
+        let doc = TextDocument::new();
+        doc.set_plain_text("中你好").unwrap();
+        engine.layout_full(&doc.snapshot_flow());
+        assert!(engine.has_full_layout());
+        let labels = shared.bridge().borrow().layout_cache_generation();
+
+        shared.set_default_language(Some("ja-JP"));
+        assert!(!engine.has_full_layout());
+        assert_ne!(shared.bridge().borrow().layout_cache_generation(), labels);
+
+        engine.layout_full(&doc.snapshot_flow());
+        let labels = shared.bridge().borrow().layout_cache_generation();
+        shared.set_default_language(Some("ja"));
+        assert!(engine.has_full_layout());
+        assert_eq!(shared.bridge().borrow().layout_cache_generation(), labels);
+    }
+
     /// Regression test for HiDPI invalidation plumbing.
     ///
     /// When the shared [`SharedTypesetter`] receives a new scale
