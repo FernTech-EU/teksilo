@@ -260,9 +260,9 @@ impl TypesetterBridge {
     /// tokens name), then register every feature-gated script-specific
     /// fallback font. The feature-gated registrations discard their
     /// `FontFaceId` because fallback eligibility only requires that a
-    /// font be in the registry — text-typeset's `find_fallback_font`
-    /// iterates every registered font and picks the first one whose
-    /// charmap covers a `.notdef` glyph's codepoint.
+    /// font be in the registry: text-typeset's glyph fallback visits every
+    /// registered font for a character the primary font lacks, and for an
+    /// emoji it prefers one that draws it in colour.
     fn register_default_font(&mut self) {
         // Inter is the default/UI family. Register the upright variable
         // face as the default, then the italic variable face so italic

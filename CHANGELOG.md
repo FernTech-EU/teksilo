@@ -136,6 +136,53 @@ by crate for clarity, not because crates version independently.
   showed. Microsoft Pinyin shows `nihao` as "ni'hao" and commits "nihao";
   an apostrophe the writer typed, as in "xi'an", stays.
 
+#### Text
+
+- **An emoji after CJK text is drawn, and CJK text after an emoji.** In
+  "Showcase日本にほん😁😁" neither emoji showed, in a `RichTextEditor` or a
+  `TextInput`, and after a 🇯🇵 the Chinese and Korean that followed drew as
+  blank space. The characters the default font lacks were set in the font
+  found for the first of them, and what that font lacked was looked for
+  nowhere else. Needs text-typeset 3.0.
+- **A CJK character the first CJK font lacks is drawn.** On Windows 你 was
+  blank in "中你好" and "我你好你好" (a Heading 1, the Title field) and drew
+  in "exer你好cises": the first system font with 中 or 我 has no 你. A word
+  that one installed font draws whole is now set in that font. Needs
+  text-typeset 3.0.
+- **An emoji is drawn in colour when a monochrome font has it too.** ❤️
+  (U+2764 U+FE0F) was a black text heart, because Inter, the default font,
+  has a U+2764 of its own. A character followed by U+FE0F, or one that
+  defaults to emoji presentation, now comes from a colour emoji font when
+  one is installed. On Linux an emoji came from the first system font that
+  had it, often a monochrome one such as VL Gothic. ❤ with no U+FE0F after
+  it stays a text heart. Needs text-typeset 3.0.
+- **A COLRv1 emoji is drawn in colour.** Noto Color Emoji as Fedora ships it
+  is COLRv1, which the glyph rasterizer did not paint, and an emoji set in it
+  was blank space. COLRv1 glyphs are now painted, with their gradients,
+  transforms, clips and composite modes. A COLRv1 glyph that cannot be
+  painted (a cycle in its paint) is drawn as the font's missing-glyph box.
+  **Behaviour change:** on Windows 11 every emoji looks different. Segoe UI
+  Emoji carries both formats, and its emoji are now drawn from their COLRv1
+  design, with the gradients Windows itself shows, where its flat COLRv0
+  design was drawn before. Needs text-typeset 3.0.
+- **CJK text the default font lacks keeps the weight of the text around
+  it.** On Windows regular 中你好 came out in BIZ UDGothic Bold, and on Linux
+  in Noto Sans CJK Bold: fallback took the first font file with the
+  character, and a family's Bold file can sort before its Regular one. It
+  now takes the face of that family whose weight, style and width match the
+  text. Needs text-typeset 3.0.
+- **Bold text in a font with no bold is drawn bold.** On the Mac every CJK
+  character comes from Arial Unicode MS, which has one weight, so Cmd+B
+  made the Latin text bold and left the CJK regular. A face lighter than a
+  bold weight, with no weight axis to reach it, is now emboldened as
+  FreeType does it, its advances widened by as much, so the caret and
+  selection stay with the glyphs. Needs text-typeset 3.0.
+- **Italic text in a font with no italic is drawn slanted.** No CJK font has
+  an italic, so Ctrl+I (Cmd+I on the Mac) left CJK text upright. A face
+  with no italic, oblique or slant axis is now slanted about the baseline
+  by fontconfig's synthetic oblique angle; the advances do not change, so
+  the caret and selection stay where they were. Needs text-typeset 3.0.
+
 #### Widgets
 
 - **Undo no longer replays an input method's composition.** In a
