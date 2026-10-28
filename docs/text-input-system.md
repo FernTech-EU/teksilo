@@ -240,6 +240,17 @@ its state while it works answers it.
 
 ## 7. Platforms
 
+A password field (`PasswordField`, or any field whose IME purpose is
+`ImePurpose::Password`) takes no input method on Windows and X11: its text
+comes from the keys alone, as in a native password field, and no
+composition, emoji panel or Windows voice typing reaches it. Windows is
+told the purpose as the `IS_PASSWORD` input scope. On Wayland and macOS the
+input method stays allowed and is told the purpose: on Wayland that keeps
+the on-screen keyboard, and the input method types directly; on macOS a
+Roman layout's dead keys compose through the input system. macOS secure
+event input (`EnableSecureEventInput`, which a native secure text field
+turns on) is not done yet, and winit passes the purpose to nothing there.
+
 | Platform | What works | Notes |
 | --- | --- | --- |
 | macOS | Emoji & Symbols, Start Dictation, the press-and-hold accent popup, Writing Tools in its panel, Korean Hanja conversion of the syllable just typed. Keys the input method swallows (the accent popup open) do not type, a key it answers with a commit of its own (2-Set Korean's Space with nothing composed) types that commit once, and a key it types as another character (Kotoeri's full-width space, Pinyin's full-width punctuation) types that character. A switch to another input source in the middle of a composition commits it where it was, once, as the input method commits it (Pinyin's `ni hao` as `nihao`), whether the input method does so itself or not; another mode of the same input method (Kotoeri's Katakana after its Hiragana) leaves the composition going. | AutoFill is not supported. The rows come from the Edit menu: see [Rows macOS adds to the Edit menu](native-menu.md#rows-macos-adds-to-the-edit-menu). |

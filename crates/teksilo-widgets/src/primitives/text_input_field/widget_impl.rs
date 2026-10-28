@@ -747,13 +747,14 @@ impl Widget for TextInputField {
         let handlers = HandlerSet::new()
             .focusable(true)
             .cursor(CursorIcon::Text)
-            // Secure fields declare `ImePurpose::Password` so the platform
-            // suppresses the IME's learning dictionary / candidate history —
-            // the OS input method stays enabled (a password must still be
-            // composable in a non-Latin script), and masking the preedit is
-            // this widget's own job. Read by the platform IME layer at
-            // focus-change time; an unset descriptor (the node default) is
-            // what means "no OS IME".
+            // Secure fields declare `ImePurpose::Password`, for which the
+            // application layer keeps the OS input method off on Windows and
+            // X11, as native password fields do; the purpose itself reaches
+            // the platform everywhere (Windows' input scope, Wayland's content
+            // purpose). Masking a preedit, which Wayland and macOS still
+            // deliver, is this widget's own job. Read by the platform IME
+            // layer at focus-change time; an unset descriptor (the node
+            // default) is what means "no OS IME".
             .ime_input(if self.secure {
                 teksilo_core::ime::ImeContext::password()
             } else {

@@ -24,8 +24,9 @@ pub enum ImePurpose {
     /// No special hint (ordinary text entry).
     #[default]
     Normal,
-    /// Password entry. The platform suppresses IME history/learning; the
-    /// widget masks the preedit and never exposes composing text to AT.
+    /// Password entry. The platform is told the purpose, and on Windows and
+    /// X11 its input method is kept off while such a field has focus (see
+    /// [`ImeContext::password`]).
     Password,
     /// Terminal entry (e.g. extra on-screen-keyboard keys on Wayland).
     Terminal,
@@ -48,9 +49,13 @@ impl ImeContext {
         }
     }
 
-    /// A password surface (`ImePurpose::Password`). IME stays enabled so
-    /// non-Latin users can compose passwords; the widget is responsible for
-    /// masking the preedit on screen and hiding it from assistive tech.
+    /// A password surface (`ImePurpose::Password`). On Windows and X11 the
+    /// application layer keeps the platform's input method off while it has
+    /// focus, as native password fields do: its text comes from the keys
+    /// alone. On Wayland and macOS the input method stays allowed (the
+    /// on-screen keyboard, dead keys) and is told the purpose. The widget
+    /// masks a composition it receives on screen and hides it from
+    /// assistive tech.
     pub fn password() -> Self {
         Self {
             purpose: ImePurpose::Password,

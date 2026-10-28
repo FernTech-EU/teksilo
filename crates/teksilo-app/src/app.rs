@@ -731,6 +731,16 @@ impl crate::input_loop::InputChrome for WindowChrome<'_> {
             self.window.window().set_ime_allowed(allowed);
         }
     }
+
+    fn ime_host(&self) -> crate::input_loop::ImeHost {
+        let window_system =
+            winit::raw_window_handle::HasDisplayHandle::display_handle(self.window.window())
+                .ok()
+                .map(|display| {
+                    teksilo_platform::window_system_for_display_handle(&display.as_raw())
+                });
+        crate::input_loop::ImeHost::of(window_system)
+    }
 }
 
 #[derive(Debug)]

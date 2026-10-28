@@ -568,10 +568,11 @@ Turn this into a secure (password) field with the given
 glyph per source `char`), so the plaintext never reaches the
 shaper or glyph atlas while masked, and caret / selection /
 hit-test stay correct. Also defaults `allow_copy` to `false` and
-declares the focused node an `ImePurpose::Password` surface — the
-OS IME stays enabled so non-Latin passwords can still be composed,
-with the preedit masked on screen and hidden from AT. Pair with
-`revealed` for a reveal toggle.
+declares the focused node an `ImePurpose::Password` surface: on
+Windows and X11 the OS input method is off while it has focus, as in a
+native password field; on Wayland and macOS the input method is told
+the purpose, and a preedit is masked on screen and hidden from AT.
+Pair with `revealed` for a reveal toggle.
 
 <a id="textinputfield-input_purpose"></a>
 

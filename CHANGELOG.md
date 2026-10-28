@@ -126,6 +126,13 @@ by crate for clarity, not because crates version independently.
 - A `RichTextEditor` and a `TextInputField` report dictation, Writing Tools
   and emoji insertions to `on_text_inserted` under `EditSource::Dictation`,
   `EditSource::WritingTools` and `EditSource::Ime`.
+- **A password field takes no input method on Windows and X11**: a
+  `PasswordField`, or any field with `ImePurpose::Password`, takes its text
+  there from the keys alone, as native password fields do. Compositions, the
+  emoji panel and Windows voice typing no longer reach it. On Wayland and
+  macOS the input method stays, told that the field is a password (on
+  Wayland the on-screen keyboard and the input method's direct mode follow
+  it); macOS secure event input is not done yet.
 
 #### Workspace
 

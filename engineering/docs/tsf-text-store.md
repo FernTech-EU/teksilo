@@ -3,7 +3,7 @@
 
 # A TSF text store on Windows: design
 
-Status: a design, not implemented. Revised on 2026-10-28 after an independent review, against
+Status: a design. Phase -1 (7.1) is implemented; the store is not. Revised on 2026-10-28 after an independent review, against
 `feat/system-text-input` at `4b1f697a` and the eight rounds of
 `cross_tasks/system-text-input-windows-findings.md` (Windows 11 22621, French UI and AZERTY;
 Japanese, Pinyin and Korean from round 4). The first version (`ee8716db`) knew three rounds.
@@ -377,7 +377,7 @@ outside a composition is `Insertion` and a composition's is `Composition`, as to
   specific to the thread manager and a bitmask (`TF_DISABLE_SPEECH`, `TF_DISABLE_DICTATION`,
   `TF_DISABLE_COMMANDING`), not 1 on a context as the first version said: the store sets it on the
   thread while a secure field has focus and clears it on the way out (M7). On the IMM path, Phase -1
-  disallows the IME for `ImePurpose::Password`; today IMEs and voice typing work in passwords.
+  disallows the IME for `ImePurpose::Password` on Windows and X11 (`input_loop::ime_allowed_for`).
 - **Read-only fields**: a context with `TS_SD_READONLY`; writes return `TS_E_READONLY`,
   `OnStartComposition` refuses.
 - **Purposes**: `Normal` is `IS_DEFAULT`, `Password` `IS_PASSWORD`, `Terminal` `IS_DEFAULT` (it takes
@@ -491,8 +491,10 @@ store (its source). Still to be measured on the VM, through the `win` worker on 
 2. **Path per focus** in `settle_ime` (4.2, 4.6). Not waiting for `CodeEditor`: the IMM path is
    needed anyway for legacy IMM-IMEs.
 3. **Passwords refuse IMEs and dictation**: Phase -1 on the IMM path, the disabled context and the
-   thread-level speech compartment on the store path. It changes what users get; whether the IMM
-   change applies on every platform or Windows only is the maintainer's call.
+   thread-level speech compartment on the store path. It changes what users get; the maintainer
+   decided it applies on Windows and X11 only: on Wayland, turning text-input-v3 off would take the
+   on-screen keyboard away (GTK keeps it on with the password purpose), and macOS composes dead keys
+   through the input system, as a secure text field does.
 4. **Touch keyboard autocorrect and prediction**: off by default, a per-field opt-in (the touch
    keyboard rewrites committed words with `SetText`; Chromium had to add revert logic for
    `autocorrect="off"`), through the dynamic `TS_SD_TKB*` flags.
@@ -506,8 +508,8 @@ store (its source). Still to be measured on the VM, through the `win` worker on 
    `TeksiloAppBuilder` option forcing IMM; the variable stays as a kill switch; IMM is taken
    automatically when activation fails or a legacy IMM-IME is active.
 
-Still for the maintainer: the teksilo-core API of section 3 item by item; the scope of the password
-change; the builder option's name; the touch keyboard default.
+Still for the maintainer: the teksilo-core API of section 3 item by item (`is_available` exists,
+with a default of `true`); the builder option's name; the touch keyboard default.
 
 ## 9. Where this design departs from the review
 

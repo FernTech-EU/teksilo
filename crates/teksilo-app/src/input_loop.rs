@@ -60,7 +60,7 @@ use winit::event::WindowEvent;
 
 /// The window-shaped operations the input half of a turn performs.
 ///
-/// Six, and none of them takes a winit type: a test supplies a recorder, the
+/// Seven, and none of them takes a winit type: a test supplies a recorder, the
 /// loop supplies the real window. Everything else the input path touches — the
 /// tree, the translator, the ops sink — is already constructible headless.
 pub(crate) trait InputChrome {
@@ -91,6 +91,10 @@ pub(crate) trait InputChrome {
     /// can only be asserted where the call would have been observable, so the
     /// call is made observable. [`settle_ime`] is the only caller.
     fn set_ime(&mut self, purpose: Option<teksilo_core::ImePurpose>, allowed: Option<bool>);
+
+    /// Which platform the window's input method runs on, for
+    /// [`ime_allowed_for`].
+    fn ime_host(&self) -> ImeHost;
 }
 
 /// What a window blocked by a modal child does with one event.
@@ -361,14 +365,76 @@ pub(crate) struct ImeReconcile {
     pub allowed: Option<bool>,
 }
 
+/// The platform a window's input method runs on, as far as
+/// [`ime_allowed_for`] tells them apart.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(crate) enum ImeHost {
+    Windows,
+    MacOs,
+    X11,
+    Wayland,
+    /// A window system this build does not know (a BSD backend, a window
+    /// whose display handle could not be read).
+    Other,
+}
+
+impl ImeHost {
+    /// The host this build runs on, given the window's window system (read
+    /// from its display handle; `None` off Linux and the BSDs, or when it
+    /// could not be read).
+    pub(crate) fn of(window_system: Option<WindowSystem>) -> Self {
+        if cfg!(target_os = "windows") {
+            Self::Windows
+        } else if cfg!(target_os = "macos") {
+            Self::MacOs
+        } else {
+            match window_system {
+                Some(WindowSystem::Wayland) => Self::Wayland,
+                Some(WindowSystem::X11) => Self::X11,
+                Some(WindowSystem::Unknown) | None => Self::Other,
+            }
+        }
+    }
+}
+
+/// Whether the platform's input method may serve a focused field of
+/// `purpose` on `host`: always, except a
+/// [`Password`](teksilo_core::ImePurpose::Password) field on Windows and X11.
+///
+/// There, as in a native password field (the Win32 edit control with
+/// `ES_PASSWORD`, Qt with `ImhHiddenText`), the field takes its text from the
+/// keys alone: an input method composes in the clear and learns what it is
+/// given, and on Windows voice typing and the emoji panel reach a window
+/// through its input method. Dead keys still work on both, through the
+/// keyboard layout (Windows) and winit's own compose table (X11).
+///
+/// On Wayland and macOS the input method stays allowed and is told the
+/// purpose instead: turning text-input-v3 off on Wayland would also take the
+/// on-screen keyboard away (GTK keeps it on with the password purpose, and the
+/// input method goes direct), and macOS composes a Roman layout's dead keys
+/// through the input system, which a secure text field keeps. (A secure
+/// field on macOS also turns on secure event input, which Teksilo does not
+/// do yet; the purpose is a no-op in winit there today.)
+///
+/// The field declares its purpose on every platform, and the window is told
+/// it: Windows' input scope, Wayland's content purpose, and a screen reader's
+/// key echo (`key_report`) all read it.
+pub(crate) fn ime_allowed_for(purpose: teksilo_core::ImePurpose, host: ImeHost) -> bool {
+    purpose != teksilo_core::ImePurpose::Password
+        || matches!(host, ImeHost::MacOs | ImeHost::Wayland | ImeHost::Other)
+}
+
 /// Decide what the window has to be told, given what the tree's focus wants
 /// (`wanted`) and what the window was last told.
 ///
 /// `last_purpose` and `last_allowed` are the window's remembered state and are
-/// updated to match what the caller is about to push. Disabling IME also
+/// updated to match what the caller is about to push. A focused field's
+/// purpose is pushed whether or not `host` allows it the input method
+/// ([`ime_allowed_for`]). Disabling IME because no field has focus also
 /// forgets the purpose, so it re-applies the next time IME is enabled.
 pub(crate) fn ime_reconcile(
     wanted: Option<teksilo_core::ImePurpose>,
+    host: ImeHost,
     last_purpose: &mut Option<teksilo_core::ImePurpose>,
     last_allowed: &mut Option<bool>,
 ) -> ImeReconcile {
@@ -379,9 +445,10 @@ pub(crate) fn ime_reconcile(
                 *last_purpose = Some(purpose);
                 out.purpose = Some(purpose);
             }
-            if *last_allowed != Some(true) {
-                *last_allowed = Some(true);
-                out.allowed = Some(true);
+            let allowed = ime_allowed_for(purpose, host);
+            if *last_allowed != Some(allowed) {
+                *last_allowed = Some(allowed);
+                out.allowed = Some(allowed);
             }
         }
         None => {
@@ -433,7 +500,7 @@ pub(crate) fn settle_ime(
     let wanted = tree
         .ime_context_for_focused()
         .map(|context| context.purpose);
-    let decision = ime_reconcile(wanted, last_purpose, last_allowed);
+    let decision = ime_reconcile(wanted, chrome.ime_host(), last_purpose, last_allowed);
     if decision.purpose.is_some() || decision.allowed.is_some() {
         chrome.set_ime(decision.purpose, decision.allowed);
     }
@@ -513,6 +580,8 @@ mod tests {
         /// Every [`InputChrome::set_ime`] this seam made, in order. Its
         /// *emptiness* is what the composition guarantee is stated against.
         ime: Vec<(Option<teksilo_core::ImePurpose>, Option<bool>)>,
+        /// What [`InputChrome::ime_host`] answers; `Other` when unset.
+        host: Option<ImeHost>,
         /// What [`InputChrome::safe_area`] answers.
         sides: SafeAreaSides,
         /// What [`InputChrome::occluded_band`] answers, and what it was asked.
@@ -539,6 +608,9 @@ mod tests {
         }
         fn set_ime(&mut self, purpose: Option<teksilo_core::ImePurpose>, allowed: Option<bool>) {
             self.ime.push((purpose, allowed));
+        }
+        fn ime_host(&self) -> ImeHost {
+            self.host.unwrap_or(ImeHost::Other)
         }
     }
 
@@ -979,7 +1051,12 @@ mod tests {
         let mut purpose = None;
         let mut allowed = None;
         assert_eq!(
-            ime_reconcile(Some(ImePurpose::Normal), &mut purpose, &mut allowed),
+            ime_reconcile(
+                Some(ImePurpose::Normal),
+                ImeHost::Windows,
+                &mut purpose,
+                &mut allowed
+            ),
             ImeReconcile {
                 purpose: Some(ImePurpose::Normal),
                 allowed: Some(true),
@@ -992,7 +1069,12 @@ mod tests {
         // window is a fresh `enable`, and `enable` resets the preedit.
         for _ in 0..3 {
             assert_eq!(
-                ime_reconcile(Some(ImePurpose::Normal), &mut purpose, &mut allowed),
+                ime_reconcile(
+                    Some(ImePurpose::Normal),
+                    ImeHost::Windows,
+                    &mut purpose,
+                    &mut allowed
+                ),
                 ImeReconcile::default(),
                 "re-asserting allowance is what cancels a composition mid-word"
             );
@@ -1001,7 +1083,7 @@ mod tests {
         // Focus leaving the field disables IME and forgets the purpose, so it
         // re-applies on the next field.
         assert_eq!(
-            ime_reconcile(None, &mut purpose, &mut allowed),
+            ime_reconcile(None, ImeHost::Windows, &mut purpose, &mut allowed),
             ImeReconcile {
                 purpose: None,
                 allowed: Some(false),
@@ -1009,12 +1091,199 @@ mod tests {
         );
         assert_eq!(purpose, None);
         assert_eq!(
-            ime_reconcile(Some(ImePurpose::Password), &mut purpose, &mut allowed),
+            ime_reconcile(
+                Some(ImePurpose::Terminal),
+                ImeHost::Windows,
+                &mut purpose,
+                &mut allowed
+            ),
             ImeReconcile {
-                purpose: Some(ImePurpose::Password),
+                purpose: Some(ImePurpose::Terminal),
                 allowed: Some(true),
             },
         );
+    }
+
+    #[test]
+    fn a_password_field_is_refused_the_input_method_on_windows_and_x11_only() {
+        use teksilo_core::ImePurpose;
+
+        for host in [
+            ImeHost::Windows,
+            ImeHost::MacOs,
+            ImeHost::X11,
+            ImeHost::Wayland,
+            ImeHost::Other,
+        ] {
+            assert!(ime_allowed_for(ImePurpose::Normal, host), "{host:?}");
+            assert!(ime_allowed_for(ImePurpose::Terminal, host), "{host:?}");
+            let refused = matches!(host, ImeHost::Windows | ImeHost::X11);
+            assert_eq!(
+                ime_allowed_for(ImePurpose::Password, host),
+                !refused,
+                "{host:?}: on Wayland the on-screen keyboard and on macOS dead keys go \
+                 through the input method"
+            );
+        }
+        // The build's own host: Windows and macOS whatever the window system.
+        let built = ImeHost::of(Some(WindowSystem::Wayland));
+        if cfg!(target_os = "windows") {
+            assert_eq!(built, ImeHost::Windows);
+        } else if cfg!(target_os = "macos") {
+            assert_eq!(built, ImeHost::MacOs);
+        } else {
+            assert_eq!(built, ImeHost::Wayland);
+            assert_eq!(ImeHost::of(Some(WindowSystem::X11)), ImeHost::X11);
+            assert_eq!(ImeHost::of(None), ImeHost::Other);
+        }
+    }
+
+    #[test]
+    fn a_password_field_is_told_its_purpose_whether_or_not_it_is_refused() {
+        use teksilo_core::ImePurpose;
+
+        let windows = ImeHost::Windows;
+        let mut purpose = None;
+        let mut allowed = None;
+        assert_eq!(
+            ime_reconcile(
+                Some(ImePurpose::Password),
+                windows,
+                &mut purpose,
+                &mut allowed
+            ),
+            ImeReconcile {
+                purpose: Some(ImePurpose::Password),
+                allowed: Some(false),
+            },
+            "the purpose still goes to the window (Windows' input scope)"
+        );
+        assert_eq!(
+            ime_reconcile(
+                Some(ImePurpose::Password),
+                windows,
+                &mut purpose,
+                &mut allowed
+            ),
+            ImeReconcile::default(),
+            "a settled password focus pushes nothing"
+        );
+        // From a password field to an ordinary one: both facts change.
+        assert_eq!(
+            ime_reconcile(
+                Some(ImePurpose::Normal),
+                windows,
+                &mut purpose,
+                &mut allowed
+            ),
+            ImeReconcile {
+                purpose: Some(ImePurpose::Normal),
+                allowed: Some(true),
+            },
+        );
+        // And back: the input method goes off with the purpose's change.
+        assert_eq!(
+            ime_reconcile(
+                Some(ImePurpose::Password),
+                windows,
+                &mut purpose,
+                &mut allowed
+            ),
+            ImeReconcile {
+                purpose: Some(ImePurpose::Password),
+                allowed: Some(false),
+            },
+        );
+        // Focus leaving it: the input method is already off, nothing to push.
+        assert_eq!(
+            ime_reconcile(None, windows, &mut purpose, &mut allowed),
+            ImeReconcile::default()
+        );
+
+        // On Wayland only the purpose changes: the input method stays on.
+        let mut purpose = Some(ImePurpose::Normal);
+        let mut allowed = Some(true);
+        assert_eq!(
+            ime_reconcile(
+                Some(ImePurpose::Password),
+                ImeHost::Wayland,
+                &mut purpose,
+                &mut allowed
+            ),
+            ImeReconcile {
+                purpose: Some(ImePurpose::Password),
+                allowed: None,
+            },
+        );
+    }
+
+    #[test]
+    fn a_focused_password_field_settles_by_its_host() {
+        use teksilo_canvas::SizeProposal;
+        use teksilo_core::ImePurpose;
+        use teksilo_core::signal::Signal;
+        use teksilo_widgets::{PasswordField, TextInput};
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let root = tree.add(
+            teksilo_widgets::VStack::new()
+                .child(TextInput::new(Signal::new(String::new())))
+                .child(PasswordField::new(Signal::new(String::new()))),
+        );
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        // The two fields, in Tab order: each one's purpose says which.
+        let fields: Vec<_> = tree
+            .tab_stops_within(root)
+            .into_iter()
+            .filter(|&id| {
+                tree.focus(id);
+                tree.ime_context_for_focused().is_some()
+            })
+            .collect();
+        let [text, password] = fields[..] else {
+            panic!("a text field and a password field: {fields:?}");
+        };
+
+        for (host, password_allowed) in [(ImeHost::Windows, false), (ImeHost::Wayland, true)] {
+            let mut chrome = Chrome {
+                host: Some(host),
+                ..Chrome::default()
+            };
+            let mut purpose = None;
+            let mut allowed = None;
+            tree.focus(password);
+            settle_ime(
+                &mut chrome,
+                &mut tree,
+                SoftKeyboardSupport::None,
+                &mut purpose,
+                &mut allowed,
+            );
+            assert_eq!(
+                chrome.ime,
+                vec![(Some(ImePurpose::Password), Some(password_allowed))],
+                "{host:?}"
+            );
+
+            chrome.ime.clear();
+            tree.focus(text);
+            settle_ime(
+                &mut chrome,
+                &mut tree,
+                SoftKeyboardSupport::None,
+                &mut purpose,
+                &mut allowed,
+            );
+            // The allowance is pushed only where it changes.
+            assert_eq!(
+                chrome.ime,
+                vec![(
+                    Some(ImePurpose::Normal),
+                    (!password_allowed).then_some(true)
+                )],
+                "{host:?}"
+            );
+        }
     }
 
     #[test]
@@ -1063,10 +1332,15 @@ mod tests {
         purpose = None;
         allowed = None;
         let mut chrome = Chrome::default();
-        let decision = ime_reconcile(Some(ImePurpose::Password), &mut purpose, &mut allowed);
-        assert_eq!(decision.purpose, Some(ImePurpose::Password));
+        let decision = ime_reconcile(
+            Some(ImePurpose::Terminal),
+            ImeHost::Windows,
+            &mut purpose,
+            &mut allowed,
+        );
+        assert_eq!(decision.purpose, Some(ImePurpose::Terminal));
         chrome.set_ime(decision.purpose, decision.allowed);
-        assert_eq!(chrome.ime, vec![(Some(ImePurpose::Password), Some(true))]);
+        assert_eq!(chrome.ime, vec![(Some(ImePurpose::Terminal), Some(true))]);
     }
 
     #[test]
