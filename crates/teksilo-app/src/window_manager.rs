@@ -110,6 +110,53 @@ pub(crate) fn ime_should_skip_empty_preedit(last_empty: &mut bool, empty_preedit
     repeat
 }
 
+/// Drops the preedit an input method re-sends after the field ended its
+/// composition while the input method still held it.
+///
+/// Measured on KDE Wayland with fcitx5: once the app ended the composition
+/// (a reset of winit's IME, or IME switched off because focus left the
+/// field), the input method re-sends the old preedit after every `done`, also
+/// after keys it does not compose (Escape, Space, plain letters) and after
+/// focus changes, and never sends a clear or a commit. So a key press or a
+/// focus change proves nothing; only a different preedit or a commit from the
+/// input method ends the guard.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct StalePreeditGuard {
+    /// Text of the last preedit delivered to the tree.
+    last: String,
+    /// The preedit text being dropped, once the composition was ended
+    /// app-side.
+    dropping: Option<String>,
+}
+
+impl StalePreeditGuard {
+    /// The app ended the composition (the field's `finish_ime_composition`,
+    /// or IME switched off): drop the preedit the input method re-sends. Does
+    /// nothing when no preedit is showing.
+    pub(crate) fn arm(&mut self) {
+        if !self.last.is_empty() {
+            self.dropping = Some(self.last.clone());
+        }
+    }
+
+    /// A preedit arrived: whether to deliver it.
+    pub(crate) fn admit_preedit(&mut self, text: &str) -> bool {
+        if self.dropping.as_deref() == Some(text) {
+            return false;
+        }
+        self.dropping = None;
+        self.last.clear();
+        self.last.push_str(text);
+        true
+    }
+
+    /// The input method committed: its composition is over.
+    pub(crate) fn commit(&mut self) {
+        self.dropping = None;
+        self.last.clear();
+    }
+}
+
 /// Wrap the root a window's builder made in the window's post-root hook:
 /// its own `post_root`, else the app-wide default (none for a modal
 /// window). Returns the wrapped root. The tree remembers the unwrapped one
@@ -302,6 +349,8 @@ pub(crate) struct ManagedWindow {
     /// layout+render pass. This lets the event loop skip the repeats entirely
     /// (neither dispatch nor redraw). Reset by any non-empty-preedit IME event.
     pub last_ime_preedit_empty: bool,
+    /// Drops the preedit the input method re-sends after a reset.
+    pub(crate) preedit_guard: StalePreeditGuard,
     /// RAII handles for the auto-save observers wired to
     /// `state.{size, position, placement}` when a
     /// `WindowStateService` is registered. Dropped when the window
@@ -672,6 +721,18 @@ fn start_platform_desktop_watch(proxy: Option<&AppEventProxy>) -> Option<Box<dyn
 pub struct WindowManager {
     windows: HashMap<winit::window::WindowId, ManagedWindow>,
     teksilo_to_winit: HashMap<TeksiloWindowId, winit::window::WindowId>,
+    /// Windows whose field ended its composition (`finish_ime_composition`)
+    /// since their next `Ime` event: that event arms the window's
+    /// [`StalePreeditGuard`]. Kept here because the dispatching window is out
+    /// of the manager while its ops sink runs.
+    ime_composition_finished: std::collections::HashSet<TeksiloWindowId>,
+    /// The candidate-window area each window's focused field last reported
+    /// (`set_ime_cursor_area`), kept here because the dispatching window is
+    /// out of the manager while its ops sink runs. winit drops an area
+    /// reported while the window's IME is not allowed (on Wayland), and a
+    /// field reports its area as it takes focus, before the dispatch ends and
+    /// the IME is allowed: the post-dispatch settle applies it again then.
+    ime_cursor_areas: HashMap<TeksiloWindowId, teksilo_canvas::Rect>,
     /// Stable string-id → id lookup, populated whenever a config carries
     /// `id(...)`. Used by `WindowOps::find_window`.
     string_to_id: HashMap<String, TeksiloWindowId>,
@@ -907,12 +968,31 @@ pub struct WindowManager {
 // `take_activation_token_callback`, which `missing_docs` alone compiled clean.
 #[deny(missing_docs, clippy::missing_docs_in_private_items)]
 impl WindowManager {
+    /// A field of window `id` ended its composition; see
+    /// [`StalePreeditGuard`].
+    pub(crate) fn note_ime_composition_finished(&mut self, id: TeksiloWindowId) {
+        self.ime_composition_finished.insert(id);
+    }
+
+    /// Whether `id` ended a composition since this was last asked; clears it.
+    pub(crate) fn take_ime_composition_finished(&mut self, id: TeksiloWindowId) -> bool {
+        self.ime_composition_finished.remove(&id)
+    }
+
+    /// The candidate-window area window `id`'s focused field last reported,
+    /// if any; see [`WindowManager::ime_cursor_areas`].
+    pub(crate) fn ime_cursor_area(&self, id: TeksiloWindowId) -> Option<teksilo_canvas::Rect> {
+        self.ime_cursor_areas.get(&id).copied()
+    }
+
     /// An empty manager whose windows will be built against `theme`.
     pub fn new(theme: Theme) -> Self {
         let a11y_prefs = AccessibilityPreferences::query();
         Self {
             windows: HashMap::new(),
             teksilo_to_winit: HashMap::new(),
+            ime_composition_finished: std::collections::HashSet::new(),
+            ime_cursor_areas: HashMap::new(),
             string_to_id: HashMap::new(),
             next_id: 1,
             pending_closes: Vec::new(),
@@ -2504,6 +2584,7 @@ impl WindowManager {
             ime_allowed: None,
             ime_purpose: None,
             last_ime_preedit_empty: false,
+            preedit_guard: StalePreeditGuard::default(),
             _persist_handles: persist_handles,
             close_guard,
             can_close,
@@ -2717,6 +2798,7 @@ impl WindowManager {
         self.recency.forget(teksilo_id);
         // A close it deferred no longer waits: a late answer changes nothing.
         self.deferred_closes.remove(&teksilo_id);
+        self.ime_cursor_areas.remove(&teksilo_id);
         if let Some(winit_id) = self.teksilo_to_winit.remove(&teksilo_id)
             && let Some(mut managed) = self.windows.remove(&winit_id)
         {
@@ -5308,6 +5390,10 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         // during dispatch). Repositioning the candidate area is idempotent —
         // unlike `set_ime_allowed`, it never cancels an active composition —
         // so no dedup is needed; text widgets only report it on caret moves.
+        // Kept too, for the settle that allows the IME after this dispatch.
+        if let Some(id) = self.current_id {
+            self.wm.ime_cursor_areas.insert(id, area);
+        }
         if let Some(arc) = self.current_window_arc.as_ref() {
             arc.set_ime_cursor_area(
                 winit::dpi::LogicalPosition::new(area.x, area.y),
@@ -5323,6 +5409,10 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         if teksilo_platform::text_input_hook::finish_composition(id) {
             return;
         }
+        // The input method may still hold the composition and re-send its
+        // preedit: the window drops it (`StalePreeditGuard`). Noted for every
+        // path, whether or not winit's IME is toggled below.
+        self.wm.note_ime_composition_finished(id);
         // The platform cannot end it: reset the input method by toggling
         // winit's IME. The window ends allowed, as its bookkeeping
         // (`ManagedWindow::ime_allowed`) already says.
@@ -6315,6 +6405,60 @@ mod close_guard_tests {
 
 #[cfg(test)]
 mod ime_dedup_tests {
+    use super::StalePreeditGuard;
+
+    fn resent_zhong_x3(g: &mut StalePreeditGuard) -> bool {
+        (0..3).all(|_| !g.admit_preedit("zhong"))
+    }
+
+    #[test]
+    fn f10_path_keys_and_focus_do_not_end_the_guard() {
+        // preedit zhong, F10 (IME off, armed), re-send, Escape, enable, x3.
+        let mut g = StalePreeditGuard::default();
+        assert!(g.admit_preedit("zhong"));
+        g.arm();
+        assert!(!g.admit_preedit("zhong"));
+        assert!(resent_zhong_x3(&mut g));
+        assert!(g.admit_preedit("g"));
+        assert!(g.admit_preedit("g"), "the guard has stopped");
+    }
+
+    #[test]
+    fn click_path_resend_survives_a_following_key() {
+        // disable, enable, zhong x3, key 'k', zhong again, then something new.
+        let mut g = StalePreeditGuard::default();
+        assert!(g.admit_preedit("zhong"));
+        g.arm();
+        assert!(resent_zhong_x3(&mut g));
+        assert!(resent_zhong_x3(&mut g), "after the key");
+        assert!(g.admit_preedit("k"));
+    }
+
+    #[test]
+    fn a_commit_ends_the_guard() {
+        let mut g = StalePreeditGuard::default();
+        assert!(g.admit_preedit("zhong"));
+        g.arm();
+        g.commit();
+        assert!(g.admit_preedit("zhong"));
+    }
+
+    #[test]
+    fn an_empty_preedit_ends_the_guard() {
+        let mut g = StalePreeditGuard::default();
+        assert!(g.admit_preedit("zhong"));
+        g.arm();
+        assert!(g.admit_preedit(""));
+        assert!(g.admit_preedit("zhong"));
+    }
+
+    #[test]
+    fn arming_with_no_composition_guards_nothing() {
+        let mut g = StalePreeditGuard::default();
+        g.arm();
+        assert!(g.admit_preedit("a"));
+    }
+
     use super::ime_should_skip_empty_preedit;
 
     #[test]

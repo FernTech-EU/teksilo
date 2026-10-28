@@ -2196,7 +2196,8 @@ impl TeksiloAppHandler {
             current.tree.dispatch_event_with_ops(event, &mut ops);
         }
 
-        Self::settle_ime(&mut current);
+        let last_area = self.wm.ime_cursor_area(current.teksilo_id);
+        Self::settle_ime(&mut current, last_area);
         self.wm.reinsert_managed(window_id, current);
     }
 
@@ -2244,7 +2245,8 @@ impl TeksiloAppHandler {
             )
         };
 
-        Self::settle_ime(&mut current);
+        let last_area = self.wm.ime_cursor_area(current.teksilo_id);
+        Self::settle_ime(&mut current, last_area);
         self.wm.reinsert_managed(window_id, current);
         Some(result)
     }
@@ -2420,7 +2422,8 @@ impl TeksiloAppHandler {
             );
         }
 
-        Self::settle_ime(&mut current);
+        let last_area = self.wm.ime_cursor_area(current.teksilo_id);
+        Self::settle_ime(&mut current, last_area);
         self.wm.reinsert_managed(window_id, current);
     }
 
@@ -2433,7 +2436,18 @@ impl TeksiloAppHandler {
     /// `set_ime_allowed` — is [`crate::input_loop::settle_ime`]. The caret
     /// area is reported separately (and idempotently) by the focused widget
     /// via `WindowOps::set_ime_cursor_area`.
-    fn settle_ime(managed: &mut crate::window_manager::ManagedWindow) {
+    ///
+    /// `last_area` is the candidate-window area the window's focused field
+    /// last reported. An IME this settle allows gets it again: winit drops an
+    /// area reported while the IME is not allowed (on Wayland), which is what
+    /// a field taking focus reports, so the input method's first candidate
+    /// window opened at the screen's corner until the composition's first
+    /// update moved it.
+    fn settle_ime(
+        managed: &mut crate::window_manager::ManagedWindow,
+        last_area: Option<teksilo_canvas::Rect>,
+    ) {
+        let was_allowed = managed.ime_allowed == Some(true);
         let mut chrome = WindowChrome::new(&managed.platform_window, &managed.redraw, None);
         crate::input_loop::settle_ime(
             &mut chrome,
@@ -2442,6 +2456,20 @@ impl TeksiloAppHandler {
             &mut managed.ime_purpose,
             &mut managed.ime_allowed,
         );
+        if !was_allowed
+            && managed.ime_allowed == Some(true)
+            && let Some(area) = last_area
+        {
+            managed.platform_window.window().set_ime_cursor_area(
+                winit::dpi::LogicalPosition::new(area.x, area.y),
+                winit::dpi::LogicalSize::new(area.width.max(1.0), area.height.max(1.0)),
+            );
+        }
+        // IME switched off with a composition showing: the input method may
+        // keep re-sending its preedit (`StalePreeditGuard`).
+        if was_allowed && managed.ime_allowed == Some(false) {
+            managed.preedit_guard.arm();
+        }
     }
 
     /// Map the core `ImePurpose` onto winit's enum at the platform boundary.
@@ -4135,7 +4163,8 @@ impl TeksiloAppHandler {
         // (access actions, programmatic focus, rebuild) that didn't go
         // through `dispatch_in_window`. Layout has settled, so the focused
         // node's descriptor is current. Cheap + deduped, safe every frame.
-        Self::settle_ime(current);
+        let last_area = self.wm.ime_cursor_area(current.teksilo_id);
+        Self::settle_ime(current, last_area);
         resized_after_layout
     }
 
@@ -4563,7 +4592,26 @@ impl TeksiloAppHandler {
                 };
                 if !skip {
                     let teksilo_id = self.wm.get_by_winit_mut(window_id).map(|m| m.teksilo_id);
-                    let maybe_evt = match teksilo_id {
+                    if let Some(id) = teksilo_id
+                        && self.wm.take_ime_composition_finished(id)
+                        && let Some(m) = self.wm.get_by_winit_mut(window_id)
+                    {
+                        m.preedit_guard.arm();
+                    }
+                    let admitted = match &ime {
+                        winit::event::Ime::Preedit(text, _) => self
+                            .wm
+                            .get_by_winit_mut(window_id)
+                            .is_none_or(|m| m.preedit_guard.admit_preedit(text)),
+                        winit::event::Ime::Commit(_) => {
+                            if let Some(m) = self.wm.get_by_winit_mut(window_id) {
+                                m.preedit_guard.commit();
+                            }
+                            true
+                        }
+                        _ => true,
+                    };
+                    let maybe_evt = match teksilo_id.filter(|_| admitted) {
                         Some(teksilo_id) => {
                             let is_preedit = matches!(ime, winit::event::Ime::Preedit(..));
                             event_translation::translate_ime(ime).map(|mut evt| {
