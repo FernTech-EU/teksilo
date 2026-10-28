@@ -15,6 +15,7 @@ use teksilo_text::CursorAffinity;
 use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
 use crate::EditSource;
+use crate::common::composition::position_after_commit;
 use crate::common::text_nav::{CaretStep, caret_step, deletes_word};
 
 use super::state::{SharedState, TextInputState, sync_cursor_signals};
@@ -588,19 +589,7 @@ fn commit_composition(
             st.composition.cancel(&st.document);
             return EventResponse::Handled;
         }
-        let clean: String = text
-            .chars()
-            .filter(|c| single_line_admits(*c))
-            .filter(|c| st.char_filter_admits(*c))
-            .collect();
-        let clean: String = match st.max_length {
-            Some(max) => {
-                let taken = st.document.transient_range().map_or(0, |range| range.len());
-                let kept = st.document.character_count().saturating_sub(taken);
-                clean.chars().take(max.saturating_sub(kept)).collect()
-            }
-            None => clean,
-        };
+        let clean = committable(st, text);
         let arrived = st
             .composition
             .commit(&st.document, &st.cursor, &clean, false);
@@ -615,6 +604,25 @@ fn commit_composition(
     report_ime_cursor_area(state, ctx);
     ctx.request_frame();
     EventResponse::Handled
+}
+
+/// What of `text`, committed in place of the composition, the field takes: the
+/// rules typing follows (the single-line strip, the `char_filter`, the
+/// `max_length` cap, counted without the composition and what it replaces).
+fn committable(st: &TextInputState, text: &str) -> String {
+    let clean: String = text
+        .chars()
+        .filter(|c| single_line_admits(*c))
+        .filter(|c| st.char_filter_admits(*c))
+        .collect();
+    match st.max_length {
+        Some(max) => {
+            let taken = st.document.transient_range().map_or(0, |range| range.len());
+            let kept = st.document.character_count().saturating_sub(taken);
+            clean.chars().take(max.saturating_sub(kept)).collect()
+        }
+        None => clean,
+    }
 }
 
 /// Insert the typing and the input method's commit batched for this frame
@@ -669,66 +677,87 @@ pub(crate) fn settle_before_press(state: &SharedState, ctx: &mut EventContext) {
     finish_composition(state, ctx);
 }
 
-/// End the composition the input method still holds, keeping what it shows as
-/// committed text, for a press in the field or a focus change: what a native
-/// text field does, rather than leave the composition to be committed later at
-/// its old place (or in the next field focused).
+/// End the composition the input method still holds, keeping it as committed
+/// text, for a press in the field or a focus change: what a native text field
+/// does, rather than leave the composition to be committed later at its old
+/// place (or in the next field focused).
 ///
-/// The text is already in the field as the composition. It goes through what
-/// a commit does: one undo step that takes it back out, reported to
-/// `on_text_inserted` as [`EditSource::Ime`]. Only then is the platform told
-/// ([`EventContext::finish_ime_composition`]), so the empty update and the
-/// empty commit it may still deliver find no composition and change nothing.
-/// A composition the input method had already ended (its empty update, no
-/// commit) is settled as the cancel it was, and the platform is not told. With
-/// no composition, does nothing.
+/// The platform is told first ([`EventContext::finish_ime_composition`]),
+/// while the composition is still live, and answers with what the input
+/// method committed for it, if anything: on Windows the input method
+/// completes it, and its commit can differ from what it showed (Microsoft
+/// Pinyin commits "nihao" for "ni'hao"). That text is kept, or the text the
+/// composition showed when there is none. It goes through what a commit does:
+/// one undo step that takes it back out, reported to `on_text_inserted` as
+/// [`EditSource::Ime`]. What the platform still delivers for the composition
+/// (an empty update, an empty commit) arrives after this handler returns and
+/// finds no composition to change. A composition the input method had already
+/// ended (its empty update, no commit) is settled as the cancel it was, and
+/// the platform is not told. With no composition, does nothing.
 pub(crate) fn finish_composition(state: &SharedState, ctx: &mut EventContext) {
-    let finished = {
+    let live = {
         let mut guard = state.borrow_mut();
         let st = &mut *guard;
-        let finished = if settle_cancelled_composition(st) {
+        if settle_cancelled_composition(st) {
             false
         } else if st.composition.is_live(&st.document) {
-            keep_composition(st);
             true
         } else {
             return;
-        };
+        }
+    };
+    let committed = if live {
+        ctx.finish_ime_composition()
+    } else {
+        None
+    };
+    {
+        let mut guard = state.borrow_mut();
+        let st = &mut *guard;
+        if live {
+            keep_composition(st, committed.as_deref());
+        }
         // The press that follows hit-tests the layout: bring it up to date.
         super::catch_up_layout(st);
-        finished
-    };
+    }
     sync_cursor_signals(state);
     ctx.request_frame();
-    if finished {
-        ctx.finish_ime_composition();
-    }
 }
 
-/// Commit the live composition's text where it stands, as its own commit
-/// would, reported as [`EditSource::Ime`]. The field reads the same
-/// afterwards. The caret ends after the text, unless it stood outside the
-/// composition (a right-click put it there before the menu took focus), where
-/// it stays.
-fn keep_composition(st: &mut TextInputState) {
+/// Commit the live composition where it stands, as its own commit would,
+/// reported as [`EditSource::Ime`]: as `committed`, the input method's commit
+/// for it, under the rules a commit follows ([`committable`]), or as the text
+/// it showed when there is none or the rules leave nothing of it. The caret
+/// ends after the text, unless it stood outside the composition (a
+/// right-click put it there before the menu took focus), where it stays.
+fn keep_composition(st: &mut TextInputState, committed: Option<&str>) {
     let caret = (st.cursor.anchor(), st.cursor.position());
-    let outside = st.composition.range(&st.document).is_some_and(|range| {
+    let range = st.composition.range(&st.document);
+    let outside = range.as_ref().is_some_and(|range| {
         let inside = |at: usize| range.start <= at && at <= range.end;
         !inside(caret.0) || !inside(caret.1)
     });
-    let Some(text) = st.composition.text(&st.document).map(str::to_owned) else {
+    // The text shown was held to the field's rules when it was shown.
+    let Some(shown) = st.composition.text(&st.document).map(str::to_owned) else {
         return;
     };
-    // The text was held to the field's rules when it was shown.
+    let text = committed
+        .map(|text| committable(st, text))
+        .filter(|text| !text.is_empty())
+        .unwrap_or(shown);
     let arrived = st
         .composition
         .commit(&st.document, &st.cursor, &text, false);
     st.report_inserted_chars(EditSource::Ime, arrived);
-    // The committed text is the text the composition showed, so the offsets
-    // read with it in place still name the same places.
-    if outside {
-        st.cursor.set_position(caret.0, MoveMode::MoveAnchor);
-        st.cursor.set_position(caret.1, MoveMode::KeepAnchor);
+    // A caret after the composition moves with its end, by the difference
+    // between the committed text and the text shown.
+    if outside && let Some(range) = range {
+        let length = text.chars().count();
+        let carried = |at| position_after_commit(at, &range, length);
+        st.cursor
+            .set_position(carried(caret.0), MoveMode::MoveAnchor);
+        st.cursor
+            .set_position(carried(caret.1), MoveMode::KeepAnchor);
     }
     st.pending_text_changed = true;
 }

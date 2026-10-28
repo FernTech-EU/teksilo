@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Windows: ending a composition, and a subclass tap that traces.
+//! Windows: completing a composition, and a subclass tap that traces.
 //!
 //! Every attached window's HWND is kept, so that [`finish_composition`] can
-//! end the window's IME composition when the focused field has already kept
-//! the text it showed; see that function for what winit does around it.
+//! have the input method complete the window's IME composition when the
+//! focused field ends it, and tell the field what it committed; see that
+//! function for what winit does around it.
 //!
 //! winit 0.30 reads the text input system through IMM32 alone: a commit is
 //! the `GCS_RESULTSTR` of a `WM_IME_COMPOSITION`, and everything else is a
@@ -136,6 +137,9 @@ use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::text_surface::TextSurfaces;
 use teksilo_core::window::TeksiloWindowId;
 
+use super::FinishedComposition;
+use super::imm_completion::{self, ImmCompletion, ImmMessage};
+
 use windows::Win32::Foundation::{
     CO_E_NOTINITIALIZED, CloseHandle, HWND, LPARAM, LRESULT, S_OK, WPARAM,
 };
@@ -153,9 +157,9 @@ use windows::Win32::System::Variant::{
     VariantClear,
 };
 use windows::Win32::UI::Input::Ime::{
-    CPS_CANCEL, CS_INSERTCHAR, CS_NOMOVECARET, GCS_COMPATTR, GCS_COMPCLAUSE, GCS_COMPREADATTR,
-    GCS_COMPREADCLAUSE, GCS_COMPREADSTR, GCS_COMPSTR, GCS_CURSORPOS, GCS_DELTASTART,
-    GCS_RESULTCLAUSE, GCS_RESULTREADCLAUSE, GCS_RESULTREADSTR, GCS_RESULTSTR, HIMC,
+    CPS_CANCEL, CPS_COMPLETE, CS_INSERTCHAR, CS_NOMOVECARET, GCS_COMPATTR, GCS_COMPCLAUSE,
+    GCS_COMPREADATTR, GCS_COMPREADCLAUSE, GCS_COMPREADSTR, GCS_COMPSTR, GCS_CURSORPOS,
+    GCS_DELTASTART, GCS_RESULTCLAUSE, GCS_RESULTREADCLAUSE, GCS_RESULTREADSTR, GCS_RESULTSTR, HIMC,
     IME_COMPOSITION_STRING, IMN_CHANGECANDIDATE, IMN_CLOSECANDIDATE, IMN_CLOSESTATUSWINDOW,
     IMN_GUIDELINE, IMN_OPENCANDIDATE, IMN_OPENSTATUSWINDOW, IMN_PRIVATE, IMN_SETCANDIDATEPOS,
     IMN_SETCOMPOSITIONFONT, IMN_SETCOMPOSITIONWINDOW, IMN_SETCONVERSIONMODE, IMN_SETOPENSTATUS,
@@ -209,8 +213,9 @@ macro_rules! tap_trace {
 // ---------------------------------------------------------------------------
 
 /// Subclass ids for this tap: a private range, distinct from the title bar's
-/// (`0xFE_111_000`), the pen's (`0xFE_112_000`) and the quit target's
-/// (`0xFE_113_000`), so no two can ever collide on one HWND.
+/// (`0xFE_111_000`), the pen's (`0xFE_112_000`), the quit target's
+/// (`0xFE_113_000`) and the completion capture's ([`CAPTURE_SUBCLASS_ID`]),
+/// so no two can ever collide on one HWND.
 static NEXT_SUBCLASS_ID: AtomicUsize = AtomicUsize::new(0xFE_114_000);
 
 /// Orders every traced message, across windows.
@@ -481,7 +486,7 @@ fn log_message(state: &TapState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Op
 ///
 /// The IMM strings after `WM_IME_ENDCOMPOSITION` are what winit's own handling
 /// of it read: while it still holds a preedit there, it commits the result
-/// string again (see [`finish_composition`]).
+/// string again (see `imm_completion`).
 fn probe_message(hwnd: HWND, msg: u32, seq: u64) {
     let _probing = Probing::enter();
     if matches!(msg, WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION) {
@@ -1256,46 +1261,63 @@ fn process_image(pid: u32) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Ending a composition
+// Completing a composition
 // ---------------------------------------------------------------------------
 
-/// End the window's composition without the input method delivering its text:
-/// the focused field has already kept what the composition showed (a click
-/// elsewhere, a focus change).
+/// The subclass id of the capture [`finish_composition`] installs for as long
+/// as it completes a composition: a private range, distinct from the trace
+/// tap's (see [`NEXT_SUBCLASS_ID`]). One window completes at a time, so one id
+/// serves them all.
+const CAPTURE_SUBCLASS_ID: usize = 0xFE_115_000;
+
+// The flags the completion reads in `WM_IME_COMPOSITION`'s `lParam` are IMM's.
+const _: () = assert!(
+    imm_completion::GCS_COMPSTR == GCS_COMPSTR.0
+        && imm_completion::GCS_RESULTSTR == GCS_RESULTSTR.0
+);
+
+thread_local! {
+    /// The completion [`finish_composition`] is capturing, and the window it
+    /// is for: set around its `ImmNotifyIME` calls, fed by [`capture_proc`].
+    static CAPTURE: RefCell<Option<(HWND, ImmCompletion)>> = const { RefCell::new(None) };
+}
+
+/// Complete the window's composition, which the focused field is ending (a
+/// click elsewhere, a focus change), and say what the input method committed
+/// for it and what winit will commit once the handler returns.
 ///
-/// It cancels the composition (`ImmNotifyIME(NI_COMPOSITIONSTR, CPS_CANCEL)`)
-/// rather than completing it: `CPS_COMPLETE` would hand the composition's text
-/// over as a result, and winit would commit it a second time. What winit then
-/// receives, and why it commits nothing:
+/// It asks the input method to complete the composition
+/// (`ImmNotifyIME(NI_COMPOSITIONSTR, CPS_COMPLETE)`), as a native edit control
+/// does when the caret leaves it, so that the field keeps the input method's
+/// own form of the text rather than the one it showed: measured in Notepad,
+/// Microsoft Pinyin commits "nihao" for the "ni'hao" it shows. The input
+/// method sends its messages to the window from inside the call (measured
+/// with `CPS_CANCEL`: its `WM_IME_ENDCOMPOSITION` reached the window while
+/// winit was still handling the click). winit handles each
+/// as it comes and holds the events they make until the application is done
+/// with the one it is handling, so they reach the field after it has kept the
+/// text. A subclass installed for the call ([`capture_proc`]) shows each
+/// message to an [`ImmCompletion`] before winit has it, which says what the
+/// input method committed (its `GCS_RESULTSTR`s) and what winit commits for
+/// the messages (see `imm_completion` for winit's rules): the application
+/// drops those ([`FinishedComposition::late_commits`]).
 ///
-/// 1. The input method clears the composition and sends `WM_IME_COMPOSITION`
-///    with `lParam` 0. winit turns that into an empty `Ime::Preedit` and stays
-///    in its preedit state (only a result moves it out).
-/// 2. It sends `WM_IME_ENDCOMPOSITION`. winit, still in its preedit state,
-///    reads `GCS_RESULTSTR` and commits it (a workaround for Hangul input
-///    methods, which send their last result after this message). winit counts
-///    an empty string as text, so it sends an empty `Ime::Preedit` and an
-///    empty `Ime::Commit`, then `Ime::Disabled`.
+/// An input method still composing after the call (it refused the
+/// completion, sent nothing for it, or composed again) is then told to cancel
+/// (`CPS_CANCEL`), so that it composes no more at the place the field has
+/// left; the text it still composed is kept after what it committed. The
+/// capture follows the cancel's messages too.
 ///
-/// The result string is empty there: a cancel produces no result, and CUAS
-/// (which serves every TSF input method to an IMM32 window like winit's)
-/// writes the context's composition strings afresh at each update, so a
-/// result an earlier message carried does not survive into the cancel's. An
-/// empty commit inserts nothing in any Teksilo text field. An input method
-/// that kept an earlier result through a cancel would have it committed
-/// again; the trace logs the strings before and after the cancel, and after
-/// winit has handled `WM_IME_ENDCOMPOSITION`, to show it.
+/// With no subclass to capture through, the hook cancels instead, and the
+/// field keeps what the composition showed: a cancel produces no result, and
+/// CUAS (which serves every TSF input method to an IMM32 window like
+/// winit's) writes the context's strings afresh at each update, so what winit
+/// reads at the end and commits is an empty string, which inserts nothing.
 ///
-/// The field must stop treating the composition as live before it calls this:
-/// winit delivers the empty preedit after the call (it holds events while the
-/// application handles one), and a field still holding the preedit's range
-/// would delete the text it meant to keep.
-///
-/// Returns whether the window had an input context to cancel in. `false` when
-/// the window is not attached or has none (its IME is not allowed, so nothing
-/// is composing), and the caller's fallback, toggling winit's IME, then finds
-/// nothing to reset either.
-pub(super) fn finish_composition(window_id: TeksiloWindowId) -> bool {
+/// `None` when the window is not attached or has no input context (its IME is
+/// not allowed, so nothing is composing), and the caller's fallback, toggling
+/// winit's IME, then finds nothing to reset either.
+pub(super) fn finish_composition(window_id: TeksiloWindowId) -> Option<FinishedComposition> {
     let hwnd = WINDOWS
         .try_with(|windows| windows.borrow().get(&window_id).copied())
         .ok()
@@ -1303,35 +1325,361 @@ pub(super) fn finish_composition(window_id: TeksiloWindowId) -> bool {
     let seq = next_sequence();
     let Some(hwnd) = hwnd else {
         tap_trace!("#{seq} {window_id} finish composition: the window is not attached");
-        return false;
+        return None;
     };
     let himc = unsafe { ImmGetContext(hwnd) };
     if himc.is_invalid() {
         tap_trace!("#{seq} {window_id} finish composition: the window has no input context");
-        return false;
+        return None;
     }
-    let tracing = super::trace_enabled();
-    if tracing {
+    if super::trace_enabled() {
         tap_trace!(
             "#{seq} {window_id} finish composition: comp={} result={}",
             composition_string(himc, GCS_COMPSTR),
             composition_string(himc, GCS_RESULTSTR)
         );
     }
+    let finished = complete(hwnd, himc, seq);
+    unsafe {
+        let _ = ImmReleaseContext(hwnd, himc);
+    }
+    Some(finished)
+}
+
+/// [`finish_composition`]'s calls to the input method, in `himc`, the input
+/// context of `hwnd`.
+fn complete(hwnd: HWND, himc: HIMC, seq: u64) -> FinishedComposition {
+    let tracing = super::trace_enabled();
+    let Some(capture) = Capture::install(hwnd) else {
+        let cancelled = unsafe { ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_CANCEL, 0) };
+        tap_trace!(
+            "#{seq}   no capture subclass: cancelled instead, which returned {}",
+            cancelled.as_bool()
+        );
+        return FinishedComposition::default();
+    };
     // The input method sends its messages to the window from inside this
     // call; winit handles them as they come and holds the events they make
     // until the application is done with the one it is handling.
-    let cancelled = unsafe { ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_CANCEL, 0) };
+    let completed = unsafe { ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_COMPLETE, 0) };
     if tracing {
         tap_trace!(
-            "#{seq}   cancel returned {}; now comp={} result={}",
-            cancelled.as_bool(),
+            "#{seq}   complete returned {}; now comp={} result={}",
+            completed.as_bool(),
             composition_string(himc, GCS_COMPSTR),
             composition_string(himc, GCS_RESULTSTR)
         );
     }
-    unsafe {
-        let _ = ImmReleaseContext(hwnd, himc);
+    let left = capture.left_composing();
+    if let Some(left) = &left {
+        let cancelled = unsafe { ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_CANCEL, 0) };
+        tap_trace!(
+            "#{seq}   still composing {left:?}: cancel returned {}",
+            cancelled.as_bool()
+        );
     }
-    true
+    let completion = capture.finish();
+    let finished = FinishedComposition {
+        committed: completion.committed(left.as_deref()),
+        late_commits: completion.winit_commits().to_vec(),
+    };
+    tap_trace!(
+        "#{seq}   the input method committed {:?}; winit commits {:?} after the handler",
+        finished.committed,
+        finished.late_commits
+    );
+    finished
+}
+
+/// The capture subclass on the window being completed, and the completion it
+/// feeds, for as long as it lives (a panic included).
+struct Capture {
+    hwnd: HWND,
+}
+
+impl Capture {
+    /// Start capturing `hwnd`'s messages. `None` when a capture is already
+    /// running on this thread, or the subclass could not be installed.
+    fn install(hwnd: HWND) -> Option<Self> {
+        let started = CAPTURE
+            .try_with(|slot| match slot.try_borrow_mut() {
+                Ok(mut slot) if slot.is_none() => {
+                    *slot = Some((hwnd, ImmCompletion::new()));
+                    true
+                }
+                _ => false,
+            })
+            .unwrap_or(false);
+        if !started {
+            return None;
+        }
+        // Installed last, so it is called first: before the trace tap, the
+        // other subclasses and winit.
+        let installed =
+            unsafe { SetWindowSubclass(hwnd, Some(capture_proc), CAPTURE_SUBCLASS_ID, 0) };
+        if !installed.as_bool() {
+            Self::clear();
+            return None;
+        }
+        Some(Self { hwnd })
+    }
+
+    /// See [`ImmCompletion::left_composing`].
+    fn left_composing(&self) -> Option<String> {
+        CAPTURE
+            .try_with(|slot| {
+                let slot = slot.try_borrow().ok()?;
+                let (_, completion) = slot.as_ref()?;
+                completion.left_composing().map(str::to_owned)
+            })
+            .ok()
+            .flatten()
+    }
+
+    /// Stop capturing, and hand over what was captured.
+    fn finish(self) -> ImmCompletion {
+        let completion = CAPTURE
+            .try_with(|slot| {
+                let mut slot = slot.try_borrow_mut().ok()?;
+                slot.take().map(|(_, completion)| completion)
+            })
+            .ok()
+            .flatten();
+        drop(self);
+        completion.unwrap_or_default()
+    }
+
+    fn clear() {
+        let _ = CAPTURE.try_with(|slot| {
+            if let Ok(mut slot) = slot.try_borrow_mut() {
+                *slot = None;
+            }
+        });
+    }
+}
+
+impl Drop for Capture {
+    fn drop(&mut self) {
+        // Fails harmlessly when the window is already gone (the procedure
+        // removed itself at `WM_NCDESTROY`).
+        unsafe {
+            let _ = RemoveWindowSubclass(self.hwnd, Some(capture_proc), CAPTURE_SUBCLASS_ID);
+        }
+        Self::clear();
+    }
+}
+
+/// Shows the window's composition messages to the completion being
+/// captured, then passes every message on, unconditionally: what winit
+/// receives is unchanged.
+unsafe extern "system" fn capture_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    uid: usize,
+    _dw_ref_data: usize,
+) -> LRESULT {
+    if matches!(msg, WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION) {
+        // No panic may unwind into user32.
+        let _ = catch_unwind(AssertUnwindSafe(|| capture_message(hwnd, msg, lparam)));
+    }
+    if msg == WM_NCDESTROY {
+        unsafe {
+            let _ = RemoveWindowSubclass(hwnd, Some(capture_proc), uid);
+        }
+    }
+    unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+}
+
+/// Show one composition message of `hwnd` to the completion, with the input
+/// context's strings read as winit is about to read them. Reading does not
+/// consume them, and calls nothing that can deliver a message.
+fn capture_message(hwnd: HWND, msg: u32, lparam: LPARAM) {
+    let capturing = CAPTURE
+        .try_with(|slot| {
+            slot.try_borrow()
+                .is_ok_and(|slot| slot.as_ref().is_some_and(|(window, _)| *window == hwnd))
+        })
+        .unwrap_or(false);
+    if !capturing {
+        return;
+    }
+    let himc = unsafe { ImmGetContext(hwnd) };
+    // winit reads from the same context; with none, every read fails and it
+    // does nothing.
+    let read = |which| {
+        (!himc.is_invalid())
+            .then(|| winit_string(himc, which))
+            .flatten()
+    };
+    let message = if msg == WM_IME_COMPOSITION {
+        let flags = lparam.0 as u32;
+        ImmMessage::Composition {
+            flags,
+            result: (flags & imm_completion::GCS_RESULTSTR != 0)
+                .then(|| read(GCS_RESULTSTR))
+                .flatten(),
+            composition: (flags & imm_completion::GCS_COMPSTR != 0)
+                .then(|| read(GCS_COMPSTR))
+                .flatten(),
+        }
+    } else {
+        ImmMessage::End {
+            result: read(GCS_RESULTSTR),
+        }
+    };
+    if !himc.is_invalid() {
+        unsafe {
+            let _ = ImmReleaseContext(hwnd, himc);
+        }
+    }
+    if super::trace_enabled() {
+        let seq = next_sequence();
+        match &message {
+            ImmMessage::Composition {
+                flags,
+                result,
+                composition,
+            } => tap_trace!(
+                "#{seq} capture: WM_IME_COMPOSITION flags={flags:#x} result={result:?} comp={composition:?}"
+            ),
+            ImmMessage::End { result } => {
+                tap_trace!("#{seq} capture: WM_IME_ENDCOMPOSITION result={result:?}")
+            }
+        }
+    }
+    let _ = CAPTURE.try_with(|slot| {
+        if let Ok(mut slot) = slot.try_borrow_mut()
+            && let Some((_, completion)) = slot.as_mut()
+        {
+            completion.message(&message);
+        }
+    });
+}
+
+/// One of an input context's strings as winit reads it
+/// (`ImeContext::get_composition_string`): empty when the context holds
+/// none, `None` on an error and for an odd byte count or UTF-16 that is not
+/// valid, which winit gives up on.
+fn winit_string(himc: HIMC, which: IME_COMPOSITION_STRING) -> Option<String> {
+    let bytes = unsafe { ImmGetCompositionStringW(himc, which, None, 0) };
+    if bytes < 0 {
+        return None;
+    }
+    if bytes == 0 {
+        return Some(String::new());
+    }
+    let mut units = vec![0u16; (bytes as usize).div_ceil(2)];
+    let read = unsafe {
+        ImmGetCompositionStringW(himc, which, Some(units.as_mut_ptr().cast()), bytes as u32)
+    };
+    if read < 0 || read % 2 != 0 {
+        return None;
+    }
+    units.truncate(read as usize / 2);
+    String::from_utf16(&units).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        CreateWindowExW, DefWindowProcW, DestroyWindow, RegisterClassW, SendMessageW,
+        WINDOW_EX_STYLE, WNDCLASSW, WS_OVERLAPPED,
+    };
+    use windows::core::PCWSTR;
+
+    unsafe extern "system" fn plain_proc(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    }
+
+    /// A hidden window of this thread, which nothing else knows of.
+    fn hidden_window() -> HWND {
+        unsafe {
+            let instance = GetModuleHandleW(PCWSTR::null()).expect("this module");
+            let class = w!("TeksiloImmCompletionTest");
+            let wc = WNDCLASSW {
+                lpfnWndProc: Some(plain_proc),
+                hInstance: instance.into(),
+                lpszClassName: class,
+                ..Default::default()
+            };
+            // A second registration fails harmlessly: the first one stands.
+            RegisterClassW(&wc);
+            CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                class,
+                w!("imm completion"),
+                WS_OVERLAPPED,
+                0,
+                0,
+                0,
+                0,
+                None,
+                None,
+                Some(instance.into()),
+                None,
+            )
+            .expect("a hidden window")
+        }
+    }
+
+    fn send(hwnd: HWND, msg: u32, lparam: u32) {
+        unsafe {
+            let _ = SendMessageW(hwnd, msg, Some(WPARAM(0)), Some(LPARAM(lparam as isize)));
+        }
+    }
+
+    /// The capture sees the composition messages sent to its window while it
+    /// is installed, with the input context's strings read as winit reads
+    /// them, and is gone once it has handed over what it saw.
+    #[test]
+    fn the_capture_sees_the_messages_sent_while_it_is_installed() {
+        let hwnd = hidden_window();
+        let capture = Capture::install(hwnd).expect("the capture is installed");
+        assert!(Capture::install(hwnd).is_none(), "one capture at a time");
+        assert_eq!(
+            capture.left_composing().as_deref(),
+            Some(""),
+            "nothing sent yet: winit would still compose"
+        );
+        send(hwnd, WM_IME_COMPOSITION, GCS_RESULTSTR.0);
+        send(hwnd, WM_IME_ENDCOMPOSITION, 0);
+        assert_eq!(capture.left_composing(), None, "the end was seen");
+        let completion = capture.finish();
+        // An input context with no composition holds an empty result, which
+        // winit commits and the field does not keep. With no context, winit
+        // reads nothing.
+        let has_context = unsafe {
+            let himc = ImmGetContext(hwnd);
+            let valid = !himc.is_invalid();
+            if valid {
+                let _ = ImmReleaseContext(hwnd, himc);
+            }
+            valid
+        };
+        let expected: &[&str] = if has_context { &[""] } else { &[] };
+        assert_eq!(completion.winit_commits(), expected);
+        assert_eq!(completion.committed(None), None);
+
+        // The subclass went with the capture: a completion left in the slot by
+        // hand hears nothing of a message sent now.
+        CAPTURE.with_borrow_mut(|slot| *slot = Some((hwnd, ImmCompletion::new())));
+        send(hwnd, WM_IME_ENDCOMPOSITION, 0);
+        let heard = CAPTURE.with_borrow_mut(|slot| slot.take());
+        assert_eq!(
+            heard.map(|(_, completion)| completion.left_composing().map(str::to_owned)),
+            Some(Some(String::new())),
+            "no subclass fed it"
+        );
+        unsafe {
+            let _ = DestroyWindow(hwnd);
+        }
+    }
 }

@@ -38,6 +38,8 @@ use super::WidgetTree;
 struct RecordingOps {
     opened: Vec<Option<String>>,
     finished_compositions: usize,
+    /// What the input method commits as a composition is finished.
+    committed: Option<String>,
 }
 
 impl WindowOps for RecordingOps {
@@ -62,8 +64,9 @@ impl WindowOps for RecordingOps {
 
     fn close_window_by_id(&mut self, _id: TeksiloWindowId) {}
 
-    fn finish_ime_composition(&mut self) {
+    fn finish_ime_composition(&mut self) -> Option<String> {
         self.finished_compositions += 1;
+        self.committed.clone()
     }
 }
 
@@ -139,8 +142,18 @@ fn an_application_callback_reaches_a_root_action_and_the_window_operations() {
 fn finish_ime_composition_reaches_the_window_operations() {
     let mut tree = WidgetTree::new();
     let mut ops = RecordingOps::default();
-    tree.run_with_event_context(&mut ops, |ctx| ctx.finish_ime_composition());
+    let mut kept = Some(String::new());
+    tree.run_with_event_context(&mut ops, |ctx| kept = ctx.finish_ime_composition());
     assert_eq!(ops.finished_compositions, 1);
+    assert_eq!(
+        kept, None,
+        "nothing committed: the field keeps what it showed"
+    );
+
+    ops.committed = Some("nihao".to_owned());
+    tree.run_with_event_context(&mut ops, |ctx| kept = ctx.finish_ime_composition());
+    assert_eq!(ops.finished_compositions, 2);
+    assert_eq!(kept.as_deref(), Some("nihao"), "the input method's commit");
 }
 
 #[test]

@@ -443,6 +443,78 @@ fn a_press_with_no_composition_ends_nothing() {
     assert!(e.arrivals().is_empty());
 }
 
+/// On Windows the input method completes the composition as the click ends
+/// it, and its commit can differ from what it showed: Microsoft Pinyin shows
+/// `nihao` as "ni'hao" and commits "nihao", as Notepad keeps it. The editor
+/// keeps the commit; with none (macOS, Linux, an input method that commits
+/// nothing), or one that leaves nothing once cleaned, what it showed.
+#[test]
+fn a_click_keeps_the_input_methods_commit_in_place_of_what_it_showed() {
+    for (shown, committed, kept) in [
+        ("ni'hao", Some("nihao"), "nihao"),
+        ("xi'an", Some("xi'an"), "xi'an"),
+        ("ni'hao", None, "ni'hao"),
+        ("ni'hao", Some(""), "ni'hao"),
+        ("ni'hao", Some("\u{7}"), "ni'hao"),
+    ] {
+        let mut e = Editor::new("abc def ", 8);
+        e.ops.committed = committed.map(str::to_owned);
+        e.compose_states(&["n", shown]);
+        e.click(1);
+        let expected = format!("abc def {kept}");
+        assert_eq!(e.text(), expected, "{committed:?}");
+        assert_eq!(e.caret(), 1, "{committed:?}: the caret at the click");
+        assert_eq!(e.ops.finished, 1, "{committed:?}");
+        assert_eq!(
+            e.arrivals(),
+            vec![(EditSource::Ime, kept.chars().count())],
+            "{committed:?}"
+        );
+        // What reaches the editor after the handler: the empty update (the
+        // application drops winit's copy of the commit).
+        e.compose("", None);
+        e.settle();
+        assert_eq!(e.text(), expected, "{committed:?}: nothing changes after");
+        e.undo();
+        assert_eq!(
+            e.text(),
+            "abc def ",
+            "{committed:?}: one undo takes the kept text back"
+        );
+    }
+}
+
+/// A focus change ends the composition the same way.
+#[test]
+fn a_focus_change_keeps_the_input_methods_commit() {
+    let mut e = Editor::new("hello", 5);
+    e.ops.committed = Some("\u{306B}\u{307B}\u{3093}".to_owned());
+    e.compose("\u{306B}\u{307B}\u{FF4E}", None);
+    let title = e.title;
+    e.tree.focus_ops(title, &mut e.ops);
+    assert_eq!(e.text(), "hello\u{306B}\u{307B}\u{3093}");
+    assert_eq!(e.ops.finished, 1);
+    assert_eq!(e.title_text.get(), "");
+}
+
+/// A caret the right-click put after the composition before the menu took the
+/// focus stays where it was in the text: it moves with the composition's end,
+/// which the input method's shorter commit moved one character back.
+#[test]
+fn a_caret_after_the_composition_moves_with_the_input_methods_commit() {
+    let mut e = Editor::new("hello world", 5);
+    e.ops.committed = Some("nihao".to_owned());
+    e.compose("ni'hao", None);
+    assert_eq!(e.text(), "helloni'hao world");
+    let between_w_and_o = e.at(13);
+    super::mouse::reposition_caret_for_context_menu(&e.state, between_w_and_o);
+    assert_eq!(e.caret(), 13);
+    let title = e.title;
+    e.tree.focus_ops(title, &mut e.ops);
+    assert_eq!(e.text(), "hellonihao world");
+    assert_eq!(e.caret(), 12, "still between the w and the o");
+}
+
 // ── Typing just before a press ──────────────────────────────────────────────
 
 /// The Microsoft Korean IME commits its syllable on the mouse-down itself: an

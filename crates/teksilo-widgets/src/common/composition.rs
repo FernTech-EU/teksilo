@@ -109,6 +109,19 @@ pub(crate) fn flip_relayout(doc: &TextDocument) -> Option<FlipRelayout> {
     })
 }
 
+/// Where `at`, a position outside the composition at `range` (in the document
+/// as it stands, the composition in it), is once the composition is committed
+/// as `committed` characters: one after it moves with its end. The input
+/// method's commit can be longer or shorter than what the composition showed
+/// (Microsoft Pinyin's "nihao" for "ni'hao").
+pub(crate) fn position_after_commit(at: usize, range: &Range<usize>, committed: usize) -> usize {
+    if at > range.end {
+        at - range.len() + committed
+    } else {
+        at
+    }
+}
+
 /// A text surface's composition. See the [module documentation](self).
 #[derive(Debug, Default)]
 pub(crate) struct Composition {
@@ -391,5 +404,15 @@ mod tests {
         assert_eq!(cursor.position(), 9);
         doc.undo().unwrap();
         assert_eq!(text(&doc), "ab", "one undo takes the whole commit back");
+    }
+
+    #[test]
+    fn a_position_after_the_composition_moves_with_a_shorter_commit() {
+        // "hello" + "ni'hao" + " world", committed as "nihao".
+        let range = 5..11;
+        assert_eq!(position_after_commit(13, &range, 5), 12);
+        assert_eq!(position_after_commit(2, &range, 5), 2, "before it stays");
+        assert_eq!(position_after_commit(13, &range, 6), 13, "the same length");
+        assert_eq!(position_after_commit(12, &range, 8), 14, "a longer one");
     }
 }

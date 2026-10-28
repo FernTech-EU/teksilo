@@ -157,6 +157,69 @@ impl StalePreeditGuard {
     }
 }
 
+/// Drops winit's copy of what the input method committed as the field ended
+/// its composition, on Windows.
+///
+/// The field ends a composition from inside the handler of a press or a
+/// focus change, and the platform has the input method complete it
+/// (`teksilo_platform::text_input_hook::finish_composition`): the input
+/// method answers from inside that call, and the field keeps its commit in
+/// place of what the composition showed. winit handles the input method's
+/// messages as they come but holds the events they make until the handler
+/// returns, so its `Ime::Commit` of that same text arrives after the field has
+/// kept it, with the caret moved by the press: delivered, it would go in a
+/// second time, at the click. The platform says what winit will commit
+/// ([`FinishedComposition::late_commits`](teksilo_platform::text_input_hook::FinishedComposition::late_commits),
+/// in order), and the window drops exactly those, as the next commits winit
+/// delivers. Anything else ends the expectation, since those events come
+/// before any later message's: a commit of other text (delivered), a
+/// composition with text (a new one), and winit's `Ime::Disabled`, the last
+/// event of the composition's end.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct LateImeCommits {
+    /// The commits winit will deliver for compositions the field ended, in
+    /// order.
+    expected: std::collections::VecDeque<String>,
+}
+
+impl LateImeCommits {
+    /// The platform ended a composition the field kept, and winit will
+    /// commit `commits` for it, in order.
+    pub(crate) fn expect(&mut self, commits: Vec<String>) {
+        self.expected.extend(commits);
+    }
+
+    /// An IME event winit delivers for the window: whether to deliver it.
+    pub(crate) fn admit(&mut self, ime: &winit::event::Ime) -> bool {
+        match ime {
+            winit::event::Ime::Commit(text) => {
+                if self.expected.front() == Some(text) {
+                    self.expected.pop_front();
+                    false
+                } else {
+                    self.expected.clear();
+                    true
+                }
+            }
+            winit::event::Ime::Preedit(text, _) if !text.is_empty() => {
+                self.expected.clear();
+                true
+            }
+            winit::event::Ime::Disabled => {
+                self.expected.clear();
+                true
+            }
+            _ => true,
+        }
+    }
+
+    /// Whether a commit is still expected.
+    #[cfg(test)]
+    fn is_expecting(&self) -> bool {
+        !self.expected.is_empty()
+    }
+}
+
 /// Wrap the root a window's builder made in the window's post-root hook:
 /// its own `post_root`, else the app-wide default (none for a modal
 /// window). Returns the wrapped root. The tree remembers the unwrapped one
@@ -726,6 +789,10 @@ pub struct WindowManager {
     /// [`StalePreeditGuard`]. Kept here because the dispatching window is out
     /// of the manager while its ops sink runs.
     ime_composition_finished: std::collections::HashSet<TeksiloWindowId>,
+    /// The commits winit will deliver to each window for a composition its
+    /// field ended and kept: see [`LateImeCommits`]. Kept here because the
+    /// dispatching window is out of the manager while its ops sink runs.
+    late_ime_commits: HashMap<TeksiloWindowId, LateImeCommits>,
     /// The candidate-window area each window's focused field last reported
     /// (`set_ime_cursor_area`), kept here because the dispatching window is
     /// out of the manager while its ops sink runs. winit drops an area
@@ -979,6 +1046,31 @@ impl WindowManager {
         self.ime_composition_finished.remove(&id)
     }
 
+    /// winit will commit `commits` to window `id` for a composition its field
+    /// ended and kept; see [`LateImeCommits`].
+    pub(crate) fn expect_late_ime_commits(&mut self, id: TeksiloWindowId, commits: Vec<String>) {
+        if !commits.is_empty() {
+            self.late_ime_commits.entry(id).or_default().expect(commits);
+        }
+    }
+
+    /// Whether window `id` delivers the IME event `ime`, or drops it as
+    /// winit's copy of a commit its field has kept; see [`LateImeCommits`].
+    pub(crate) fn admit_late_ime_event(
+        &mut self,
+        id: TeksiloWindowId,
+        ime: &winit::event::Ime,
+    ) -> bool {
+        let Some(late) = self.late_ime_commits.get_mut(&id) else {
+            return true;
+        };
+        let admitted = late.admit(ime);
+        if late.expected.is_empty() {
+            self.late_ime_commits.remove(&id);
+        }
+        admitted
+    }
+
     /// The candidate-window area window `id`'s focused field last reported,
     /// if any; see [`WindowManager::ime_cursor_areas`].
     pub(crate) fn ime_cursor_area(&self, id: TeksiloWindowId) -> Option<teksilo_canvas::Rect> {
@@ -992,6 +1084,7 @@ impl WindowManager {
             windows: HashMap::new(),
             teksilo_to_winit: HashMap::new(),
             ime_composition_finished: std::collections::HashSet::new(),
+            late_ime_commits: HashMap::new(),
             ime_cursor_areas: HashMap::new(),
             string_to_id: HashMap::new(),
             next_id: 1,
@@ -2799,6 +2892,7 @@ impl WindowManager {
         // A close it deferred no longer waits: a late answer changes nothing.
         self.deferred_closes.remove(&teksilo_id);
         self.ime_cursor_areas.remove(&teksilo_id);
+        self.late_ime_commits.remove(&teksilo_id);
         if let Some(winit_id) = self.teksilo_to_winit.remove(&teksilo_id)
             && let Some(mut managed) = self.windows.remove(&winit_id)
         {
@@ -5402,12 +5496,15 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         }
     }
 
-    fn finish_ime_composition(&mut self) {
+    fn finish_ime_composition(&mut self) -> Option<String> {
         let (Some(id), Some(arc)) = (self.current_id, self.current_window_arc.as_ref()) else {
-            return;
+            return None;
         };
-        if teksilo_platform::text_input_hook::finish_composition(id) {
-            return;
+        if let Some(finished) = teksilo_platform::text_input_hook::finish_composition(id) {
+            // winit delivers its copy of the commit once this handler returns,
+            // after the field has kept it: the window drops it.
+            self.wm.expect_late_ime_commits(id, finished.late_commits);
+            return finished.committed;
         }
         // The input method may still hold the composition and re-send its
         // preedit: the window drops it (`StalePreeditGuard`). Noted for every
@@ -5420,6 +5517,7 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
             arc.set_ime_allowed(false);
             arc.set_ime_allowed(true);
         }
+        None
     }
 
     fn begin_os_drag(
@@ -6405,7 +6503,95 @@ mod close_guard_tests {
 
 #[cfg(test)]
 mod ime_dedup_tests {
-    use super::StalePreeditGuard;
+    use super::{LateImeCommits, StalePreeditGuard};
+    use winit::event::Ime;
+
+    fn commit(text: &str) -> Ime {
+        Ime::Commit(text.to_owned())
+    }
+
+    fn preedit(text: &str) -> Ime {
+        Ime::Preedit(text.to_owned(), None)
+    }
+
+    /// What winit delivers after the hook completed Pinyin's "ni'hao": the
+    /// empty update and the commit of the result, then the end. The commit is
+    /// dropped: the field kept "nihao" before the press moved the caret.
+    #[test]
+    fn winits_copy_of_a_kept_commit_is_dropped() {
+        let mut late = LateImeCommits::default();
+        late.expect(vec!["nihao".to_owned()]);
+        assert!(late.admit(&preedit("")));
+        assert!(!late.admit(&commit("nihao")), "the copy is dropped");
+        assert!(late.admit(&Ime::Disabled));
+        assert!(!late.is_expecting());
+        assert!(
+            late.admit(&commit("nihao")),
+            "a later commit of the same text is the writer's"
+        );
+    }
+
+    #[test]
+    fn several_commits_are_dropped_in_order() {
+        let mut late = LateImeCommits::default();
+        late.expect(vec!["\u{65E5}".to_owned(), String::new()]);
+        assert!(!late.admit(&commit("\u{65E5}")));
+        assert!(!late.admit(&commit("")));
+        assert!(!late.is_expecting());
+    }
+
+    #[test]
+    fn a_commit_of_other_text_is_delivered_and_ends_the_expectation() {
+        let mut late = LateImeCommits::default();
+        late.expect(vec!["a".to_owned(), "b".to_owned()]);
+        assert!(late.admit(&commit("x")));
+        assert!(late.admit(&commit("b")), "no longer expected");
+    }
+
+    #[test]
+    fn a_new_composition_or_the_end_ends_the_expectation() {
+        let mut late = LateImeCommits::default();
+        late.expect(vec!["a".to_owned()]);
+        assert!(late.admit(&preedit("k")));
+        assert!(late.admit(&commit("a")), "a new composition's commit");
+
+        let mut late = LateImeCommits::default();
+        late.expect(vec!["a".to_owned()]);
+        assert!(late.admit(&Ime::Enabled));
+        assert!(late.is_expecting(), "a start does not end it");
+        assert!(late.admit(&Ime::Disabled));
+        assert!(late.admit(&commit("a")));
+    }
+
+    #[test]
+    fn nothing_expected_drops_nothing() {
+        let mut late = LateImeCommits::default();
+        assert!(late.admit(&commit("")));
+        assert!(late.admit(&commit("nihao")));
+    }
+
+    /// What the ops sink records while the field's handler runs, and the
+    /// window's `Ime` arm asks after it returns, per window.
+    #[test]
+    fn the_manager_drops_a_late_commit_for_its_window_only() {
+        use teksilo_core::window::TeksiloWindowId;
+        let mut wm = super::WindowManager::new(teksilo_core::presets::intui::light());
+        let (one, two) = (TeksiloWindowId::new(1), TeksiloWindowId::new(2));
+        wm.expect_late_ime_commits(one, vec!["nihao".to_owned()]);
+        assert!(
+            wm.admit_late_ime_event(two, &commit("nihao")),
+            "another window"
+        );
+        assert!(!wm.admit_late_ime_event(one, &commit("nihao")));
+        assert!(wm.admit_late_ime_event(one, &commit("nihao")), "once");
+
+        wm.expect_late_ime_commits(one, vec!["a".to_owned()]);
+        wm.close_window(one);
+        assert!(
+            wm.admit_late_ime_event(one, &commit("a")),
+            "gone with the window"
+        );
+    }
 
     fn resent_zhong_x3(g: &mut StalePreeditGuard) -> bool {
         (0..3).all(|_| !g.admit_preedit("zhong"))

@@ -46,8 +46,9 @@
 //! AppKit methods (see the macOS backend). A composition its input method
 //! leaves marked when the user switches to another input source is kept as
 //! committed where it is, and the input method's later delivery of it is
-//! dropped. On Windows the hook ends a composition the field has kept
-//! ([`finish_composition`]) and, when asked, traces.
+//! dropped. On Windows the hook has the input method complete a composition
+//! the field ends, and tells the field what it committed
+//! ([`finish_composition`]); when asked, it traces.
 //!
 //! With `TEKSILO_TEXT_INPUT_TRACE=1` set the hooks also log every call they
 //! see to stderr, which is how the per-OS behaviour they rely on was measured.
@@ -66,6 +67,7 @@ use teksilo_core::{AppEventPoster, ImeOrigin};
 mod answers;
 mod composition;
 mod dictation;
+mod imm_completion;
 mod key_press;
 mod left_behind;
 #[cfg(target_os = "macos")]
@@ -230,25 +232,48 @@ pub fn key_taken_by_input_method(window_id: TeksiloWindowId) -> Option<TakenKey>
     }
 }
 
-/// Ask the platform's input method to end the window's composition without
-/// committing it again.
+/// How the platform ended a window's composition, as [`finish_composition`]
+/// reports it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FinishedComposition {
+    /// The text the input method committed for the composition as it ended,
+    /// for the field to keep in place of the text the composition showed.
+    /// `None` keeps what it showed: on macOS, and on Windows when the input
+    /// method committed nothing, or only an empty string.
+    pub committed: Option<String>,
+    /// What winit delivers as `Ime::Commit` for the window once the
+    /// application's handler returns, in order, an empty string included: the
+    /// copy of the commit above, and anything else winit reads again. The
+    /// application drops them: the field has kept the composition, and the
+    /// caret has moved since. Empty on macOS.
+    pub late_commits: Vec<String>,
+}
+
+/// End the window's composition (a click elsewhere, a focus change), and say
+/// what the input method committed for it.
 ///
-/// For a field that has already kept what the composition showed (a click
-/// elsewhere, a focus change): without this the input method still holds the
-/// composition and delivers its text later, at the old place or in another
-/// field. Returns whether the platform did it; `false` means the caller falls
-/// back to resetting the input method by toggling winit's IME on the window
-/// (`set_ime_allowed(false)` then `set_ime_allowed(true)`).
+/// Called from inside the application's handler while the focused field
+/// still holds the composition; the field keeps the text right after.
+/// Without this the input method still holds the composition and delivers
+/// its text later, at the old place or in another field. `None` means the
+/// platform did not do it, and the caller falls back to resetting the input
+/// method by toggling winit's IME on the window (`set_ime_allowed(false)`
+/// then `set_ime_allowed(true)`); the field keeps what the composition
+/// showed.
 ///
 /// macOS does it for an attached window: the view ends winit's marked text
-/// and has the input method discard its composition. Windows cancels the
-/// composition in the window's input context (`ImmNotifyIME` with
-/// `CPS_CANCEL`). Elsewhere, and for a window with nothing to cancel in,
-/// `false`.
-pub fn finish_composition(window_id: TeksiloWindowId) -> bool {
+/// and has the input method discard its composition, and the field keeps
+/// what it showed, as TextEdit does. Windows asks the input method to
+/// complete the composition in the window's input context (`ImmNotifyIME`
+/// with `CPS_COMPLETE`), as Notepad's text control does, and the field keeps
+/// what the input method commits (Microsoft Pinyin's "nihao" for the
+/// "ni'hao" it showed); winit's own copy of that commit is in
+/// [`FinishedComposition::late_commits`]. Elsewhere, and for a window with
+/// no input context, `None`.
+pub fn finish_composition(window_id: TeksiloWindowId) -> Option<FinishedComposition> {
     #[cfg(target_os = "macos")]
     {
-        macos::finish_composition(window_id)
+        macos::finish_composition(window_id).then(FinishedComposition::default)
     }
     #[cfg(target_os = "windows")]
     {
@@ -257,7 +282,7 @@ pub fn finish_composition(window_id: TeksiloWindowId) -> bool {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = window_id;
-        false
+        None
     }
 }
 

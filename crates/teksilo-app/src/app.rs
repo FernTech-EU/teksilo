@@ -4611,6 +4611,19 @@ impl TeksiloAppHandler {
                         }
                         _ => true,
                     };
+                    // winit's copy of a commit the field kept as it ended the
+                    // composition (`LateImeCommits`). Asked of every event,
+                    // which may end the expectation.
+                    let late = teksilo_id.is_none_or(|id| self.wm.admit_late_ime_event(id, &ime));
+                    if !late
+                        && let Some(id) = teksilo_id
+                        && teksilo_platform::text_input_hook::trace_enabled()
+                    {
+                        eprintln!(
+                            "[text-input] {id} dropped winit's {ime:?}: the field kept it as the composition ended"
+                        );
+                    }
+                    let admitted = admitted && late;
                     let maybe_evt = match teksilo_id.filter(|_| admitted) {
                         Some(teksilo_id) => {
                             let is_preedit = matches!(ime, winit::event::Ime::Preedit(..));

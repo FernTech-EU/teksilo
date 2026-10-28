@@ -98,11 +98,25 @@ pub trait WindowOps {
     fn set_ime_cursor_area(&mut self, _area: teksilo_canvas::Rect) {}
 
     /// Tell the platform's input method that the focused field's composition
-    /// is over, without delivering its text again: the field has already
-    /// kept what the composition showed (a click elsewhere, a focus change).
+    /// is over (a click elsewhere, a focus change), and return the text the
+    /// input method committed for it, if it committed one: the field keeps
+    /// that text in place of what the composition showed. On Windows the input
+    /// method is asked to complete the composition, as a native edit control
+    /// does, and its commit can differ from what it showed (Microsoft Pinyin
+    /// commits "nihao" for the "ni'hao" it showed). `None` keeps what the
+    /// composition showed: the platform keeps that (macOS, Linux), or the
+    /// input method committed nothing.
     ///
-    /// No-op on the standalone / test sink.
-    fn finish_ime_composition(&mut self) {}
+    /// The field calls it while it still holds the composition, and keeps the
+    /// text right after, in the same handler. Whatever the platform delivers
+    /// for the composition arrives after the handler returns (an empty update,
+    /// an empty commit), and must find nothing left to change; a copy of the
+    /// commit returned here is not delivered.
+    ///
+    /// `None` on the standalone / test sink.
+    fn finish_ime_composition(&mut self) -> Option<String> {
+        None
+    }
 
     /// Hand an OS-level drag to the platform when an in-app drag escalates at
     /// the window boundary (the pointer left the window carrying an

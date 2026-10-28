@@ -8,11 +8,15 @@ use teksilo_core::WindowConfig;
 use teksilo_core::window::{TeksiloWindowId, WindowState};
 
 /// Counts [`finish_ime_composition`](teksilo_core::WindowOps::finish_ime_composition)
-/// calls; every other operation is inert.
+/// calls and answers them with [`committed`](Self::committed); every other
+/// operation is inert.
 #[derive(Default)]
 pub(crate) struct ImeOps {
     /// How many times a field told the platform its composition is over.
     pub finished: usize,
+    /// What the input method commits as a field finishes its composition:
+    /// `None` keeps what the composition showed, as macOS and Linux do.
+    pub committed: Option<String>,
 }
 
 impl teksilo_core::WindowOps for ImeOps {
@@ -36,7 +40,8 @@ impl teksilo_core::WindowOps for ImeOps {
 
     fn close_window_by_id(&mut self, _id: TeksiloWindowId) {}
 
-    fn finish_ime_composition(&mut self) {
+    fn finish_ime_composition(&mut self) -> Option<String> {
         self.finished += 1;
+        self.committed.clone()
     }
 }

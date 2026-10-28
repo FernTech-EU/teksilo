@@ -1533,13 +1533,14 @@ impl<'ops> EventContext<'ops> {
     }
 
     /// Tell the platform's input method that the focused field's composition
-    /// is over, without delivering its text again: the field has already kept
-    /// what the composition showed (a click elsewhere, a focus change).
-    /// No-op outside a dispatch / on a standalone tree.
-    pub fn finish_ime_composition(&mut self) {
-        if let Some(ops) = self.window_ops.as_deref_mut() {
-            ops.finish_ime_composition();
-        }
+    /// is over (a click elsewhere, a focus change), and get the text the input
+    /// method committed for it, which the field keeps in place of what the
+    /// composition showed; `None` keeps what it showed. Call it while the
+    /// field still holds the composition, and keep the text right after: see
+    /// [`WindowOps::finish_ime_composition`](crate::window::WindowOps::finish_ime_composition).
+    /// `None` outside a dispatch / on a standalone tree.
+    pub fn finish_ime_composition(&mut self) -> Option<String> {
+        self.window_ops.as_deref_mut()?.finish_ime_composition()
     }
 
     /// Resolve the platform parent handle of the window currently
