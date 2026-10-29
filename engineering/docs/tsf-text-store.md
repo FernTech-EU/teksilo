@@ -490,6 +490,17 @@ cannot compose breaks every IME.
   `GUID_PROP_INPUTSCOPE`, waits for Phase 4 with the touch keyboard's flags. A read-only field that
   describes its document gets a read-only store: `TS_SD_READONLY`, writes refused, compositions
   refused, `OnStatusChange` when the field turns read-only or back.
+  Measured (round 1, `tsf-phase-1-windows-findings.md`): everything passed but one stall. A
+  change of the field's selection while a composition was open (an IME passing Down to the field
+  after the first Space, or Shift+Right after a reconversion opened an empty composition) left the
+  revision ahead of the last report for good, since nothing is reported during a composition, and
+  every later lock was deferred: the keys were lost until focus left. Fixed by holding a lock back
+  only for what the next report can clear (typing not inserted, which a settle now inserts even
+  during a composition, or changes reportable now; nothing while a composition is open or the
+  mirror holds a text service's writes), and by granting a deferred request at a settle after its
+  report whatever is left, traced. A text service's `SetSelection` now counts as a write, so its
+  own selection is what it reads back (the reconversion's `SetSelection 140..144` was answered
+  `140..140` from the document).
 - **Phases 2 and 3, writes and compositions, one unit** (about 2,500 lines). The write half wired,
   the composition sink, interim dictation, the Japanese IME through the store, termination before a
   press, display attributes for clauses, the key-trace verdict, `WM_IME_REQUEST` kept under TSF. On

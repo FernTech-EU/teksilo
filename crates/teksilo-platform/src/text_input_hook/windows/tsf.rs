@@ -539,7 +539,7 @@ pub(super) fn set_text_store_focus(hwnd: HWND, focus: StoreFocus) {
         // asks for a lock with typing unreported (4.10); then the changes are
         // reported and a lock request that waited for them is granted.
         state.report(true);
-        state.grant_deferred();
+        state.grant_deferred(true);
     }
 }
 
@@ -731,6 +731,17 @@ impl StoreState {
     /// widget code may run there, and the text service that just wrote reads
     /// its writes back until the next settle.
     fn report(&self, settle: bool) {
+        // Typing waiting for the frame goes in even while a composition is
+        // open: a lock waits for the field to be available (4.7), and only
+        // this makes it so.
+        if settle
+            && self
+                .inner
+                .try_borrow()
+                .is_ok_and(|inner| inner.locks.held().is_none())
+        {
+            let _ = self.document(|document| document.flush_pending_input());
+        }
         {
             let Ok(inner) = self.inner.try_borrow() else {
                 return;
@@ -741,9 +752,6 @@ impl StoreState {
             {
                 return;
             }
-        }
-        if settle {
-            let _ = self.document(|document| document.flush_pending_input());
         }
         let Some(notifications) = self.document(|document| self.compare(document)).flatten() else {
             return;
@@ -864,10 +872,17 @@ impl StoreState {
         })
     }
 
-    /// Whether the document has changes the text services have not heard
-    /// of, or cannot be read now: a lock is not granted then (4.7, rule 1).
-    /// Reads only. A document that counts no revisions is compared at each
-    /// report instead, and never holds a lock back.
+    /// Whether a lock waits for the next settle (4.7, rule 1): the field
+    /// holds typing not inserted yet, or has changes the text services have
+    /// not heard of that the next report will tell them. Reads only.
+    ///
+    /// Only what a report can clear holds a lock back, or a deferred request
+    /// would wait for ever: while a composition is open, or the mirror holds
+    /// a text service's writes, the field's changes are not reported (the
+    /// mirror is not the field's text), so they hold nothing back; the
+    /// report after the composition compares the whole text. A document that
+    /// counts no revisions is compared at each report instead, and never
+    /// holds a lock back.
     fn dirty(&self) -> bool {
         self.document(|document| {
             if !document.is_available() {
@@ -876,6 +891,9 @@ impl StoreState {
             let Ok(inner) = self.inner.try_borrow() else {
                 return false;
             };
+            if inner.compositions > 0 || inner.mirror.written() {
+                return false;
+            }
             match (document.revisions(), inner.reported) {
                 (Some(now), Some(then)) => now.text != then.text || now.selection != then.selection,
                 _ => false,
@@ -924,14 +942,27 @@ impl StoreState {
         }
         // The tail: whatever a message delivered during the grants changed.
         self.report(false);
-        self.grant_deferred();
+        self.grant_deferred(false);
         Ok(session)
     }
 
     /// Grant the request deferred for changes to report, once they are.
-    fn grant_deferred(&self) {
+    /// At a `settle`, after its report, it is granted whatever [`dirty`]
+    /// says: what could be reported was, and a request that waited any
+    /// longer would cost the text service its keys. At the tail of
+    /// `RequestLock`, only once nothing is to be reported.
+    ///
+    /// [`dirty`]: Self::dirty
+    fn grant_deferred(&self, settle: bool) {
         if self.dirty() {
-            return;
+            if !settle {
+                return;
+            }
+            tsf_trace!(
+                "#{} {} deferred lock granted with changes still unreported",
+                next_sequence(),
+                self.window_id
+            );
         }
         let kind = match self.inner.try_borrow_mut() {
             Ok(mut inner) => inner.locks.take_deferred(),
@@ -1930,6 +1961,16 @@ mod tests {
         }
     }
 
+    impl Doc {
+        /// Move the field's own selection, as a key it handles does.
+        fn select(&self, range: Range<usize>) {
+            *self.selection.borrow_mut() = range;
+            let mut revisions = self.revisions.get();
+            revisions.selection += 1;
+            self.revisions.set(revisions);
+        }
+    }
+
     impl TextInputDocument for Doc {
         fn is_available(&self) -> bool {
             self.pending.borrow().is_empty()
@@ -2510,7 +2551,7 @@ mod tests {
 
         // What the settle does.
         rig.state.report(true);
-        rig.state.grant_deferred();
+        rig.state.grant_deferred(true);
         assert_eq!(
             rig.heard.borrow().order,
             vec!["text", "selection", "layout", "grant"],
@@ -2544,6 +2585,130 @@ mod tests {
         assert_eq!(rig.heard.borrow().changes, vec![(0, 0, 1)]);
     }
 
+    /// 変換 with nothing selected: the IME selects the word at the caret and
+    /// opens a composition over it in one lock. The selection it set is what
+    /// it reads back, and the field's own selection moving afterwards
+    /// (Shift+Right) holds no later lock back (measured stall, round 1).
+    #[test]
+    fn a_selection_moved_under_an_open_composition_holds_no_lock_back() {
+        let rig = rig_with("left right", 0, true);
+        let store = rig.store.clone();
+        let read = Rc::new(RefCell::new(None));
+        let out = read.clone();
+        rig.during_grant(move || {
+            let selection = [TS_SELECTION_ACP {
+                acpStart: 0,
+                acpEnd: 4,
+                style: TS_SELECTIONSTYLE {
+                    ase: TS_AE_END,
+                    fInterimChar: false.into(),
+                },
+            }];
+            unsafe { store.SetSelection(&selection) }.unwrap();
+            let composition: ITfContextOwnerCompositionSink = store.cast().unwrap();
+            assert!(
+                unsafe { composition.OnStartComposition(None) }
+                    .unwrap()
+                    .as_bool()
+            );
+            let mut got = [TS_SELECTION_ACP::default()];
+            let mut fetched = 0;
+            unsafe { store.GetSelection(TF_DEFAULT_SELECTION, &mut got, &mut fetched) }.unwrap();
+            *out.borrow_mut() = Some((got[0].acpStart, got[0].acpEnd));
+        });
+        assert_eq!(
+            unsafe { rig.store.RequestLock(LF_READWRITE | LF_SYNC) }.unwrap(),
+            S_OK
+        );
+        assert_eq!(*read.borrow(), Some((0, 4)), "the IME's own selection");
+
+        // Shift+Right in the field, then the IME's next keys.
+        rig.doc.select(0..1);
+        rig.state.report(true);
+        assert_eq!(
+            unsafe { rig.store.RequestLock(LF_READWRITE) }.unwrap(),
+            S_OK,
+            "granted at once: nothing a report could tell"
+        );
+        assert_eq!(
+            unsafe { rig.store.RequestLock(LF_READWRITE | LF_SYNC) }.unwrap(),
+            S_OK
+        );
+        assert_eq!(rig.heard.borrow().grants.len(), 3);
+        assert_eq!(rig.posted(), 0, "no settle asked for");
+    }
+
+    /// `nihongo`, Space, then Down passed to the field, which moves its
+    /// caret under the composition, then Enter: its locks are granted, the
+    /// composition ends, and the next settle gives the document back
+    /// (measured stall, round 1).
+    #[test]
+    fn a_key_the_field_handles_during_a_composition_holds_no_lock_back() {
+        let rig = rig_with("ab", 2, true);
+        let store = rig.store.clone();
+        rig.during_grant(move || {
+            let composition: ITfContextOwnerCompositionSink = store.cast().unwrap();
+            assert!(
+                unsafe { composition.OnStartComposition(None) }
+                    .unwrap()
+                    .as_bool()
+            );
+            unsafe { store.SetText(0, 2, 2, &[0x65E5, 0x672C]) }.unwrap();
+        });
+        assert_eq!(
+            unsafe { rig.store.RequestLock(LF_READWRITE) }.unwrap(),
+            S_OK
+        );
+        rig.heard.borrow_mut().order.clear();
+        // Down, twice, handled by the field.
+        rig.doc.select(0..0);
+        rig.state.report(true);
+        rig.doc.select(1..1);
+        rig.state.report(true);
+        assert!(rig.heard.borrow().order.is_empty(), "nothing reported yet");
+        // Enter: the IME commits and ends its composition.
+        let store = rig.store.clone();
+        rig.during_grant(move || {
+            let composition: ITfContextOwnerCompositionSink = store.cast().unwrap();
+            unsafe { composition.OnEndComposition(None) }.unwrap();
+        });
+        assert_eq!(
+            unsafe { rig.store.RequestLock(LF_READWRITE) }.unwrap(),
+            S_OK,
+            "granted, not queued"
+        );
+        assert_eq!(rig.posted(), 0);
+        // The next settle compares the whole text and gives it back.
+        rig.state.report(true);
+        assert_eq!(rig.heard.borrow().changes, vec![(2, 4, 2)]);
+        assert!(rig.heard.borrow().selections > 0);
+        assert_eq!(rig.state.inner.borrow().mirror.text(), "ab");
+        assert_eq!(rig.read_text(), "ab");
+    }
+
+    /// Typing that waits for the frame while a composition is open is
+    /// inserted at the settle all the same, and the lock that waited for it
+    /// is granted.
+    #[test]
+    fn typing_waiting_during_a_composition_is_flushed_and_the_lock_granted() {
+        let rig = rig_with("abc", 3, true);
+        let composition: ITfContextOwnerCompositionSink = rig.store.cast().unwrap();
+        assert!(
+            unsafe { composition.OnStartComposition(None) }
+                .unwrap()
+                .as_bool()
+        );
+        rig.doc.pending.borrow_mut().push('d');
+        assert_eq!(
+            unsafe { rig.store.RequestLock(LF_READWRITE) }.unwrap(),
+            TS_S_ASYNC
+        );
+        rig.state.report(true);
+        rig.state.grant_deferred(true);
+        assert_eq!(rig.heard.borrow().grants, vec![LF_READWRITE]);
+        assert_eq!(*rig.doc.text.borrow(), "abcd");
+    }
+
     #[test]
     fn typing_held_for_the_frame_goes_in_before_a_lock_is_granted() {
         let rig = rig_with("abc", 3, true);
@@ -2555,10 +2720,10 @@ mod tests {
         );
         // Inside RequestLock nothing may flush: the next settle does.
         rig.state.report(false);
-        rig.state.grant_deferred();
+        rig.state.grant_deferred(false);
         assert!(rig.heard.borrow().grants.is_empty());
         rig.state.report(true);
-        rig.state.grant_deferred();
+        rig.state.grant_deferred(true);
         assert_eq!(rig.heard.borrow().changes, vec![(3, 3, 5)]);
         assert_eq!(rig.heard.borrow().grants, vec![LF_READ]);
     }

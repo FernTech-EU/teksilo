@@ -45,7 +45,7 @@ pub(crate) struct TextMirror {
     selection: Range<usize>,
     /// Whether the caret is at the selection's start (`TS_AE_START`).
     caret_at_start: bool,
-    /// A text service wrote since the last sync.
+    /// A text service wrote (text or selection) since the last sync.
     written: bool,
 }
 
@@ -65,8 +65,8 @@ impl TextMirror {
         self.caret_at_start
     }
 
-    /// Whether a text service wrote since the last sync: the mirror then
-    /// holds text the document does not.
+    /// Whether a text service wrote since the last sync, its text or its
+    /// selection: the mirror then holds what the document does not.
     pub(crate) fn written(&self) -> bool {
         self.written
     }
@@ -193,6 +193,7 @@ impl TextMirror {
         }
         self.selection = selection;
         self.caret_at_start = caret_at_start;
+        self.written = true;
         Ok(())
     }
 }
@@ -326,6 +327,19 @@ mod tests {
         assert_eq!(mirror.text(), "aXYd");
         assert_eq!(mirror.selection(), 3..3);
         assert!(mirror.written());
+    }
+
+    #[test]
+    fn a_selection_a_text_service_sets_is_a_write() {
+        let mut mirror = synced("hello", 0..0);
+        mirror.set_selection(1..4, false).unwrap();
+        assert!(
+            mirror.written(),
+            "the document does not hold it, so reads come from the mirror"
+        );
+        assert_eq!(mirror.selection(), 1..4);
+        mirror.sync("hello", 0..0, false);
+        assert!(!mirror.written());
     }
 
     #[test]
