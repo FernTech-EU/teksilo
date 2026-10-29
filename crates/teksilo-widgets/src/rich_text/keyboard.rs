@@ -776,8 +776,14 @@ pub(super) fn run_standard_edit(
             st.select_all_anchor_cell = None;
         }
         if declines(&st, command, empty_history_passes_on) {
+            crate::common::input_trace::trace(format_args!("{command:?} declined"));
             return false;
         }
+        crate::common::input_trace::trace(format_args!(
+            "{command:?} runs; typing waiting {:?}, composition held {}",
+            st.pending_chars,
+            st.composition.is_held(&st.document)
+        ));
         match command {
             StandardEdit::SelectAll => {
                 apply_select_all_ladder(&mut st);
@@ -806,11 +812,15 @@ pub(super) fn run_standard_edit(
                 KeyAction::ClearPreferredX
             }
             StandardEdit::Undo => {
-                let _ = st.document.undo();
+                crate::common::input_trace::traced_history_step(&st.document, "undo", || {
+                    st.document.undo()
+                });
                 KeyAction::ClearPreferredX
             }
             StandardEdit::Redo => {
-                let _ = st.document.redo();
+                crate::common::input_trace::traced_history_step(&st.document, "redo", || {
+                    st.document.redo()
+                });
                 KeyAction::ClearPreferredX
             }
             _ => return false,

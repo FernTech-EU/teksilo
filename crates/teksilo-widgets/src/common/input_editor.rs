@@ -324,11 +324,15 @@ pub(crate) fn end(
     let text = composition.written_text(document)?;
     input.segments.borrow_mut().clear();
     let kept = rules(&text);
-    Some(
-        input
-            .journal
-            .input_system_write(|| composition.commit(document, cursor, &kept, paragraphs)),
-    )
+    let can_undo = document.can_undo();
+    let arrived = input
+        .journal
+        .input_system_write(|| composition.commit(document, cursor, &kept, paragraphs));
+    super::input_trace::trace(format_args!(
+        "composition {text:?} committed as {kept:?}: {arrived} characters; can undo {can_undo} -> {}",
+        document.can_undo()
+    ));
+    Some(arrived)
 }
 
 #[cfg(test)]

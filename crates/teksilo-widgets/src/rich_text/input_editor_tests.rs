@@ -258,3 +258,111 @@ fn a_read_only_editor_hands_out_no_writing_half() {
             .is_none()
     );
 }
+
+/// The store's commit of a Japanese composition, as the Microsoft IME
+/// writes it (one batch per lock: the start, each reading, the conversion
+/// written again unchanged, the commit), then Ctrl+Z with nothing in
+/// between: the whole composition goes, whether frames ran between the locks
+/// or not, with a second view on the document (the demo's preview) and the
+/// store's reads after each lock. Measured on Windows: three times in about
+/// fifteen the undo did nothing until the caret moved; not reproduced here.
+#[test]
+fn an_undo_right_after_a_store_commit_takes_the_composition() {
+    use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+    use teksilo_core::text_input_document::{CompositionSegment, SegmentStyle};
+    for variant in 0..32 {
+        let doc = TextDocument::new();
+        doc.set_markdown("# RichTextEditor \u{2014} Capability Showcase\n\nThis window hosts two RichTextEditor widgets bound to the same document.\n").unwrap();
+        let first = RichTextEditor::editor(doc.clone());
+        let handle = first.handle();
+        let second = RichTextEditor::editor(doc.clone());
+        let mut tree = WidgetTree::new();
+        let a = tree.add(first);
+        let b = tree.add(second);
+        let root = tree.add(crate::primitives::VStack::new().child(a).child(b));
+        let _ = root;
+        tree.layout(SizeProposal::exact(300.0, 600.0));
+        tree.focus(a);
+        let settle = |tree: &mut WidgetTree| {
+            for _ in 0..3 {
+                tree.request_frame();
+                tree.tick_animations(std::time::Duration::from_millis(16));
+                tree.layout(SizeProposal::exact(300.0, 600.0));
+            }
+            let _ = tree.render();
+        };
+        settle(&mut tree);
+        let at = 36;
+        handle.select_range(at, at);
+        settle(&mut tree);
+        let doc_before_composition = doc.to_plain_text().unwrap();
+        let read = |h: &EditorHandle| {
+            let rev = h.revisions();
+            let _ = h.utf16_index();
+            let _ = TextInputDocument::text_in(h, 0..20);
+            let _ = rev.map(|r| h.text_changed_since(r.text.saturating_sub(1)));
+        };
+        let lock = |f: &dyn Fn(&dyn TextInputEditor)| {
+            handle.begin_input_batch();
+            f(&handle);
+            handle.end_input_batch();
+            read(&handle);
+        };
+        lock(&|e| {
+            e.mark_composition(at..at, &[]).unwrap();
+            e.replace_text(at..at, "ｎ", WriteOptions::default())
+                .unwrap();
+            e.set_selection(at + 1..at + 1, false).unwrap();
+            e.mark_composition(at..at + 1, &[]).unwrap();
+        });
+        let steps: [(usize, usize, &str); 7] = [
+            (0, 1, "に"),
+            (0, 1, "にｈ"),
+            (0, 2, "にほ"),
+            (0, 2, "にほｎ"),
+            (0, 3, "にほんｇ"),
+            (0, 4, "にほんご"),
+            (0, 4, "にほんご"),
+        ];
+        for (k, (s0, e0, text)) in steps.iter().enumerate() {
+            let end = at + text.chars().count();
+            lock(&|e| {
+                e.replace_text(at + s0..at + e0, text, WriteOptions::default())
+                    .unwrap();
+                e.set_selection(end..end, false).unwrap();
+                e.mark_composition(
+                    at..end,
+                    &[CompositionSegment {
+                        range: at..end,
+                        style: SegmentStyle::Input,
+                    }],
+                )
+                .unwrap();
+            });
+            if variant & (1 << (k % 5)) != 0 {
+                settle(&mut tree);
+            }
+        }
+        lock(&|e| {
+            e.replace_text(at..at + 4, "にほんご", WriteOptions::default())
+                .unwrap();
+            e.set_selection(at + 4..at + 4, false).unwrap();
+            e.end_composition(teksilo_core::ImeOrigin::Composition)
+                .unwrap();
+        });
+        if variant & 16 != 0 {
+            settle(&mut tree);
+        }
+        let before = doc.to_plain_text().unwrap();
+        assert!(before.contains("にほんご"));
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Z,
+            modifiers: Modifiers::COMMAND,
+            text: Some("\u{1a}".into()),
+        });
+        settle(&mut tree);
+        let after = doc.to_plain_text().unwrap();
+        assert!(!after.contains("にほんご"), "variant {variant}: {after:?}");
+        assert_eq!(after, doc_before_composition, "variant {variant}");
+    }
+}

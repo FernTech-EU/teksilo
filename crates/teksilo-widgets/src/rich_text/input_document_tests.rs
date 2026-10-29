@@ -695,3 +695,44 @@ fn typing_waiting_makes_the_document_unavailable_and_asking_changes_nothing() {
         assert!(!editor.doc().is_available(), "the editor at work");
     }
 }
+
+/// What the input system reads is the addressable text, window by window,
+/// in a document with every kind of block, with a composition written into
+/// it and the batch still open (TSF's `GetText` after its own `SetText`).
+#[test]
+fn windows_of_the_text_read_the_addressable_text() {
+    use teksilo_core::text_input_document::{TextInputEditor, WriteOptions};
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "# RichTextEditor \u{2014} Capability Showcase\n\nThis window hosts two editors. A long line that wraps somewhere.\n\n> a quote\n> with two lines\n\n- one\n- two\n  - nested\n\n| a | b |\n|---|---|\n| c | d |\n\n```\ncode\n```\n\nThe end \u{1F600} here.\n",
+    )
+    .unwrap();
+    let editor = Editor::mount(doc.clone(), 300.0, |e| e);
+    let check = |label: &str| {
+        let full: Vec<char> = doc.to_addressable_text().unwrap().chars().collect();
+        let d = editor.doc();
+        assert_eq!(d.char_count(), Some(full.len()), "{label}: count");
+        for start in 0..full.len() {
+            for len in [1usize, 7, 32, 128] {
+                let end = (start + len).min(full.len());
+                let want: String = full[start..end].iter().collect();
+                assert_eq!(
+                    d.text_in(start..end).as_deref(),
+                    Some(want.as_str()),
+                    "{label}: {start}..{end}"
+                );
+            }
+        }
+    };
+    check("recorded");
+    let at = 40;
+    editor.handle.begin_input_batch();
+    editor.handle.mark_composition(at..at, &[]).unwrap();
+    editor
+        .handle
+        .replace_text(at..at, "\u{304B}\u{308F}", WriteOptions::default())
+        .unwrap();
+    check("composing, batch open");
+    editor.handle.end_input_batch();
+    check("composing, batch closed");
+}

@@ -29,6 +29,7 @@ pub(crate) mod ime_ops_test;
 pub(crate) mod input_batch;
 pub(crate) mod input_editor;
 pub(crate) mod input_journal;
+pub(crate) mod input_trace;
 pub(crate) mod interaction;
 pub(crate) mod list_nav;
 #[cfg(test)]

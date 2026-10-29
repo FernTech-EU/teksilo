@@ -1895,7 +1895,12 @@ impl RichTextEditor {
     /// Undo the most recent edit. Mirrors Ctrl+Z. No-op when the undo
     /// stack is empty.
     pub fn undo(&self) {
-        let _ = self.state.borrow().document.undo();
+        {
+            let st = self.state.borrow();
+            crate::common::input_trace::traced_history_step(&st.document, "undo", || {
+                st.document.undo()
+            });
+        }
         sync_cursor_signals(&self.state);
     }
 
@@ -1913,7 +1918,12 @@ impl RichTextEditor {
     /// Redo the most recently undone edit. Mirrors Ctrl+Y /
     /// Ctrl+Shift+Z. No-op when the redo stack is empty.
     pub fn redo(&self) {
-        let _ = self.state.borrow().document.redo();
+        {
+            let st = self.state.borrow();
+            crate::common::input_trace::traced_history_step(&st.document, "redo", || {
+                st.document.redo()
+            });
+        }
         sync_cursor_signals(&self.state);
     }
 
@@ -3588,7 +3598,12 @@ impl EditorHandle {
 
     /// Undo the most recent edit. No-op when the undo stack is empty.
     pub fn undo(&self) {
-        let _ = self.state.borrow().document.undo();
+        {
+            let st = self.state.borrow();
+            crate::common::input_trace::traced_history_step(&st.document, "undo", || {
+                st.document.undo()
+            });
+        }
         sync_cursor_signals(&self.state);
     }
 
@@ -3606,7 +3621,12 @@ impl EditorHandle {
     /// Redo the most recently undone edit. No-op when the redo stack
     /// is empty.
     pub fn redo(&self) {
-        let _ = self.state.borrow().document.redo();
+        {
+            let st = self.state.borrow();
+            crate::common::input_trace::traced_history_step(&st.document, "redo", || {
+                st.document.redo()
+            });
+        }
         sync_cursor_signals(&self.state);
     }
 
