@@ -8,6 +8,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use teksilo_canvas::SizeProposal;
 use teksilo_core::ImeOrigin;
@@ -173,16 +174,46 @@ fn the_batch_holds_back_what_the_application_sees() {
     let editor = Editor::with_text("abc");
     let caret = editor.handle.cursor_position_signal();
     let before = caret.get();
+    let changes = std::sync::Arc::new(AtomicUsize::new(0));
+    let _subscription = {
+        let changes = changes.clone();
+        editor.doc.on_change(move |_| {
+            changes.fetch_add(1, Ordering::Relaxed);
+        })
+    };
+    let start = editor.handle.revisions().unwrap().text;
+    // An index built before the batch, which its events would invalidate.
+    assert_eq!(editor.handle.utf16_index().unwrap().utf16_len(), 3);
     editor.edit(|e| {
         e.begin_input_batch();
-        e.replace_text(3..3, "d", WriteOptions::default()).unwrap();
+        e.replace_text(3..3, "d\u{1F600}", WriteOptions::default())
+            .unwrap();
         e.set_selection(0..1, false).unwrap();
     });
     assert!(editor.arrivals.borrow().is_empty(), "held back");
     assert_eq!(caret.get(), before, "the caret signal waits too");
+    assert_eq!(
+        changes.load(Ordering::Relaxed),
+        0,
+        "the document's events wait too"
+    );
+    assert_eq!(
+        editor.handle.utf16_index().unwrap().utf16_len(),
+        6,
+        "the input system reads its write back meanwhile"
+    );
     editor.edit(|e| e.end_input_batch());
-    assert_eq!(*editor.arrivals.borrow(), vec![(EditSource::Ime, 1)]);
+    assert_eq!(*editor.arrivals.borrow(), vec![(EditSource::Ime, 2)]);
     assert_eq!(caret.get(), 1);
+    assert!(
+        changes.load(Ordering::Relaxed) > 0,
+        "delivered as the batch ends"
+    );
+    assert_eq!(
+        editor.handle.text_changed_since(start).map(|c| c.cause),
+        Some(ChangeCause::InputSystem),
+        "and logged as the input system's"
+    );
 }
 
 /// Typing waiting for the frame tick makes the editor busy; inserting it

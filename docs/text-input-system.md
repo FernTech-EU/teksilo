@@ -246,7 +246,8 @@ and writes its composition into the document itself, then marks it
 the field's rules (filters, a length cap) wait for `end_composition`, which
 records the final text as one undo step. Writes come between
 `begin_input_batch` and `end_input_batch`; inside a batch the widget changes
-only its own state and holds back what the application would see. Every
+only its own state and holds back what the application would see, the
+document's own change events included (they arrive as the batch ends). Every
 method has a default that refuses, so a widget that implements none of it
 keeps the platform's other paths. The stock widgets implement it. For the
 platform to report changes back, `revisions` and `text_changed_since` say

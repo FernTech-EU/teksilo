@@ -167,7 +167,10 @@ impl TextInputDocument for EditorHandle {
     }
 
     fn utf16_index(&self) -> Option<Rc<Utf16Index>> {
-        self.with_typing_inserted(|st| st.utf16.index(&st.document))
+        self.with_typing_inserted(|st| {
+            st.utf16
+                .current_index(&st.document, st.input_system.batch.is_open())
+        })
     }
 
     fn flush_pending_input(&self) -> bool {

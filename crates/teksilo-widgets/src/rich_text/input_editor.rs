@@ -179,19 +179,21 @@ impl TextInputEditor for EditorHandle {
 
     fn begin_input_batch(&self) {
         if let Ok(st) = self.state.try_borrow() {
-            st.input_system.batch.begin();
+            st.input_system.batch.begin(&st.document);
         }
     }
 
     fn end_input_batch(&self) {
-        let Some(deferred) = self
-            .state
-            .try_borrow()
-            .ok()
-            .and_then(|st| st.input_system.batch.end())
-        else {
+        let Some((ended, marker)) = self.state.try_borrow().ok().and_then(|st| {
+            let ended = st.input_system.batch.end()?;
+            Some((ended, st.input_system.journal.marker()))
+        }) else {
             return;
         };
+        // The document's events, held since the batch began, go out first,
+        // as the input system's, with no borrow of the state held.
+        let deferred = ended.deferred;
+        marker.while_writing(|| drop(ended.hold));
         if let Ok(st) = self.state.try_borrow() {
             for (source, chars) in deferred.arrivals {
                 st.report_inserted_chars(source, chars);

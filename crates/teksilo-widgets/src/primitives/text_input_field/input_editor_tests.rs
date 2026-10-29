@@ -116,11 +116,17 @@ fn a_composition_meets_the_rules_only_as_it_ends() {
 #[test]
 fn the_batch_holds_back_the_arrivals() {
     let f = Field::new("ab", |field| field);
+    assert_eq!(f.read(|d| d.utf16_index()).unwrap().utf16_len(), 2);
     f.edit(|e| {
         e.begin_input_batch();
         e.replace_text(0..0, "x", WriteOptions::default()).unwrap();
     });
     assert!(f.arrivals.borrow().is_empty());
+    assert_eq!(
+        f.read(|d| d.utf16_index()).unwrap().utf16_len(),
+        3,
+        "the write is read back while the document's events are held"
+    );
     f.edit(|e| e.end_input_batch());
     assert_eq!(*f.arrivals.borrow(), vec![(EditSource::Ime, 1)]);
 }

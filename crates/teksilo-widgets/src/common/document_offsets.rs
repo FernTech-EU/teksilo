@@ -99,6 +99,23 @@ impl DocumentUtf16 {
         }
         index
     }
+
+    /// [`index`](Self::index), built afresh and not kept while the
+    /// document's events are held (an input batch,
+    /// [`InputBatch`](super::input_batch::InputBatch)): the subscription that
+    /// would say the text changed has not heard yet.
+    pub(crate) fn current_index(
+        &self,
+        document: &TextDocument,
+        events_held: bool,
+    ) -> Rc<Utf16Index> {
+        if events_held {
+            return Rc::new(Utf16Index::new(
+                &document.to_addressable_text().unwrap_or_default(),
+            ));
+        }
+        self.index(document)
+    }
 }
 
 /// Whether `event` may have changed the document's text.

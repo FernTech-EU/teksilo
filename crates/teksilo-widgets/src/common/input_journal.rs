@@ -187,9 +187,28 @@ impl DocumentJournal {
 
     /// Run `write`, the changes it makes logged as the input system's.
     pub(crate) fn input_system_write<R>(&self, write: impl FnOnce() -> R) -> R {
-        let outer = self.input_system.swap(true, Ordering::Relaxed);
+        self.marker().while_writing(write)
+    }
+
+    /// A handle that marks the input system's writes with no borrow of the
+    /// journal, for releasing the events a batch held back
+    /// ([`InputBatch`](super::input_batch::InputBatch)), which runs the
+    /// document's subscribers, the surface's own among them.
+    pub(crate) fn marker(&self) -> InputSystemMarker {
+        InputSystemMarker(self.input_system.clone())
+    }
+}
+
+/// See [`DocumentJournal::marker`].
+pub(crate) struct InputSystemMarker(Arc<AtomicBool>);
+
+impl InputSystemMarker {
+    /// Run `write`, the events delivered meanwhile logged as the input
+    /// system's.
+    pub(crate) fn while_writing<R>(&self, write: impl FnOnce() -> R) -> R {
+        let outer = self.0.swap(true, Ordering::Relaxed);
         let result = write();
-        self.input_system.store(outer, Ordering::Relaxed);
+        self.0.store(outer, Ordering::Relaxed);
         result
     }
 }
