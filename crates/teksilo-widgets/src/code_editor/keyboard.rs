@@ -61,18 +61,35 @@ pub(super) fn handle_key(
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
-    if let WidgetEvent::ImeComposition { text, .. } = event {
-        return handle_ime_composition(state, ctx, text);
+    if let WidgetEvent::ImeComposition {
+        text, replacement, ..
+    } = event
+    {
+        return handle_ime_composition(state, ctx, text, replacement.as_ref());
     }
-    if let WidgetEvent::ImeCommit { text, .. } = event {
+    if let WidgetEvent::ImeCommit {
+        text, replacement, ..
+    } = event
+    {
         // The commit of a composition takes its place; text with no
-        // composition before it is batched like typing.
+        // composition before it is batched like typing, or replaces the
+        // range the input system named.
         let composing = {
             let mut guard = state.borrow_mut();
             let st = &mut *guard;
             st.composition.reconcile(&st.document);
             st.composition.is_held(&st.document)
         };
+        if let Some(range) = replacement {
+            if composing {
+                // A range the commit names is read against the text without
+                // the composition.
+                let mut guard = state.borrow_mut();
+                let st = &mut *guard;
+                st.composition.cancel(&st.document);
+            }
+            return replace_from_input_system(state, ctx, text, range.clone());
+        }
         if composing {
             return commit_composition(state, ctx, text);
         }
@@ -904,6 +921,7 @@ fn handle_ime_composition(
     state: &SharedState,
     ctx: &mut EventContext,
     text: &str,
+    replacement: Option<&std::ops::Range<usize>>,
 ) -> EventResponse {
     let filter = state.borrow().policy.command_filter;
     if !filter.accepts(CodeCommand::InsertChar) {
@@ -937,10 +955,22 @@ fn handle_ime_composition(
         // is none, unless keys typed during it, and it is then started again.
         super::frame_loop::flush_pending_chars(st);
         st.composition.reconcile(&st.document);
+        st.clear_extra_carets();
         if !st.composition.is_live(&st.document) {
             st.composition.begin(&st.document);
+            // The first update of a composition that takes the place of text
+            // already in the editor (Korean Hanja conversion): shown over that
+            // text, which a cancel puts back.
+            if let Some(range) = replacement {
+                let end_of_text = crate::common::document_offsets::document_end(&st.document);
+                let start = range.start.min(end_of_text);
+                let end = range.end.min(end_of_text).max(start);
+                st.cursor
+                    .set_position(start, teksilo_text::text_document::MoveMode::MoveAnchor);
+                st.cursor
+                    .set_position(end, teksilo_text::text_document::MoveMode::KeepAnchor);
+            }
         }
-        st.clear_extra_carets();
         st.composition.show(&st.document, &st.cursor, &clean);
         st.preferred_x = None;
         st.cursor_affinity = teksilo_text::CursorAffinity::Downstream;
@@ -981,6 +1011,53 @@ fn commit_composition(state: &SharedState, ctx: &mut EventContext, text: &str) -
         let clean: String = text.chars().filter(|c| !c.is_control()).collect();
         st.composition
             .commit(&st.document, &st.cursor, &clean, false);
+        st.preferred_x = None;
+        st.cursor_affinity = teksilo_text::CursorAffinity::Downstream;
+        st.pending_text_changed = true;
+    }
+    report_ime_cursor_area(state, ctx);
+    ctx.request_frame();
+    EventResponse::Handled
+}
+
+/// Text the input system commits over a range it names (the accent popup
+/// replacing the letter it was held on, Korean Hanja over a committed
+/// syllable): the typing batched before it lands first, then the range is
+/// replaced, one undo step, as a paste of code (one paragraph per line).
+fn replace_from_input_system(
+    state: &SharedState,
+    ctx: &mut EventContext,
+    text: &str,
+    range: std::ops::Range<usize>,
+) -> EventResponse {
+    {
+        let mut guard = state.borrow_mut();
+        let st = &mut *guard;
+        if !st.policy.command_filter.accepts(CodeCommand::InsertChar) {
+            return EventResponse::Ignored;
+        }
+        super::frame_loop::flush_pending_chars(st);
+        st.clear_extra_carets();
+        let end_of_text = crate::common::document_offsets::document_end(&st.document);
+        let start = range.start.min(end_of_text);
+        let end = range.end.min(end_of_text).max(start);
+        let clean: String = text
+            .chars()
+            .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+            .collect();
+        st.cursor
+            .set_position(start, teksilo_text::text_document::MoveMode::MoveAnchor);
+        st.cursor
+            .set_position(end, teksilo_text::text_document::MoveMode::KeepAnchor);
+        st.cursor.begin_edit_block();
+        if clean.is_empty() {
+            if start < end {
+                let _ = st.cursor.remove_selected_text();
+            }
+        } else {
+            super::clipboard::insert_multiline(&st.cursor, &clean);
+        }
+        st.cursor.end_edit_block();
         st.preferred_x = None;
         st.cursor_affinity = teksilo_text::CursorAffinity::Downstream;
         st.pending_text_changed = true;

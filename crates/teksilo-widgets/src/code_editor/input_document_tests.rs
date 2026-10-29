@@ -220,3 +220,45 @@ fn the_composition_is_underlined_clause_by_clause() {
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert_eq!(lines[0].width, 1.0);
 }
+
+/// Now that the editor describes its document, the macOS input system names
+/// ranges in it: a commit over a range replaces it (the accent popup's
+/// letter), and a composition over one shows in its place (Korean Hanja),
+/// as in the text fields.
+#[test]
+fn a_range_the_input_system_names_is_replaced() {
+    let mut editor = Editor::with_text("cafe;");
+    editor.tree.dispatch_event_with_ops(
+        WidgetEvent::ImeCommit {
+            text: "\u{E9}".into(),
+            origin: ImeOrigin::Insertion,
+            replacement: Some(3..4),
+        },
+        &mut editor.ops,
+    );
+    editor.settle();
+    assert_eq!(editor.text(), "caf\u{E9};");
+
+    let mut hanja = Editor::with_text("\u{D55C};");
+    hanja.tree.dispatch_event_with_ops(
+        WidgetEvent::ImeComposition {
+            text: "\u{97D3}".into(),
+            cursor: None,
+            replacement: Some(0..1),
+        },
+        &mut hanja.ops,
+    );
+    hanja.settle();
+    assert_eq!(hanja.text(), "\u{97D3};", "in place of the syllable");
+    hanja
+        .tree
+        .dispatch_event_with_ops(WidgetEvent::ime_commit("\u{97D3}"), &mut hanja.ops);
+    hanja.settle();
+    assert_eq!(hanja.text(), "\u{97D3};");
+    hanja.doc.undo().unwrap();
+    assert_eq!(
+        hanja.text(),
+        "\u{D55C};",
+        "one undo gives the syllable back"
+    );
+}
