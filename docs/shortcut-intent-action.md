@@ -993,13 +993,15 @@ exist only while an editor that runs them does.
 | Italic | `format.italic` | `Ctrl+I` | `RichTextEditor` |
 | Underline | `format.underline` | `Ctrl+U` | `RichTextEditor` |
 | Insert Paragraph | `format.insert_paragraph` | `Ctrl+Enter` | `RichTextEditor` |
-| Toggle Comment | `code.toggle_comment` | `Ctrl+/` and `Ctrl+Shift+/` | `CodeEditor` |
+| Toggle Comment | `code.toggle_comment` | `Ctrl+/` | `CodeEditor` |
 | Duplicate | `code.duplicate` | `Ctrl+D` | `CodeEditor` |
 
 The ids are on
 [`FormatShortcut` and `CodeShortcut`](../crates/teksilo-widgets/src/editor_shortcuts.rs).
-`Ctrl+Shift+/` is there for the layouts that type `/` with Shift (AZERTY,
-German): the chord arrives with Shift held. Each editable editor declares its
+On a layout that types `/` with Shift (AZERTY, German) the chord arrives with
+Shift held and still matches: the registry tries a punctuation chord again
+without Shift when nothing matches as pressed, and never for a letter or
+digit, so Ctrl+Shift+D stays apart from Ctrl+D. Each editable editor declares its
 set with `BuildContext::register_shortcut_shared`, so `ShortcutSettings`
 lists Bold under Format only in an application that has a rich-text editor,
 and a read-only viewer declares nothing.

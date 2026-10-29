@@ -97,6 +97,22 @@ impl KeyStroke {
         Self::new(key, Modifiers::ALT)
     }
 
+    /// This chord without its Shift, when the key is a punctuation character
+    /// pressed with Shift and another modifier: the form a shortcut declared
+    /// for a layout that types the character unshifted is written in. `None`
+    /// for any other chord. Letters and digits keep their Shift, since
+    /// Ctrl+Shift+S is not Ctrl+S, and Shift alone is typing, not a chord.
+    pub(crate) fn without_shift_for_punctuation(self) -> Option<Self> {
+        let Key::Character(c) = self.key else {
+            return None;
+        };
+        let others = self.modifiers.without(Modifiers::SHIFT);
+        if !self.modifiers.shift() || others == Modifiers::NONE || c.is_alphanumeric() {
+            return None;
+        }
+        Some(Self::new(self.key, others))
+    }
+
     /// This chord with a declared `Ctrl` reinterpreted as the platform's
     /// primary accelerator ([`Modifiers::COMMAND`]) — ⌘ on macOS, unchanged
     /// everywhere else.
@@ -1140,12 +1156,33 @@ impl ShortcutRegistry {
     /// wins). Resolving that needs the widget tree (descendant checks),
     /// which the registry can't see — so it hands back all candidates
     /// and the dispatcher selects with focus in hand.
+    ///
+    /// A chord is matched as the key produced it first. Only when nothing
+    /// matches, and the key is a punctuation character pressed with Shift and
+    /// another modifier, the chord is tried again without Shift: on a layout
+    /// where `/` is typed with Shift (AZERTY, French-PC), ⌘/ reaches the app
+    /// as ⌘⇧ with the character `/`, and the shortcut declared as ⌘/ is the
+    /// one meant. This is what Qt and AppKit do for key equivalents such as
+    /// ⌘/ and ⌘?. Letters are never relaxed, so Ctrl+Shift+letter chords stay
+    /// apart from Ctrl+letter.
     pub fn matches_by_keystroke(
         &self,
         keystroke: KeyStroke,
     ) -> impl Iterator<Item = EffectiveShortcut<'_>> {
-        self.iter_effective()
-            .filter(move |s| s.enabled && s.matches(keystroke))
+        let exact: Vec<_> = self
+            .iter_effective()
+            .filter(|s| s.enabled && s.matches(keystroke))
+            .collect();
+        if exact.is_empty()
+            && let Some(relaxed) = keystroke.without_shift_for_punctuation()
+        {
+            return self
+                .iter_effective()
+                .filter(|s| s.enabled && s.matches(relaxed))
+                .collect::<Vec<_>>()
+                .into_iter();
+        }
+        exact.into_iter()
     }
 
     /// First effective shortcut whose primary or secondary keystroke
@@ -1512,6 +1549,81 @@ mod tests {
                 .map(|s| s.shortcut.id),
             Some("app.save")
         );
+    }
+
+    // --- Registry: a punctuation chord typed with Shift --------------
+
+    #[test]
+    fn a_punctuation_chord_typed_with_shift_matches_the_unshifted_declaration() {
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("code.toggle_comment")
+                .primary(KeyStroke::command(Key::Character('/')))
+                .build(),
+        );
+        // French-PC: `/` is Shift+`:`, so the accelerator + `/` arrives with
+        // Shift held and the logical character `/`.
+        let french = KeyStroke::command_shift(Key::Character('/'));
+        assert_eq!(
+            reg.find_by_keystroke(french).map(|s| s.shortcut.id),
+            Some("code.toggle_comment")
+        );
+        // The unshifted chord still matches.
+        assert!(
+            reg.find_by_keystroke(KeyStroke::command(Key::Character('/')))
+                .is_some()
+        );
+        // Shift alone is typing, not a chord.
+        assert!(
+            reg.find_by_keystroke(KeyStroke::new(Key::Character('/'), Modifiers::SHIFT))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn shift_is_never_ignored_for_a_letter_or_digit() {
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("a.plain")
+                .primary(KeyStroke::command(Key::D))
+                .build(),
+        );
+        reg.register(
+            Shortcut::new("a.digit")
+                .primary(KeyStroke::command(Key::Character('1')))
+                .build(),
+        );
+        assert!(
+            reg.find_by_keystroke(KeyStroke::command_shift(Key::D))
+                .is_none()
+        );
+        assert!(
+            reg.find_by_keystroke(KeyStroke::new(
+                Key::Character('1'),
+                Modifiers::COMMAND | Modifiers::SHIFT
+            ))
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn an_exact_shifted_declaration_wins_over_the_relaxed_one() {
+        let mut reg = ShortcutRegistry::new();
+        reg.register(
+            Shortcut::new("a.plain")
+                .primary(KeyStroke::command(Key::Character('/')))
+                .build(),
+        );
+        reg.register(
+            Shortcut::new("a.shifted")
+                .primary(KeyStroke::command_shift(Key::Character('/')))
+                .build(),
+        );
+        let ids: Vec<_> = reg
+            .matches_by_keystroke(KeyStroke::command_shift(Key::Character('/')))
+            .map(|s| s.shortcut.id)
+            .collect();
+        assert_eq!(ids, ["a.shifted"]);
     }
 
     // --- Registry: owner indexing & cleanup ----------------------------

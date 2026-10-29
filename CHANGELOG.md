@@ -237,6 +237,12 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A shortcut declared on a punctuation key still fires on a layout that
+  types it with Shift.** Ctrl+/ (⌘/ on macOS) toggled a `CodeEditor`'s
+  comment only where `/` is a key of its own; on French-PC, where it is
+  Shift+`:`, nothing happened. A chord that matches nothing as pressed is now
+  tried again without Shift when its key is punctuation. Letters and digits
+  keep their Shift, so Ctrl+Shift+D is not Ctrl+D.
 - **In a `CodeEditor`, Up, Down, Page Up and Page Down keep the column.**
   They went to column 0 of the line they reached. The caret now holds its
   horizontal place through a run of vertical moves, across shorter lines and

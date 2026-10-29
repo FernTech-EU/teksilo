@@ -150,7 +150,7 @@ pub enum CodeShortcut { /* variants */ }
 
 ### Variants
 
-- **`ToggleComment`** — `code.toggle_comment`, Ctrl+/ (⌘/ on macOS), and Ctrl+Shift+/ for the layouts that type `/` with Shift (AZERTY, German).
+- **`ToggleComment`** — `code.toggle_comment`, Ctrl+/ (⌘/ on macOS). On a layout that types `/` with Shift (AZERTY, German) the chord arrives with Shift held and still matches: the registry ignores Shift for a punctuation key.
 - **`Duplicate`** — `code.duplicate`, Ctrl+D (⌘D on macOS): the caret's line, or the selection, below itself.
 
 ### Methods

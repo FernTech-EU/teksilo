@@ -21,7 +21,7 @@
 //! An application that binds one of these chords to a global shortcut of its
 //! own shares it with the editor's while an editor exists.
 
-use teksilo_core::event::{Key, Modifiers};
+use teksilo_core::event::Key;
 use teksilo_core::shortcut::{KeyStroke, Shortcut};
 use teksilo_i18n::{LocalizedString, tr_widget};
 
@@ -99,8 +99,9 @@ impl FormatShortcut {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum CodeShortcut {
-    /// `code.toggle_comment`, Ctrl+/ (⌘/ on macOS), and Ctrl+Shift+/ for the
-    /// layouts that type `/` with Shift (AZERTY, German).
+    /// `code.toggle_comment`, Ctrl+/ (⌘/ on macOS). On a layout that types `/`
+    /// with Shift (AZERTY, German) the chord arrives with Shift held and still
+    /// matches: the registry ignores Shift for a punctuation key.
     ToggleComment,
     /// `code.duplicate`, Ctrl+D (⌘D on macOS): the caret's line, or the
     /// selection, below itself.
@@ -136,13 +137,6 @@ impl CodeShortcut {
                 category(),
             )
             .primary(KeyStroke::ctrl(Key::Character('/')))
-            // A layout that types `/` with Shift reports the chord with Shift
-            // held; on one that does not, Shift+/ types `?` and this never
-            // matches.
-            .secondary(KeyStroke::new(
-                Key::Character('/'),
-                Modifiers::CTRL | Modifiers::SHIFT,
-            ))
             .build(),
             CodeShortcut::Duplicate => described(
                 self.id(),
@@ -183,5 +177,25 @@ mod tests {
             assert_eq!(command.shortcut().id, command.id());
         }
         assert_eq!(FormatShortcut::from_id("code.duplicate"), None);
+    }
+
+    #[test]
+    fn toggle_comment_matches_a_layout_that_types_slash_with_shift() {
+        let mut registry = teksilo_core::shortcut::ShortcutRegistry::new();
+        registry.register(CodeShortcut::ToggleComment.shortcut());
+        // French-PC: `/` is Shift+`:`, so the accelerator + `/` arrives with
+        // Shift held and the logical character `/`.
+        let french = KeyStroke::command_shift(Key::Character('/'));
+        assert_eq!(
+            registry.find_by_keystroke(french).map(|s| s.shortcut.id),
+            Some("code.toggle_comment")
+        );
+        // Ctrl+Shift+D is not Ctrl+D.
+        registry.register(CodeShortcut::Duplicate.shortcut());
+        assert!(
+            registry
+                .find_by_keystroke(KeyStroke::command_shift(Key::D))
+                .is_none()
+        );
     }
 }
