@@ -571,6 +571,22 @@ cannot compose breaks every IME.
   written composition ends, its text kept, before a key passed on, a press, an edit command and a
   focus change (the IMM path's preedit is still discarded on focus loss). **`TeksiloAppBuilder::
   windows_text_store(bool)`**, off by default; `TEKSILO_TSF` overrides it (`0` off, `1` on).
+  Measured (`tsf-phase-4-windows-findings.md`): no FAIL. The password context answers scope 31 and
+  the touch keyboard shows its password layout; attribution, `CodeEditor` through the store and
+  `TEKSILO_TSF=0` pass. **The touch keyboard showed suggestions in a field** (a misspelt "the": the, ten, tea,
+  tee) without autocorrecting, the store setting neither TKB flag. The facts: the flags say a
+  document *supports* the keyboard's autocorrection and suggestions (`TS_STATUS`), so leaving them
+  out is not "off"; the keyboard types by injecting keys (`WM_KEYDOWN src=keyboard/system`) and
+  shows its own suggestions from the input scope; Chromium's store sets neither flag and answers
+  `IS_DEFAULT` (or `IS_PRIVATE` when it must not learn), and Firefox's source does not use them;
+  Microsoft documents
+  `SearchIncremental` (`IS_SEARCH_INCREMENTAL`, 52) as the default layout with text prediction and
+  autocorrection always off, and `IS_DEFAULT` with them on. So a field's store now answers
+  `IS_SEARCH_INCREMENTAL` until a field can ask for suggestions. To measure: whether the input
+  methods treat that scope differently (the Microsoft Japanese IME's own predictions). The GUID
+  `D5138268-A1BF-4308-BCBF-2E739398E234` a text service asks as a supported attribute (no
+  `RetrieveRequestedAttrs` follows) is in no public header; the store does not answer it.
+  `CodeEditor` now draws its composition's underline, clause by clause, as the other two widgets do.
 
 Total: **6,000 to 9,000 lines with tests**, plus an open tail of TIP-specific workarounds. For scale:
 Chromium's TSF code is about 3,050 lines without tests, with the composition bookkeeping done by

@@ -33,7 +33,8 @@ by crate for clarity, not because crates version independently.
   undo step, its clauses underlined), and are told of its changes; a press or
   a focus change ends a composition with the input method's last text.
   Read-only fields are presented as such, and a password field as one (the
-  touch keyboard's password layout). `CodeEditor` takes part too. The
+  touch keyboard's password layout); the touch keyboard's suggestions and
+  autocorrection are off. `CodeEditor` takes part too. The
   environment variable `TEKSILO_TSF` overrides the choice for diagnosis (`0`
   off, `1` on).
 - **Windows: a text field answers the input method's questions about its
@@ -150,7 +151,8 @@ by crate for clarity, not because crates version independently.
   the macOS input system's questions about its text are answered, and on
   Windows it takes the TSF text store when that is on. A composition the input
   system writes ends, its text kept, before a key it passes on, a press, an
-  edit command or a focus change.
+  edit command or a focus change. Its composition is now underlined, clause
+  by clause, as in the other text widgets.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.
