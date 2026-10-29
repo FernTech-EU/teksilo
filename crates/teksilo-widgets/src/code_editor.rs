@@ -370,6 +370,18 @@ impl Widget for CodeEditorBody {
             engine.with_render_cursor_only(paint_closure);
         }
 
+        // The composition's underline, clause by clause, as the rich editor
+        // and the text field draw it, inside the text clip.
+        let color = ctx.theme.colors.text_primary;
+        for stroke in input_document::composition_strokes(&st) {
+            canvas.draw_line(
+                Point::new(stroke.x0, stroke.y),
+                Point::new(stroke.x1, stroke.y),
+                color,
+                teksilo_canvas::StrokeStyle::solid(stroke.width),
+            );
+        }
+
         canvas.clear_clip();
     }
 

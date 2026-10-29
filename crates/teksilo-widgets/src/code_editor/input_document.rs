@@ -437,3 +437,78 @@ pub(super) fn finish_written_composition(state: &SharedState, ctx: &mut EventCon
     ctx.request_frame();
     true
 }
+
+/// One stroke of a composition's underline, in window space: from `x0` to
+/// `x1` at `y`, `width` thick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct UnderlineStroke {
+    pub(crate) x0: f32,
+    pub(crate) x1: f32,
+    pub(crate) y: f32,
+    pub(crate) width: f32,
+}
+
+/// The strokes the composition is underlined with, as the rich editor and
+/// the text field draw it: one line per clause the input system marked (the
+/// clause being converted twice as thick, several clauses a little short at
+/// both ends), one thin line for a composition with none (the IMM path's),
+/// split where a clause wraps. Empty with no composition shown, or before
+/// the layout.
+pub(crate) fn composition_strokes(st: &CodeEditorState) -> Vec<UnderlineStroke> {
+    let Some(range) = st
+        .composition
+        .range(&st.document)
+        .filter(|range| !range.is_empty())
+        .filter(|_| st.shows_transient_edits())
+    else {
+        return Vec::new();
+    };
+    if !st.engine.has_full_layout() {
+        return Vec::new();
+    }
+    let lines = crate::common::input_editor::composition_underlines(
+        range,
+        &st.input_system.segments.borrow(),
+    );
+    let mut strokes = Vec::new();
+    for line in lines {
+        let width = if line.thick { 2.0 } else { 1.0 };
+        let inset = if line.inset { 1.0 } else { 0.0 };
+        // (x where the stroke starts, last x, y of its line, line height)
+        let mut current: Option<(f32, f32, f32, f32)> = None;
+        let mut first = true;
+        for p in line.range.start..=line.range.end {
+            let c = to_window(
+                st,
+                st.engine
+                    .caret_rect(st.shown_position(p), CursorAffinity::Downstream),
+            );
+            match current {
+                Some((x0, last, y, h)) if (c.y - y).abs() > 0.5 => {
+                    strokes.push(UnderlineStroke {
+                        x0,
+                        x1: last,
+                        y: y + h - width,
+                        width,
+                    });
+                    current = Some((c.x, c.x, c.y, c.height));
+                }
+                Some((x0, _, y, h)) => current = Some((x0, c.x, y, h)),
+                None => {
+                    let start = if first { c.x + inset } else { c.x };
+                    current = Some((start, c.x, c.y, c.height));
+                }
+            }
+            first = false;
+        }
+        if let Some((x0, last, y, h)) = current {
+            strokes.push(UnderlineStroke {
+                x0,
+                x1: last - inset,
+                y: y + h - width,
+                width,
+            });
+        }
+    }
+    strokes
+}

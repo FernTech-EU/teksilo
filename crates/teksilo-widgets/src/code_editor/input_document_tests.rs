@@ -159,3 +159,64 @@ fn a_composition_the_input_system_ends_is_its_commit() {
     assert_eq!(editor.text(), "a\u{AC00}");
     assert_eq!(editor.read(|d| d.composition_range()), None);
 }
+
+/// The paint draws the composition's underline from the same clauses the
+/// rich editor and the text field draw: a thick line under the clause being
+/// converted, a thin one under the rest, and one thin line for the IMM
+/// path's composition.
+#[test]
+fn the_composition_is_underlined_clause_by_clause() {
+    use teksilo_core::text_input_document::{CompositionSegment, SegmentStyle};
+    let mut editor = Editor::with_text("x = ;");
+    let strokes =
+        |editor: &Editor| super::input_document::composition_strokes(&editor.handle.state.borrow());
+    assert!(strokes(&editor).is_empty(), "no composition, no line");
+    editor.edit(|e| {
+        e.mark_composition(4..4, &[]).unwrap();
+        e.replace_text(4..4, "\u{79C1}\u{306F}\u{65E5}", WriteOptions::default())
+            .unwrap();
+        e.mark_composition(
+            4..7,
+            &[
+                CompositionSegment {
+                    range: 4..6,
+                    style: SegmentStyle::Target,
+                },
+                CompositionSegment {
+                    range: 6..7,
+                    style: SegmentStyle::Converted,
+                },
+            ],
+        )
+        .unwrap();
+    });
+    editor.settle();
+    let lines = strokes(&editor);
+    assert_eq!(
+        lines.iter().map(|s| s.width).collect::<Vec<_>>(),
+        vec![2.0, 1.0],
+        "{lines:?}"
+    );
+    assert!(lines[0].x1 <= lines[1].x0, "in order, apart: {lines:?}");
+    assert!(lines.iter().all(|s| s.x1 > s.x0));
+
+    // The IMM path's composition: one thin line.
+    let mut imm = Editor::with_text("x = ;");
+    imm.handle
+        .state
+        .borrow()
+        .cursor
+        .set_position(4, teksilo_text::text_document::MoveMode::MoveAnchor);
+    imm.tree.dispatch_event_with_ops(
+        WidgetEvent::ImeComposition {
+            text: "\u{306B}\u{307B}".into(),
+            cursor: None,
+            replacement: None,
+        },
+        &mut imm.ops,
+    );
+    imm.settle();
+    let lines = strokes(&imm);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0].width, 1.0);
+}
