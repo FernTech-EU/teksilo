@@ -531,6 +531,18 @@ cannot compose breaks every IME.
   through the same sink. Reports are no longer held back during a composition: the text is the
   field's now, so a change the field makes under one (its caret moved) is reported and lets the
   text service end it.
+  Measured (`tsf-phase-2-windows-findings.md`): no hang, crash, lost or doubled key; every
+  composition accepted and ended; clicks, focus changes, Down after Space (Notepad's behaviour),
+  the emoji panel, Alt+`, bursts, the secure and read-only fields and the IMM path pass. Fixed
+  after it: a caret at a soft line break is answered at the start of the next line, where it is
+  drawn (the reconversion list opened at the end of the previous line); a selection the IME sets
+  is followed by `OnLayoutChange`, since the rectangles it would read moved; a pen press ends the
+  composition before it is dispatched, as a mouse press and a contact do. Open: an undo right
+  after a commit did nothing three times in about fifteen, until the caret moved (not reproduced
+  headlessly; the widgets now trace what an undo did under `TEKSILO_TEXT_INPUT_TRACE`), and the
+  Microsoft IME's cancel of a reconversion it started itself first wrote the text before the word
+  back over the word (the reads it made are answered from the document and match its
+  addressable text; `GetText` now traces what it answered).
 - **Phase 4** (about 500 lines). Attribution (5), touch keyboard flags, a document for `CodeEditor`,
   macOS's `insertText:` onto the write half.
 

@@ -213,10 +213,15 @@ fn end_store_composition_before_press(
         WindowEvent::Touch(touch) => touch.phase == winit::event::TouchPhase::Started,
         _ => false,
     };
-    if press
-        && chrome.text_store_mode() != TextStoreMode::Off
-        && chrome.terminate_text_store_composition()
-    {
+    if press {
+        end_store_composition(chrome, tree);
+    }
+}
+
+/// End the text store's composition, if one is open, and lay the window out
+/// on what the text service left.
+fn end_store_composition(chrome: &mut dyn InputChrome, tree: &mut WidgetTree) {
+    if chrome.text_store_mode() != TextStoreMode::Off && chrome.terminate_text_store_composition() {
         let proposal = tree.last_proposal();
         tree.layout(proposal);
     }
@@ -234,7 +239,14 @@ pub(crate) fn pump_pen(
     tree: &mut WidgetTree,
     ops: &mut dyn WindowOps,
 ) -> bool {
-    let produced = crate::input_routing::route_pen(backend, tree, ops);
+    let samples = crate::input_routing::poll_pen(backend, tree);
+    let produced = !samples.is_empty();
+    // A pen going down ends the text store's composition first, as a mouse
+    // button or a contact does.
+    if crate::input_routing::has_press(&samples) {
+        end_store_composition(chrome, tree);
+    }
+    crate::input_routing::route_pen_samples(tree, ops, samples);
     if produced {
         chrome.request_redraw("pen");
     }
@@ -1776,6 +1788,34 @@ mod tests {
             "an empty poll asks for nothing"
         );
         assert_eq!(log.borrow().phases.len(), before);
+    }
+
+    /// A pen going down ends the text store's composition first, as a mouse
+    /// press does; a pen hovering does not.
+    #[test]
+    fn a_pen_press_ends_the_text_stores_composition() {
+        let (mut tree, _log) = tree_with_log();
+        let mut backend = backend();
+        let mut ops = NoopWindowOps;
+        let mut chrome = Chrome {
+            store_mode: Some(TextStoreMode::Store),
+            composing: true,
+            ..Chrome::default()
+        };
+        backend.set_pen_source(Box::new(FakePen {
+            packets: vec![pen_packet(120.0, 90.0, false)],
+            caps: teksilo_platform::PenCaps::FULL_PEN,
+            off_thread: true,
+        }));
+        pump_pen(&mut chrome, &mut backend, &mut tree, &mut ops);
+        assert_eq!(chrome.terminated, 0, "hovering ends nothing");
+        backend.set_pen_source(Box::new(FakePen {
+            packets: vec![pen_packet(120.0, 90.0, true)],
+            caps: teksilo_platform::PenCaps::FULL_PEN,
+            off_thread: true,
+        }));
+        pump_pen(&mut chrome, &mut backend, &mut tree, &mut ops);
+        assert_eq!(chrome.terminated, 1, "the press does");
     }
 
     #[test]

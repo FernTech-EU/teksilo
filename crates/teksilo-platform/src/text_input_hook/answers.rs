@@ -247,7 +247,9 @@ pub(crate) fn union_rect_in_visible_selection(document: &dyn TextInputDocument) 
 
 /// TSF's `GetTextExt`: the bounding box of the lines of `range`
 /// (characters), window-logical, clipped to the visible text, and whether
-/// any of it was cut off; the caret's rectangle for an empty range. A range
+/// any of it was cut off; the caret's rectangle for an empty range, drawn
+/// downstream at a soft line break (at the start of the next line, where a
+/// caret placed there is drawn, not at the end of the line it ends). A range
 /// none of which is visible is answered whole, as cut off, so a candidate
 /// window still opens next to it. At most [`MAX_UNION_LINES`] lines are
 /// walked. `None` when the document cannot place the range's first line.
@@ -257,7 +259,19 @@ pub(crate) fn range_rect(
 ) -> Option<(Rect, bool)> {
     let mut union: Option<Rect> = None;
     if range.is_empty() {
-        union = Some(document.first_line_rect(range)?.rect);
+        let at = range.start;
+        let caret = document.first_line_rect(at..at)?.rect;
+        // The character after the caret, when it starts another visual
+        // line: the caret is at a soft line break.
+        let next = document
+            .first_line_rect(at..at + 1)
+            .filter(|next| next.covered.start == at && !next.covered.is_empty())
+            .map(|next| next.rect)
+            .filter(|next| (next.y - caret.y).abs() > 0.5);
+        union = Some(match next {
+            Some(next) => Rect::new(next.x, next.y, caret.width, next.height),
+            None => caret,
+        });
     } else {
         let mut start = range.start;
         for _ in 0..MAX_UNION_LINES {
@@ -351,6 +365,9 @@ mod tests {
         editable: bool,
         writing_tools: bool,
         busy: bool,
+        /// A caret at a line's end is placed at the end of that line
+        /// (upstream), as a wrapping editor places it.
+        upstream: bool,
         lines_asked: Cell<usize>,
     }
 
@@ -368,6 +385,7 @@ mod tests {
                 editable: true,
                 writing_tools: true,
                 busy: false,
+                upstream: false,
                 lines_asked: Cell::new(0),
             }
         }
@@ -416,6 +434,13 @@ mod tests {
             let end = range.end.min(self.len());
             let start = range.start.min(end);
             let (x, y) = self.place(start);
+            if start == end && self.upstream && start > 0 && start.is_multiple_of(self.per_line) {
+                let (x, y) = self.place(start - 1);
+                return Some(FirstLineRect {
+                    rect: Rect::new(x + 10.0, y, 1.0, 20.0),
+                    covered: start..start,
+                });
+            }
             if start == end {
                 return Some(FirstLineRect {
                     rect: Rect::new(x, y, 1.0, 20.0),
@@ -611,6 +636,30 @@ mod tests {
         );
         document.busy = true;
         assert_eq!(range_rect(&document, 3..5), None);
+    }
+
+    /// A caret at a soft line break is answered at the start of the next
+    /// line, where a caret placed there is drawn; one at the end of the text
+    /// stays where it is.
+    #[test]
+    fn a_caret_at_a_soft_line_break_is_answered_downstream() {
+        let mut document = Grid::new(&"x".repeat(25));
+        document.upstream = true;
+        assert_eq!(
+            range_rect(&document, 10..10),
+            Some((Rect::new(0.0, 20.0, 1.0, 20.0), false)),
+            "the start of the second line, not the end of the first"
+        );
+        assert_eq!(
+            range_rect(&document, 5..5),
+            Some((Rect::new(50.0, 0.0, 1.0, 20.0), false)),
+            "inside a line: the caret"
+        );
+        assert_eq!(
+            range_rect(&document, 25..25),
+            Some((Rect::new(50.0, 40.0, 1.0, 20.0), false)),
+            "at the end of the text: the caret"
+        );
     }
 
     #[test]

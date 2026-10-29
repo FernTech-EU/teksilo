@@ -250,25 +250,38 @@ pub(crate) fn route_input_event(
     true
 }
 
-/// Drain the pen shim and route whatever it buffered.
+/// Drain the pen shim: what it buffered, translated; empty without a pen
+/// source. [`route_pen_samples`] routes it.
 ///
 /// Separate from [`route_input_event`] because a digitizer packet is not a
-/// winit event: the shim collects packets on its own — on its own thread under
-/// Wayland, from the window's message stream on Windows — and this is the pump
-/// that asks it what it has.
-pub(crate) fn route_pen(
+/// winit event: the shim collects packets on its own (on its own thread under
+/// Wayland, from the window's message stream on Windows) and this is the pump
+/// that asks it what it has. Polling and routing are two steps so that the
+/// loop can end a text store's composition before a pen press is routed.
+pub(crate) fn poll_pen(
     backend: &mut teksilo_platform::TranslationState,
+    tree: &WidgetTree,
+) -> Vec<InputSample> {
+    if !backend.has_pen_source() {
+        return Vec::new();
+    }
+    backend.poll_pen(tree.input_now())
+}
+
+/// Route samples [`poll_pen`] produced.
+pub(crate) fn route_pen_samples(
     tree: &mut WidgetTree,
     ops: &mut dyn WindowOps,
-) -> bool {
-    if !backend.has_pen_source() {
-        return false;
-    }
-    let now = tree.input_now();
-    let samples = backend.poll_pen(now);
-    let produced = !samples.is_empty();
+    samples: Vec<InputSample>,
+) {
     route_samples(tree, ops, samples);
-    produced
+}
+
+/// Whether `samples` hold a pen (or any pointer) going down.
+pub(crate) fn has_press(samples: &[InputSample]) -> bool {
+    samples.iter().any(|sample| {
+        matches!(sample, InputSample::Pointer(p) if p.phase == teksilo_core::pointer::PointerPhase::Down)
+    })
 }
 
 /// Revoke every live pointer, at both ends.

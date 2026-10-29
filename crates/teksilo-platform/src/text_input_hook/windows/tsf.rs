@@ -912,12 +912,17 @@ impl StoreState {
                 change
             }
         };
-        // The one a text service's write left is its own and not told back.
+        // The one a text service's write left is its own and not told back;
+        // where it moved the selection, what the rectangles answer changed,
+        // and a text service that asks none of them again (a reconversion
+        // the IME starts by selecting the word) is told the layout changed.
         let known = inner.store_selection.take() == Some((selection16.clone(), caret_at_start));
         inner
             .mirror
             .follow_selection(selection16.clone(), caret_at_start);
-        let moved = (selection16, caret_at_start) != before && !known;
+        let elsewhere = (selection16, caret_at_start) != before;
+        let moved = elsewhere && !known;
+        let layout_for_selection = elsewhere && known;
         // The layout: by revision, or by the caret's and the visible text's
         // rectangles for a document that counts none.
         let layout_changed = match (revisions, inner.reported) {
@@ -936,6 +941,7 @@ impl StoreState {
             inner.caret = caret_rect;
             inner.visible = visible;
         }
+        layout |= layout_for_selection;
         let status = inner.reported_index.is_some() && inner.editable != editable;
         inner.editable = editable;
         inner.reported = revisions;
@@ -1321,6 +1327,25 @@ impl TextStore_Impl {
     }
 }
 
+/// What a read answered, for a trace: the text, its middle elided past 48
+/// characters. Empty while tracing is off.
+fn excerpt(units: &[u16]) -> String {
+    if !super::super::trace_enabled() {
+        return String::new();
+    }
+    let text: Vec<char> = String::from_utf16_lossy(units).chars().collect();
+    let shown = |chars: &[char]| chars.iter().collect::<String>();
+    if text.len() <= 48 {
+        format!("{:?}", shown(&text))
+    } else {
+        format!(
+            "{:?}..{:?}",
+            shown(&text[..24]),
+            shown(&text[text.len() - 24..])
+        )
+    }
+}
+
 /// The units of a text a text service hands over.
 fn units_of(text: &PCWSTR, count: u32) -> Vec<u16> {
     if text.is_null() || count == 0 {
@@ -1582,9 +1607,10 @@ impl ITextStoreACP_Impl for TextStore_Impl {
                 *pacpnext = (start + units.len()) as i32;
             }
             tsf_trace!(
-                "#{} GetText {start}..{end} (asked {cchplainreq} units) -> {} units from the {source}",
+                "#{} GetText {start}..{end} (asked {cchplainreq} units) -> {} units from the {source}: {}",
                 next_sequence(),
-                units.len()
+                units.len(),
+                excerpt(&units)
             );
             Ok(())
         })
@@ -3134,6 +3160,11 @@ mod tests {
         assert_eq!(*read.borrow(), Some((0, 4)), "the IME's own selection");
         assert_eq!(*rig.doc.selection.borrow(), 0..4, "set in the field");
         assert_eq!(rig.heard.borrow().selections, 0, "not told back");
+        assert_eq!(
+            rig.heard.borrow().layouts,
+            1,
+            "but the rectangles it would ask for moved: the layout is told"
+        );
 
         // Shift+Right in the field, then the IME's next keys.
         rig.doc.select(0..1);
