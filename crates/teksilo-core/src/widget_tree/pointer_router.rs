@@ -443,6 +443,8 @@ impl WidgetTree {
         {
             return;
         }
+        self.hover_owner_outside_window = true;
+        self.tooltip_dwell_held = false;
         let Some(hovered) = self.hovered_id() else {
             return;
         };
@@ -2229,6 +2231,9 @@ impl WidgetTree {
                 );
                 self.tooltip_pointer_enter(new);
             }
+            // A pointer that goes to another widget, or to nothing, has left
+            // the one the press answered for: its next hover is a new one.
+            self.tooltip_dwell_held = false;
             self.set_hovered(target);
             self.update_hover_within_signals(previously_hovered, target);
         } else if let Some(target) = target {

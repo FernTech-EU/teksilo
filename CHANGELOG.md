@@ -234,6 +234,14 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A tooltip no longer opens after a click on its control, or once the pointer
+  has left the window, and a plain tooltip no longer takes a click meant for
+  what lies under it.** After a click that rebuilt a toolbar button, or a jump
+  of the pointer out of the window, the button's tooltip opened under a pointer
+  that was not there and stayed, covering the button, which did nothing when
+  clicked until the pointer moved inside the window again. A tooltip now waits
+  for the pointer to leave the control and come back, and a click on a plain
+  tooltip reaches the control it covers.
 - **Search highlights stay on the words they match while the text is
   edited.** A `FindSession`'s boxes after an edit (an input method's commit,
   a burst of typing) were drawn one edit behind, cut short ("Headin" of

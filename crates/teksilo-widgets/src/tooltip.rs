@@ -70,6 +70,7 @@ use teksilo_core::build_context::BuildContext;
 use teksilo_core::signal::Prop;
 use teksilo_core::styles::{SharedTooltipStyle, TooltipStyleConfig};
 use teksilo_core::widget::{LayoutContext, PaintContext, Widget, WidgetPlacement};
+use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::{CornerRadius, TextRole, TextStyleRole};
 
@@ -213,6 +214,9 @@ impl Widget for TooltipWidget {
         let cfg = TooltipStyleConfig { content: text_id };
         let root_id = style.make_body(&cfg, ctx);
         self.root_child_id = Some(root_id);
+        // A caption, not a surface: the tip opens under its anchor and so lies
+        // over whatever sits there, and a click on it belongs to that.
+        ctx.apply_self_handlers(HandlerSet::new().hit_transparent(true));
         vec![root_id]
     }
 
@@ -331,6 +335,77 @@ mod tests {
             "the wrapped body must occupy more than one line ({} vs {})",
             long.height,
             short.height
+        );
+    }
+
+    #[test]
+    fn a_plain_tooltip_over_a_button_does_not_take_its_click() {
+        // A tip opens under its anchor, so it lies over whatever sits right
+        // below. It is a caption, not a surface: a click on it is a click on
+        // the control beneath, and an anchor the tip happens to cover must
+        // not go dead while the tip is up.
+        use crate::primitives::VStack;
+        use std::cell::Cell;
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+        let clicked = Rc::new(Cell::new(0_u32));
+        let counter = clicked.clone();
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(std::rc::Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        tree.add(
+            VStack::new()
+                .child(crate::button::Button::new(lit!("Anchor")).tooltip(lit!("Anchor")))
+                .child(
+                    crate::button::Button::new(lit!("Below"))
+                        .on_activate_fn(move |_| counter.set(counter.get() + 1)),
+                ),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let anchor = tree.find_by_label("Anchor").expect("the anchor");
+        let below_id = tree
+            .find_by_label("Below")
+            .expect("the button under the anchor");
+        tree.pointer_move(tree.bounds(anchor).center());
+        tree.advance_time(std::time::Duration::from_secs(1));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let overlay = *tree
+            .active_overlays()
+            .first()
+            .expect("the tooltip is shown");
+        let tip = tree.overlay_content_bounds(overlay).expect("tip bounds");
+        let target = tree.bounds(below_id);
+        let (left, right) = (
+            tip.x.max(target.x),
+            (tip.x + tip.width).min(target.x + target.width),
+        );
+        let (top, bottom) = (
+            tip.y.max(target.y),
+            (tip.y + tip.height).min(target.y + target.height),
+        );
+        assert!(
+            left < right && top < bottom,
+            "the tip covers the button below"
+        );
+        let at = teksilo_canvas::Point::new((left + right) / 2.0, (top + bottom) / 2.0);
+
+        // Move onto the covered part first, as the user would.
+        tree.pointer_move(at);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            at,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        assert_eq!(clicked.get(), 1, "the click went through the tooltip");
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the press that went through also retires the tip it went through"
         );
     }
 

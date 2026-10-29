@@ -262,6 +262,18 @@ pub struct WidgetTree {
     /// degenerating to "the apex is wherever I am, so I am always
     /// inside it").
     previous_pointer_position: Option<teksilo_canvas::Point>,
+    /// The hover owner left the window ([`WidgetTree::pointer_left_window`])
+    /// and has not been seen inside it since. Its cached position is then the
+    /// last one inside, not where it is, so the layout pass must not re-derive
+    /// hover (or a tooltip dwell) from it. Cleared by the next sample of a
+    /// pointer that can hover.
+    hover_owner_outside_window: bool,
+    /// A press cancelled the tooltip dwell and the pointer has not yet left
+    /// and re-entered a widget: the hover recovery at the end of a layout pass
+    /// (a click that rebuilt the anchor under a stationary pointer) must not
+    /// start the dwell again. Desktop convention: a click answers the question
+    /// the tooltip would have, until the pointer goes away and comes back.
+    tooltip_dwell_held: bool,
     /// A rebuild destroyed the focused widget: the ancestors it had inside the
     /// subtree that owned focus, innermost first, remembered so the end of the
     /// layout pass can land focus back inside the innermost one still alive.
@@ -1083,6 +1095,8 @@ impl WidgetTree {
             presses: crate::press::PressTable::default(),
             view_focus_stack: Vec::new(),
             previous_pointer_position: None,
+            hover_owner_outside_window: false,
+            tooltip_dwell_held: false,
             pending_focus_restore: Vec::new(),
             pending_focus_request: None,
             last_interaction_anchors: Vec::new(),

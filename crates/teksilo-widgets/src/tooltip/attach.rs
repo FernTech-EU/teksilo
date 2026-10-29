@@ -25,6 +25,7 @@ use std::time::Duration;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::overlay::TooltipPlacement;
 use teksilo_core::widget::Widget;
+use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::LocalizedString;
 
@@ -124,6 +125,21 @@ pub fn attach_rich_tooltip_content(
     )
 }
 
+/// The deferred host of a plain tooltip's body.
+///
+/// A plain tip is a caption, not a surface (its body is
+/// [`hit_transparent`](teksilo_core::widget_builder::WidgetBuilder::hit_transparent)).
+/// The host is the overlay's content root, and the overlay answers a point in
+/// its bounds with `None` unless that root passes through, so the host passes
+/// through too: a click on the tip reaches the control beneath it, and an
+/// anchor the tip covers does not go dead while the tip is up. Rich and
+/// composite tips are interactive and keep taking hits.
+fn add_plain_tooltip_body(ctx: &mut BuildContext, text: impl Into<LocalizedString>) -> WidgetId {
+    let host = ctx.add_deferred_on_demand(TooltipWidget::new(text));
+    ctx.apply_handlers(host, HandlerSet::new().event_pass_through(true));
+    host
+}
+
 /// Attach a **plain** tooltip — first tier, a single line of text.
 ///
 /// The one door for plain tooltips, and the reason it exists rather than each
@@ -139,7 +155,7 @@ pub fn attach_plain_tooltip(
     text: impl Into<LocalizedString>,
     delay: Duration,
 ) -> WidgetId {
-    let tooltip_id = ctx.add_deferred_on_demand(TooltipWidget::new(text));
+    let tooltip_id = add_plain_tooltip_body(ctx, text);
     ctx.attach_tooltip(anchor_id, tooltip_id, delay);
     tooltip_id
 }
@@ -154,7 +170,7 @@ pub fn attach_plain_tooltip_with_placement(
     delay: Duration,
     placement: TooltipPlacement,
 ) -> WidgetId {
-    let tooltip_id = ctx.add_deferred_on_demand(TooltipWidget::new(text));
+    let tooltip_id = add_plain_tooltip_body(ctx, text);
     ctx.attach_tooltip_with_placement(anchor_id, tooltip_id, delay, placement);
     tooltip_id
 }

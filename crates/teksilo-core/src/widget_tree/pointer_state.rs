@@ -298,6 +298,9 @@ impl WidgetTree {
         if is_move && was_hover_owner {
             self.previous_pointer_position = before;
         }
+        if info.kind.hovers() {
+            self.hover_owner_outside_window = false;
+        }
         if self.last_pointer_kind_signal.get() != info.kind {
             self.last_pointer_kind_signal.set(info.kind);
         }

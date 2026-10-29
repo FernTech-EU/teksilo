@@ -1585,6 +1585,11 @@ impl WidgetTree {
     /// a tooltip's own surface is the user reaching into it (a rich tooltip's
     /// inline link), not dismissing it, so that tooltip is spared.
     pub(super) fn tooltip_pointer_press(&mut self, at: Option<teksilo_canvas::Point>) {
+        // Only a press holds the dwell back: a window deactivation or Escape
+        // (no position) retires the tips but says nothing about the hover.
+        if at.is_some() {
+            self.tooltip_dwell_held = true;
+        }
         let mut to_dismiss = Vec::new();
         let candidates: Vec<(usize, Option<crate::overlay::OverlayId>)> = self
             .tooltips
@@ -1597,10 +1602,20 @@ impl WidgetTree {
             // which also counts the anchor (it exists to keep the tip alive
             // while the pointer crosses the gap). A press on the *anchor* is
             // exactly the case that must dismiss.
+            // A tip that takes no hits (a plain one) has no inside: the press
+            // was the covered control's, and the tip it covers must go.
+            let body = self.tooltip_content_node(self.tooltips[index].content_id);
+            let takes_hits = !self
+                .arena
+                .get(body)
+                .is_some_and(|node| node.hit_transparent);
             let inside = match (overlay_id, at) {
-                (Some(oid), Some(pos)) => self
-                    .overlay_content_bounds(oid)
-                    .is_some_and(|rect| rect.contains(pos)),
+                (Some(oid), Some(pos)) => {
+                    takes_hits
+                        && self
+                            .overlay_content_bounds(oid)
+                            .is_some_and(|rect| rect.contains(pos))
+                }
                 _ => false,
             };
             if inside {
@@ -3690,6 +3705,101 @@ mod tests {
             tree.active_overlays().is_empty(),
             "a press must dismiss the shown tooltip"
         );
+    }
+
+    #[test]
+    fn a_pointer_that_left_the_window_by_a_jump_arms_no_tooltip() {
+        // A click on the anchor, then the pointer leaves the window with no
+        // move inside it on the way (a fast flick, an injected jump). The next
+        // layout pass must not re-derive hover from the last position inside
+        // the window and start the dwell again: the tooltip would open under a
+        // pointer that is no longer there and nothing would ever dismiss it.
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let tip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let delay = std::time::Duration::from_millis(300);
+        tree.attach_tooltip(anchor, tip, delay);
+
+        let centre = tree.bounds(anchor).center();
+        tree.pointer_move(centre);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            centre,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            centre,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+
+        let mut noop = crate::window::NoopWindowOps;
+        tree.pointer_left_window(&mut noop);
+        tree.arena.mark_needs_layout(anchor);
+        tree.arena.mark_ancestors_need_layout(anchor);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        tree.advance_time(delay * 3);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "no tooltip may open once the pointer has left the window"
+        );
+        assert_eq!(
+            tree.pending_tooltip_count(),
+            0,
+            "no dwell may be left running either"
+        );
+
+        // Coming back inside restores the ordinary behaviour.
+        tree.pointer_move(Point::new(centre.x + 1.0, centre.y));
+        tree.advance_time(delay * 2);
+        assert_eq!(tree.active_overlays().len(), 1, "a pointer inside arms it");
+    }
+
+    #[test]
+    fn a_click_that_rebuilds_the_anchor_does_not_start_its_dwell_again() {
+        // The click changed something and the toolbar was rebuilt under the
+        // stationary pointer: the layout pass recovers hover for the new
+        // button, and must not start the tooltip dwell the press just
+        // cancelled. A tooltip that opens right after the click is the one
+        // that then sits over the button.
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let tip = tree.add(FillWidget::new().label("Tip"));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let delay = std::time::Duration::from_millis(300);
+        tree.attach_tooltip(anchor, tip, delay);
+
+        let centre = tree.bounds(anchor).center();
+        tree.pointer_move(centre);
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            centre,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_up(
+            centre,
+            PointerButton::Primary,
+            Modifiers::NONE,
+        ));
+
+        // What a rebuild of the anchor leaves behind: no hover, a fresh entry.
+        tree.set_hovered(None);
+        tree.arena.mark_needs_layout(anchor);
+        tree.arena.mark_ancestors_need_layout(anchor);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        assert!(tree.hovered_id().is_some(), "hover is recovered");
+        tree.advance_time(delay * 3);
+        assert!(
+            tree.active_overlays().is_empty(),
+            "no tooltip right after a click on its anchor"
+        );
+
+        // Leaving and coming back is a new hover, and it arms the dwell.
+        tree.pointer_left_window(&mut crate::window::NoopWindowOps);
+        tree.pointer_move(centre);
+        tree.advance_time(delay * 2);
+        assert_eq!(tree.active_overlays().len(), 1);
     }
 
     #[test]

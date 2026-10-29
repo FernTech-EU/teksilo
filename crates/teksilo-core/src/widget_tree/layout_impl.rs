@@ -892,7 +892,11 @@ impl WidgetTree {
         // Hover recovery is the **hover owner**'s business: re-deriving hover
         // from the primary would invent one on a touch-only device, where the
         // primary is a finger and nothing hovers at all.
+        // Not while the hover owner is outside the window: its cached position
+        // is the last one inside, and hover re-derived from it would light the
+        // widget up and start its tooltip dwell for a pointer that is gone.
         if self.hovered_id().is_none()
+            && !self.hover_owner_outside_window
             && let Some(pos) = self.hover_owner_position()
         {
             let new_target = self.hit_test(pos);
@@ -909,7 +913,11 @@ impl WidgetTree {
                     // entry with a fresh one whose `hover_start` is `None`, and
                     // the pointer is not going to move again — so without this the
                     // widget's tooltip is unreachable for the rest of the hover.
-                    self.tooltip_pointer_enter(new);
+                    // ...unless a press cancelled the dwell: the click that
+                    // rebuilt the anchor answered the tooltip's question.
+                    if !self.tooltip_dwell_held {
+                        self.tooltip_pointer_enter(new);
+                    }
                 }
                 self.set_hovered(new_target);
             }
