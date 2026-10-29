@@ -119,6 +119,19 @@ pub(crate) fn handle_key(
         ctx.request_frame();
     }
 
+    // A key the text service passed on while the composition it writes is
+    // open ends that composition, its text kept, before the key acts, as a
+    // native edit control's does (measured in Notepad: the Microsoft
+    // Japanese IME passes Down after the first Space, and the composition
+    // ends there).
+    let written = {
+        let st = state.borrow();
+        st.composition.is_written(&st.document)
+    };
+    if written {
+        finish_composition(state, ctx);
+    }
+
     let shift = modifiers.shift();
     // The platform accelerator — ⌘ on macOS, Ctrl elsewhere. See the
     // rich-text sibling for why this is not `ctrl() || super_key()`.
@@ -747,8 +760,17 @@ fn keep_composition(st: &mut TextInputState, committed: Option<&str>) {
         let inside = |at: usize| range.start <= at && at <= range.end;
         !inside(caret.0) || !inside(caret.1)
     });
-    // The text shown was held to the field's rules when it was shown.
-    let Some(shown) = st.composition.text(&st.document).map(str::to_owned) else {
+    // The text shown was held to the field's rules when it was shown; a
+    // written composition's (the text service's, which it was asked to end
+    // and did not) meets them now.
+    let shown = if st.composition.is_written(&st.document) {
+        st.composition
+            .written_text(&st.document)
+            .map(|text| committable(st, &text))
+    } else {
+        st.composition.text(&st.document).map(str::to_owned)
+    };
+    let Some(shown) = shown else {
         return;
     };
     let text = committed

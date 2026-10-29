@@ -21,7 +21,7 @@ use teksilo_canvas::{Point, SizeProposal};
 use teksilo_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
 use teksilo_core::pointer::PointerPhase;
 use teksilo_core::signal::Signal;
-use teksilo_core::text_input_document::TextInputDocument;
+use teksilo_core::text_input_document::{TextInputDocument, TextInputEditor, WriteOptions};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
 use teksilo_text::text_document::{MoveMode, TextDocument};
@@ -1045,4 +1045,51 @@ fn an_edit_or_format_command_during_a_composition_ends_it_first() {
         assert!(!e.handle.is_composing(), "{key:?}");
         assert_eq!(e.text(), expected, "{key:?}");
     }
+}
+
+// ── A composition the input system writes itself (a TSF text store) ────────
+
+/// The store's composition, written through `TextInputEditor`: marked at
+/// the caret, then its text written in.
+fn write_composition(e: &mut Editor, at: usize, text: &str) {
+    e.handle.mark_composition(at..at, &[]).unwrap();
+    e.handle
+        .replace_text(at..at, text, WriteOptions::default())
+        .unwrap();
+    e.settle();
+    assert_eq!(e.composition(), Some(at..at + text.chars().count()));
+}
+
+/// A click while the store's composition is open keeps its text and ends it
+/// as one undo step: the text service's text, not the empty string the
+/// composition was begun with.
+#[test]
+fn a_click_keeps_a_written_composition() {
+    let mut e = Editor::new("hello world", 5);
+    write_composition(&mut e, 5, "\u{306B}\u{307B}");
+    e.click(1);
+    assert_eq!(e.text(), "hello\u{306B}\u{307B} world");
+    assert_eq!(e.composition(), None);
+    assert_eq!(e.ops.finished, 1, "the platform is told");
+    e.undo();
+    assert_eq!(e.text(), "hello world", "one step");
+}
+
+/// A key the text service passed on while its composition is open (the
+/// Microsoft Japanese IME's Down after the first Space) ends it first, its
+/// text kept, then acts: Notepad's behaviour.
+#[test]
+fn a_key_passed_on_during_a_written_composition_ends_it_first() {
+    let mut e = Editor::new("hello world", 5);
+    write_composition(&mut e, 5, "\u{65E5}\u{672C}");
+    e.dispatch(WidgetEvent::KeyDown {
+        key: Key::ArrowLeft,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    e.settle();
+    assert_eq!(e.ops.finished, 1);
+    assert_eq!(e.composition(), None);
+    assert_eq!(e.text(), "hello\u{65E5}\u{672C} world");
+    assert_eq!(e.caret(), 6, "the key acted after the commit");
 }

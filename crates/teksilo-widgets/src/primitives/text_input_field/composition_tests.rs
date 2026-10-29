@@ -21,7 +21,7 @@ use teksilo_canvas::{Point, SizeProposal};
 use teksilo_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
 use teksilo_core::pointer::PointerPhase;
 use teksilo_core::signal::Signal;
-use teksilo_core::text_input_document::TextInputDocument;
+use teksilo_core::text_input_document::{TextInputDocument, TextInputEditor, WriteOptions};
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
 use teksilo_text::CursorAffinity;
@@ -1086,4 +1086,40 @@ fn the_segment_skips_the_characters_a_filter_dropped() {
     let st = state.borrow();
     assert_eq!(st.document.to_plain_text().unwrap(), "ab2c");
     assert_eq!(st.composition.segment(&st.document), Some(1..3));
+}
+
+// ── A composition the input system writes itself (a TSF text store) ────────
+
+/// A click, or a key the text service passed on, while the store's
+/// composition is open keeps its text and ends it as one undo step.
+#[test]
+fn a_written_composition_is_kept_by_a_click_or_a_passed_key() {
+    for by_key in [false, true] {
+        let mut f = Field::new("hello world", 5);
+        f.handle.mark_composition(5..5, &[]).unwrap();
+        f.handle
+            .replace_text(5..5, "\u{306B}\u{307B}", WriteOptions::default())
+            .unwrap();
+        f.settle();
+        assert_eq!(f.composition(), Some(5..7));
+        if by_key {
+            f.dispatch(WidgetEvent::KeyDown {
+                key: Key::ArrowLeft,
+                modifiers: Modifiers::NONE,
+                text: None,
+            });
+        } else {
+            f.click(1);
+        }
+        f.settle();
+        assert_eq!(
+            f.doc_text(),
+            "hello\u{306B}\u{307B} world",
+            "by key: {by_key}"
+        );
+        assert_eq!(f.composition(), None);
+        assert_eq!(f.ops.finished, 1);
+        f.undo();
+        assert_eq!(f.doc_text(), "hello world", "one step, by key: {by_key}");
+    }
 }

@@ -632,11 +632,15 @@ impl Widget for RichTextEditorBody {
             .composition
             .range(&st.document)
             .filter(|_| st.shows_transient_edits());
-        // The segment the input method is converting, drawn thicker.
-        let ime_segment = st
-            .composition
-            .segment(&st.document)
-            .filter(|_| st.shows_transient_edits());
+        // One underline per clause of a composition the input system styled,
+        // or the segment the input method is converting drawn thicker.
+        let ime_underlines = ime_preedit_range.clone().map(|range| {
+            crate::common::input_editor::preedit_underlines(
+                range,
+                &st.input_system.segments.borrow(),
+                st.composition.segment(&st.document).as_ref(),
+            )
+        });
         let ime_affinity = st.cursor_affinity;
 
         // Clip to bounds so overflowing glyphs don't bleed into siblings.
@@ -741,38 +745,36 @@ impl Widget for RichTextEditorBody {
         // Taking the scroll off `y` as well drew the underline that far above
         // the composition, under an earlier line.
         // On a read-only viewer there is never a preedit, so this is inert.
-        if let Some(range) = ime_preedit_range
+        if let (Some(range), Some(lines)) = (ime_preedit_range, ime_underlines)
             && engine.has_full_layout()
             && range.start < range.end
         {
             let color = ctx.theme.colors.text_primary;
-            // One stroke per visual line of each stretch: the composition's
-            // text thin, the segment being converted thick.
-            for (stretch, stroke) in
-                crate::common::composition::preedit_strokes(&range, ime_segment.as_ref())
-            {
-                let weight = match stroke {
-                    crate::common::composition::PreeditStroke::Thin => 1.0,
-                    crate::common::composition::PreeditStroke::Thick => 2.0,
-                };
+            // One stroke per visual line of each underline: the composition's
+            // text thin, the segment or clause being converted twice as
+            // thick, several clauses a little short at both ends, so they
+            // read apart.
+            for line in lines {
+                let width = if line.thick { 2.0 } else { 1.0 };
+                let inset = if line.inset { 1.0 } else { 0.0 };
                 let underline = |canvas: &mut Canvas, x0: f32, x1: f32, y: f32, h: f32| {
-                    let uy = y + h - 1.0;
+                    let uy = y + h - width;
                     canvas.draw_line(
                         Point::new(x0, uy),
                         Point::new(x1, uy),
                         color,
-                        teksilo_canvas::StrokeStyle::solid(weight),
+                        teksilo_canvas::StrokeStyle::solid(width),
                     );
                 };
                 let mut seg_x0: Option<f32> = None;
                 let (mut seg_y, mut seg_h, mut last_x) = (0.0_f32, 0.0_f32, 0.0_f32);
-                for p in stretch.start..=stretch.end {
+                for p in line.range.start..=line.range.end {
                     let c = engine.caret_rect(p, ime_affinity);
                     let x = bounds.x + c[0] - scroll_x_logical;
                     let y = bounds.y + c[1];
                     match seg_x0 {
                         None => {
-                            seg_x0 = Some(x);
+                            seg_x0 = Some(x + inset);
                             seg_y = y;
                             seg_h = c[3];
                             last_x = x;
@@ -789,7 +791,7 @@ impl Widget for RichTextEditorBody {
                     }
                 }
                 if let Some(x0) = seg_x0 {
-                    underline(canvas, x0, last_x, seg_y, seg_h);
+                    underline(canvas, x0, last_x - inset, seg_y, seg_h);
                 }
             }
         }

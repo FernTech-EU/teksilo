@@ -28,11 +28,11 @@ use std::ops::Range;
 
 use teksilo_canvas::Rect;
 use teksilo_core::text_input_document::{
-    CompositionSegment, InputRevisions, Landed, WriteOptions, WriteRefused,
+    CompositionSegment, InputRevisions, Landed, SegmentStyle, WriteOptions, WriteRefused,
 };
 use teksilo_text::text_document::{MoveMode, TextCursor, TextDocument};
 
-use super::composition::Composition;
+use super::composition::{Composition, PreeditStroke, preedit_strokes};
 use super::input_batch::InputBatch;
 use super::input_journal::DocumentJournal;
 
@@ -104,6 +104,85 @@ fn rect_bits(a: Option<Rect>, b: Option<Rect>) -> [u32; 8] {
         }
     }
     bits
+}
+
+/// One underline a composition is drawn with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Underline {
+    /// The characters it is under.
+    pub(crate) range: Range<usize>,
+    /// The clause being converted (a target): drawn thicker.
+    pub(crate) thick: bool,
+    /// One of several clauses: drawn a little short at both ends, so that
+    /// the clauses read apart, as Windows draws them.
+    pub(crate) inset: bool,
+}
+
+/// The underlines the composition at `range` is drawn with: one per segment
+/// the text service styled ([`InputSystemState::segments`]), clipped to the
+/// composition, in order, a target thicker; the stretches no segment covers,
+/// and the whole composition when there is none, as typed input.
+pub(crate) fn composition_underlines(
+    range: Range<usize>,
+    segments: &[CompositionSegment],
+) -> Vec<Underline> {
+    let mut styled: Vec<(Range<usize>, bool)> = segments
+        .iter()
+        .map(|segment| {
+            let start = segment.range.start.clamp(range.start, range.end);
+            let end = segment.range.end.clamp(start, range.end);
+            let thick = !matches!(segment.style, SegmentStyle::Input | SegmentStyle::Converted);
+            (start..end, thick)
+        })
+        .filter(|(range, _)| !range.is_empty())
+        .collect();
+    styled.sort_by_key(|(range, _)| range.start);
+    let mut out = Vec::new();
+    let mut at = range.start;
+    for (segment, thick) in styled {
+        if segment.start < at {
+            continue;
+        }
+        if segment.start > at {
+            out.push((at..segment.start, false));
+        }
+        at = segment.end;
+        out.push((segment, thick));
+    }
+    if at < range.end {
+        out.push((at..range.end, false));
+    }
+    let inset = out.len() > 1;
+    out.into_iter()
+        .map(|(range, thick)| Underline {
+            range,
+            thick,
+            inset,
+        })
+        .collect()
+}
+
+/// The underlines the composition at `range` is drawn with on any input
+/// path: the clauses the text service styled when it styled any
+/// ([`composition_underlines`]), otherwise the segment the input method's
+/// preedit names, `selected`, thick and the rest thin, none of them inset
+/// ([`preedit_strokes`]).
+pub(crate) fn preedit_underlines(
+    range: Range<usize>,
+    segments: &[CompositionSegment],
+    selected: Option<&Range<usize>>,
+) -> Vec<Underline> {
+    if !segments.is_empty() {
+        return composition_underlines(range, segments);
+    }
+    preedit_strokes(&range, selected)
+        .into_iter()
+        .map(|(range, stroke)| Underline {
+            range,
+            thick: stroke == PreeditStroke::Thick,
+            inset: false,
+        })
+        .collect()
 }
 
 /// A text service's line breaks as the document's: `\r\n` and a lone `\r`
@@ -280,6 +359,52 @@ mod tests {
             input,
             end,
         }
+    }
+
+    #[test]
+    fn a_composition_is_underlined_by_its_clauses() {
+        let segment = |range: Range<usize>, style| CompositionSegment { range, style };
+        assert_eq!(
+            composition_underlines(2..8, &[]),
+            vec![Underline {
+                range: 2..8,
+                thick: false,
+                inset: false
+            }],
+            "no segment: one thin line"
+        );
+        let lines = composition_underlines(
+            2..8,
+            &[
+                segment(5..8, SegmentStyle::Converted),
+                segment(2..5, SegmentStyle::Target),
+                segment(0..1, SegmentStyle::Input),
+            ],
+        );
+        assert_eq!(
+            lines,
+            vec![
+                Underline {
+                    range: 2..5,
+                    thick: true,
+                    inset: true
+                },
+                Underline {
+                    range: 5..8,
+                    thick: false,
+                    inset: true
+                },
+            ],
+            "in order, the target thick, one outside the composition dropped"
+        );
+        let gaps = composition_underlines(0..6, &[segment(2..4, SegmentStyle::TargetInput)]);
+        assert_eq!(
+            gaps.iter()
+                .map(|line| (line.range.clone(), line.thick))
+                .collect::<Vec<_>>(),
+            vec![(0..2, false), (2..4, true), (4..6, false)],
+            "what no segment covers is drawn as typed input"
+        );
     }
 
     fn upper(text: &str, _: &Range<usize>) -> String {

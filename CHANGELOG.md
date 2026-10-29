@@ -58,6 +58,9 @@ by crate for clarity, not because crates version independently.
   (`begin_input_batch`, `end_input_batch`) that holds back what the
   application sees until it ends. Every method has a default that refuses or
   does nothing. `RichTextEditor` and `TextInputField` implement it.
+- **`TextSurfaces::surface(owner)`**: the text widget registered under a
+  widget id, focused or not, for a platform bridge that finishes a
+  composition in the field the writer has just left.
 - **`TextInputDocument::flush_pending_input`**, **`revisions`** and
   **`text_changed_since`** (`InputRevisions`, `TextChanged`, `ChangeCause`):
   insert batched typing where a change may be reported, and tell what changed

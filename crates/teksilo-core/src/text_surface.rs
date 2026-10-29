@@ -228,6 +228,21 @@ impl TextSurfaces {
             .map(|(_, s)| Rc::clone(s))
     }
 
+    /// The text widget registered under `owner`, focused or not.
+    ///
+    /// For a platform bridge that keeps serving one widget across a focus
+    /// change: a text service finishing its composition in the field the
+    /// writer just left (the press or the focus change that left it ends the
+    /// composition, and the text service writes its final text into that
+    /// field, not into the one that has the focus now).
+    pub fn surface(&self, owner: WidgetId) -> Option<Rc<dyn TextSurface>> {
+        self.entries
+            .borrow()
+            .iter()
+            .find(|(id, _)| *id == owner)
+            .map(|(_, s)| Rc::clone(s))
+    }
+
     /// Is the keyboard focus inside a widget that edits text? The cheap half of
     /// [`focused`](Self::focused), for a host that only needs to decide whether
     /// to step aside.
@@ -471,6 +486,18 @@ mod tests {
             surfaces.with_focused_input_document(|d| d.caret()),
             None,
             "a surface that describes no document answers nothing"
+        );
+
+        // A bridge still reaches the widget it serves once focus has left.
+        let left = surfaces.surface(described).expect("registered");
+        assert_eq!(
+            left.input_document().and_then(|d| d.selection()),
+            Some(1..2)
+        );
+        surfaces.remove(described);
+        assert!(
+            surfaces.surface(described).is_none(),
+            "gone with its widget"
         );
     }
 

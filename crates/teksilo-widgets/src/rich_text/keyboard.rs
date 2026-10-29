@@ -227,6 +227,19 @@ pub(super) fn handle_key(
         ctx.request_frame();
     }
 
+    // A key the text service passed on while the composition it writes is
+    // open ends that composition, its text kept, before the key acts, as a
+    // native edit control's does (measured in Notepad: the Microsoft
+    // Japanese IME passes Down after the first Space, and the composition
+    // ends there).
+    let written = {
+        let st = state.borrow();
+        st.composition.is_written(&st.document)
+    };
+    if written {
+        finish_composition(state, ctx);
+    }
+
     let shift = modifiers.shift();
     // The platform accelerator, not physical Control: ⌘ on macOS, Ctrl
     // elsewhere. Testing both would make the Win key act as Ctrl on Linux and
@@ -1651,13 +1664,21 @@ fn keep_composition(st: &mut EditorState, committed: Option<&str>) {
         let inside = |at: usize| range.start <= at && at <= range.end;
         !inside(caret.0) || !inside(caret.1)
     });
-    let Some(shown) = st.composition.text(&st.document) else {
+    // What the composition shows: a written one's text is the document's
+    // over the transient edits (the text service's, which it was asked to
+    // end and did not).
+    let shown = if st.composition.is_written(&st.document) {
+        st.composition.written_text(&st.document)
+    } else {
+        st.composition.text(&st.document).map(str::to_owned)
+    };
+    let Some(shown) = shown else {
         return;
     };
     let text = committed
         .map(|text| text.chars().filter(|c| !c.is_control()).collect::<String>())
         .filter(|text| !text.is_empty())
-        .unwrap_or_else(|| shown.to_owned());
+        .unwrap_or(shown);
     let mut arrived = 0;
     super::typing_format::insert_with(st, |st| {
         arrived = st.composition.commit(&st.document, &st.cursor, &text, true);
