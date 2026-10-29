@@ -59,6 +59,12 @@ pub(crate) struct KeyPress {
     /// It named a command while it had the key: the key is handed back as a
     /// key, and winit reports it.
     commanded: bool,
+    /// The window's marked text is what was left of a composition committed
+    /// in this press: winit keeps it until the press is over, though the
+    /// field has taken the commit. Set once the commit is through
+    /// ([`note_commit_through`](Self::note_commit_through)), cleared by the
+    /// next composing call.
+    marked_left_over: bool,
 }
 
 impl KeyPress {
@@ -90,9 +96,27 @@ impl KeyPress {
     /// the key: the same calls made before it has the key or after it handed
     /// it back are not its answer to this press.
     pub(crate) fn note_composed(&mut self) {
+        // Any marking replaces what a commit left: it is marked text again.
+        self.marked_left_over = false;
         if self.interpreting > 0 {
             self.acted = true;
         }
+    }
+
+    /// A commit of the window's composition has gone through (winit's
+    /// `insertText:` returned, or the hook committed in winit's place):
+    /// the marked text winit still holds is a leftover until the next
+    /// composing call. Noted after the commit, never before it: winit asks
+    /// `hasMarkedText` while it commits, and must hear yes then.
+    pub(crate) fn note_commit_through(&mut self) {
+        self.marked_left_over = true;
+    }
+
+    /// Whether the marked text winit holds is a commit's leftover, which the
+    /// view does not count as marked text (`hasMarkedText` answers no, as a
+    /// native text view does after a commit).
+    pub(crate) fn marked_text_is_left_over(&self) -> bool {
+        self.marked_left_over
     }
 
     /// The input method committed the composition the window held. What it
@@ -170,6 +194,25 @@ mod tests {
     /// A press of Space.
     fn press(acts: impl FnOnce(&mut KeyPress)) -> KeyPress {
         press_of(" ", acts)
+    }
+
+    /// After a commit inside a press, winit's marked text is a leftover
+    /// until the input method marks again: Korean commits 한 (Option+Return)
+    /// and then marks 韓 over it (Hanja) in the same press.
+    #[test]
+    fn a_commits_marked_text_is_a_leftover_until_the_next_mark() {
+        let mut press = KeyPress::default();
+        press.begin_interpreting();
+        press.note_committed();
+        assert!(
+            !press.marked_text_is_left_over(),
+            "not before the commit is through: winit asks while it commits"
+        );
+        press.note_commit_through();
+        assert!(press.marked_text_is_left_over());
+        press.note_composed();
+        assert!(!press.marked_text_is_left_over(), "marked again");
+        press.end_interpreting();
     }
 
     #[test]

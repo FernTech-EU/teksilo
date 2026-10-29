@@ -1480,7 +1480,9 @@ fn in_key_insertion(
     if key_down_depth() == 0 {
         return None;
     }
-    let marked = original_has_marked_text(view) == Some(true);
+    // As winit hears it: after a commit in this press, its leftover marked
+    // text does not count, and winit does not commit a later insertion.
+    let marked = view_has_marked_text(view) == Some(true);
     let string = read_inserted(text)
         .map(|(text, _)| text)
         .unwrap_or_default();
@@ -1592,6 +1594,38 @@ fn is_kind_of(object: &AnyObject, class: &AnyClass) -> bool {
 /// Whether the view holds marked text, as winit's own `hasMarkedText`
 /// answers. `None` for anything but an attached `WinitView`, whose state
 /// winit's method reads.
+/// Whether `view` holds marked text, as the input system is told
+/// (`hasMarkedText`) and as winit itself hears it: winit's own answer, except
+/// after a commit inside the key press, while winit still holds the
+/// committed composition's marked text and the document has no composition.
+/// That leftover is not marked text: a native text view answers no after a
+/// commit, and so does the view, as its `markedRange` answers none then
+/// ([`answers::marked_range`]).
+///
+/// Measured (macOS 27): with `hasMarkedText` yes and `markedRange` none
+/// after 2-Set Korean commits 한 for Hanja (Option+Return), AppKit sent no
+/// `setMarkedText ""`, and Korean marked 韓 with no replacement range, after
+/// 한 instead of in its place. With winit's stale `0..1` as `markedRange`
+/// (before round 11) AppKit emptied the marked text and Korean named 한's
+/// range; that stale range was also what pointed Kotoeri at the document's
+/// first characters. Answering no keeps round 11's `markedRange` and makes
+/// the two agree.
+fn view_has_marked_text(view: *mut AnyObject) -> Option<bool> {
+    let marked = original_has_marked_text(view)?;
+    if !marked {
+        return Some(false);
+    }
+    let left_over = with_key_press(|_, press| press.marked_text_is_left_over()).unwrap_or(false);
+    if !left_over {
+        return Some(true);
+    }
+    // The document's own composition, if it has one, is marked text.
+    let composing = ask_document(view, |document| {
+        Some(document.composition_range().is_some())
+    });
+    Some(composing.unwrap_or(true))
+}
+
 fn original_has_marked_text(view: *mut AnyObject) -> Option<bool> {
     attached_window(view)?;
     let winit_view = WINIT_VIEW.get()?;
@@ -2180,6 +2214,17 @@ extern "C-unwind" fn insert_text(
         log(|line| {
             let _ = write!(line, "insertText:replacementRange: -> {taken}");
         });
+    }
+    // A commit inside the press has gone through: what winit still marks is
+    // its leftover (see `view_has_marked_text`).
+    if matches!(
+        insertion,
+        Some((
+            InKeyInsertion::WinitCommits | InKeyInsertion::HookCommits,
+            _
+        ))
+    ) {
+        let _ = with_key_press(|_, press| press.note_commit_through());
     }
 }
 
@@ -2866,7 +2911,13 @@ extern "C-unwind" fn unmark_text(this: *mut AnyObject, cmd: Sel) {
 }
 
 extern "C-unwind" fn has_marked_text(this: *mut AnyObject, cmd: Sel) -> Bool {
-    let marked = call_original!(Slot::HasMarkedText.index(), BoolFn, Bool::NO, (this, cmd));
+    let original = call_original!(Slot::HasMarkedText.index(), BoolFn, Bool::NO, (this, cmd));
+    // After a commit in the key press, winit's leftover marked text is not
+    // marked text (see `view_has_marked_text`).
+    let marked = match guarded(|| view_has_marked_text(this), || None) {
+        Some(false) if original.as_bool() => Bool::NO,
+        _ => original,
+    };
     log(|line| {
         // Asking again would run winit's method twice: its answer is this.
         let known = attached_window(this).map(|_| marked.as_bool());
@@ -2888,7 +2939,7 @@ extern "C-unwind" fn has_marked_text(this: *mut AnyObject, cmd: Sel) -> Bool {
 extern "C-unwind" fn marked_range(this: *mut AnyObject, cmd: Sel) -> NSRange {
     let from_document = guarded(
         || {
-            let view_has_marked_text = original_has_marked_text(this)?;
+            let view_has_marked_text = view_has_marked_text(this)?;
             ask_document(this, |document| {
                 answers::marked_range(document, view_has_marked_text)
             })

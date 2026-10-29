@@ -151,6 +151,9 @@ by crate for clarity, not because crates version independently.
 - **On macOS, an input method asking where its composition is just after
   committing it is told there is none.** Kotoeri, committing at the end of a
   heading, was pointed at the document's first characters.
+  The field says it holds no marked text then either, so Korean Hanja
+  conversion of the syllable just committed (Option+Return) takes its place
+  again instead of landing after it.
 - **On macOS, a character the input method types in place of a key's own
   is the one typed.** With nothing composed, Kotoeri's Space typed a
   half-width space instead of its full-width U+3000, and Pinyin's "；" and
