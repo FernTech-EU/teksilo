@@ -67,9 +67,9 @@ struct Typed {
     end: usize,
     /// The document's content revision just after it.
     revision: u64,
-    /// No insertion of the typing replaced a selection. One that did is
-    /// part of the typing's undo step, and an undo of that step would give
-    /// the selection back.
+    /// No insertion of the typing replaced a selection. Only the first can
+    /// (one over a selection begins new typing), and an undo of the step it
+    /// begins gives that selection back.
     clean: bool,
 }
 
@@ -335,20 +335,23 @@ pub(crate) fn replace(
 /// (a replacement is never merged), so the typing is undone and typed again
 /// with `text` in place of its end: the undo takes back the typing's step,
 /// which may hold more than the last insertion (`caf` and `e` typed apart are
-/// one step), and the step is typed again from where it began. Returns `None`,
-/// having changed nothing, unless that is safe:
+/// one step), and the step is typed again from where it began, over the
+/// selection it gave back when the typing began over one (a word selected,
+/// `ab` typed, `é` picked: one undo gives the word back, as TextEdit's "Undo
+/// Typing" does). Returns `None`, having changed nothing, unless that is
+/// safe:
 ///
 /// - `range` is not empty and is the end of the typing's last insertion
-///   ([`InputSystemState::typing`]), the document is as that insertion left
-///   it (its content revision has not moved), so the last step is the one
-///   holding that insertion, and no insertion of that typing replaced a
-///   selection;
+///   ([`InputSystemState::typing`]), and the document is as that insertion
+///   left it (its content revision has not moved), so the last step is the
+///   one holding that insertion;
 /// - `text` is one line;
-/// - the undo only removed text, ending where the insertion did and
-///   beginning within the typing, and no line break, table or image:
-///   otherwise (the step began before the typing, merged with an insertion
-///   the surface did not type) it is redone, which puts the document back
-///   as it was.
+/// - the undo removed the typed text, a run of one line ending where the
+///   insertion did and beginning within the typing, and gave back nothing
+///   but, when the typing began over a selection and the step began with
+///   it, that selection: otherwise (the step began before the typing, merged
+///   with an insertion the surface did not type) it is redone, which puts
+///   the document back as it was.
 ///
 /// A replacement of more than what was last typed (Writing Tools rewriting
 /// the sentence the caret ends) is never joined.
@@ -357,7 +360,6 @@ fn join_typing(writing: &Writing<'_>, range: &Range<usize>, text: &str) -> Optio
     let document = writing.document;
     let end = typed.end;
     if range.is_empty()
-        || !typed.clean
         || range.start < typed.last
         || range.end != end
         || document.content_revision() != typed.revision
@@ -376,16 +378,31 @@ fn join_typing(writing: &Writing<'_>, range: &Range<usize>, text: &str) -> Optio
             return None;
         }
     };
-    let typed_from = (before.len() >= after.len())
+    // Where the undone step began, and how much of the text there it gave
+    // back: none for typing that only inserted; the selection it replaced
+    // for typing that began over one, which can only have begun the step (an
+    // insertion over a selection is never merged into the step before it).
+    let only_inserted = (before.len() >= after.len())
         .then(|| end.checked_sub(before.len() - after.len()))
         .flatten()
-        .filter(|&from| {
-            (typed.from..=typed.last).contains(&from)
-                && after[..from] == before[..from]
-                && after[from..] == before[end..]
-                && !before[from..end].iter().copied().any(breaks_a_typing_run)
-        });
-    let Some(from) = typed_from else {
+        .filter(|from| (typed.from..=typed.last).contains(from))
+        .map(|from| (from, 0));
+    let over_selection = (!typed.clean)
+        .then(|| (after.len() + end).checked_sub(before.len() + typed.from))
+        .flatten()
+        .map(|given_back| (typed.from, given_back));
+    let undone =
+        [only_inserted, over_selection]
+            .into_iter()
+            .flatten()
+            .find(|&(from, given_back)| {
+                from <= end
+                    && after.len() >= from + given_back
+                    && after[..from] == before[..from]
+                    && after[from + given_back..] == before[end..]
+                    && !before[from..end].iter().copied().any(breaks_a_typing_run)
+            });
+    let Some((from, given_back)) = undone else {
         let _ = document.redo();
         return None;
     };
@@ -395,6 +412,9 @@ fn join_typing(writing: &Writing<'_>, range: &Range<usize>, text: &str) -> Optio
         .chain(text.chars())
         .collect();
     writing.cursor.set_position(from, MoveMode::MoveAnchor);
+    writing
+        .cursor
+        .set_position(from + given_back, MoveMode::KeepAnchor);
     if writing.cursor.insert_text(&retyped).is_err() {
         let _ = document.redo();
         return None;
@@ -405,7 +425,7 @@ fn join_typing(writing: &Writing<'_>, range: &Range<usize>, text: &str) -> Optio
         last: inserted.start,
         end: inserted.end,
         revision: document.content_revision(),
-        clean: true,
+        clean: given_back == 0 && typed.clean,
     }));
     Some(Landed {
         inserted,
@@ -701,9 +721,10 @@ mod tests {
     }
 
     #[test]
-    fn a_typing_step_that_also_replaced_a_selection_is_left_as_it_was() {
-        // `x` typed over a selected `ab`, then `e` merged into that step: an
-        // undo of the step would give `ab` back, which typing again cannot.
+    fn typing_that_began_over_a_selection_is_undone_with_it() {
+        // A word selected, `x` typed over it, then `e` merged into that step,
+        // and the popup's `é` over the `e`: one undo gives the word back, as
+        // TextEdit's "Undo Typing" does, and a redo the typing with the `é`.
         let (document, cursor, mut composition, input) = rig("ab");
         document.break_undo_merge();
         cursor.set_position(0, MoveMode::MoveAnchor);
@@ -720,14 +741,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(document.to_plain_text().unwrap(), "xé");
+        assert_eq!(cursor.position(), 2);
         document.undo().unwrap();
-        assert_eq!(
-            document.to_plain_text().unwrap(),
-            "xe",
-            "the replacement is its own step, the typing untouched"
-        );
+        assert_eq!(document.to_plain_text().unwrap(), "ab", "one undo step");
+        document.redo().unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "xé");
+
+        // In the middle of a paragraph, and a second pick over the first.
+        let (document, cursor, mut composition, input) = rig("one two three");
+        document.break_undo_merge();
+        cursor.set_position(4, MoveMode::MoveAnchor);
+        cursor.set_position(7, MoveMode::KeepAnchor);
+        input.typing(&document, &cursor, || cursor.insert_text("ab").is_ok());
+        input.typing(&document, &cursor, || cursor.insert_text("e").is_ok());
+        for pick in ["é", "è"] {
+            replace(
+                writing(&document, &cursor, &mut composition, &input),
+                6..7,
+                pick,
+                WriteOptions::default(),
+                |text, _| text.to_owned(),
+                plain_insert,
+            )
+            .unwrap();
+        }
+        assert_eq!(document.to_plain_text().unwrap(), "one abè three");
         document.undo().unwrap();
-        assert_eq!(document.to_plain_text().unwrap(), "ab");
+        assert_eq!(document.to_plain_text().unwrap(), "one two three");
 
         // Typing that merged with an insertion the surface did not type: the
         // undo takes back more than the typing, and is redone.

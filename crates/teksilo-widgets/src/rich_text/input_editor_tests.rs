@@ -399,3 +399,34 @@ fn a_replacement_of_the_last_typed_character_is_undone_with_that_typing() {
         "one undo takes back the typing and the pick"
     );
 }
+
+/// A word selected, `ab` typed over it, the held `e`'s popup picked: one undo
+/// gives the word back, as TextEdit's "Undo Typing" does.
+#[test]
+fn a_replacement_ending_typing_over_a_selection_is_undone_with_it() {
+    let mut editor = Editor::with_text("one two three");
+    editor.doc.break_undo_merge();
+    editor.handle.select_range(4, 7);
+    editor.tree.type_text(editor.id, "ab");
+    editor.settle();
+    editor.tree.type_text(editor.id, "e");
+    editor.settle();
+    assert_eq!(editor.text(), "one abe three");
+    editor
+        .edit(|e| e.replace_text(6..7, "é", WriteOptions::default()))
+        .unwrap();
+    editor.settle();
+    assert_eq!(editor.text(), "one abé three");
+    editor.tree.press_key(Key::Z, Modifiers::COMMAND);
+    editor.settle();
+    assert_eq!(
+        editor.text(),
+        "one two three",
+        "one undo gives the word back"
+    );
+    editor
+        .tree
+        .press_key(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT);
+    editor.settle();
+    assert_eq!(editor.text(), "one abé three");
+}
