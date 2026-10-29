@@ -2091,8 +2091,9 @@ fn move_cursor_to_line_edge(st: &mut EditorState, edge: LineEdge, mode: MoveMode
 /// character just past (or before) the current visual line, and its caret rect gives that line's
 /// band. Falls back to the caret-height step only when the engine cannot name the line — better
 /// an approximate move than none.
-fn neighbour_line_center_y(
-    st: &EditorState,
+pub(crate) fn neighbour_line_center_y(
+    engine: &teksilo_text::RichTextEngine,
+    affinity_at: CursorAffinity,
     pos: usize,
     direction: i32,
     caret: [f32; 4],
@@ -2101,7 +2102,7 @@ fn neighbour_line_center_y(
         let center_y = caret[1] + caret[3] * 0.5;
         Some(center_y + (direction as f32) * caret[3].max(16.0))
     };
-    let Some((start, end)) = st.engine.visual_line_range_at(pos, st.cursor_affinity) else {
+    let Some((start, end)) = engine.visual_line_range_at(pos, affinity_at) else {
         return fallback();
     };
 
@@ -2128,7 +2129,7 @@ fn neighbour_line_center_y(
         CursorAffinity::Downstream
     };
     for probe in candidates {
-        let neighbour = st.engine.caret_rect(probe, affinity);
+        let neighbour = engine.caret_rect(probe, affinity);
         // A degenerate rect names no line; and a rect on the wrong side of the caret is the
         // same line answering again, which is exactly the failure this function exists to fix.
         if neighbour[3] <= 0.0 {
@@ -2160,7 +2161,9 @@ fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
         st.preferred_x = Some(caret[0]);
     }
 
-    let Some(target_y) = neighbour_line_center_y(st, pos, direction, caret) else {
+    let Some(target_y) =
+        neighbour_line_center_y(&st.engine, st.cursor_affinity, pos, direction, caret)
+    else {
         return;
     };
     // Both ends of this comparison have to be in the space `caret_rect` and

@@ -80,6 +80,7 @@ pub(crate) mod hit_test;
 pub(crate) mod image_cache;
 mod input_document;
 mod keyboard;
+pub(crate) use keyboard::neighbour_line_center_y;
 mod lists;
 mod mouse;
 mod nesting;

@@ -234,6 +234,12 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **In a `CodeEditor`, Up, Down, Page Up and Page Down keep the column.**
+  They went to column 0 of the line they reached. The caret now holds its
+  horizontal place through a run of vertical moves, across shorter lines and
+  soft-wrapped lines, until a horizontal move or an edit; with Shift it
+  extends the selection the same way, and each of several carets keeps its
+  own place.
 - **A tooltip no longer opens after a click on its control, or once the pointer
   has left the window, and a plain tooltip no longer takes a click meant for
   what lies under it.** After a click that rebuilt a toolbar button, or a jump

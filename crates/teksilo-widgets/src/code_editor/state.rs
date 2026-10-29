@@ -228,6 +228,11 @@ pub(crate) struct CodeEditorState {
     /// Sticky column for vertical navigation, so crossing a short line does
     /// not permanently pull the caret leftward.
     pub preferred_x: Option<f32>,
+    /// The sticky x of every caret in the run of vertical moves `preferred_x`
+    /// marks, each keyed by the position its caret stood at when the last
+    /// move ended, so a caret that has since gone anywhere else, or been
+    /// merged away, matches nothing. Emptied when a run starts.
+    pub sticky_x: Vec<(usize, f32)>,
     pub cursor_affinity: CursorAffinity,
 
     // --- Appearance --------------------------------------------------------
@@ -371,6 +376,7 @@ impl CodeEditorState {
             pending_text_changed: false,
             pending_undo_redo: None,
             preferred_x: None,
+            sticky_x: Vec::new(),
             cursor_affinity: CursorAffinity::default(),
             follow_text_scale: true,
             font_size_scale: 1.0,

@@ -46,6 +46,7 @@ mod gutter;
 mod keyboard;
 mod log_stream;
 mod log_view;
+mod motion;
 mod mouse;
 mod policy;
 mod semantics;
@@ -55,6 +56,8 @@ mod widget;
 
 #[cfg(test)]
 mod composition_tests;
+#[cfg(test)]
+mod motion_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

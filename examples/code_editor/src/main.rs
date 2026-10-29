@@ -17,7 +17,10 @@
 //!   and its partner get a faint wash.
 //! - **Ctrl+/** — toggle a line comment on the caret's line or the selection.
 //! - **Tab / Shift+Tab** — indent / dedent (a selection indents every line).
-//! - **Ctrl+D** — add a caret on the next line; type into all of them at once.
+//! - **Ctrl+D**: duplicate the selection, or the caret's line when nothing is
+//!   selected.
+//! - **Ctrl+Alt+↑ / Ctrl+Alt+↓**, or **Alt+click**: add a caret above / below,
+//!   or where you click; type into all of them at once.
 //! - **Alt+↑ / Alt+↓** — move the current line up / down.
 //! - **Ctrl+Space** (or just type) — completion: the injected provider offers
 //!   keywords, the editor filters by the word under the caret.
@@ -74,7 +77,7 @@ const KEYWORDS: &[&str] = &[
 ];
 
 const SAMPLE: &str = "// A little Teksilo widget. Edit me!
-// Ctrl+/ comments a line, Tab indents, Ctrl+D adds a caret.
+// Ctrl+/ comments a line, Tab indents, Ctrl+D duplicates a line.
 struct Counter {
     count: Signal<i32>,
 }

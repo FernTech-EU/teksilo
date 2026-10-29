@@ -35,6 +35,7 @@ use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
 use super::clipboard;
 use super::completion::{self, Trigger};
+use super::motion;
 use super::policy::CodeCommand;
 use super::semantics;
 use super::state::{CodeEditorState, SharedState};
@@ -252,19 +253,19 @@ pub(super) fn handle_key(
                 KeyAction::ClearPreferredX
             }
             Key::ArrowUp if filter.accepts(CodeCommand::MoveUp) => {
-                move_every_caret(&mut st, MoveOperation::Up, mode);
+                motion::move_vertically(&mut st, -1, false, mode);
                 KeyAction::KeepPreferredX
             }
             Key::ArrowDown if filter.accepts(CodeCommand::MoveDown) => {
-                move_every_caret(&mut st, MoveOperation::Down, mode);
+                motion::move_vertically(&mut st, 1, false, mode);
                 KeyAction::KeepPreferredX
             }
             Key::PageUp if filter.accepts(CodeCommand::PageUp) => {
-                move_page(&mut st, -1, mode);
+                motion::move_vertically(&mut st, -1, true, mode);
                 KeyAction::KeepPreferredX
             }
             Key::PageDown if filter.accepts(CodeCommand::PageDown) => {
-                move_page(&mut st, 1, mode);
+                motion::move_vertically(&mut st, 1, true, mode);
                 KeyAction::KeepPreferredX
             }
 
@@ -723,22 +724,6 @@ fn leading_whitespace_columns(line: &str) -> usize {
     } else {
         indent
     }
-}
-
-/// Page up/down by the viewport's worth of lines.
-fn move_page(st: &mut CodeEditorState, direction: i32, mode: MoveMode) {
-    let line_h = st.engine.default_line_height().max(1.0);
-    let lines = ((st.viewport_height / line_h).floor() as i32 - 1).max(1);
-    let op = if direction < 0 {
-        MoveOperation::Up
-    } else {
-        MoveOperation::Down
-    };
-    st.cursor.move_position(op, mode, lines as usize);
-    for c in &mut st.extra_carets {
-        c.move_position(op, mode, lines as usize);
-    }
-    st.merge_collided_carets();
 }
 
 // --- Editing --------------------------------------------------------------
