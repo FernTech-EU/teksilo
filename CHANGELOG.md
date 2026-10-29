@@ -237,6 +237,11 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **In a `CodeEditor`, the completion list follows text the input system
+  commits.** After the accent popup replaced a typed `e` with `é`, or an
+  emoji or dictated text was inserted, the list stayed open on the old word;
+  it now re-filters against the new text or closes, as after a typed
+  character.
 - **On macOS, Ctrl+letter no longer types the letter in a text field.**
   Ctrl+D in a `CodeEditor` typed a "d". A Control chord (or a Super one)
   carries no text to any widget now; Control with Alt, which is how Windows

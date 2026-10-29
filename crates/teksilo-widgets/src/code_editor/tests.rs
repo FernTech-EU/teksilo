@@ -1023,6 +1023,51 @@ fn type_keys(tree: &mut WidgetTree, text: &str) {
     ime_frame(tree);
 }
 
+/// An accent chosen from the press-and-hold popup arrives as a commit, not as
+/// typing: an open completion list re-filters against it, and closes when no
+/// candidate matches the word any more.
+#[test]
+fn a_commit_closes_the_completion_list_when_nothing_matches() {
+    fn editor_with_list() -> (WidgetTree, SharedState) {
+        let editor =
+            super::widget::CodeEditor::new(TextDocument::new()).completion_provider(|_cx| {
+                ["enum", "else", "élan"]
+                    .map(CompletionItem::new)
+                    .into_iter()
+                    .collect()
+            });
+        let st = editor.handle().state_handle();
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(600.0, 400.0));
+        let focus = tree.first_focusable_descendant(id).unwrap_or(id);
+        tree.focus(focus);
+        ime_frame(&mut tree);
+        (tree, st)
+    }
+
+    let (mut tree, st) = editor_with_list();
+    type_keys(&mut tree, "e");
+    assert!(st.borrow().completion.open.get(), "typing opens the list");
+    assert_eq!(st.borrow().completion.test_labels(), vec!["enum", "else"]);
+
+    // The commit that follows a replacing insertion: the word is now "ex".
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::ime_commit("x"));
+    ime_frame(&mut tree);
+    assert!(
+        !st.borrow().completion.open.get(),
+        "no candidate starts with the word, the list closes"
+    );
+
+    // And a commit that still matches keeps it open, filtered.
+    let (mut tree, st) = editor_with_list();
+    type_keys(&mut tree, "e");
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::ime_commit("n"));
+    ime_frame(&mut tree);
+    assert!(st.borrow().completion.open.get());
+    assert_eq!(st.borrow().completion.test_labels(), vec!["enum"]);
+}
+
 /// The states a composition went through are never recorded: one undo takes
 /// back what it committed, the next the typing before it.
 #[test]

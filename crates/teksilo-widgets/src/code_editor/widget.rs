@@ -679,6 +679,16 @@ impl Widget for CodeEditor {
                 let touch = self.touch.clone();
                 move |event, ctx| {
                     let response = super::keyboard::handle_key(&state, event, ctx);
+                    // Text the input system committed (an accent chosen from
+                    // the press-and-hold popup, an emoji, dictation) is
+                    // typing as far as completion goes: an open popup
+                    // re-filters against it, or closes when nothing matches
+                    // the word any more, as after a typed character.
+                    if matches!(event, teksilo_core::event::WidgetEvent::ImeCommit { .. })
+                        && response == teksilo_core::event::EventResponse::Handled
+                    {
+                        completion::react(&state, ctx, completion::Trigger::Typed);
+                    }
                     // A keystroke moves the caret and edits the text, neither of
                     // which the controller made — so the handles it published
                     // are pointing at where the text used to be. `refresh` is a
