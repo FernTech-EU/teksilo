@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::SizeProposal;
 use teksilo_core::ImeOrigin;
+use teksilo_core::event::{Key, Modifiers};
 use teksilo_core::signal::Signal;
 use teksilo_core::text_input_document::{
     ChangeCause, TextInputDocument, TextInputEditor, WriteOptions, WriteRefused,
@@ -163,4 +164,25 @@ fn a_read_only_or_secure_field_hands_out_no_writing_half() {
                 .is_none()
         );
     }
+}
+
+/// The macOS accent popup in a field: the held key typed `e`, the character
+/// picked in the popup replaces it, and one undo takes back both.
+#[test]
+fn a_replacement_of_the_last_typed_character_is_undone_with_that_typing() {
+    let mut f = Field::new("", |field| field);
+    f.tree.type_text(f.field, "e");
+    f.settle();
+    assert_eq!(f.text.get(), "e");
+    f.edit(|e| e.replace_text(0..1, "é", WriteOptions::default()))
+        .unwrap();
+    f.settle();
+    assert_eq!(f.text.get(), "é");
+    f.tree.press_key(Key::Z, Modifiers::COMMAND);
+    f.settle();
+    assert_eq!(
+        f.text.get(),
+        "",
+        "one undo takes back the typing and the pick"
+    );
 }

@@ -49,6 +49,28 @@ pub(crate) struct InputSystemState {
     /// The caret and visible rectangles last answered, and the layout
     /// revision.
     layout_seen: Cell<([u32; 8], u64)>,
+    /// What the surface's typing last inserted: what [`replace`] joins a
+    /// replacement of the end of that text to.
+    typed: Cell<Option<Typed>>,
+}
+
+/// The surface's typing since it last did something else
+/// ([`InputSystemState::typing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Typed {
+    /// Where the typing began: the insertions since were each at the caret
+    /// the one before left, with nothing else changing the document.
+    from: usize,
+    /// Where the last insertion began.
+    last: usize,
+    /// Where the last insertion ended.
+    end: usize,
+    /// The document's content revision just after it.
+    revision: u64,
+    /// No insertion of the typing replaced a selection. One that did is
+    /// part of the typing's undo step, and an undo of that step would give
+    /// the selection back.
+    clean: bool,
 }
 
 impl InputSystemState {
@@ -60,7 +82,36 @@ impl InputSystemState {
             segments: RefCell::new(Vec::new()),
             selection_seen: Cell::new((0, 0, 0)),
             layout_seen: Cell::new(([0; 8], 0)),
+            typed: Cell::new(None),
         }
+    }
+
+    /// Run `insert`, the surface's typing inserting at the cursor (one
+    /// `TextCursor::insert_text` of one line, recorded, which says whether it
+    /// went in), and note what it inserted for [`replace`].
+    pub(crate) fn typing(
+        &self,
+        document: &TextDocument,
+        cursor: &TextCursor,
+        insert: impl FnOnce() -> bool,
+    ) {
+        let revision = document.content_revision();
+        let over_selection = cursor.has_selection();
+        let at = cursor.selection_start();
+        if !insert() {
+            return;
+        }
+        let continued = self
+            .typed
+            .get()
+            .filter(|typed| !over_selection && typed.end == at && typed.revision == revision);
+        self.typed.set(Some(Typed {
+            from: continued.map_or(at, |typed| typed.from),
+            last: at,
+            end: cursor.position(),
+            revision: document.content_revision(),
+            clean: continued.map_or(!over_selection, |typed| typed.clean),
+        }));
     }
 
     /// The revisions, given the selection (anchor, caret) and where the caret
@@ -252,6 +303,13 @@ pub(crate) fn replace(
             replaced: range,
         });
     }
+    if let Some(landed) = writing
+        .input
+        .journal
+        .input_system_write(|| join_typing(&writing, &range, &kept))
+    {
+        return Ok(landed);
+    }
     writing
         .cursor
         .set_position(range.start, MoveMode::MoveAnchor);
@@ -264,6 +322,101 @@ pub(crate) fn replace(
         inserted: range.start..range.start + arrived,
         replaced: range,
     })
+}
+
+/// [`replace`] of the end of the text the surface's typing last inserted,
+/// with `text`, as part of that typing: one undo step takes back both, as in
+/// a native text view. The macOS accent popup is what asks for it: the held
+/// key typed `e`, and the character picked in the popup replaces it. Recorded
+/// as a replacement of its own, the `e` came back on the first undo and went
+/// on the second.
+///
+/// The document's history cannot join a replacement to the typing before it
+/// (a replacement is never merged), so the typing is undone and typed again
+/// with `text` in place of its end: the undo takes back the typing's step,
+/// which may hold more than the last insertion (`caf` and `e` typed apart are
+/// one step), and the step is typed again from where it began. Returns `None`,
+/// having changed nothing, unless that is safe:
+///
+/// - `range` is not empty and is the end of the typing's last insertion
+///   ([`InputSystemState::typing`]), the document is as that insertion left
+///   it (its content revision has not moved), so the last step is the one
+///   holding that insertion, and no insertion of that typing replaced a
+///   selection;
+/// - `text` is one line;
+/// - the undo only removed text, ending where the insertion did and
+///   beginning within the typing, and no line break, table or image:
+///   otherwise (the step began before the typing, merged with an insertion
+///   the surface did not type) it is redone, which puts the document back
+///   as it was.
+///
+/// A replacement of more than what was last typed (Writing Tools rewriting
+/// the sentence the caret ends) is never joined.
+fn join_typing(writing: &Writing<'_>, range: &Range<usize>, text: &str) -> Option<Landed> {
+    let typed = writing.input.typed.get()?;
+    let document = writing.document;
+    let end = typed.end;
+    if range.is_empty()
+        || !typed.clean
+        || range.start < typed.last
+        || range.end != end
+        || document.content_revision() != typed.revision
+        || text.chars().any(breaks_a_typing_run)
+    {
+        return None;
+    }
+    let before: Vec<char> = document.to_addressable_text().ok()?.chars().collect();
+    if end > before.len() || document.undo().is_err() {
+        return None;
+    }
+    let after: Vec<char> = match document.to_addressable_text() {
+        Ok(after) => after.chars().collect(),
+        Err(_) => {
+            let _ = document.redo();
+            return None;
+        }
+    };
+    let typed_from = (before.len() >= after.len())
+        .then(|| end.checked_sub(before.len() - after.len()))
+        .flatten()
+        .filter(|&from| {
+            (typed.from..=typed.last).contains(&from)
+                && after[..from] == before[..from]
+                && after[from..] == before[end..]
+                && !before[from..end].iter().copied().any(breaks_a_typing_run)
+        });
+    let Some(from) = typed_from else {
+        let _ = document.redo();
+        return None;
+    };
+    let retyped: String = before[from..range.start]
+        .iter()
+        .copied()
+        .chain(text.chars())
+        .collect();
+    writing.cursor.set_position(from, MoveMode::MoveAnchor);
+    if writing.cursor.insert_text(&retyped).is_err() {
+        let _ = document.redo();
+        return None;
+    }
+    let inserted = range.start..range.start + text.chars().count();
+    writing.input.typed.set(Some(Typed {
+        from,
+        last: inserted.start,
+        end: inserted.end,
+        revision: document.content_revision(),
+        clean: true,
+    }));
+    Some(Landed {
+        inserted,
+        replaced: range.clone(),
+    })
+}
+
+/// A character typing does not put in a run of one line: a line or paragraph
+/// break, a table's or an image's anchor, a control character.
+fn breaks_a_typing_run(c: char) -> bool {
+    c.is_control() || matches!(c, '\u{2028}' | '\u{2029}' | '\u{fffc}')
 }
 
 /// [`TextInputEditor::mark_composition`]: the first mark starts a written
@@ -441,6 +594,162 @@ mod tests {
         assert_eq!(document.to_plain_text().unwrap(), "aXYc");
         let change = input.journal.changed_since(before).unwrap();
         assert_eq!(change.cause, ChangeCause::InputSystem);
+    }
+
+    /// Type `text` at the end of the document as a surface's typing does.
+    fn type_at_end(
+        document: &TextDocument,
+        cursor: &TextCursor,
+        input: &InputSystemState,
+        text: &str,
+    ) {
+        cursor.set_position(document.character_count(), MoveMode::MoveAnchor);
+        input.typing(document, cursor, || cursor.insert_text(text).is_ok());
+    }
+
+    fn plain_insert(cursor: &TextCursor, text: &str, _: bool) -> usize {
+        cursor.insert_text(text).unwrap();
+        text.chars().count()
+    }
+
+    #[test]
+    fn a_replacement_of_what_was_just_typed_joins_that_typing() {
+        // The macOS accent popup: the held key typed `e`, the popup puts `é`
+        // in its place. TextEdit takes both back in one undo.
+        let (document, cursor, mut composition, input) = rig("x ");
+        document.break_undo_merge();
+        type_at_end(&document, &cursor, &input, "e");
+        let landed = replace(
+            writing(&document, &cursor, &mut composition, &input),
+            2..3,
+            "é",
+            WriteOptions::default(),
+            |text, _| text.to_owned(),
+            plain_insert,
+        )
+        .unwrap();
+        assert_eq!(
+            landed,
+            Landed {
+                inserted: 2..3,
+                replaced: 2..3
+            }
+        );
+        assert_eq!(document.to_plain_text().unwrap(), "x é");
+        assert_eq!(cursor.position(), 3, "the caret after what was picked");
+        document.undo().unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "x ", "one undo step");
+        document.redo().unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "x é");
+
+        // Typed in two goes merged into one step, the popup's character joins
+        // the whole of it.
+        let (document, cursor, mut composition, input) = rig("x ");
+        document.break_undo_merge();
+        type_at_end(&document, &cursor, &input, "caf");
+        type_at_end(&document, &cursor, &input, "e");
+        replace(
+            writing(&document, &cursor, &mut composition, &input),
+            5..6,
+            "é",
+            WriteOptions::default(),
+            |text, _| text.to_owned(),
+            plain_insert,
+        )
+        .unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "x café");
+        document.undo().unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "x ");
+    }
+
+    #[test]
+    fn a_replacement_reaching_past_what_was_typed_is_a_step_of_its_own() {
+        // Writing Tools rewriting the sentence the caret ends.
+        let (document, cursor, mut composition, input) = rig("A dog is");
+        document.break_undo_merge();
+        type_at_end(&document, &cursor, &input, "e");
+        replace(
+            writing(&document, &cursor, &mut composition, &input),
+            0..9,
+            "A dog is here",
+            WriteOptions::default(),
+            |text, _| text.to_owned(),
+            plain_insert,
+        )
+        .unwrap();
+        document.undo().unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "A dog ise");
+
+        // Something changed the document since the typing: not joined.
+        let (document, cursor, mut composition, input) = rig("x ");
+        document.break_undo_merge();
+        type_at_end(&document, &cursor, &input, "e");
+        document.break_undo_merge();
+        document.cursor_at(0).insert_text("y").unwrap();
+        replace(
+            writing(&document, &cursor, &mut composition, &input),
+            3..4,
+            "é",
+            WriteOptions::default(),
+            |text, _| text.to_owned(),
+            plain_insert,
+        )
+        .unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "yx é");
+        document.undo().unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "yx e");
+    }
+
+    #[test]
+    fn a_typing_step_that_also_replaced_a_selection_is_left_as_it_was() {
+        // `x` typed over a selected `ab`, then `e` merged into that step: an
+        // undo of the step would give `ab` back, which typing again cannot.
+        let (document, cursor, mut composition, input) = rig("ab");
+        document.break_undo_merge();
+        cursor.set_position(0, MoveMode::MoveAnchor);
+        cursor.set_position(2, MoveMode::KeepAnchor);
+        input.typing(&document, &cursor, || cursor.insert_text("x").is_ok());
+        type_at_end(&document, &cursor, &input, "e");
+        replace(
+            writing(&document, &cursor, &mut composition, &input),
+            1..2,
+            "é",
+            WriteOptions::default(),
+            |text, _| text.to_owned(),
+            plain_insert,
+        )
+        .unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "xé");
+        document.undo().unwrap();
+        assert_eq!(
+            document.to_plain_text().unwrap(),
+            "xe",
+            "the replacement is its own step, the typing untouched"
+        );
+        document.undo().unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "ab");
+
+        // Typing that merged with an insertion the surface did not type: the
+        // undo takes back more than the typing, and is redone.
+        let (document, cursor, mut composition, input) = rig("x ");
+        document.break_undo_merge();
+        cursor.set_position(2, MoveMode::MoveAnchor);
+        cursor.insert_text("ca").unwrap();
+        type_at_end(&document, &cursor, &input, "fe");
+        replace(
+            writing(&document, &cursor, &mut composition, &input),
+            5..6,
+            "é",
+            WriteOptions::default(),
+            |text, _| text.to_owned(),
+            plain_insert,
+        )
+        .unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "x café");
+        document.undo().unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "x cafe");
+        document.undo().unwrap();
+        assert_eq!(document.to_plain_text().unwrap(), "x ");
     }
 
     #[test]

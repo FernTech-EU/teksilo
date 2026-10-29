@@ -528,7 +528,9 @@ impl TextInputState {
             return;
         }
         let batch = std::mem::take(&mut self.pending_chars);
-        let _ = self.cursor.insert_text(&batch);
+        self.input_system.typing(&self.document, &self.cursor, || {
+            self.cursor.insert_text(&batch).is_ok()
+        });
         self.pending_text_changed = true;
         let callback = self.on_text_inserted.as_ref();
         self.pending_arrivals.flush(|source, chars| {

@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use teksilo_canvas::SizeProposal;
 use teksilo_core::ImeOrigin;
+use teksilo_core::event::{Key, Modifiers};
 use teksilo_core::text_input_document::{
     ChangeCause, Landed, TextInputDocument, TextInputEditor, WriteOptions, WriteRefused,
 };
@@ -365,4 +366,36 @@ fn an_undo_right_after_a_store_commit_takes_the_composition() {
         assert!(!after.contains("にほんご"), "variant {variant}: {after:?}");
         assert_eq!(after, doc_before_composition, "variant {variant}");
     }
+}
+
+/// The macOS accent popup: the held key typed `e`, the character picked in the
+/// popup replaces it. One undo takes back both, as in TextEdit; recorded as a
+/// replacement of its own, the first undo gave the `e` back.
+#[test]
+fn a_replacement_of_the_last_typed_character_is_undone_with_that_typing() {
+    let mut editor = Editor::with_text("x ");
+    editor.handle.select_range(2, 2);
+    editor.doc.break_undo_merge();
+    editor.tree.type_text(editor.id, "e");
+    editor.settle();
+    assert_eq!(editor.text(), "x e");
+    let landed = editor
+        .edit(|e| e.replace_text(2..3, "é", WriteOptions::default()))
+        .unwrap();
+    assert_eq!(
+        landed,
+        Landed {
+            inserted: 2..3,
+            replaced: 2..3
+        }
+    );
+    editor.settle();
+    assert_eq!(editor.text(), "x é");
+    editor.tree.press_key(Key::Z, Modifiers::COMMAND);
+    editor.settle();
+    assert_eq!(
+        editor.text(),
+        "x ",
+        "one undo takes back the typing and the pick"
+    );
 }

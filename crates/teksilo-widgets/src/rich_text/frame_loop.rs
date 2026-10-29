@@ -420,10 +420,18 @@ pub(crate) fn flush_pending_chars(state: &mut EditorState) {
                 // one does. Only then: a batch in an edit block of its own
                 // would not merge with the typing around it into one undo step.
                 super::clipboard::insert_plain_text(state, &batch)
-            } else if state.cursor.insert_text(&batch).is_ok() {
-                batch.chars().count()
             } else {
-                0
+                let mut inserted = 0;
+                state
+                    .input_system
+                    .typing(&state.document, &state.cursor, || {
+                        let went_in = state.cursor.insert_text(&batch).is_ok();
+                        if went_in {
+                            inserted = batch.chars().count();
+                        }
+                        went_in
+                    });
+                inserted
             }
         });
         // Counted as the characters went in, which is what was written. A caret

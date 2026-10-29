@@ -244,7 +244,10 @@ text). The input system replaces ranges (`replace_text`), sets the selection,
 and writes its composition into the document itself, then marks it
 (`mark_composition`); while one is marked, its writes are not recorded and
 the field's rules (filters, a length cap) wait for `end_composition`, which
-records the final text as one undo step. Writes come between
+records the final text as one undo step. A write outside a composition is
+an undo step of its own, except one that replaces the end of what the user
+just typed (the accent popup's character over the held key's): the stock
+widgets take it back with that typing, in one undo. Writes come between
 `begin_input_batch` and `end_input_batch`; inside a batch the widget changes
 only its own state and holds back what the application would see, the
 document's own change events included (they arrive as the batch ends). Every

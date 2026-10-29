@@ -262,3 +262,26 @@ fn a_range_the_input_system_names_is_replaced() {
         "one undo gives the syllable back"
     );
 }
+
+/// The macOS accent popup: the held key typed `e`, the character picked in the
+/// popup replaces it, and one undo takes back both.
+#[test]
+fn a_replacement_of_the_last_typed_character_is_undone_with_that_typing() {
+    let mut editor = Editor::with_text("");
+    let focused = editor.tree.focused().expect("the editor has focus");
+    editor.tree.type_text(focused, "e");
+    editor.settle();
+    assert_eq!(editor.text(), "e");
+    editor
+        .edit(|e| e.replace_text(0..1, "é", WriteOptions::default()))
+        .unwrap();
+    editor.settle();
+    assert_eq!(editor.text(), "é");
+    editor.tree.press_key(Key::Z, Modifiers::COMMAND);
+    editor.settle();
+    assert_eq!(
+        editor.text(),
+        "",
+        "one undo takes back the typing and the pick"
+    );
+}

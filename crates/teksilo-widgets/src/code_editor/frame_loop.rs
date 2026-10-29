@@ -240,7 +240,11 @@ pub(crate) fn insert_at_every_caret(state: &mut CodeEditorState, text: &str) {
     state.merge_collided_carets();
 
     if state.extra_carets.is_empty() {
-        let _ = state.cursor.insert_text(text);
+        state
+            .input_system
+            .typing(&state.document, &state.cursor, || {
+                state.cursor.insert_text(text).is_ok()
+            });
         return;
     }
 
