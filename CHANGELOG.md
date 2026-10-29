@@ -237,6 +237,10 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **On macOS, Ctrl+letter no longer types the letter in a text field.**
+  Ctrl+D in a `CodeEditor` typed a "d". A Control chord (or a Super one)
+  carries no text to any widget now; Control with Alt, which is how Windows
+  reports AltGr, still types.
 - **A shortcut declared on a punctuation key still fires on a layout that
   types it with Shift.** Ctrl+/ (⌘/ on macOS) toggled a `CodeEditor`'s
   comment only where `/` is a key of its own; on French-PC, where it is

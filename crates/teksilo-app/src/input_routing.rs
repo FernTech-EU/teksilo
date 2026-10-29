@@ -156,6 +156,12 @@ pub(crate) fn bounces_to_modal(event: &WindowEvent) -> bool {
 /// press the input method typed as other characters (Kotoeri's full-width
 /// space for Space) becomes a `KeyDown` carrying those characters as its
 /// text, in place of the key's own `text`.
+///
+/// A press with Control or Super held carries no text. Control without Alt and
+/// Super are commands, never typing, but winit still resolves the key's
+/// character for them (on macOS Ctrl+D has the text "d", the key without its
+/// modifiers), and a text widget whose "command" test is ⌘ alone typed it.
+/// Control with Alt is how Windows reports AltGr, whose characters are text.
 pub(crate) fn key_widget_event(
     logical_key: &winit::keyboard::Key,
     text: Option<&str>,
@@ -186,11 +192,19 @@ pub(crate) fn key_widget_event(
             None => WidgetEvent::KeyDown {
                 key,
                 modifiers,
-                text: text.map(str::to_string),
+                text: text
+                    .filter(|_| !is_command_chord(modifiers))
+                    .map(str::to_string),
             },
         },
         winit::event::ElementState::Released => WidgetEvent::KeyUp { key, modifiers },
     })
+}
+
+/// Whether the held modifiers make a press a command rather than typing:
+/// Super, or Control without Alt (with Alt it may be AltGr).
+fn is_command_chord(modifiers: teksilo_core::event::Modifiers) -> bool {
+    modifiers.super_key() || (modifiers.ctrl() && !modifiers.alt())
 }
 
 /// Whether a key press ends a pending bare-Alt tap. The menu-bar tap is Alt
@@ -1162,6 +1176,40 @@ pub(crate) mod tests {
 
     fn enter() -> winit::keyboard::Key {
         winit::keyboard::Key::Named(winit::keyboard::NamedKey::Enter)
+    }
+
+    /// winit resolves the character of Ctrl+D to "d" on macOS, where a text
+    /// widget's "command" test is the Command key: the press must not carry
+    /// the character, or the widget types it.
+    #[test]
+    fn a_control_or_super_chord_carries_no_text() {
+        use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+        let d = winit::keyboard::Key::Character("d".into());
+        let text_of = |modifiers| match key_widget_event(
+            &d,
+            Some("d"),
+            ElementState::Pressed,
+            false,
+            modifiers,
+            None,
+        ) {
+            Some(WidgetEvent::KeyDown {
+                key: Key::D, text, ..
+            }) => text,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(text_of(Modifiers::NONE).as_deref(), Some("d"));
+        assert_eq!(text_of(Modifiers::SHIFT).as_deref(), Some("d"));
+        assert_eq!(text_of(Modifiers::CTRL), None);
+        assert_eq!(text_of(Modifiers::CTRL | Modifiers::SHIFT), None);
+        assert_eq!(text_of(Modifiers::SUPER), None);
+        // AltGr is reported as Control+Alt on Windows, and types.
+        assert_eq!(
+            text_of(Modifiers::CTRL | Modifiers::ALT).as_deref(),
+            Some("d")
+        );
+        // Alt alone is Option on macOS: accents and symbols.
+        assert_eq!(text_of(Modifiers::ALT).as_deref(), Some("d"));
     }
 
     #[test]
