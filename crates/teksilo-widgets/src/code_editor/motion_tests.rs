@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Caret motion through the laid-out text: Up, Down, Page Up and Page Down keep
-//! the visual column across a run of vertical moves, with one caret or several,
-//! wrapped or not.
+//! Caret motion through the laid-out text: Up, Down, Page Up, Page Down, Home
+//! and End keep the visual column across a run of vertical moves and stop at
+//! the end of the *visual* line, with one caret or several, wrapped or not.
 //!
 //! Every test drives real key events through a rendered tree, because the
 //! motions read the engine's layout. Lines are made of one repeated letter so
@@ -287,4 +287,101 @@ fn page_down_and_page_up_keep_the_column() {
     let back = d.caret();
     assert!(back < second && back > 11);
     assert_eq!(column(back), 6);
+}
+
+// --- End and Home ---------------------------------------------------------
+
+/// The reported bug: End at a line's end jumped to the end of the next line.
+#[test]
+fn end_at_a_line_end_stays() {
+    let mut d = Driven::new("abc\ndef\nghi");
+    d.put(1);
+    d.key(Key::End);
+    assert_eq!(d.caret(), 3);
+    d.key(Key::End);
+    assert_eq!(d.caret(), 3, "End again stays");
+    d.put(7);
+    d.key(Key::End);
+    assert_eq!(d.caret(), 7);
+}
+
+#[test]
+fn shift_end_selects_to_the_line_end_and_no_further() {
+    let mut d = Driven::new("abc\ndef");
+    d.put(1);
+    d.key_with(Key::End, Modifiers::SHIFT);
+    assert_eq!((d.anchor(), d.caret()), (1, 3));
+    d.key_with(Key::End, Modifiers::SHIFT);
+    assert_eq!((d.anchor(), d.caret()), (1, 3));
+}
+
+#[test]
+fn every_caret_goes_to_the_end_of_its_own_line() {
+    let mut d = Driven::new("abc\nd\nefgh");
+    d.put(3);
+    d.add_caret(4);
+    d.key(Key::End);
+    assert_eq!(d.carets(), vec![3, 5]);
+}
+
+#[test]
+fn home_at_a_line_end_goes_to_its_own_indent() {
+    let mut d = Driven::new("  abc\n  def");
+    d.put(5);
+    d.key(Key::Home);
+    assert_eq!(d.caret(), 2);
+    d.key(Key::Home);
+    assert_eq!(d.caret(), 0);
+    d.put(11);
+    d.key(Key::Home);
+    assert_eq!(d.caret(), 8);
+}
+
+/// A paragraph that wraps in a 160 px editor, and where its first visual line
+/// ends.
+fn wrapped() -> (Driven, usize, usize) {
+    let text = format!("{}\nend", "word ".repeat(24));
+    let d = Driven::with(&text, WrapMode::Word, 160.0);
+    let (_, first_end) = d
+        .state
+        .borrow()
+        .engine
+        .visual_line_range_at(0, CursorAffinity::Downstream)
+        .expect("laid out");
+    let paragraph_end = text.find('\n').unwrap();
+    assert!(first_end < paragraph_end, "the paragraph wraps");
+    (d, first_end, paragraph_end)
+}
+
+/// End stops where the line is drawn to end, at a soft wrap, and stays there.
+#[test]
+fn end_goes_to_the_end_of_the_visual_line() {
+    let (mut d, first_end, paragraph_end) = wrapped();
+    d.put(2);
+    d.key(Key::End);
+    assert_eq!(d.caret(), first_end, "the end of the first visual line");
+    d.key(Key::End);
+    assert_eq!(d.caret(), first_end, "End again stays");
+
+    d.put(first_end + 3);
+    d.key(Key::End);
+    assert!(
+        d.caret() > first_end + 3,
+        "the end of the second visual line"
+    );
+    assert!(d.caret() < paragraph_end);
+}
+
+/// Home on a continuation line goes to where that visual line starts, not to
+/// the start of the paragraph.
+#[test]
+fn home_goes_to_the_start_of_the_visual_line() {
+    let (mut d, first_end, _) = wrapped();
+    d.put(first_end + 3);
+    d.key(Key::Home);
+    assert_eq!(d.caret(), first_end);
+    // On the first visual line it is the line's own Home.
+    d.put(7);
+    d.key(Key::Home);
+    assert_eq!(d.caret(), 0);
 }

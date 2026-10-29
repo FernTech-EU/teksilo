@@ -31,6 +31,7 @@ use crate::common::composition::position_after_commit;
 use crate::editor_shortcuts::CodeShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_i18n::tr_widget;
+use teksilo_text::CursorAffinity;
 use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
 
 use super::clipboard;
@@ -223,11 +224,14 @@ pub(super) fn handle_key(
             }
             Key::ArrowRight if filter.accepts(horizontal_command(caret_step(*modifiers), true)) => {
                 let op = match caret_step(*modifiers) {
-                    CaretStep::LineEdge => MoveOperation::EndOfLine,
-                    CaretStep::Word => MoveOperation::WordRight,
-                    CaretStep::Character => MoveOperation::Right,
+                    CaretStep::LineEdge => None,
+                    CaretStep::Word => Some(MoveOperation::WordRight),
+                    CaretStep::Character => Some(MoveOperation::Right),
                 };
-                move_every_caret(&mut st, op, mode);
+                match op {
+                    Some(op) => move_every_caret(&mut st, op, mode),
+                    None => motion::move_to_line_end(&mut st, mode),
+                }
                 KeyAction::ClearPreferredX
             }
 
@@ -285,7 +289,7 @@ pub(super) fn handle_key(
                 KeyAction::ClearPreferredX
             }
             Key::End if filter.accepts(CodeCommand::MoveLineEnd) => {
-                move_every_caret(&mut st, MoveOperation::EndOfLine, mode);
+                motion::move_to_line_end(&mut st, mode);
                 KeyAction::ClearPreferredX
             }
 
@@ -658,6 +662,9 @@ fn move_every_caret(st: &mut CodeEditorState, op: MoveOperation, mode: MoveMode)
 /// caret is wanted nine times out of ten — but column 0 must stay reachable for
 /// re-indenting. Needs no language knowledge, so it lives here rather than with
 /// the configured semantics.
+///
+/// In a wrapped line Home on a continuation goes to that visual line's start.
+///
 /// Derived from the caret's position rather than a remembered flag.
 ///
 /// This matters with several carets: a stored "last Home went to the indent"
@@ -667,26 +674,55 @@ fn move_every_caret(st: &mut CodeEditorState, op: MoveOperation, mode: MoveMode)
 /// rule survives the caret being moved by anything else — a click, a
 /// programmatic jump — with no flag to fall out of sync.
 fn smart_home(st: &mut CodeEditorState, mode: MoveMode) {
-    let primary_target = home_target(st, st.cursor.position());
-    st.cursor.set_position(primary_target, mode);
-
-    for i in 0..st.extra_carets.len() {
-        let pos = st.extra_carets[i].position();
-        let t = home_target(st, pos);
-        st.extra_carets[i].set_position(t, mode);
+    let count = 1 + st.extra_carets.len();
+    let targets: Vec<usize> = (0..count)
+        .map(|i| {
+            let caret = if i == 0 {
+                &st.cursor
+            } else {
+                &st.extra_carets[i - 1]
+            };
+            let shown = st.shown_selection(caret).1;
+            let affinity = if i == 0 {
+                st.cursor_affinity
+            } else {
+                CursorAffinity::Downstream
+            };
+            home_target(st, caret.position(), shown, affinity)
+        })
+        .collect();
+    for (i, t) in targets.into_iter().enumerate() {
+        caret_at(st, i).set_position(t, mode);
+    }
+    if st.engine.has_full_layout() {
+        // A caret sent to the start of a wrapped line belongs to that line,
+        // not to the end of the one above it.
+        let pos = st.shown_caret();
+        let continuation = matches!(
+            st.engine.visual_line_range_at(pos, CursorAffinity::Downstream),
+            Some((_, end)) if end == pos
+        );
+        st.cursor_affinity = if continuation {
+            CursorAffinity::Upstream
+        } else {
+            CursorAffinity::Downstream
+        };
     }
     st.merge_collided_carets();
 }
 
-/// Where Home should land a caret currently at `pos`.
+/// Where Home should land a caret currently at `pos` (`shown` in the layout,
+/// seen with `affinity`).
 ///
-/// At the first non-whitespace character → column 0. Anywhere else (including
-/// column 0) → the first non-whitespace character. A line with no indent has
-/// both in the same place, so it is simply column 0.
+/// On the second or later visual line of a soft-wrapped line, at that visual
+/// line's start. Otherwise at the first non-whitespace character, or at
+/// column 0 if the caret is already there. A line with no indent has both in
+/// the same place, so it is simply column 0.
 ///
-/// Asks the document for the *one block* containing `pos` rather than reading
-/// the whole text. One block is one line here, so the block's `position` is the
-/// line start and its `text` is the line — which is all the question needs.
+/// Asks the document for the *one block* containing the line's start rather
+/// than reading the whole text. One block is one line here, so the block's
+/// `position` is the line start and its `text` is the line, which is all the
+/// question needs.
 ///
 /// The first version of this read `to_plain_text()` and collected the entire
 /// document into a `Vec<char>`, three times per caret (the two helpers each did
@@ -695,15 +731,26 @@ fn smart_home(st: &mut CodeEditorState, mode: MoveMode) {
 /// edit invalidates the text cache — so Home right after typing paid a full
 /// re-serialization of the document to find where one line started. Held Home
 /// at key-repeat made that visible.
-fn home_target(st: &CodeEditorState, pos: usize) -> usize {
+fn home_target(st: &CodeEditorState, pos: usize, shown: usize, affinity: CursorAffinity) -> usize {
+    let visual_start = st
+        .engine
+        .has_full_layout()
+        .then(|| st.engine.visual_line_range_at(shown, affinity))
+        .flatten()
+        .map(|(start, _)| st.document_position(start));
     // Highlights are irrelevant to counting whitespace, and asking for them
     // would make the snapshot do more work.
     let Some(block) = st
         .document
-        .snapshot_block_at_position_without_highlights(pos)
+        .snapshot_block_at_position_without_highlights(visual_start.unwrap_or(pos))
     else {
         return pos;
     };
+    if let Some(start) = visual_start
+        && start > block.position
+    {
+        return start;
+    }
     let line_start = block.position;
     let indent_col = leading_whitespace_columns(&block.text);
     let indent_pos = line_start + indent_col;

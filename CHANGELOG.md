@@ -240,6 +240,10 @@ by crate for clarity, not because crates version independently.
   soft-wrapped lines, until a horizontal move or an edit; with Shift it
   extends the selection the same way, and each of several carets keeps its
   own place.
+- **In a `CodeEditor`, End and Home work on the line as it is drawn.** End
+  pressed at the end of a line jumped to the end of the next one, and on a
+  soft-wrapped line Home went to the start of the whole line. End and Home
+  now stop at the end and the start of the visual line the caret is on.
 - **A tooltip no longer opens after a click on its control, or once the pointer
   has left the window, and a plain tooltip no longer takes a click meant for
   what lies under it.** After a click that rebuilt a toolbar button, or a jump

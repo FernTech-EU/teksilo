@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Caret motion that needs the layout: Up, Down, Page Up and Page Down.
+//! Caret motion that needs the layout: Up, Down, Page Up, Page Down and End.
 //!
 //! text-document moves Up and Down by whole blocks, with no idea where a
-//! caret is drawn, which is right for nothing an editor shows. These motions
-//! ask the engine instead: where the caret is drawn, which visual line is
-//! next, where a point lands.
+//! caret is drawn, and finds the end of a line from the block at the caret's
+//! position, which at a line's end is the next line. Both are right for
+//! nothing an editor shows, so these motions ask the engine instead: where
+//! the caret is drawn, which visual line is next, where a point lands.
 //!
 //! **What stays put through a run of Up and Down is the caret's x**, not its
 //! column. In a monospace face they are the same; with a tab, a wide
@@ -138,4 +139,40 @@ fn page_lines(st: &CodeEditorState) -> usize {
     ((st.viewport_height / line_h).floor() as usize)
         .saturating_sub(1)
         .max(1)
+}
+
+/// End: every caret to the end of its visual line. Pressed there, it stays.
+pub(super) fn move_to_line_end(st: &mut CodeEditorState, mode: MoveMode) {
+    if !st.engine.has_full_layout() {
+        st.cursor.move_position(MoveOperation::EndOfLine, mode, 1);
+        for c in &mut st.extra_carets {
+            c.move_position(MoveOperation::EndOfLine, mode, 1);
+        }
+        st.merge_collided_carets();
+        return;
+    }
+    let count = 1 + st.extra_carets.len();
+    let mut targets = Vec::with_capacity(count);
+    for i in 0..count {
+        let caret = if i == 0 {
+            &st.cursor
+        } else {
+            &st.extra_carets[i - 1]
+        };
+        let shown = st.shown_selection(caret).1;
+        let end = st
+            .engine
+            .visual_line_range_at(shown, affinity_of(st, i))
+            .map(|(_, end)| st.document_position(end));
+        targets.push(end);
+    }
+    for (i, end) in targets.into_iter().enumerate() {
+        if let Some(end) = end {
+            caret_of(st, i).set_position(end, mode);
+        }
+    }
+    // At a soft wrap the end of a line is also the start of the next; the
+    // caret belongs to the line it just went to the end of.
+    st.cursor_affinity = CursorAffinity::Downstream;
+    st.merge_collided_carets();
 }
