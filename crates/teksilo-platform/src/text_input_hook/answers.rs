@@ -245,6 +245,48 @@ pub(crate) fn union_rect_in_visible_selection(document: &dyn TextInputDocument) 
     union
 }
 
+/// TSF's `GetTextExt`: the bounding box of the lines of `range`
+/// (characters), window-logical, clipped to the visible text, and whether
+/// any of it was cut off; the caret's rectangle for an empty range. A range
+/// none of which is visible is answered whole, as cut off, so a candidate
+/// window still opens next to it. At most [`MAX_UNION_LINES`] lines are
+/// walked. `None` when the document cannot place the range's first line.
+pub(crate) fn range_rect(
+    document: &dyn TextInputDocument,
+    range: Range<usize>,
+) -> Option<(Rect, bool)> {
+    let mut union: Option<Rect> = None;
+    if range.is_empty() {
+        union = Some(document.first_line_rect(range)?.rect);
+    } else {
+        let mut start = range.start;
+        for _ in 0..MAX_UNION_LINES {
+            if start >= range.end {
+                break;
+            }
+            let Some(line) = document.first_line_rect(start..range.end) else {
+                break;
+            };
+            union = Some(union.map_or(line.rect, |union| bounding(union, line.rect)));
+            if line.covered.end <= start {
+                break;
+            }
+            start = line.covered.end;
+        }
+    }
+    let union = union?;
+    Some(match document.visible_text_rect() {
+        // A box that only touches the visible text's edge is not visible.
+        Some(visible) => match intersection(union, visible) {
+            Some(clipped) if clipped.height > 0.0 || union.height <= 0.0 => {
+                (clipped, clipped != union)
+            }
+            _ => (union, true),
+        },
+        None => (union, false),
+    })
+}
+
 /// `isEditable`: always `true`, whatever has focus. AppKit gives a view that
 /// answers `false` no input context, and winit's view reads its input context
 /// when it is created and at every `keyDown:`, and panics without one
@@ -537,6 +579,38 @@ mod tests {
         let document = Grid::new(EMOJI);
         assert_eq!(replacement_chars(&document, range(3, 3)), Some(2..4));
         assert_eq!(replacement_chars(&document, Utf16Range::NONE), None);
+    }
+
+    #[test]
+    fn a_ranges_box_takes_in_its_lines_and_says_when_it_was_cut() {
+        let mut document = Grid::new(&"x".repeat(40));
+        // Lines of 10 characters, 20 tall, 100 by 60 visible.
+        assert_eq!(
+            range_rect(&document, 3..5),
+            Some((Rect::new(30.0, 0.0, 20.0, 20.0), false))
+        );
+        assert_eq!(
+            range_rect(&document, 5..25),
+            Some((Rect::new(0.0, 0.0, 100.0, 60.0), false)),
+            "three lines, the first from its middle"
+        );
+        assert_eq!(
+            range_rect(&document, 7..7),
+            Some((Rect::new(70.0, 0.0, 1.0, 20.0), false)),
+            "a caret"
+        );
+        assert_eq!(
+            range_rect(&document, 25..35),
+            Some((Rect::new(0.0, 40.0, 100.0, 20.0), true)),
+            "the fourth line is below the visible text"
+        );
+        assert_eq!(
+            range_rect(&document, 31..33),
+            Some((Rect::new(10.0, 60.0, 20.0, 20.0), true)),
+            "nothing visible: the whole box, cut off"
+        );
+        document.busy = true;
+        assert_eq!(range_rect(&document, 3..5), None);
     }
 
     #[test]

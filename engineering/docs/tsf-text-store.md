@@ -464,10 +464,32 @@ cannot compose breaks every IME.
   `common::input_editor` (the order of things), `input_journal` (from the document's change events,
   the cause from a flag set around the input system's writes) and `input_batch`; a written
   composition is `Composition`'s second mode on text-document's transient edits. The batch holds
-  back the widgets' own effects; the document's own subscribers wait for text-document's event
-  hold, which is being added on `feat/transient-edits`.
+  back the widgets' own effects and, through text-document's `hold_events` (taken at the outermost
+  `begin_input_batch`, dropped at the outermost end), the document's own subscribers; the held
+  events are released as the input system's, so the journal, which hears them only then, gives
+  them that cause. While the events are held the widgets build their UTF-16 index afresh at each
+  read, the cache's invalidation being one of the held subscribers; the layout follows at release.
 - **Phase 1, reads** (about 800 lines). Real answers, the arbiter, notifications per message, focus
   in `settle_ime`, the secure, read-only and empty contexts. NVDA with the Japanese IME (M11).
+  Built: the store reads the focused field's document (`text_in` through its UTF-16 index, ranges
+  widened then cut back to the units asked; the selection; `GetTextExt` as the bounding box of the
+  range's own lines, clipped to the visible text with `pfClipped` set when cut), and the mirror is
+  now only the text as TSF last heard of it, followed by the journal's ranges (`text_changed_since`,
+  the old offsets through the UTF-16 index at the last report) and compared whole only after a gap,
+  a text service's writes, or for a document that counts no revisions. In this phase a text
+  service's writes still land in the mirror only, and the reads answer from it until the settle
+  after the composition puts the document back. The arbiter refuses a synchronous lock and defers
+  an asynchronous one while the field is busy or its text or selection revision is ahead of the
+  last report, and posts a `TextStorePayload` that `teksilo-app` answers with `settle_ime` between
+  dispatches, where batched typing is flushed, the changes reported and the deferred lock granted.
+  At the tail of `RequestLock` changes a message made during the grant are reported (no flush,
+  no write put back). While a `RequestLock` is on the stack, `set_text_store_focus` moves nothing
+  and asks for another settle. A secure field (or a password) gets the empty context and turns
+  speech off on the thread (`GUID_COMPARTMENT_SPEECH_DISABLED`, the three bits, the earlier value
+  given back on the way out); its `IS_PASSWORD` scope, which needs a store answering
+  `GUID_PROP_INPUTSCOPE`, waits for Phase 4 with the touch keyboard's flags. A read-only field that
+  describes its document gets a read-only store: `TS_SD_READONLY`, writes refused, compositions
+  refused, `OnStatusChange` when the field turns read-only or back.
 - **Phases 2 and 3, writes and compositions, one unit** (about 2,500 lines). The write half wired,
   the composition sink, interim dictation, the Japanese IME through the store, termination before a
   press, display attributes for clauses, the key-trace verdict, `WM_IME_REQUEST` kept under TSF. On

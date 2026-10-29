@@ -17,6 +17,13 @@
 //!   `RequestLock`.
 //! - A read-only lock is never upgraded in place; the write request waits
 //!   for the grant that follows.
+//! - With no lock held but the document not ready to be read (changes not
+//!   reported to the text service yet, or the widget busy), a synchronous
+//!   request is refused and an asynchronous one **deferred**
+//!   ([`LockArbiter::defer`]): `RequestLock` returns, the store reports what
+//!   changed, then grants it ([`LockArbiter::take_deferred`]), as Microsoft
+//!   asks ("the application can only respond to the asynchronous lock
+//!   request").
 
 #![cfg_attr(
     not(target_os = "windows"),
@@ -73,6 +80,7 @@ pub(crate) enum LockDecision {
 pub(crate) struct LockArbiter {
     held: Option<LockKind>,
     pending: Option<LockKind>,
+    deferred: Option<LockKind>,
 }
 
 impl LockArbiter {
@@ -102,11 +110,28 @@ impl LockArbiter {
         if flags & LF_SYNC != 0 {
             return LockDecision::Refused;
         }
-        self.pending = Some(match (self.pending, kind) {
-            (Some(LockKind::ReadWrite), _) | (_, LockKind::ReadWrite) => LockKind::ReadWrite,
-            _ => LockKind::Read,
-        });
+        self.pending = Some(coalesce(self.pending, kind));
         LockDecision::Queued
+    }
+
+    /// A request that cannot be granted yet (the document has changes to
+    /// report, or is busy): refused when synchronous, else kept, coalesced
+    /// with any other kept, for [`take_deferred`](Self::take_deferred).
+    pub(crate) fn defer(&mut self, flags: u32) -> LockDecision {
+        if flags & LF_SYNC != 0 {
+            return LockDecision::Refused;
+        }
+        self.deferred = Some(coalesce(self.deferred, LockKind::of(flags)));
+        LockDecision::Queued
+    }
+
+    /// The deferred request, held from now on, when no lock is.
+    pub(crate) fn take_deferred(&mut self) -> Option<LockKind> {
+        if self.held.is_some() {
+            return None;
+        }
+        self.held = self.deferred.take();
+        self.held
     }
 
     /// The text service's `OnLockGranted` returned: the lock is released,
@@ -114,6 +139,14 @@ impl LockArbiter {
     pub(crate) fn release(&mut self) -> Option<LockKind> {
         self.held = self.pending.take();
         self.held
+    }
+}
+
+/// A kept request joined by `kind`: read-write if either is.
+fn coalesce(kept: Option<LockKind>, kind: LockKind) -> LockKind {
+    match (kept, kind) {
+        (Some(LockKind::ReadWrite), _) | (_, LockKind::ReadWrite) => LockKind::ReadWrite,
+        _ => LockKind::Read,
     }
 }
 
@@ -153,6 +186,20 @@ mod tests {
             "coalesced, read-write since one asked"
         );
         assert!(locks.can_write(), "held by the pending grant");
+        assert_eq!(locks.release(), None);
+    }
+
+    #[test]
+    fn a_request_that_cannot_be_granted_yet_is_deferred_until_taken() {
+        let mut locks = LockArbiter::default();
+        assert_eq!(locks.defer(LF_READ | LF_SYNC), LockDecision::Refused);
+        assert_eq!(locks.take_deferred(), None, "nothing deferred");
+        assert_eq!(locks.defer(LF_READ), LockDecision::Queued);
+        assert_eq!(locks.defer(LF_READWRITE), LockDecision::Queued);
+        assert!(!locks.can_read(), "nothing held yet");
+        assert_eq!(locks.take_deferred(), Some(LockKind::ReadWrite));
+        assert!(locks.can_write());
+        assert_eq!(locks.take_deferred(), None, "taken once");
         assert_eq!(locks.release(), None);
     }
 

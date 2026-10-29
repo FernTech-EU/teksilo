@@ -3832,6 +3832,29 @@ impl TeksiloAppHandler {
         Ok(())
     }
 
+    /// Try to route an `AppEvent::External` payload as a
+    /// [`TextStorePayload`](teksilo_platform::text_input_hook::TextStorePayload):
+    /// the window's text store (Windows, `TEKSILO_TSF`) asks to be settled
+    /// again between dispatches, because a text service's lock request waits
+    /// for changes it could not report yet, or a settle was skipped while a
+    /// lock call was on the stack. It gets what a dispatched event gets,
+    /// [`Self::settle_ime`], and a redraw for typing that went in. A payload
+    /// for a window that has closed since is dropped.
+    fn try_route_text_store_payload(
+        &mut self,
+        payload: Box<dyn std::any::Any + Send>,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        use teksilo_platform::text_input_hook::TextStorePayload;
+
+        let TextStorePayload { window_id_owner } = *payload.downcast::<TextStorePayload>()?;
+        let last_area = self.wm.ime_cursor_area(window_id_owner);
+        if let Some(managed) = self.wm.get_by_teksilo_mut(window_id_owner) {
+            Self::settle_ime(managed, last_area);
+            managed.request_redraw();
+        }
+        Ok(())
+    }
+
     /// Tick gestures on every window with a real `WindowOps` sink so
     /// long-press / drag-tick handlers can open windows.
     fn tick_gestures_in_window(
@@ -5269,6 +5292,10 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                 let payload = match payload {
                     None => None,
                     Some(payload) => self.try_route_ime_commit_payload(payload, event_loop).err(),
+                };
+                let payload = match payload {
+                    None => None,
+                    Some(payload) => self.try_route_text_store_payload(payload).err(),
                 };
                 let payload = match payload {
                     None => None,

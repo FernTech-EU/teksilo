@@ -155,6 +155,33 @@ impl TextMirror {
         change
     }
 
+    /// Follow a change of the document the text service has not seen yet:
+    /// `range` (UTF-16 units of the mirror's text) became `text`. Unlike
+    /// [`replace`](Self::replace) it does not count as a text service's
+    /// write. The change to report, `None` for a range outside the text.
+    pub(crate) fn follow(&mut self, range: Range<usize>, text: &[u16]) -> Option<TextChange> {
+        let written = self.written;
+        let change = self.replace(range, text).ok();
+        self.written = written;
+        change
+    }
+
+    /// Follow the document's selection (UTF-16 offsets), clamped; whether
+    /// it moved.
+    pub(crate) fn follow_selection(
+        &mut self,
+        selection: Range<usize>,
+        caret_at_start: bool,
+    ) -> bool {
+        let end = self.units.len();
+        let start = selection.start.min(end);
+        let selection = start..selection.end.min(end).max(start);
+        let moved = selection != self.selection || caret_at_start != self.caret_at_start;
+        self.selection = selection;
+        self.caret_at_start = caret_at_start;
+        moved
+    }
+
     /// Set the selection, `SetSelection`.
     pub(crate) fn set_selection(
         &mut self,
@@ -299,6 +326,28 @@ mod tests {
         assert_eq!(mirror.text(), "aXYd");
         assert_eq!(mirror.selection(), 3..3);
         assert!(mirror.written());
+    }
+
+    #[test]
+    fn following_the_document_is_not_a_write() {
+        let mut mirror = synced("hello", 5..5);
+        let change = mirror.follow(5..5, &units(" world")).unwrap();
+        assert_eq!(
+            change,
+            TextChange {
+                start: 5,
+                old_end: 5,
+                new_end: 11
+            }
+        );
+        assert_eq!(mirror.text(), "hello world");
+        assert!(!mirror.written());
+        assert_eq!(mirror.follow(20..21, &[]), None);
+        assert_eq!(mirror.selection(), 11..11, "the caret after the insertion");
+        assert!(mirror.follow_selection(0..5, true));
+        assert!(!mirror.follow_selection(0..5, true), "no move");
+        assert!(mirror.follow_selection(3..40, false), "clamped");
+        assert_eq!(mirror.selection(), 3..11);
     }
 
     #[test]

@@ -360,8 +360,12 @@ fn parse_text_store_mode(value: Option<&str>) -> TextStoreMode {
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StoreFocus {
-    /// No text field, or a secure one: TSF gets an empty, disabled context.
+    /// No text field: TSF gets an empty, disabled context.
     None,
+    /// A secure field (a password): the same empty, disabled context, with
+    /// speech turned off on the thread while it has the focus (design
+    /// section 6).
+    Secure,
     /// A text field that does not describe its document (`CodeEditor`, the
     /// terminal): the IMM path, CUAS's own document.
     Imm,
@@ -371,6 +375,19 @@ pub enum StoreFocus {
         /// The focused widget.
         widget: teksilo_core::WidgetId,
     },
+}
+
+/// Asks `teksilo-app` to call [`set_text_store_focus`] for a window again,
+/// between dispatches: the window's text store has a lock request waiting
+/// for changes it could not report yet, or skipped a call made while a text
+/// service held a lock. `teksilo-app` does what it does after a dispatched
+/// event (`settle_ime`); a payload for a window that has closed since is
+/// dropped.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextStorePayload {
+    /// The window whose text store asks.
+    pub window_id_owner: TeksiloWindowId,
 }
 
 /// Give the window's text store `focus`, and bring its copy of the focused

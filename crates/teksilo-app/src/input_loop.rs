@@ -531,25 +531,27 @@ pub(crate) fn settle_ime(
 }
 
 /// What the text store is given for the focused widget: a store of its own
-/// for a field that describes its document (`secure` is that document's
-/// answer, `None` for a field that describes none), the IMM path for a text
-/// field that does not, an empty, disabled context for anything else and
-/// for a secure field (design section 6).
+/// for a widget that describes its document (`secure` is that document's
+/// answer, `None` for a widget that describes none), read-only or not; the
+/// IMM path for a text field that does not; an empty, disabled context for
+/// anything else, with speech off for a secure field or a password (design
+/// section 6).
 pub(crate) fn store_focus(
     focused: Option<teksilo_core::WidgetId>,
     ime: Option<teksilo_core::ime::ImeContext>,
     secure: Option<bool>,
 ) -> StoreFocus {
-    let (Some(widget), Some(ime)) = (focused, ime) else {
+    let Some(widget) = focused else {
         return StoreFocus::None;
     };
-    if ime.purpose == teksilo_core::ImePurpose::Password {
-        return StoreFocus::None;
+    let password = ime.is_some_and(|ime| ime.purpose == teksilo_core::ImePurpose::Password);
+    if password || secure == Some(true) {
+        return StoreFocus::Secure;
     }
-    match secure {
-        Some(false) => StoreFocus::Document { widget },
-        Some(true) => StoreFocus::None,
-        None => StoreFocus::Imm,
+    match (secure, ime) {
+        (Some(_), _) => StoreFocus::Document { widget },
+        (None, Some(_)) => StoreFocus::Imm,
+        (None, None) => StoreFocus::None,
     }
 }
 
@@ -1290,12 +1292,21 @@ mod tests {
         );
         assert_eq!(
             store_focus(Some(widget), text, Some(true)),
-            StoreFocus::None,
-            "a secure document: the empty context"
+            StoreFocus::Secure,
+            "a secure document: the empty context, speech off"
         );
         assert_eq!(
             store_focus(Some(widget), Some(ImeContext::password()), Some(false)),
-            StoreFocus::None
+            StoreFocus::Secure
+        );
+        assert_eq!(
+            store_focus(Some(widget), Some(ImeContext::password()), None),
+            StoreFocus::Secure
+        );
+        assert_eq!(
+            store_focus(Some(widget), None, Some(false)),
+            StoreFocus::Document { widget },
+            "a read-only field that describes its document: a read-only store"
         );
         assert_eq!(store_focus(Some(widget), None, None), StoreFocus::None);
         assert_eq!(store_focus(None, text, Some(false)), StoreFocus::None);

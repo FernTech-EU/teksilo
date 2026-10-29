@@ -338,8 +338,6 @@ pub(super) fn attach(
     poster: Arc<dyn AppEventPoster>,
     surfaces: TextSurfaces,
 ) {
-    // Nothing is posted yet.
-    let _ = poster;
     let Some(hwnd) = hwnd_of(parent) else {
         return;
     };
@@ -348,7 +346,7 @@ pub(super) fn attach(
     detach(window_id);
     WINDOWS.with_borrow_mut(|windows| windows.insert(window_id, hwnd));
     install_tap(window_id, hwnd, surfaces.clone());
-    tsf::attach(window_id, hwnd, surfaces);
+    tsf::attach(window_id, hwnd, poster, surfaces);
 }
 
 /// See [`super::set_text_store_focus`].
