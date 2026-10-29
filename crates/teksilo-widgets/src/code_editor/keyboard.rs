@@ -94,6 +94,10 @@ pub(super) fn handle_key(
     if settle_cancelled_composition(&mut state.borrow_mut()) {
         ctx.request_frame();
     }
+    // A key the text service passed on while the composition it writes is
+    // open ends that composition first, its text kept, as a native edit
+    // control's does.
+    super::input_document::finish_written_composition(state, ctx);
 
     let shift = modifiers.shift();
     // The platform accelerator — ⌘ on macOS, Ctrl elsewhere — so one chord
@@ -1016,6 +1020,11 @@ pub(super) fn settle_before_press(state: &SharedState, ctx: &mut EventContext) {
 /// The composition is at the primary caret only (see
 /// [`handle_ime_composition`]), so the other carets are left as they are.
 pub(super) fn finish_composition(state: &SharedState, ctx: &mut EventContext) {
+    // A composition the input system writes (a TSF text store's) ends its
+    // own way, the platform told first.
+    if super::input_document::finish_written_composition(state, ctx) {
+        return;
+    }
     let live = {
         let mut guard = state.borrow_mut();
         let st = &mut *guard;

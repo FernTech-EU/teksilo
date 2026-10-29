@@ -213,6 +213,11 @@ pub(crate) struct CodeEditorState {
     /// say (`TextDocument::transient_range`): any recorded write reverts it.
     /// See [`Composition`].
     pub composition: Composition,
+    /// The UTF-16 index of the document, for the platform's input system.
+    pub utf16: crate::common::document_offsets::DocumentUtf16,
+    /// What the platform's input system needs beside the document: the
+    /// change journal, the batch, the composition's clauses.
+    pub input_system: crate::common::input_editor::InputSystemState,
     /// Whether this view lays out every transient edit of its document, not only
     /// its own composition: the host's override, for transient edits it makes
     /// itself through the API (see `CodeEditor::show_transient_edits` and
@@ -292,6 +297,8 @@ impl CodeEditorState {
         wrap_mode: WrapMode,
     ) -> SharedState {
         let cursor = document.cursor();
+        let utf16 = crate::common::document_offsets::DocumentUtf16::watching(&document);
+        let input_system = crate::common::input_editor::InputSystemState::watching(&document);
 
         let event_queue = Arc::new(Mutex::new(VecDeque::<DocumentEvent>::new()));
         let subscription = {
@@ -370,6 +377,8 @@ impl CodeEditorState {
             _event_subscription: subscription,
             pending_chars: String::new(),
             composition: Composition::default(),
+            utf16,
+            input_system,
             show_transient_edits: false,
             last_ime_area: None,
             last_chase_pos: None,

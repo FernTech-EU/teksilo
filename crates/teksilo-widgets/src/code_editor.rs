@@ -43,6 +43,9 @@ mod config;
 mod context_menu;
 mod frame_loop;
 mod gutter;
+mod input_document;
+#[cfg(test)]
+mod input_document_tests;
 mod keyboard;
 mod log_stream;
 mod log_view;
@@ -720,5 +723,22 @@ impl teksilo_core::text_surface::TextSurface for CodeEditorHandle {
         if self.accepts(StandardEdit::SelectAll) {
             CodeEditorHandle::select_all(self);
         }
+    }
+
+    fn input_document(&self) -> Option<&dyn teksilo_core::text_input_document::TextInputDocument> {
+        Some(self)
+    }
+
+    /// None while the editor is read-only: the input system writes nothing
+    /// into it.
+    fn input_editor(&self) -> Option<&dyn teksilo_core::text_input_document::TextInputEditor> {
+        let editable = self.state.try_borrow().is_ok_and(|st| {
+            !st.policy.is_read_only()
+                && st
+                    .policy
+                    .command_filter
+                    .accepts(policy::CodeCommand::InsertChar)
+        });
+        editable.then_some(self as &dyn teksilo_core::text_input_document::TextInputEditor)
     }
 }

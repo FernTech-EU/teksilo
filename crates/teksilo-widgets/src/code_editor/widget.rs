@@ -625,9 +625,11 @@ impl Widget for CodeEditor {
                     } else {
                         // Keep any in-progress composition's text in place and
                         // end the platform's composition (see
-                        // `keyboard::finish_composition`): thrown away, the
-                        // writer's text was lost; left alive, the input method
-                        // commits it later, here or in the field focused next.
+                        // `keyboard::finish_composition`, which ends one the
+                        // input system writes as the platform finishes it):
+                        // thrown away, the writer's text was lost; left alive,
+                        // the input method commits it later, here or in the
+                        // field focused next.
                         super::keyboard::finish_composition(&state, ctx);
                         // A popup that outlived its editor's focus would float
                         // detached — close it on blur.

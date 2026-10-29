@@ -87,6 +87,9 @@ pub(super) fn handle_pointer_event(
                 // Secondary / middle belong to the context menu; let them bubble.
                 return EventResponse::Ignored;
             }
+            // The composition the input system writes ends first, its text
+            // kept, so the press hit-tests the text it left.
+            super::input_document::finish_written_composition(state, ctx);
             // A cursor has taken over. Touch chrome — handles, the selection
             // toolbar — is standing on the text it is trying to reach, and the
             // affordance band is exempt from outside-press dismissal, so nothing
@@ -251,6 +254,7 @@ fn handle_direct_pointer_event(
             // A fresh press: forget any hold this contact's id carried from a
             // previous gesture, so a stale record can never eat a real tap.
             touch.take_hold_consumed(ctx.pointer().id);
+            super::input_document::finish_written_composition(state, ctx);
             // …and remember where it landed, so the release can tell a tap from
             // a pan. See `EditorTouch::press_is_still_a_tap` for why the
             // framework's coarse tap boundary cannot answer that here.
