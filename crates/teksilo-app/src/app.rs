@@ -737,6 +737,12 @@ impl crate::input_loop::InputChrome for WindowChrome<'_> {
         }
     }
 
+    fn terminate_text_store_composition(&mut self) -> bool {
+        teksilo_core::raw_handle::ParentHandle::from_window(self.window.window()).is_some_and(
+            |parent| teksilo_platform::text_input_hook::terminate_text_store_composition(&parent),
+        )
+    }
+
     fn ime_host(&self) -> crate::input_loop::ImeHost {
         let window_system =
             winit::raw_window_handle::HasDisplayHandle::display_handle(self.window.window())
@@ -3934,7 +3940,15 @@ impl TeksiloAppHandler {
             return;
         }
         let pressed = key_event.state == winit::event::ElementState::Pressed;
+        // A key a text service took while Alt was held reached the window
+        // as its key-up only (Alt+` toggling the Japanese IME through the
+        // text store): it is a key of the chord all the same. Asked at the
+        // press to start afresh.
+        let key_taken = teksilo_platform::text_input_hook::take_key_taken_by_text_store();
         let action = self.wm.get_by_winit_mut(window_id).and_then(|managed| {
+            if !pressed && key_taken {
+                managed.state.note_non_alt_keydown_during_alt();
+            }
             if managed.state.note_alt_key_from_os(
                 pressed,
                 crate::input_routing::alt_pressed_alone(managed.current_modifiers),

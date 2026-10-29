@@ -501,11 +501,36 @@ cannot compose breaks every IME.
   report whatever is left, traced. A text service's `SetSelection` now counts as a write, so its
   own selection is what it reads back (the reconversion's `SetSelection 140..144` was answered
   `140..140` from the document).
+  Round 2 (`tsf-phase-1-windows-2-findings.md`) passed: no lock queued, refused or deferred. It
+  also found what Phase 2 must match: in Notepad the Microsoft Japanese IME passes Down after the
+  first Space too, and that Down ends the composition there (the underline goes, the next Enter
+  adds a line), where the store's stayed open until Enter.
 - **Phases 2 and 3, writes and compositions, one unit** (about 2,500 lines). The write half wired,
   the composition sink, interim dictation, the Japanese IME through the store, termination before a
   press, display attributes for clauses, the key-trace verdict, `WM_IME_REQUEST` kept under TSF. On
   by default once the VM runs pass: Japanese, Pinyin and Korean, voice typing in two languages, the
   emoji panel, the touch keyboard, NVDA.
+  Built: `SetText`, `InsertTextAtSelection` and `SetSelection` go to the field's
+  `TextInputEditor` inside the batch each grant opens (writes land at once and are read back under
+  the same lock; what the application sees follows the grant), `TS_ST_CORRECTION` as a correction,
+  a query as a dry run, the landed range answered in UTF-16. The mirror keeps no writes: it is the
+  text as the text services last heard of it, following the journal; a change the text services
+  made, and the selection their writes left, are not told back. The composition sink marks the
+  range `OnStartComposition` names (empty at the caret, or the reconverted text), the edit sink
+  hands over the clauses (`GUID_PROP_ATTRIBUTE` runs, styled by `ITfDisplayAttributeMgr`'s
+  `bAttr`: target converted and target not converted thick, input and converted thin, drawn per
+  clause in both widgets), and `OnEndComposition` commits it as one undo step through the field's
+  rules. `TerminateComposition` runs before a press is dispatched (`teksilo-app` lays the window
+  out after it, M13) and whenever a field ends its composition (a focus change, an edit command),
+  through the same `finish_composition` call the IMM path uses; the field then finds it ended. The
+  store serves its widget by id (`TextSurfaces::surface`), so the last text of a composition a
+  focus change ended lands in the field that held it. A key the text service passes on while its
+  composition is open ends the composition first, its text kept, then acts (Notepad's behaviour
+  above). The key-trace verdict (a key traced with no `WM_KEYDOWN` for it) counts as a key of an
+  Alt chord. `WM_IME_REQUEST` answers stay, unchanged. The emoji panel's one-shot composition goes
+  through the same sink. Reports are no longer held back during a composition: the text is the
+  field's now, so a change the field makes under one (its caret moved) is reported and lets the
+  text service end it.
 - **Phase 4** (about 500 lines). Attribution (5), touch keyboard flags, a document for `CodeEditor`,
   macOS's `insertText:` onto the write half.
 

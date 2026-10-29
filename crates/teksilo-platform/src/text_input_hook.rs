@@ -72,6 +72,7 @@ mod dictation;
 mod imm_completion;
 mod imm_requests;
 mod key_press;
+mod key_trace;
 mod left_behind;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -375,6 +376,43 @@ pub enum StoreFocus {
         /// The focused widget.
         widget: teksilo_core::WidgetId,
     },
+}
+
+/// End the composition a text service holds in the window's text store, if
+/// one is open, and let the text service write its last text (a Japanese
+/// trailing `n` becomes `ん`): what `teksilo-app` does before it dispatches a
+/// press, so that the press hit-tests the text the text service left
+/// (`engineering/docs/tsf-text-store.md`, 4.11). Main thread only, outside
+/// the dispatch of an event. Whether a composition was open: the caller then
+/// lays the window out before it dispatches. Does nothing unless
+/// [`text_store_mode`] is on.
+#[doc(hidden)]
+pub fn terminate_text_store_composition(window: &ParentHandle) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows::terminate_text_store_composition(window)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        false
+    }
+}
+
+/// Whether a text service took a key (it reached the window as its key-up
+/// only) since the last call: a key of a chord the window never saw go
+/// down, for the bare-Alt menu, which `teksilo-app` asks as Alt goes down and
+/// as it comes up. Always `false` unless [`text_store_mode`] is on.
+#[doc(hidden)]
+pub fn take_key_taken_by_text_store() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows::take_key_taken_by_text_store()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
 }
 
 /// Asks `teksilo-app` to call [`set_text_store_focus`] for a window again,

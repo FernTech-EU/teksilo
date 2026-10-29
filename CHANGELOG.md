@@ -26,11 +26,12 @@ by crate for clarity, not because crates version independently.
   [docs/native-menu.md](docs/native-menu.md).
 - **`TEKSILO_TEXT_INPUT_TRACE=1`** logs what the platform's text input system
   sends a window, on macOS and Windows.
-- **`TEKSILO_TSF=1`** (Windows) runs a measuring TSF text store: text
+- **`TEKSILO_TSF=1`** (Windows, experimental) runs a TSF text store: text
   services read the focused field's text, selection and character positions
-  through it, are told of its changes, and get read-only and secure fields as
-  such; what they write stays in the store's own copy and does not reach the
-  field. For diagnosing only.
+  through it and write into it, compositions included (each one undo step,
+  its clauses underlined), and are told of its changes; a press or a focus
+  change ends a composition with the text service's last text. Read-only and
+  secure fields are presented as such. Off by default while it is measured.
 - **Windows: a text field answers the input method's questions about its
   text.** The candidate window follows the character being converted, and
   the input method reads the text around the composition as it predicts.

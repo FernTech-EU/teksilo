@@ -104,6 +104,12 @@ pub(crate) trait InputChrome {
     /// Give the window's text store the focus [`settle_ime`] decided, and
     /// let it bring its copy of the focused document up to date.
     fn set_text_store_focus(&mut self, focus: StoreFocus);
+
+    /// End the composition a text service holds in the window's text store,
+    /// letting it write its last text
+    /// ([`teksilo_platform::text_input_hook::terminate_text_store_composition`]).
+    /// Whether one was open.
+    fn terminate_text_store_composition(&mut self) -> bool;
 }
 
 /// What a window blocked by a modal child does with one event.
@@ -176,6 +182,7 @@ pub(crate) fn dispatch_input(
     ops: &mut dyn WindowOps,
     event: &WindowEvent,
 ) -> bool {
+    end_store_composition_before_press(chrome, tree, event);
     if !crate::input_routing::route_input_event(backend, tree, ops, event) {
         return false;
     }
@@ -187,6 +194,32 @@ pub(crate) fn dispatch_input(
         chrome.request_redraw(trace_label);
     }
     true
+}
+
+/// Before a press is dispatched, end the composition a text service holds in
+/// the window's text store and lay the window out, so that the press
+/// hit-tests the text the text service left (a Japanese trailing `n` becomes
+/// `ん`, Pinyin's letters become their characters): design 4.11 of
+/// `engineering/docs/tsf-text-store.md`, measurement M13. Outside the
+/// dispatch, so the text service writes outside any handler. Nothing
+/// without a text store.
+fn end_store_composition_before_press(
+    chrome: &mut dyn InputChrome,
+    tree: &mut WidgetTree,
+    event: &WindowEvent,
+) {
+    let press = match event {
+        WindowEvent::MouseInput { state, .. } => state.is_pressed(),
+        WindowEvent::Touch(touch) => touch.phase == winit::event::TouchPhase::Started,
+        _ => false,
+    };
+    if press
+        && chrome.text_store_mode() != TextStoreMode::Off
+        && chrome.terminate_text_store_composition()
+    {
+        let proposal = tree.last_proposal();
+        tree.layout(proposal);
+    }
 }
 
 /// Drain this window's pen shim and route whatever it buffered.
@@ -634,6 +667,10 @@ mod tests {
         store_mode: Option<TextStoreMode>,
         /// Every [`InputChrome::set_text_store_focus`], in order.
         store_focus: Vec<StoreFocus>,
+        /// What [`InputChrome::terminate_text_store_composition`] answers,
+        /// and how often it was asked.
+        composing: bool,
+        terminated: u32,
         /// What [`InputChrome::safe_area`] answers.
         sides: SafeAreaSides,
         /// What [`InputChrome::occluded_band`] answers, and what it was asked.
@@ -670,6 +707,62 @@ mod tests {
         fn set_text_store_focus(&mut self, focus: StoreFocus) {
             self.store_focus.push(focus);
         }
+        fn terminate_text_store_composition(&mut self) -> bool {
+            self.terminated += 1;
+            std::mem::take(&mut self.composing)
+        }
+    }
+
+    /// A press ends the store's composition before it is dispatched, and
+    /// only a press, and only with a text store.
+    #[test]
+    fn a_press_ends_the_text_stores_composition_before_its_dispatch() {
+        let (mut tree, log) = tree_with_log();
+        let mut backend = backend();
+        let mut ops = NoopWindowOps;
+        let mut chrome = Chrome {
+            store_mode: Some(TextStoreMode::Store),
+            composing: true,
+            ..Chrome::default()
+        };
+        dispatch_input(
+            &mut chrome,
+            &mut backend,
+            &mut tree,
+            &mut ops,
+            &cursor(10.0, 10.0),
+        );
+        assert_eq!(chrome.terminated, 0, "a move ends nothing");
+        dispatch_input(
+            &mut chrome,
+            &mut backend,
+            &mut tree,
+            &mut ops,
+            &click(winit::event::ElementState::Pressed),
+        );
+        assert_eq!(chrome.terminated, 1);
+        assert!(!log.borrow().phases.is_empty(), "then dispatched");
+        dispatch_input(
+            &mut chrome,
+            &mut backend,
+            &mut tree,
+            &mut ops,
+            &click(winit::event::ElementState::Released),
+        );
+        assert_eq!(chrome.terminated, 1, "a release ends nothing");
+
+        let mut off = Chrome {
+            composing: true,
+            ..Chrome::default()
+        };
+        dispatch_input(
+            &mut off,
+            &mut backend,
+            &mut tree,
+            &mut ops,
+            &click(winit::event::ElementState::Pressed),
+        );
+        assert_eq!(off.terminated, 0, "no text store: never asked");
     }
 
     // -- (a) the pointer arm, through the loop's own step ----------------

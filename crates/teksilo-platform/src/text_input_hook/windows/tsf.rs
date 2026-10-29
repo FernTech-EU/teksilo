@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 // SPDX-FileCopyrightText: 2026 FernTech
 
-//! Windows: a TSF text store, Phases 0 and 1 of
-//! `engineering/docs/tsf-text-store.md` (7.1): reads, notifications and the
-//! lock model, behind `TEKSILO_TSF` ([`TextStoreMode`]). Writes are Phase 2.
+//! Windows: a TSF text store, Phases 0 to 3 of
+//! `engineering/docs/tsf-text-store.md` (7.1): reads, writes, compositions,
+//! notifications and the lock model, behind `TEKSILO_TSF` ([`TextStoreMode`]).
 //!
 //! What it does:
 //!
@@ -12,41 +12,51 @@
 //!   (`TF_GetThreadMgr`) or a new one, if the UI thread is an STA; it never
 //!   initialises COM. Keys follow Chromium's model: TSF processes them
 //!   itself, and an `ITfKeyTraceEventSink` on the thread manager says which
-//!   it saw (M9). The thread is never deactivated, and its COM pointers are
-//!   leaked at thread exit rather than released in an order nobody controls
-//!   (4.5).
+//!   it saw (M9); a key traced with no `WM_KEYDOWN` for it was taken
+//!   ([`KeyTrace`]), which the bare-Alt menu asks (4.3). The thread is never
+//!   deactivated, and its COM pointers are leaked at thread exit rather than
+//!   released in an order nobody controls (4.5).
 //! - **Each window** gets its own empty document manager with an empty,
 //!   disabled context (`GUID_COMPARTMENT_KEYBOARD_DISABLED` and
-//!   `GUID_COMPARTMENT_EMPTYCONTEXT` set to 1), associated with its HWND once
+//!   `GUID_COMPARTMENT_EMPTYCONTEXT` set to 1), associated with its HWND
 //!   (`AssociateFocus`), as Chromium does (4.6). For the IMM path
 //!   ([`StoreFocus::Imm`]) the HWND is associated back with what that call
 //!   handed back (nothing, measured), so that CUAS's own document takes the
-//!   focus as winit's IMM context activates; with our empty document
-//!   associated, TSF focused it instead and the input method stayed off (M2).
-//!   It is associated back at detach too. A secure field
-//!   ([`StoreFocus::Secure`]) gets the empty context, and speech is turned off
-//!   on the thread while it has the focus (section 6).
+//!   focus as winit's IMM context activates (M2). It is associated back at
+//!   detach too. A secure field ([`StoreFocus::Secure`]) gets the empty
+//!   context, and speech is turned off on the thread while it has the focus
+//!   (section 6).
 //! - **Each focus session** on a widget that describes its document gets a
 //!   new document manager and context over a [`TextStore`]
 //!   (`ITextStoreACP`, `ITfContextOwnerCompositionSink`) and an
-//!   [`EditSink`] (`ITfTextEditSink`, M4). TSF focus moves only from
-//!   [`set_text_store_focus`], which `teksilo-app` calls after every
-//!   dispatched event (case 2 of 4.4: TSF calls are allowed there), never
-//!   while a `RequestLock` is on the stack, and only for the window that has
-//!   the Win32 focus (`GetFocus`); a change made while the window is in the
-//!   background is applied when it comes back (M14).
+//!   [`EditSink`] (`ITfTextEditSink`). The store serves that widget, found by
+//!   its id, until the session ends, so a text service finishing a
+//!   composition a focus change ended writes into it. TSF focus moves only
+//!   from [`set_text_store_focus`], which `teksilo-app` calls after every
+//!   dispatched event (case 2 of 4.4), never while a `RequestLock` is on the
+//!   stack, and only for the window that has the Win32 focus (M14).
 //! - **Reads** answer from the document (4.8), in UTF-16 through its index,
-//!   and `GetTextExt` with the range's own lines. A [`TextMirror`] holds the
-//!   text and selection as the text services last heard of them: what a
-//!   change is reported against, and, in this phase, where a text service's
-//!   writes land and are read back from until the settle after its
-//!   composition gives the document back.
+//!   and `GetTextExt` with the range's own lines.
+//! - **Writes** (4.9) go through the field's write half
+//!   ([`TextInputEditor`]): `SetText` and `InsertTextAtSelection` replace a
+//!   range (`TS_ST_CORRECTION` keeps the replaced run's format, a query is a
+//!   dry run), `SetSelection` sets the selection, and each answers what
+//!   landed. Every grant is a batch of the field's (`begin_input_batch`), so
+//!   what the application sees of the writes follows as the grant ends.
+//! - **Compositions** are ranges of the field's text: `OnStartComposition`
+//!   marks the range the text service names (`mark_composition`), the edit
+//!   sink hands over its clauses, each styled by its display attribute
+//!   (`GUID_PROP_ATTRIBUTE`, `ITfDisplayAttributeMgr`), and
+//!   `OnEndComposition` ends it as one undo step (`end_composition`).
+//!   [`terminate_composition`] (`TerminateComposition`) ends one before a
+//!   press is dispatched and when a field ends its composition (4.11).
 //! - **Notifications** (4.10): at every [`set_text_store_focus`], typing the
 //!   field holds for its frame is flushed, and the changes since the last
-//!   report go out, the journal's range followed into the mirror
-//!   ([`TextInputDocument::text_changed_since`]), changes the input system
-//!   made itself not reported. At the tail of `RequestLock`, the changes a
-//!   message made during the grant.
+//!   report go out, the journal's range followed into a [`TextMirror`] (the
+//!   text as the text services last heard of it); changes the text services
+//!   made themselves, and the selection their writes left, are not told
+//!   back. At the tail of `RequestLock`, the changes a message made during
+//!   the grant.
 //! - **Locks** follow [`LockArbiter`] (4.7): while the field is busy or has
 //!   changes not reported yet, a synchronous request is refused and an
 //!   asynchronous one deferred, and a [`TextStorePayload`] asks
@@ -69,11 +79,12 @@ use std::sync::Arc;
 
 use teksilo_canvas::{Point, Rect};
 use teksilo_core::text_input_document::{
-    ChangeCause, InputRevisions, TextInputDocument, Utf16Index,
+    ChangeCause, CompositionSegment, InputRevisions, SegmentStyle, TextInputDocument,
+    TextInputEditor, Utf16Index, WriteOptions, WriteRefused,
 };
-use teksilo_core::text_surface::TextSurfaces;
+use teksilo_core::text_surface::{TextSurface, TextSurfaces};
 use teksilo_core::window::TeksiloWindowId;
-use teksilo_core::{AppEventPoster, WidgetId};
+use teksilo_core::{AppEventPoster, ImeOrigin, WidgetId};
 
 use windows::Win32::Foundation::{
     E_FAIL, E_INVALIDARG, E_NOTIMPL, E_UNEXPECTED, HWND, LPARAM, POINT, RECT, S_OK, WPARAM,
@@ -85,22 +96,26 @@ use windows::Win32::System::Variant::{VARIANT, VT_EMPTY, VT_I4};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows::Win32::UI::TextServices::{
-    CLSID_TF_ThreadMgr, GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
-    GUID_COMPARTMENT_SPEECH_DISABLED, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink,
-    ITfCompartmentMgr, ITfCompositionView, ITfContext, ITfContextOwnerCompositionSink,
-    ITfContextOwnerCompositionSink_Impl, ITfDocumentMgr, ITfEditRecord, ITfKeyTraceEventSink,
-    ITfKeyTraceEventSink_Impl, ITfProperty, ITfRange, ITfSource, ITfTextEditSink,
-    ITfTextEditSink_Impl, ITfThreadMgr, ITfThreadMgrEx, TEXT_STORE_LOCK_FLAGS,
-    TEXT_STORE_TEXT_CHANGE_FLAGS, TF_DEFAULT_SELECTION, TF_DISABLE_COMMANDING,
-    TF_DISABLE_DICTATION, TF_DISABLE_SPEECH, TF_GTP_INCL_TEXT, TS_AE_END, TS_AE_START, TS_ATTRVAL,
-    TS_E_INVALIDPOINT, TS_E_INVALIDPOS, TS_E_NOLOCK, TS_E_READONLY, TS_E_SYNCHRONOUS,
-    TS_IAS_QUERYONLY, TS_LC_CHANGE, TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC,
-    TS_SD_INPUTPANEMANUALDISPLAYENABLE, TS_SD_READONLY, TS_SELECTION_ACP, TS_SELECTIONSTYLE,
-    TS_SS_NOHIDDENTEXT, TS_STATUS, TS_TEXTCHANGE,
+    CLSID_TF_CategoryMgr, CLSID_TF_DisplayAttributeMgr, CLSID_TF_ThreadMgr,
+    GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
+    GUID_COMPARTMENT_SPEECH_DISABLED, GUID_PROP_ATTRIBUTE, ITextStoreACP, ITextStoreACP_Impl,
+    ITextStoreACPSink, ITfCategoryMgr, ITfCompartmentMgr, ITfCompositionView, ITfContext,
+    ITfContextComposition, ITfContextOwnerCompositionServices, ITfContextOwnerCompositionSink,
+    ITfContextOwnerCompositionSink_Impl, ITfDisplayAttributeMgr, ITfDocumentMgr, ITfEditRecord,
+    ITfKeyTraceEventSink, ITfKeyTraceEventSink_Impl, ITfProperty, ITfRange, ITfRangeACP, ITfSource,
+    ITfTextEditSink, ITfTextEditSink_Impl, ITfThreadMgr, ITfThreadMgrEx, TEXT_STORE_LOCK_FLAGS,
+    TEXT_STORE_TEXT_CHANGE_FLAGS, TF_ATTR_CONVERTED, TF_ATTR_FIXEDCONVERTED,
+    TF_ATTR_TARGET_CONVERTED, TF_ATTR_TARGET_NOTCONVERTED, TF_DA_ATTR_INFO, TF_DEFAULT_SELECTION,
+    TF_DISABLE_COMMANDING, TF_DISABLE_DICTATION, TF_DISABLE_SPEECH, TF_DISPLAYATTRIBUTE,
+    TF_GTP_INCL_TEXT, TS_AE_END, TS_AE_START, TS_ATTRVAL, TS_E_INVALIDPOINT, TS_E_INVALIDPOS,
+    TS_E_NOLOCK, TS_E_READONLY, TS_E_SYNCHRONOUS, TS_IAS_QUERYONLY, TS_LC_CHANGE, TS_RT_PLAIN,
+    TS_RUNINFO, TS_S_ASYNC, TS_SD_INPUTPANEMANUALDISPLAYENABLE, TS_SD_READONLY, TS_SELECTION_ACP,
+    TS_SELECTIONSTYLE, TS_SS_NOHIDDENTEXT, TS_ST_CORRECTION, TS_STATUS, TS_TEXTCHANGE,
 };
 use windows::core::{BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, PWSTR, Ref, implement};
 
 use super::super::answers::{self, Utf16Range};
+use super::super::key_trace::KeyTrace;
 use super::super::tsf_lock::{LockArbiter, LockDecision, LockKind};
 use super::super::tsf_mirror::{TextChange, TextMirror};
 use super::super::{StoreFocus, TextStoreMode, TextStorePayload, text_store_mode};
@@ -227,8 +242,41 @@ fn activate() -> Result<Thread, String> {
 #[implement(ITfKeyTraceEventSink)]
 struct KeyTraceSink;
 
+thread_local! {
+    /// Which keys a text service took (4.3), from the key trace and the
+    /// window's key-downs.
+    static KEY_TRACE: RefCell<KeyTrace> = RefCell::new(KeyTrace::default());
+}
+
+/// The window got `WM_KEYDOWN` or `WM_SYSKEYDOWN` for `vk`, which the text
+/// services therefore passed on. From the subclass, ahead of winit: no TSF
+/// call.
+pub(super) fn note_window_key_down(vk: u32) {
+    let _ = KEY_TRACE.try_with(|trace| {
+        if let Ok(mut trace) = trace.try_borrow_mut() {
+            trace.window_key_down(vk);
+        }
+    });
+}
+
+/// Whether a text service took a key since the last call.
+pub(super) fn take_key_taken() -> bool {
+    KEY_TRACE
+        .try_with(|trace| {
+            trace
+                .try_borrow_mut()
+                .is_ok_and(|mut trace| trace.take_taken())
+        })
+        .unwrap_or(false)
+}
+
 impl ITfKeyTraceEventSink_Impl for KeyTraceSink_Impl {
     fn OnKeyTraceDown(&self, wparam: WPARAM, lparam: LPARAM) -> windows::core::Result<()> {
+        let _ = KEY_TRACE.try_with(|trace| {
+            if let Ok(mut trace) = trace.try_borrow_mut() {
+                trace.trace_down(wparam.0 as u32);
+            }
+        });
         tsf_trace!(
             "#{} key trace down vk={:#04x} lparam={:#x}",
             next_sequence(),
@@ -239,6 +287,11 @@ impl ITfKeyTraceEventSink_Impl for KeyTraceSink_Impl {
     }
 
     fn OnKeyTraceUp(&self, wparam: WPARAM, lparam: LPARAM) -> windows::core::Result<()> {
+        let _ = KEY_TRACE.try_with(|trace| {
+            if let Ok(mut trace) = trace.try_borrow_mut() {
+                trace.trace_up(wparam.0 as u32);
+            }
+        });
         tsf_trace!(
             "#{} key trace up vk={:#04x} lparam={:#x}",
             next_sequence(),
@@ -543,6 +596,32 @@ pub(super) fn set_text_store_focus(hwnd: HWND, focus: StoreFocus) {
     }
 }
 
+/// End the composition a text service holds in the window's store, outside
+/// any lock (4.11): before a press is dispatched, or as a field ends its
+/// composition. Whether one was open. Never while a lock call is on the
+/// stack.
+pub(super) fn terminate_composition(hwnd: HWND) -> bool {
+    if LockDepth::active() {
+        return false;
+    }
+    let Some(window) = WINDOWS
+        .try_with(|windows| windows.borrow().get(&(hwnd.0 as isize)).cloned())
+        .ok()
+        .flatten()
+    else {
+        return false;
+    };
+    let session = window.try_borrow().ok().and_then(|window| {
+        window
+            .session
+            .as_ref()
+            .map(|session| (session.state.clone(), session.context.clone()))
+    });
+    // No borrow of the window across the TSF call.
+    drop(window);
+    session.is_some_and(|(state, context)| state.terminate(&context))
+}
+
 /// Turn speech off on the thread (`GUID_COMPARTMENT_SPEECH_DISABLED`, a
 /// bitmask on the thread manager's compartment), or give it back the value
 /// it had before.
@@ -678,10 +757,9 @@ struct StoreState {
 ///
 /// The mirror is the text and selection as the text services last heard of
 /// them, in UTF-16: what a change is reported against. Reads are answered
-/// from the document, while the mirror holds its text; in this phase a text
-/// service's writes still land in the mirror only (7.1), and reads answer
-/// from the mirror until the next report after the composition ends puts
-/// the document back.
+/// from the field's document, and the text services' writes go to its
+/// write half (`TextInputEditor`); the mirror answers a read only while the
+/// document cannot.
 #[derive(Default)]
 struct StoreInner {
     mirror: TextMirror,
@@ -695,6 +773,10 @@ struct StoreInner {
     /// The UTF-16 index of the text at the last report, where the journal's
     /// old offsets are converted.
     reported_index: Option<Rc<Utf16Index>>,
+    /// The selection (UTF-16, and whether the caret is at its start) a text
+    /// service's last write left: the text service knows it, so it is not
+    /// reported back to it.
+    store_selection: Option<(Range<usize>, bool)>,
     /// Window-logical, at the last report: answered while the document
     /// cannot place a range.
     caret: Option<Rect>,
@@ -711,47 +793,48 @@ struct Notifications {
 }
 
 impl StoreState {
-    /// Run `f` on the field's document, while the field has the focus: the
-    /// focus can move before the next settle ends the session.
+    /// The field the store is for, focused or not: a text service finishing
+    /// a composition a focus change ended writes its last text there.
+    fn surface(&self) -> Option<Rc<dyn TextSurface>> {
+        self.surfaces.surface(self.widget)
+    }
+
+    /// Run `f` on the field's document.
     fn document<R>(&self, f: impl FnOnce(&dyn TextInputDocument) -> R) -> Option<R> {
-        if self.surfaces.focus_signal().get() != Some(self.widget) {
-            return None;
-        }
-        self.surfaces.with_focused_input_document(f)
+        let surface = self.surface()?;
+        let document = surface.input_document()?;
+        Some(f(document))
+    }
+
+    /// Run `f` on the field's write half; `None` for a field that takes no
+    /// writes from the input system (read-only, secure, or a widget that
+    /// implements none).
+    fn editor<R>(&self, f: impl FnOnce(&dyn TextInputEditor) -> R) -> Option<R> {
+        let surface = self.surface()?;
+        let editor = surface.input_editor()?;
+        Some(f(editor))
     }
 
     /// Report what changed in the document since the last report:
     /// `OnTextChange` with the journal's range, `OnSelectionChange`,
-    /// `OnLayoutChange`, `OnStatusChange` (4.10). Not while a lock is held or
-    /// a composition is in progress.
+    /// `OnLayoutChange`, `OnStatusChange` (4.10). Not while a lock is held.
+    /// Changes the text services made themselves are followed, not reported.
     ///
     /// At a `settle` (between dispatches), typing the widget holds for its
-    /// frame goes in first, and a mirror holding a text service's writes is
-    /// given the document back. At the tail of `RequestLock` neither: no
-    /// widget code may run there, and the text service that just wrote reads
-    /// its writes back until the next settle.
+    /// frame goes in first. At the tail of `RequestLock`, where no widget code
+    /// may run, it does not.
     fn report(&self, settle: bool) {
-        // Typing waiting for the frame goes in even while a composition is
-        // open: a lock waits for the field to be available (4.7), and only
-        // this makes it so.
-        if settle
-            && self
+        let held = |state: &Self| {
+            state
                 .inner
                 .try_borrow()
-                .is_ok_and(|inner| inner.locks.held().is_none())
-        {
-            let _ = self.document(|document| document.flush_pending_input());
+                .map_or(true, |inner| inner.locks.held().is_some())
+        };
+        if held(self) {
+            return;
         }
-        {
-            let Ok(inner) = self.inner.try_borrow() else {
-                return;
-            };
-            if inner.locks.held().is_some()
-                || inner.compositions > 0
-                || (!settle && inner.mirror.written())
-            {
-                return;
-            }
+        if settle {
+            let _ = self.document(|document| document.flush_pending_input());
         }
         let Some(notifications) = self.document(|document| self.compare(document)).flatten() else {
             return;
@@ -789,25 +872,23 @@ impl StoreState {
         if document.is_secure() || !document.is_available() {
             return None;
         }
+        let editable = document.is_editable() && self.editor(|_| ()).is_some();
         let mut inner = self.inner.try_borrow_mut().ok()?;
-        if inner.locks.held().is_some() || inner.compositions > 0 {
+        if inner.locks.held().is_some() {
             return None;
         }
         let revisions = document.revisions();
-        let editable = document.is_editable();
-        if revisions.is_some()
-            && revisions == inner.reported
-            && !inner.mirror.written()
-            && editable == inner.editable
-        {
+        if revisions.is_some() && revisions == inner.reported && editable == inner.editable {
             return None;
         }
         let index = document.utf16_index()?;
+        // Where the text services last heard the selection was: a selection
+        // that is elsewhere now is told, even one a text change carried.
         let before = (inner.mirror.selection(), inner.mirror.caret_at_start());
         // The text: the journal's range where it can say, the whole text
         // compared otherwise.
         let followed = match (revisions, inner.reported, inner.reported_index.clone()) {
-            (Some(now), Some(then), Some(old)) if !inner.mirror.written() => {
+            (Some(now), Some(then), Some(old)) => {
                 if now.text == then.text {
                     Some(None)
                 } else {
@@ -824,22 +905,19 @@ impl StoreState {
             Some(change) => change,
             None => {
                 let text = document.text_in(0..index.char_count())?;
-                if inner.mirror.written() {
-                    tsf_trace!(
-                        "#{} {} mirror: the text services' writes go, as {:?}",
-                        next_sequence(),
-                        self.window_id,
-                        inner.mirror.text()
-                    );
-                }
-                inner
-                    .mirror
-                    .sync(&text, selection16.clone(), caret_at_start)
-                    .0
+                let selection = inner.mirror.selection();
+                let at_start = inner.mirror.caret_at_start();
+                // The selection is compared below, after the text.
+                let (change, _) = inner.mirror.sync(&text, selection, at_start);
+                change
             }
         };
-        inner.mirror.follow_selection(selection16, caret_at_start);
-        let moved = (inner.mirror.selection(), inner.mirror.caret_at_start()) != before;
+        // The one a text service's write left is its own and not told back.
+        let known = inner.store_selection.take() == Some((selection16.clone(), caret_at_start));
+        inner
+            .mirror
+            .follow_selection(selection16.clone(), caret_at_start);
+        let moved = (selection16, caret_at_start) != before && !known;
         // The layout: by revision, or by the caret's and the visible text's
         // rectangles for a document that counts none.
         let layout_changed = match (revisions, inner.reported) {
@@ -874,15 +952,8 @@ impl StoreState {
 
     /// Whether a lock waits for the next settle (4.7, rule 1): the field
     /// holds typing not inserted yet, or has changes the text services have
-    /// not heard of that the next report will tell them. Reads only.
-    ///
-    /// Only what a report can clear holds a lock back, or a deferred request
-    /// would wait for ever: while a composition is open, or the mirror holds
-    /// a text service's writes, the field's changes are not reported (the
-    /// mirror is not the field's text), so they hold nothing back; the
-    /// report after the composition compares the whole text. A document that
-    /// counts no revisions is compared at each report instead, and never
-    /// holds a lock back.
+    /// not heard of. Reads only. A document that counts no revisions is
+    /// compared at each report instead, and never holds a lock back.
     fn dirty(&self) -> bool {
         self.document(|document| {
             if !document.is_available() {
@@ -891,9 +962,6 @@ impl StoreState {
             let Ok(inner) = self.inner.try_borrow() else {
                 return false;
             };
-            if inner.compositions > 0 || inner.mirror.written() {
-                return false;
-            }
             match (document.revisions(), inner.reported) {
                 (Some(now), Some(then)) => now.text != then.text || now.selection != then.selection,
                 _ => false,
@@ -905,6 +973,12 @@ impl StoreState {
     /// Grant `kind`, then each request queued meanwhile, then report what
     /// changed during the grants and grant a request deferred meanwhile
     /// (4.7, rule 3). The first grant's result.
+    ///
+    /// Each grant is a batch of the field's (`begin_input_batch`,
+    /// `end_input_batch`): the text service's writes change only the
+    /// field's own state while it holds the lock, and what the application
+    /// sees of them (the document's events, `on_text_inserted`, the caret's
+    /// signals) follows as the grant ends (4.9).
     fn grant(&self, mut kind: LockKind) -> windows::core::Result<HRESULT> {
         let _depth = LockDepth::enter();
         let Some(sink) = self
@@ -920,9 +994,11 @@ impl StoreState {
         };
         let mut session = S_OK;
         loop {
+            let _ = self.editor(|editor| editor.begin_input_batch());
             // No borrow is held across the grant: the text service reads
             // and writes from inside it.
             let result = unsafe { sink.OnLockGranted(TEXT_STORE_LOCK_FLAGS(kind.flags())) };
+            let _ = self.editor(|editor| editor.end_input_batch());
             if session == S_OK {
                 session = result.map_or_else(|error| error.code(), |()| S_OK);
             }
@@ -940,7 +1016,8 @@ impl StoreState {
                 None => break,
             }
         }
-        // The tail: whatever a message delivered during the grants changed.
+        // The tail: what the grants changed that the text services did not
+        // write themselves, a message delivered meanwhile among them.
         self.report(false);
         self.grant_deferred(false);
         Ok(session)
@@ -974,16 +1051,12 @@ impl StoreState {
         }
     }
 
-    /// Run `read` on the focused document while the mirror holds its text
-    /// and it can be read with no change; `None` otherwise, and the mirror
-    /// answers.
+    /// Run `read` on the field's document, with its UTF-16 index, while it
+    /// can be read with no change; `None` otherwise, and the mirror answers.
     fn read_document<T>(
         &self,
         read: impl FnOnce(&dyn TextInputDocument, &Utf16Index) -> Option<T>,
     ) -> Option<T> {
-        if self.inner.try_borrow().ok()?.mirror.written() {
-            return None;
-        }
         self.document(|document| {
             if document.is_secure() || !document.is_available() {
                 return None;
@@ -992,6 +1065,27 @@ impl StoreState {
             read(document, &index)
         })
         .flatten()
+    }
+
+    /// The field's selection now, in UTF-16, and whether the caret is at
+    /// its start.
+    fn selection16(&self) -> Option<(Range<usize>, bool)> {
+        self.read_document(|document, index| {
+            let selection = document.selection()?;
+            let caret = document.caret()?;
+            Some((
+                index.char_range_to_utf16(selection.clone()),
+                caret == selection.start && !selection.is_empty(),
+            ))
+        })
+    }
+
+    /// Note the selection a text service's write left, which it knows.
+    fn note_store_selection(&self) {
+        let selection = self.selection16();
+        if let Ok(mut inner) = self.inner.try_borrow_mut() {
+            inner.store_selection = selection;
+        }
     }
 
     /// Where `range` (UTF-16) is drawn, window-logical, and whether it was
@@ -1008,6 +1102,100 @@ impl StoreState {
                 .caret
                 .map(|caret| (caret, false))
         })
+    }
+
+    /// Write `text` over `range` (UTF-16) through the field's write half,
+    /// and say what changed, in UTF-16: `SetText` and
+    /// `InsertTextAtSelection`. With `dry_run`, nothing changes.
+    fn write(
+        &self,
+        range: Range<usize>,
+        text: &[u16],
+        options: WriteOptions,
+    ) -> windows::core::Result<TextChange> {
+        let old = self
+            .read_document(|_, index| Some(Rc::new(index.clone())))
+            .ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+        if range.end > old.utf16_len() || range.start > range.end {
+            return Err(TS_E_INVALIDPOS.into());
+        }
+        let chars = old.utf16_range_to_chars(range);
+        let text = String::from_utf16_lossy(text);
+        let landed = self
+            .editor(|editor| editor.replace_text(chars, &text, options))
+            .unwrap_or(Err(WriteRefused::ReadOnly))
+            .map_err(refusal)?;
+        let start = old.char_to_utf16(landed.replaced.start);
+        // A dry run changes nothing to index: the units of what would land.
+        let new_end = if options.dry_run {
+            start
+                + text
+                    .chars()
+                    .take(landed.inserted.len())
+                    .map(char::len_utf16)
+                    .sum::<usize>()
+        } else {
+            self.read_document(|_, index| Some(index.char_to_utf16(landed.inserted.end)))
+                .unwrap_or(start)
+        };
+        Ok(TextChange {
+            start,
+            old_end: old.char_to_utf16(landed.replaced.end),
+            new_end,
+        })
+    }
+
+    /// The UTF-16 range of `range` (an `ITfRange` the text service hands
+    /// over), as characters of the field's text.
+    fn chars_of(&self, range: &ITfRange) -> Option<Range<usize>> {
+        let (start, len) = acp_extent(range)?;
+        self.read_document(|_, index| Some(index.utf16_range_to_chars(start..start + len)))
+    }
+
+    /// End the composition the text services hold in this store
+    /// (`TerminateComposition`), outside any lock, so that the text service
+    /// writes its last text now (a Japanese trailing `n` becomes `ん`).
+    /// Whether one was open.
+    fn terminate(&self, context: &ITfContext) -> bool {
+        if self
+            .inner
+            .try_borrow()
+            .map_or(true, |inner| inner.compositions == 0)
+        {
+            return false;
+        }
+        // Its edit session must not wait for changes to report.
+        self.report(true);
+        let result = context
+            .cast::<ITfContextOwnerCompositionServices>()
+            .and_then(|services| unsafe { services.TerminateComposition(None) });
+        tsf_trace!(
+            "#{} {} TerminateComposition {}",
+            next_sequence(),
+            self.window_id,
+            match &result {
+                Ok(()) => "ok".to_owned(),
+                Err(error) => hresult(error),
+            }
+        );
+        true
+    }
+}
+
+/// An `ITfRange`'s extent in ACP offsets (start, length).
+fn acp_extent(range: &ITfRange) -> Option<(usize, usize)> {
+    let acp: ITfRangeACP = range.cast().ok()?;
+    let (mut start, mut len) = (0, 0);
+    unsafe { acp.GetExtent(&mut start, &mut len) }.ok()?;
+    Some((usize::try_from(start).ok()?, usize::try_from(len).ok()?))
+}
+
+/// What a refused write answers TSF.
+fn refusal(refused: WriteRefused) -> windows::core::Error {
+    match refused {
+        WriteRefused::InvalidRange => TS_E_INVALIDPOS.into(),
+        WriteRefused::Busy => E_FAIL.into(),
+        _ => TS_E_READONLY.into(),
     }
 }
 
@@ -1108,8 +1296,8 @@ impl TextStore_Impl {
         Ok(inner)
     }
 
-    /// The text's length in UTF-16 units: the document's, while the mirror
-    /// holds its text, else the mirror's.
+    /// The text's length in UTF-16 units: the document's, or the mirror's
+    /// while the document cannot be read.
     fn end(&self) -> windows::core::Result<usize> {
         match self.state.read_document(|_, index| Some(index.utf16_len())) {
             Some(len) => Ok(len),
@@ -1117,7 +1305,10 @@ impl TextStore_Impl {
         }
     }
 
-    fn writable(&self) -> windows::core::Result<std::cell::RefMut<'_, StoreInner>> {
+    /// Whether a write may go through now: a read-write lock is held and
+    /// the field takes writes. No borrow is kept: the write goes to the
+    /// field.
+    fn writable(&self) -> windows::core::Result<()> {
         let inner = self.inner()?;
         if !inner.locks.can_write() {
             tsf_trace!("write without a read-write lock");
@@ -1126,7 +1317,7 @@ impl TextStore_Impl {
         if !inner.editable {
             return Err(TS_E_READONLY.into());
         }
-        Ok(inner)
+        Ok(())
     }
 }
 
@@ -1256,14 +1447,7 @@ impl ITextStoreACP_Impl for TextStore_Impl {
             if ulindex != 0 && ulindex != TF_DEFAULT_SELECTION {
                 return Err(E_INVALIDARG.into());
             }
-            let from_document = self.state.read_document(|document, index| {
-                let selection = document.selection()?;
-                let caret = document.caret()?;
-                Some((
-                    index.char_range_to_utf16(selection.clone()),
-                    caret == selection.start && !selection.is_empty(),
-                ))
-            });
+            let from_document = self.state.selection16();
             let source = if from_document.is_some() {
                 "document"
             } else {
@@ -1304,19 +1488,33 @@ impl ITextStoreACP_Impl for TextStore_Impl {
         pselection: *const TS_SELECTION_ACP,
     ) -> windows::core::Result<()> {
         guarded(|| {
-            let mut inner = self.writable()?;
+            self.writable()?;
             if ulcount == 0 {
                 return Ok(());
             }
             // SAFETY: TSF passes `ulcount` selections.
             let selection = unsafe { *pselection };
-            let len = inner.mirror.len();
+            let len = self.end()?;
             let range = position(selection.acpStart, len)?..position(selection.acpEnd, len)?;
-            tsf_trace!("#{} SetSelection {range:?}", next_sequence());
-            inner
-                .mirror
-                .set_selection(range, selection.style.ase == TS_AE_START)
-                .map_err(|_| TS_E_INVALIDPOS.into())
+            if range.end < range.start {
+                return Err(TS_E_INVALIDPOS.into());
+            }
+            let chars = self
+                .state
+                .read_document(|_, index| Some(index.utf16_range_to_chars(range.clone())))
+                .ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+            let caret_at_start = selection.style.ase == TS_AE_START;
+            let result = self
+                .state
+                .editor(|editor| editor.set_selection(chars.clone(), caret_at_start))
+                .unwrap_or(Err(WriteRefused::ReadOnly));
+            tsf_trace!(
+                "#{} SetSelection {range:?} (characters {chars:?}) -> {result:?}",
+                next_sequence()
+            );
+            result.map_err(refusal)?;
+            self.state.note_store_selection();
+            Ok(())
         })
     }
 
@@ -1346,8 +1544,8 @@ impl ITextStoreACP_Impl for TextStore_Impl {
             }
             let wanted = start..start + (end - start).min(cchplainreq as usize);
             // From the document, its characters widened to whole ones and
-            // cut back to the units asked (4.8); from the mirror while it
-            // holds a text service's writes.
+            // cut back to the units asked (4.8); from the mirror while the
+            // document cannot be read.
             let from_document = self.state.read_document(|document, index| {
                 let chars = index.utf16_range_to_chars(wanted.clone());
                 let first = index.char_to_utf16(chars.start);
@@ -1388,13 +1586,6 @@ impl ITextStoreACP_Impl for TextStore_Impl {
                 next_sequence(),
                 units.len()
             );
-            if super::super::trace_enabled()
-                && source == "document"
-                && let Ok(inner) = self.inner()
-                && inner.mirror.get(wanted.clone()) != units.as_slice()
-            {
-                tsf_trace!("  the mirror disagrees: {:?}", inner.mirror.text());
-            }
             Ok(())
         })
     }
@@ -1408,20 +1599,22 @@ impl ITextStoreACP_Impl for TextStore_Impl {
         cch: u32,
     ) -> windows::core::Result<TS_TEXTCHANGE> {
         guarded(|| {
-            let mut inner = self.writable()?;
-            let len = inner.mirror.len();
+            self.writable()?;
+            let len = self.end()?;
             let range = position(acpstart, len)?..position(acpend, len)?;
             let text = units_of(pchtext, cch);
-            let change = inner
-                .mirror
-                .replace(range.clone(), &text)
-                .map_err(|_| windows::core::Error::from(TS_E_INVALIDPOS))?;
+            let options = WriteOptions {
+                correction: dwflags & TS_ST_CORRECTION.0 != 0,
+                ..WriteOptions::default()
+            };
+            let change = self.state.write(range.clone(), &text, options);
             tsf_trace!(
-                "#{} SetText flags={dwflags:#x} {range:?} <- {:?}; now {:?}",
+                "#{} SetText flags={dwflags:#x} {range:?} <- {:?} -> {change:?}",
                 next_sequence(),
                 String::from_utf16_lossy(&text),
-                inner.mirror.text()
             );
+            let change = change?;
+            self.state.note_store_selection();
             Ok(text_change(change))
         })
     }
@@ -1468,19 +1661,30 @@ impl ITextStoreACP_Impl for TextStore_Impl {
     ) -> windows::core::Result<()> {
         guarded(|| {
             let query_only = dwflags & TS_IAS_QUERYONLY != 0;
-            let mut inner = if query_only {
-                self.readable()?
+            if query_only {
+                drop(self.readable()?);
             } else {
-                self.writable()?
-            };
+                self.writable()?;
+            }
             let text = units_of(pchtext, cch);
-            let change = inner.mirror.insert_at_selection(&text, query_only);
+            let (selection, _) = self
+                .state
+                .selection16()
+                .ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+            let options = WriteOptions {
+                dry_run: query_only,
+                ..WriteOptions::default()
+            };
+            let change = self.state.write(selection, &text, options);
             tsf_trace!(
-                "#{} InsertTextAtSelection flags={dwflags:#x} {:?} -> {change:?}; now {:?}",
+                "#{} InsertTextAtSelection flags={dwflags:#x} {:?} -> {change:?}",
                 next_sequence(),
                 String::from_utf16_lossy(&text),
-                inner.mirror.text()
             );
+            let change = change?;
+            if !query_only {
+                self.state.note_store_selection();
+            }
             // SAFETY: TSF passes valid out pointers, or null for those it
             // does not want.
             unsafe {
@@ -1605,7 +1809,7 @@ impl ITextStoreACP_Impl for TextStore_Impl {
         dwflags: u32,
     ) -> windows::core::Result<i32> {
         guarded(|| {
-            let written = self.readable()?.mirror.written();
+            drop(self.readable()?);
             // SAFETY: TSF passes a valid point.
             let mut point = unsafe { *ptscreen };
             unsafe {
@@ -1613,16 +1817,13 @@ impl ITextStoreACP_Impl for TextStore_Impl {
             }
             let scale = unsafe { GetDpiForWindow(self.state.hwnd) }.max(96) as f32 / 96.0;
             let logical = Point::new(point.x as f32 / scale, point.y as f32 / scale);
-            let offset = (!written)
-                .then(|| {
-                    self.state
-                        .document(|document| {
-                            if !document.is_available() {
-                                return None;
-                            }
-                            answers::character_index(document, logical)
-                        })
-                        .flatten()
+            let offset = self
+                .state
+                .document(|document| {
+                    if !document.is_available() {
+                        return None;
+                    }
+                    answers::character_index(document, logical)
                 })
                 .flatten()
                 .filter(|&offset| offset < answers::NOT_FOUND);
@@ -1714,18 +1915,31 @@ impl ITfContextOwnerCompositionSink_Impl for TextStore_Impl {
         pcomposition: Ref<ITfCompositionView>,
     ) -> windows::core::Result<BOOL> {
         guarded(|| {
-            let mut inner = self.inner()?;
+            let view = pcomposition.ok().ok();
             // A read-only field takes no composition (section 6).
-            let accepted = inner.editable;
+            let editable = self.inner()?.editable;
+            // The composition is the text service's range: empty at the
+            // caret, or the text a reconversion takes up.
+            let range = view
+                .and_then(|view| unsafe { view.GetRange() }.ok())
+                .and_then(|range| self.state.chars_of(&range));
+            let accepted = editable
+                && range.clone().is_some_and(|range| {
+                    self.state
+                        .editor(|editor| editor.mark_composition(range, &[]))
+                        .is_some_and(|marked| marked.is_ok())
+                });
             if accepted {
-                inner.compositions += 1;
+                self.inner()?.compositions += 1;
             }
             tsf_trace!(
-                "#{} OnStartComposition owner={} -> {}",
+                "#{} OnStartComposition owner={} characters {range:?} -> {}",
                 next_sequence(),
-                owner(pcomposition.ok().ok()),
+                owner(view),
                 if accepted {
                     "accepted"
+                } else if editable {
+                    "refused (the field took no composition)"
                 } else {
                     "refused (read-only)"
                 }
@@ -1749,13 +1963,20 @@ impl ITfContextOwnerCompositionSink_Impl for TextStore_Impl {
 
     fn OnEndComposition(&self, pcomposition: Ref<ITfCompositionView>) -> windows::core::Result<()> {
         guarded(|| {
-            let mut inner = self.inner()?;
-            inner.compositions = inner.compositions.saturating_sub(1);
+            {
+                let mut inner = self.inner()?;
+                inner.compositions = inner.compositions.saturating_sub(1);
+            }
+            // The text the text service left is the commit: one undo step,
+            // through the field's rules (4.9).
+            let ended = self
+                .state
+                .editor(|editor| editor.end_composition(ImeOrigin::Composition));
+            self.state.note_store_selection();
             tsf_trace!(
-                "#{} OnEndComposition owner={}; mirror {:?}",
+                "#{} OnEndComposition owner={} -> {ended:?}",
                 next_sequence(),
                 owner(pcomposition.ok().ok()),
-                inner.mirror.text()
             );
             Ok(())
         })
@@ -1786,11 +2007,21 @@ impl ITfTextEditSink_Impl for EditSink_Impl {
         ecreadonly: u32,
         peditrecord: Ref<ITfEditRecord>,
     ) -> windows::core::Result<()> {
-        if !super::super::trace_enabled() {
-            return Ok(());
-        }
         guarded(|| {
             let context = pic.ok()?;
+            // The clauses of the composition, for drawing it (display
+            // attributes, `GUID_PROP_ATTRIBUTE`).
+            if self
+                .state
+                .inner
+                .try_borrow()
+                .is_ok_and(|inner| inner.compositions > 0)
+            {
+                self.mark_clauses(context, ecreadonly);
+            }
+            if !super::super::trace_enabled() {
+                return Ok(());
+            }
             let record = peditrecord.ok()?;
             let seq = next_sequence();
             let selection_changed =
@@ -1828,6 +2059,153 @@ impl ITfTextEditSink_Impl for EditSink_Impl {
             }
             Ok(())
         })
+    }
+}
+
+impl EditSink_Impl {
+    /// Hand the field the clauses of the context's composition, each styled
+    /// by its display attribute (`mark_composition`).
+    fn mark_clauses(&self, context: &ITfContext, cookie: u32) {
+        let Some((composition, clauses)) = composition_clauses(context, cookie) else {
+            return;
+        };
+        let marked = self.state.read_document(|_, index| {
+            let chars = |range: Range<usize>| index.utf16_range_to_chars(range);
+            let segments: Vec<CompositionSegment> = clauses
+                .iter()
+                .map(|(range, style)| CompositionSegment {
+                    range: chars(range.clone()),
+                    style: *style,
+                })
+                .collect();
+            Some((chars(composition.clone()), segments))
+        });
+        let Some((range, segments)) = marked else {
+            return;
+        };
+        let result = self
+            .state
+            .editor(|editor| editor.mark_composition(range.clone(), &segments));
+        tsf_trace!(
+            "#{} composition {range:?} clauses {:?} -> {result:?}",
+            next_sequence(),
+            segments
+                .iter()
+                .map(|segment| (segment.range.clone(), segment.style))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+/// A clause of a composition: its UTF-16 range and style.
+type Clause = (Range<usize>, SegmentStyle);
+
+/// The first composition in `context` (UTF-16), and its clauses: the runs
+/// of `GUID_PROP_ATTRIBUTE` inside it, each with the style its display
+/// attribute names.
+fn composition_clauses(context: &ITfContext, cookie: u32) -> Option<(Range<usize>, Vec<Clause>)> {
+    let compositions: ITfContextComposition = context.cast().ok()?;
+    let views = unsafe { compositions.EnumCompositions() }.ok()?;
+    let mut slot = [None];
+    let mut fetched = 0;
+    unsafe { views.Next(&mut slot, &mut fetched) }.ok()?;
+    let view: ITfCompositionView = slot[0].take()?;
+    let range = unsafe { view.GetRange() }.ok()?;
+    let (start, len) = acp_extent(&range)?;
+    let composition = start..start + len;
+    let mut clauses = Vec::new();
+    let property = unsafe { context.GetProperty(&GUID_PROP_ATTRIBUTE) }.ok()?;
+    let mut runs = None;
+    unsafe { property.EnumRanges(cookie, &mut runs, &range) }.ok()?;
+    let runs = runs?;
+    for _ in 0..256 {
+        let mut slot = [None];
+        let mut fetched = 0;
+        if unsafe { runs.Next(&mut slot, &mut fetched) }.is_err() || fetched == 0 {
+            break;
+        }
+        let Some(run) = slot[0].take() else {
+            break;
+        };
+        let Some((run_start, run_len)) = acp_extent(&run) else {
+            continue;
+        };
+        let Ok(value) = (unsafe { property.GetValue(cookie, &run) }) else {
+            continue;
+        };
+        let Some(atom) = int_of(&value) else {
+            continue;
+        };
+        let start = run_start.clamp(composition.start, composition.end);
+        let end = (run_start + run_len).clamp(start, composition.end);
+        if start < end {
+            clauses.push((start..end, display_style(atom as u32)));
+        }
+    }
+    Some((composition, clauses))
+}
+
+thread_local! {
+    /// The thread's category and display attribute managers, made at the
+    /// first clause read, and each atom's style as they named it.
+    static DISPLAY: RefCell<Option<DisplayAttributes>> = const { RefCell::new(None) };
+}
+
+/// What reads a display attribute.
+struct DisplayAttributes {
+    categories: Option<ITfCategoryMgr>,
+    attributes: Option<ITfDisplayAttributeMgr>,
+    styles: HashMap<u32, SegmentStyle>,
+}
+
+/// The style of the display attribute `atom` names (a `TfGuidAtom` of
+/// `GUID_PROP_ATTRIBUTE`): its `bAttr`. Typed input when it cannot be read.
+fn display_style(atom: u32) -> SegmentStyle {
+    DISPLAY
+        .try_with(|display| {
+            let mut display = display.try_borrow_mut().ok()?;
+            let display = display.get_or_insert_with(|| DisplayAttributes {
+                categories: unsafe {
+                    CoCreateInstance(&CLSID_TF_CategoryMgr, None, CLSCTX_INPROC_SERVER)
+                }
+                .ok(),
+                attributes: unsafe {
+                    CoCreateInstance(&CLSID_TF_DisplayAttributeMgr, None, CLSCTX_INPROC_SERVER)
+                }
+                .ok(),
+                styles: HashMap::new(),
+            });
+            if let Some(style) = display.styles.get(&atom) {
+                return Some(*style);
+            }
+            let guid = unsafe { display.categories.as_ref()?.GetGUID(atom) }.ok()?;
+            let mut info = None;
+            let mut owner = GUID::zeroed();
+            unsafe {
+                display
+                    .attributes
+                    .as_ref()?
+                    .GetDisplayAttributeInfo(&guid, &mut info, &mut owner)
+            }
+            .ok()?;
+            let mut attribute = TF_DISPLAYATTRIBUTE::default();
+            unsafe { info?.GetAttributeInfo(&mut attribute) }.ok()?;
+            let style = style_of(attribute.bAttr);
+            display.styles.insert(atom, style);
+            Some(style)
+        })
+        .ok()
+        .flatten()
+        .unwrap_or(SegmentStyle::Input)
+}
+
+/// A display attribute's meaning as a clause style.
+fn style_of(attribute: TF_DA_ATTR_INFO) -> SegmentStyle {
+    match attribute {
+        TF_ATTR_TARGET_CONVERTED => SegmentStyle::Target,
+        TF_ATTR_TARGET_NOTCONVERTED => SegmentStyle::TargetInput,
+        TF_ATTR_CONVERTED | TF_ATTR_FIXEDCONVERTED => SegmentStyle::Converted,
+        _ => SegmentStyle::Input,
     }
 }
 
@@ -1890,7 +2268,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use teksilo_canvas::SizeProposal;
-    use teksilo_core::text_input_document::{FirstLineRect, TextChanged};
+    use teksilo_core::text_input_document::{FirstLineRect, Landed, TextChanged};
     use teksilo_core::text_surface::TextSurface;
     use teksilo_core::{
         BuildContext, EventContext, HandlerSet, LayoutContext, LayoutResponse, SubscriptionId,
@@ -1913,6 +2291,38 @@ mod tests {
         journal: bool,
         revisions: Cell<InputRevisions>,
         changes: RefCell<Vec<(u64, TextChanged)>>,
+        /// Every call of its write half, in order.
+        written: RefCell<Vec<String>>,
+        /// The composition the input system marked, if one is open.
+        composition: RefCell<Option<Range<usize>>>,
+        /// Whether its journal merges several changes.
+        merges: Cell<bool>,
+    }
+
+    /// The widgets' merge (`common::input_journal::merge`).
+    fn merge(first: TextChanged, then: TextChanged) -> TextChanged {
+        let then_old_end = if then.old_end >= first.new_end {
+            then.old_end - first.new_end + first.old_end
+        } else {
+            first.old_end
+        };
+        let first_new_end = if first.new_end >= then.old_end {
+            first.new_end + then.new_end - then.old_end
+        } else {
+            then.new_end
+        };
+        TextChanged {
+            start: first.start.min(then.start),
+            old_end: first.old_end.max(then_old_end),
+            new_end: first_new_end.max(then.new_end),
+            cause: if first.cause == ChangeCause::InputSystem
+                && then.cause == ChangeCause::InputSystem
+            {
+                ChangeCause::InputSystem
+            } else {
+                ChangeCause::Other
+            },
+        }
     }
 
     impl Doc {
@@ -1929,7 +2339,14 @@ mod tests {
                     layout: 0,
                 }),
                 changes: RefCell::new(Vec::new()),
+                written: RefCell::new(Vec::new()),
+                composition: RefCell::new(None),
+                merges: Cell::new(true),
             }
+        }
+
+        fn written(&self) -> Vec<String> {
+            self.written.borrow().clone()
         }
 
         fn len(&self) -> usize {
@@ -1987,11 +2404,22 @@ mod tests {
         fn revisions(&self) -> Option<InputRevisions> {
             self.journal.then(|| self.revisions.get())
         }
+        /// One change since `revision`; two or more are merged as the
+        /// widgets' journal does, unless `merges` is off, when the journal
+        /// cannot say.
         fn text_changed_since(&self, revision: u64) -> Option<TextChanged> {
             let changes = self.changes.borrow();
-            let mut after = changes.iter().filter(|(at, _)| *at > revision);
-            let first = after.next()?;
-            after.next().is_none().then_some(first.1)
+            let after: Vec<TextChanged> = changes
+                .iter()
+                .filter(|(at, _)| *at > revision)
+                .map(|(_, change)| *change)
+                .collect();
+            match after.len() {
+                0 => None,
+                1 => Some(after[0]),
+                _ if self.merges.get() => after.into_iter().reduce(merge),
+                _ => None,
+            }
         }
         fn char_count(&self) -> Option<usize> {
             Some(self.len())
@@ -2048,6 +2476,65 @@ mod tests {
         }
     }
 
+    /// A write half that writes what it is given: no rules, no undo.
+    impl TextInputEditor for Doc {
+        fn replace_text(
+            &self,
+            range: Range<usize>,
+            text: &str,
+            options: WriteOptions,
+        ) -> Result<Landed, WriteRefused> {
+            if range.end > self.len() {
+                return Err(WriteRefused::InvalidRange);
+            }
+            let count = text.chars().count();
+            let landed = Landed {
+                inserted: range.start..range.start + count,
+                replaced: range.clone(),
+            };
+            if !options.dry_run {
+                self.written
+                    .borrow_mut()
+                    .push(format!("replace {range:?} {text:?}"));
+                self.edit(range, text, ChangeCause::InputSystem);
+            }
+            Ok(landed)
+        }
+        fn set_selection(
+            &self,
+            selection: Range<usize>,
+            _caret_at_start: bool,
+        ) -> Result<(), WriteRefused> {
+            self.written
+                .borrow_mut()
+                .push(format!("select {selection:?}"));
+            self.select(selection);
+            Ok(())
+        }
+        fn mark_composition(
+            &self,
+            range: Range<usize>,
+            segments: &[CompositionSegment],
+        ) -> Result<(), WriteRefused> {
+            self.written
+                .borrow_mut()
+                .push(format!("mark {range:?} {}", segments.len()));
+            *self.composition.borrow_mut() = Some(range);
+            Ok(())
+        }
+        fn end_composition(&self, origin: ImeOrigin) -> Result<(), WriteRefused> {
+            self.written.borrow_mut().push(format!("end {origin:?}"));
+            *self.composition.borrow_mut() = None;
+            Ok(())
+        }
+        fn begin_input_batch(&self) {
+            self.written.borrow_mut().push("begin".to_owned());
+        }
+        fn end_input_batch(&self) {
+            self.written.borrow_mut().push("end batch".to_owned());
+        }
+    }
+
     impl TextSurface for Doc {
         fn can_undo(&self) -> bool {
             false
@@ -2073,6 +2560,9 @@ mod tests {
         fn select_all(&self) {}
         fn input_document(&self) -> Option<&dyn TextInputDocument> {
             Some(self)
+        }
+        fn input_editor(&self) -> Option<&dyn TextInputEditor> {
+            self.editable.get().then_some(self as &dyn TextInputEditor)
         }
     }
 
@@ -2305,8 +2795,8 @@ mod tests {
     }
 
     #[test]
-    fn reads_and_writes_go_through_a_lock_and_land_in_the_mirror() {
-        let rig = rig("abc", 1);
+    fn reads_and_writes_go_through_a_lock_and_land_in_the_field() {
+        let rig = rig_with("abc", 1, true);
         assert_eq!(
             text_of(&rig.store).map_err(|error| error.code()),
             Err(TS_E_NOLOCK),
@@ -2360,15 +2850,57 @@ mod tests {
                 "aXYbc",
                 "end 5"
             ],
-            "the writes are read back from the mirror"
+            "each write is read back at once"
         );
-        assert_eq!(rig.heard.borrow().grants, vec![LF_READWRITE]);
+        assert_eq!(*rig.doc.text.borrow(), "aXYbc", "the field has them");
         assert_eq!(
-            *rig.doc.text.borrow(),
-            "abc",
-            "the field never sees the writes"
+            rig.doc.written(),
+            vec![
+                "begin",
+                "replace 1..1 \"X\"",
+                "replace 2..2 \"Y\"",
+                "end batch"
+            ],
+            "one batch for the grant"
         );
-        assert!(rig.state.inner.borrow().mirror.written());
+        assert!(
+            rig.heard.borrow().changes.is_empty(),
+            "the text service's own writes are not told back"
+        );
+        assert_eq!(rig.heard.borrow().selections, 0, "nor the caret they left");
+        assert_eq!(rig.state.inner.borrow().mirror.text(), "aXYbc", "followed");
+    }
+
+    #[test]
+    fn a_write_lands_in_utf16_and_a_query_changes_nothing() {
+        // "a😀b": the emoji is units 1..3.
+        let rig = rig_with("a\u{1F600}b", 3, true);
+        let store = rig.store.clone();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let log = seen.clone();
+        rig.during_grant(move || {
+            let mut log = log.borrow_mut();
+            let change = unsafe { store.SetText(0, 1, 3, &[u16::from(b'e')]) }.unwrap();
+            log.push((change.acpStart, change.acpOldEnd, change.acpNewEnd));
+            let (mut start, mut end) = (0, 0);
+            unsafe {
+                store.InsertTextAtSelection(
+                    TS_IAS_QUERYONLY,
+                    &[0xD83D, 0xDE00],
+                    &mut start,
+                    &mut end,
+                    std::ptr::null_mut(),
+                )
+            }
+            .unwrap();
+            log.push((start, start, end));
+        });
+        assert_eq!(
+            unsafe { rig.store.RequestLock(LF_READWRITE | LF_SYNC) }.unwrap(),
+            S_OK
+        );
+        assert_eq!(*seen.borrow(), vec![(1, 3, 2), (2, 2, 4)]);
+        assert_eq!(*rig.doc.text.borrow(), "aeb", "the query wrote nothing");
     }
 
     #[test]
@@ -2458,31 +2990,14 @@ mod tests {
     }
 
     #[test]
-    fn the_documents_changes_are_reported_outside_a_lock_and_writes_put_back() {
+    fn the_documents_changes_are_reported_outside_a_lock() {
         let rig = rig("abc", 3);
         *rig.doc.text.borrow_mut() = "abcd".to_owned();
         *rig.doc.selection.borrow_mut() = 4..4;
         rig.state.report(true);
         assert_eq!(rig.heard.borrow().changes, vec![(3, 3, 4)]);
         assert_eq!(rig.heard.borrow().selections, 1);
-
-        // A text service writes; the next report gives the document back.
-        let store = rig.store.clone();
-        rig.during_grant(move || {
-            unsafe { store.SetText(0, 0, 0, &[u16::from(b'Z')]) }.unwrap();
-        });
-        assert_eq!(
-            unsafe { rig.store.RequestLock(LF_READWRITE | LF_SYNC) }.unwrap(),
-            S_OK
-        );
-        rig.state.report(true);
         assert_eq!(rig.state.inner.borrow().mirror.text(), "abcd");
-        assert!(!rig.state.inner.borrow().mirror.written());
-        assert_eq!(
-            rig.heard.borrow().changes.last(),
-            Some(&(0, 1, 0)),
-            "the written Z goes: the smallest change"
-        );
     }
 
     #[test]
@@ -2510,8 +3025,9 @@ mod tests {
         assert_eq!(rig.state.inner.borrow().mirror.text(), "\u{1F600}xabc");
         assert_eq!(rig.read_text(), "\u{1F600}xabc");
 
-        // Two changes the journal cannot merge here: the whole text is
-        // compared instead, and the smallest change reported.
+        // Two changes the journal cannot merge: the whole text is compared
+        // instead, and the smallest change reported.
+        rig.doc.merges.set(false);
         rig.doc.edit(5..5, "!", ChangeCause::Other);
         rig.doc.edit(0..0, "?", ChangeCause::Other);
         rig.state.report(true);
@@ -2586,11 +3102,12 @@ mod tests {
     }
 
     /// 変換 with nothing selected: the IME selects the word at the caret and
-    /// opens a composition over it in one lock. The selection it set is what
-    /// it reads back, and the field's own selection moving afterwards
-    /// (Shift+Right) holds no later lock back (measured stall, round 1).
+    /// opens a composition over it in one lock. The selection it set is the
+    /// field's, read back as such and not told back; the field's own
+    /// selection moving afterwards (Shift+Right) is reported, and holds no
+    /// later lock back (measured stall, Phase 1 round 1).
     #[test]
-    fn a_selection_moved_under_an_open_composition_holds_no_lock_back() {
+    fn a_selection_the_store_sets_is_the_fields_and_a_later_move_is_reported() {
         let rig = rig_with("left right", 0, true);
         let store = rig.store.clone();
         let read = Rc::new(RefCell::new(None));
@@ -2605,12 +3122,6 @@ mod tests {
                 },
             }];
             unsafe { store.SetSelection(&selection) }.unwrap();
-            let composition: ITfContextOwnerCompositionSink = store.cast().unwrap();
-            assert!(
-                unsafe { composition.OnStartComposition(None) }
-                    .unwrap()
-                    .as_bool()
-            );
             let mut got = [TS_SELECTION_ACP::default()];
             let mut fetched = 0;
             unsafe { store.GetSelection(TF_DEFAULT_SELECTION, &mut got, &mut fetched) }.unwrap();
@@ -2621,69 +3132,74 @@ mod tests {
             S_OK
         );
         assert_eq!(*read.borrow(), Some((0, 4)), "the IME's own selection");
+        assert_eq!(*rig.doc.selection.borrow(), 0..4, "set in the field");
+        assert_eq!(rig.heard.borrow().selections, 0, "not told back");
 
         // Shift+Right in the field, then the IME's next keys.
         rig.doc.select(0..1);
         rig.state.report(true);
+        assert_eq!(rig.heard.borrow().selections, 1, "the field's move is told");
         assert_eq!(
             unsafe { rig.store.RequestLock(LF_READWRITE) }.unwrap(),
-            S_OK,
-            "granted at once: nothing a report could tell"
-        );
-        assert_eq!(
-            unsafe { rig.store.RequestLock(LF_READWRITE | LF_SYNC) }.unwrap(),
             S_OK
         );
-        assert_eq!(rig.heard.borrow().grants.len(), 3);
         assert_eq!(rig.posted(), 0, "no settle asked for");
     }
 
-    /// `nihongo`, Space, then Down passed to the field, which moves its
-    /// caret under the composition, then Enter: its locks are granted, the
-    /// composition ends, and the next settle gives the document back
-    /// (measured stall, round 1).
+    /// The composition sink: a composition the text service starts is the
+    /// field's, over the range it names, and its end is the field's commit.
     #[test]
-    fn a_key_the_field_handles_during_a_composition_holds_no_lock_back() {
+    fn a_composition_starts_and_ends_in_the_field() {
         let rig = rig_with("ab", 2, true);
         let store = rig.store.clone();
         rig.during_grant(move || {
             let composition: ITfContextOwnerCompositionSink = store.cast().unwrap();
+            // No view: TSF hands one, whose range the test cannot make, so
+            // the composition is refused.
             assert!(
-                unsafe { composition.OnStartComposition(None) }
+                !unsafe { composition.OnStartComposition(None) }
                     .unwrap()
                     .as_bool()
             );
             unsafe { store.SetText(0, 2, 2, &[0x65E5, 0x672C]) }.unwrap();
+            unsafe { composition.OnEndComposition(None) }.unwrap();
         });
         assert_eq!(
             unsafe { rig.store.RequestLock(LF_READWRITE) }.unwrap(),
             S_OK
         );
+        assert_eq!(
+            rig.doc.written(),
+            vec![
+                "begin",
+                "replace 2..2 \"\u{65E5}\u{672C}\"",
+                "end Composition",
+                "end batch"
+            ]
+        );
+        assert!(rig.heard.borrow().changes.is_empty());
+    }
+
+    /// A key the field handles while a composition is open (Down passed on
+    /// by the IME) is reported at the next settle, and no later lock waits.
+    #[test]
+    fn a_key_the_field_handles_during_a_composition_is_reported() {
+        let rig = rig_with("ab", 2, true);
+        rig.state.inner.borrow_mut().compositions = 1;
         rig.heard.borrow_mut().order.clear();
-        // Down, twice, handled by the field.
         rig.doc.select(0..0);
-        rig.state.report(true);
-        rig.doc.select(1..1);
-        rig.state.report(true);
-        assert!(rig.heard.borrow().order.is_empty(), "nothing reported yet");
-        // Enter: the IME commits and ends its composition.
-        let store = rig.store.clone();
-        rig.during_grant(move || {
-            let composition: ITfContextOwnerCompositionSink = store.cast().unwrap();
-            unsafe { composition.OnEndComposition(None) }.unwrap();
-        });
         assert_eq!(
             unsafe { rig.store.RequestLock(LF_READWRITE) }.unwrap(),
-            S_OK,
-            "granted, not queued"
+            TS_S_ASYNC,
+            "it waits for the report"
         );
-        assert_eq!(rig.posted(), 0);
-        // The next settle compares the whole text and gives it back.
         rig.state.report(true);
-        assert_eq!(rig.heard.borrow().changes, vec![(2, 4, 2)]);
-        assert!(rig.heard.borrow().selections > 0);
-        assert_eq!(rig.state.inner.borrow().mirror.text(), "ab");
-        assert_eq!(rig.read_text(), "ab");
+        rig.state.grant_deferred(true);
+        assert_eq!(
+            rig.heard.borrow().order,
+            vec!["selection", "grant"],
+            "reported, then granted"
+        );
     }
 
     /// Typing that waits for the frame while a composition is open is
@@ -2692,12 +3208,7 @@ mod tests {
     #[test]
     fn typing_waiting_during_a_composition_is_flushed_and_the_lock_granted() {
         let rig = rig_with("abc", 3, true);
-        let composition: ITfContextOwnerCompositionSink = rig.store.cast().unwrap();
-        assert!(
-            unsafe { composition.OnStartComposition(None) }
-                .unwrap()
-                .as_bool()
-        );
+        rig.state.inner.borrow_mut().compositions = 1;
         rig.doc.pending.borrow_mut().push('d');
         assert_eq!(
             unsafe { rig.store.RequestLock(LF_READWRITE) }.unwrap(),
@@ -2726,23 +3237,6 @@ mod tests {
         rig.state.grant_deferred(true);
         assert_eq!(rig.heard.borrow().changes, vec![(3, 3, 5)]);
         assert_eq!(rig.heard.borrow().grants, vec![LF_READ]);
-    }
-
-    #[test]
-    fn no_report_while_a_composition_is_in_progress() {
-        let rig = rig("abc", 3);
-        let composition: ITfContextOwnerCompositionSink = rig.store.cast().unwrap();
-        assert!(
-            unsafe { composition.OnStartComposition(None) }
-                .unwrap()
-                .as_bool()
-        );
-        *rig.doc.text.borrow_mut() = "abcd".to_owned();
-        rig.state.report(true);
-        assert!(rig.heard.borrow().changes.is_empty());
-        unsafe { composition.OnEndComposition(None) }.unwrap();
-        rig.state.report(true);
-        assert_eq!(rig.heard.borrow().changes, vec![(3, 3, 4)]);
     }
 
     #[test]
@@ -2776,14 +3270,26 @@ mod tests {
     }
 
     #[test]
-    fn the_store_answers_nothing_from_a_field_that_lost_the_focus() {
+    fn the_store_still_serves_its_field_once_focus_has_left() {
         let mut rig = rig_with("abc", 0, true);
         rig.tree.clear_focus();
         assert_eq!(
             rig.state.read_document(|_, index| Some(index.utf16_len())),
-            None
+            Some(3)
         );
-        assert!(!rig.state.dirty(), "nothing to wait for");
-        assert_eq!(rig.read_text(), "abc", "the mirror answers");
+        assert_eq!(rig.read_text(), "abc");
+    }
+
+    #[test]
+    fn a_display_attribute_names_a_clause_style() {
+        assert_eq!(style_of(TF_ATTR_TARGET_CONVERTED), SegmentStyle::Target);
+        assert_eq!(
+            style_of(TF_ATTR_TARGET_NOTCONVERTED),
+            SegmentStyle::TargetInput
+        );
+        assert_eq!(style_of(TF_ATTR_CONVERTED), SegmentStyle::Converted);
+        assert_eq!(style_of(TF_ATTR_FIXEDCONVERTED), SegmentStyle::Converted);
+        assert_eq!(style_of(TF_DA_ATTR_INFO(0)), SegmentStyle::Input);
+        assert_eq!(style_of(TF_DA_ATTR_INFO(-1)), SegmentStyle::Input);
     }
 }

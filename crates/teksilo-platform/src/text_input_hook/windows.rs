@@ -356,6 +356,16 @@ pub(super) fn set_text_store_focus(parent: &ParentHandle, focus: StoreFocus) {
     }
 }
 
+/// See [`super::terminate_text_store_composition`].
+pub(super) fn terminate_text_store_composition(parent: &ParentHandle) -> bool {
+    hwnd_of(parent).is_some_and(tsf::terminate_composition)
+}
+
+/// See [`super::take_key_taken_by_text_store`].
+pub(super) fn take_key_taken_by_text_store() -> bool {
+    tsf::take_key_taken()
+}
+
 /// The HWND behind a window handle, `None` for one that is not a Win32 one.
 fn hwnd_of(parent: &ParentHandle) -> Option<HWND> {
     let RawWindowHandle::Win32(handle) = parent.raw_window_handle() else {
@@ -461,6 +471,10 @@ unsafe extern "system" fn text_input_proc(
         if let Some(answer) = answer {
             return answer;
         }
+    }
+    if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
+        // The key-trace verdict: a key the text services passed on.
+        tsf::note_window_key_down(wparam.0 as u32);
     }
     if msg == WM_NCDESTROY {
         // The documented place to remove a subclass. `Tap::drop` then finds
@@ -1634,6 +1648,12 @@ pub(super) fn finish_composition(window_id: TeksiloWindowId) -> Option<FinishedC
         tap_trace!("#{seq} {window_id} finish composition: the window is not attached");
         return None;
     };
+    // A composition a text service holds in the store: it ends it, and
+    // writes its last text into the field itself (4.11).
+    if tsf::terminate_composition(hwnd) {
+        tap_trace!("#{seq} {window_id} finish composition: the store's, terminated");
+        return Some(FinishedComposition::default());
+    }
     let himc = unsafe { ImmGetContext(hwnd) };
     if himc.is_invalid() {
         tap_trace!("#{seq} {window_id} finish composition: the window has no input context");
