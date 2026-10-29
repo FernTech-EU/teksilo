@@ -59,6 +59,7 @@
 //! asked of the view inside one.
 
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use teksilo_core::raw_handle::ParentHandle;
@@ -334,26 +335,46 @@ pub enum TextStoreMode {
     StoreKeepingImm,
 }
 
-/// The [`TextStoreMode`] this process runs with.
+/// Whether the application asked for the text store
+/// (`TeksiloAppBuilder::windows_text_store`), before any window exists.
+static STORE_PREFERRED: AtomicBool = AtomicBool::new(false);
+
+/// Ask for the text store, or not, from the application's builder. Read by
+/// [`text_store_mode`] when `TEKSILO_TSF` says nothing; set before the first
+/// window is attached.
+#[doc(hidden)]
+pub fn set_text_store_preferred(preferred: bool) {
+    STORE_PREFERRED.store(preferred, Ordering::Relaxed);
+}
+
+/// The [`TextStoreMode`] this process runs with: `TEKSILO_TSF` when it is
+/// set to a mode (`0` turns the store off whatever the application asked,
+/// `1` turns it on), else what the application asked for
+/// ([`set_text_store_preferred`]). Off on every platform but Windows.
 #[doc(hidden)]
 pub fn text_store_mode() -> TextStoreMode {
-    static MODE: OnceLock<TextStoreMode> = OnceLock::new();
-    *MODE.get_or_init(|| {
-        if cfg!(target_os = "windows") {
-            parse_text_store_mode(std::env::var("TEKSILO_TSF").ok().as_deref())
-        } else {
-            TextStoreMode::Off
-        }
+    static FROM_ENVIRONMENT: OnceLock<Option<TextStoreMode>> = OnceLock::new();
+    if !cfg!(target_os = "windows") {
+        return TextStoreMode::Off;
+    }
+    let from_environment = *FROM_ENVIRONMENT
+        .get_or_init(|| parse_text_store_mode(std::env::var("TEKSILO_TSF").ok().as_deref()));
+    from_environment.unwrap_or(if STORE_PREFERRED.load(Ordering::Relaxed) {
+        TextStoreMode::Store
+    } else {
+        TextStoreMode::Off
     })
 }
 
-/// `TEKSILO_TSF`'s value as a mode: `1` (or `store`) and `associated`; off
-/// for anything else.
-fn parse_text_store_mode(value: Option<&str>) -> TextStoreMode {
+/// `TEKSILO_TSF`'s value as a mode: `0` (or `off`), `1` (or `store`) and
+/// `associated`; `None` when unset or anything else, which leaves the
+/// choice to the application.
+fn parse_text_store_mode(value: Option<&str>) -> Option<TextStoreMode> {
     match value.map(str::trim) {
-        Some("1" | "store") => TextStoreMode::Store,
-        Some("associated") => TextStoreMode::StoreKeepingImm,
-        _ => TextStoreMode::Off,
+        Some("0" | "off") => Some(TextStoreMode::Off),
+        Some("1" | "store") => Some(TextStoreMode::Store),
+        Some("associated") => Some(TextStoreMode::StoreKeepingImm),
+        _ => None,
     }
 }
 
@@ -363,12 +384,17 @@ fn parse_text_store_mode(value: Option<&str>) -> TextStoreMode {
 pub enum StoreFocus {
     /// No text field: TSF gets an empty, disabled context.
     None,
-    /// A secure field (a password): the same empty, disabled context, with
-    /// speech turned off on the thread while it has the focus (design
+    /// A secure field (a password): a context of its own that holds no text
+    /// and takes no input method (keyboard disabled), whose input scope is
+    /// `IS_PASSWORD` so that the touch keyboard shows its password layout,
+    /// with speech turned off on the thread while it has the focus (design
     /// section 6).
-    Secure,
-    /// A text field that does not describe its document (`CodeEditor`, the
-    /// terminal): the IMM path, CUAS's own document.
+    Secure {
+        /// The focused widget.
+        widget: teksilo_core::WidgetId,
+    },
+    /// A text field that does not describe its document (the terminal): the
+    /// IMM path, CUAS's own document.
     Imm,
     /// A text field that describes its document: a store of its own, a new
     /// one each time a widget takes the focus.
@@ -478,14 +504,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_text_store_is_off_unless_asked_for() {
-        assert_eq!(parse_text_store_mode(None), TextStoreMode::Off);
-        assert_eq!(parse_text_store_mode(Some("0")), TextStoreMode::Off);
-        assert_eq!(parse_text_store_mode(Some("1")), TextStoreMode::Store);
-        assert_eq!(parse_text_store_mode(Some(" store ")), TextStoreMode::Store);
+    fn the_environment_decides_the_text_store_only_when_it_names_a_mode() {
+        assert_eq!(parse_text_store_mode(None), None);
+        assert_eq!(parse_text_store_mode(Some("")), None);
+        assert_eq!(parse_text_store_mode(Some("0")), Some(TextStoreMode::Off));
+        assert_eq!(parse_text_store_mode(Some("off")), Some(TextStoreMode::Off));
+        assert_eq!(parse_text_store_mode(Some("1")), Some(TextStoreMode::Store));
+        assert_eq!(
+            parse_text_store_mode(Some(" store ")),
+            Some(TextStoreMode::Store)
+        );
         assert_eq!(
             parse_text_store_mode(Some("associated")),
-            TextStoreMode::StoreKeepingImm
+            Some(TextStoreMode::StoreKeepingImm)
         );
     }
 

@@ -154,7 +154,7 @@ Rule, decided in `input_loop::settle_ime`, which already decides `set_ime_allowe
   keyboard layout. winit's IME stays disallowed, so no IMM context and no `Ime` event from winit.
   `WM_IME_ENDCOMPOSITION` is still handled when winit was in preedit, which is safe only because
   `ImmGetContext` then returns null; `finish_composition` runs before any switch.
-- **IMM path**: a surface without a document (`CodeEditor`, the terminal), a store that could not
+- **IMM path**: a surface without a document (the terminal; `CodeEditor` has had one since Phase 4), a store that could not
   start, or an active legacy IMM-IME (a keyboard layout whose HKL `ImmIsIME` reports; the trace
   already reads the profile type and HKL), which works only through an IMM context.
 
@@ -543,8 +543,34 @@ cannot compose breaks every IME.
   Microsoft IME's cancel of a reconversion it started itself first wrote the text before the word
   back over the word (the reads it made are answered from the document and match its
   addressable text; `GetText` now traces what it answered).
+  Round 2 (`tsf-phase-2-windows-2-findings.md`) passed: the undo that did nothing was the
+  worker's tooling (its key helper sent W's scan code to a QWERTY-based layout); 23 of 23 undos
+  right after a commit worked. **Tolerated, as the Microsoft IME's behaviour**: cancelling a
+  reconversion the IME started itself (Esc three times) first writes the text from the previous
+  break up to the word back over the composition ("Showcase川山海空..."), then the right word;
+  the final text is right and UI Automation shows no visible state in between, in Notepad as in
+  Teksilo. `GetText` keeps tracing what it answered.
 - **Phase 4** (about 500 lines). Attribution (5), touch keyboard flags, a document for `CodeEditor`,
   macOS's `insertText:` onto the write half.
+  Built: **attribution** (section 5) takes what M4 and M5 allow: every composition has the same
+  owner, but a keyboard input method marks its clauses with display attributes and the emoji
+  panel's one-shot pick carries none, so a composition that never carried one ends as
+  `ImeOrigin::Insertion` and one that did as `Composition`; both are `EditSource::Ime` in the
+  widgets, as before. Voice typing is unmeasured (M1) and is never `Dictation` yet. **Touch
+  keyboard**: `TS_SD_INPUTPANEMANUALDISPLAYENABLE` as before, autocorrection and prediction
+  (`TS_SD_TKBAUTOCORRECTENABLE`, `TS_SD_TKBPREDICTIONENABLE`) off; a per-field opt-in is public API
+  and waits for the maintainer. **Input scope**: the store answers `GUID_PROP_INPUTSCOPE`
+  (`RequestSupportedAttrs`, `RequestAttrsAtPosition`, then `RetrieveRequestedAttrs` with an
+  `ITfInputScope` of one scope, Chromium's `TSFInputScope`): `IS_DEFAULT` for a field,
+  `IS_PASSWORD` for a secure field, which now gets a context of its own over a store that holds no
+  text (the field's document answers nothing while secure), with the keyboard-disabled compartment,
+  so no input method composes there and the touch keyboard can show its password layout.
+  **`CodeEditor`** describes its document and takes the input system's writes (about 440 lines and
+  160 of tests: `code_editor/input_document.rs`): it leaves the IMM path; a write outside a
+  composition goes in as a paste does, a multi-caret edit collapses to the primary caret, and a
+  written composition ends, its text kept, before a key passed on, a press, an edit command and a
+  focus change (the IMM path's preedit is still discarded on focus loss). **`TeksiloAppBuilder::
+  windows_text_store(bool)`**, off by default; `TEKSILO_TSF` overrides it (`0` off, `1` on).
 
 Total: **6,000 to 9,000 lines with tests**, plus an open tail of TIP-specific workarounds. For scale:
 Chromium's TSF code is about 3,050 lines without tests, with the composition bookkeeping done by

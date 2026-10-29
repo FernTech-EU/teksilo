@@ -5773,6 +5773,9 @@ pub struct TeksiloAppBuilder {
     /// Whether macOS may merge the windows into tabs; see
     /// [`window_tabbing`](Self::window_tabbing).
     window_tabbing: bool,
+    /// Whether Windows text input runs through a TSF text store; see
+    /// [`windows_text_store`](Self::windows_text_store).
+    windows_text_store: bool,
     /// Type-erased adapter for the application's backend event source.
     /// Installed via `event_source<S>(source)`.
     event_source: Option<EventSourceAdapter>,
@@ -5842,6 +5845,7 @@ impl TeksiloAppBuilder {
             quit_guard: None,
             termination_signals: true,
             window_tabbing: false,
+            windows_text_store: false,
             event_source: None,
             app_state_registry: HashMap::new(),
             i18n: None,
@@ -6562,6 +6566,18 @@ impl TeksiloAppBuilder {
         self
     }
 
+    /// Run text input on Windows through a TSF text store of Teksilo's: input
+    /// methods, the emoji panel, voice typing and the touch keyboard then
+    /// read and write the focused field directly, as in a native edit
+    /// control, instead of through IMM32. Experimental, so off by default;
+    /// ignored on other platforms. A field that describes no document (the
+    /// terminal) keeps IMM32. The environment variable `TEKSILO_TSF` overrides
+    /// it for diagnosis: `0` turns the store off, `1` on.
+    pub fn windows_text_store(mut self, enabled: bool) -> Self {
+        self.windows_text_store = enabled;
+        self
+    }
+
     /// Open the configured settings bundle (if any) and register
     /// each service in the app-state registry.
     fn install_settings(&mut self) -> Option<teksilo_settings::OpenedSettings> {
@@ -6897,6 +6913,9 @@ impl TeksiloAppBuilder {
         event_loop.set_control_flow(ControlFlow::Wait);
         // Before the first window: AppKit reads it as windows are ordered in.
         teksilo_platform::set_automatic_window_tabbing(self.window_tabbing);
+        // Before the first window too: each window's text input attaches as
+        // it is created.
+        teksilo_platform::text_input_hook::set_text_store_preferred(self.windows_text_store);
 
         // Always create a proxy: it's needed by both `on_ready` (if set)
         // and by the event-source poster (if a source is registered). The

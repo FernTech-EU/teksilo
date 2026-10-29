@@ -87,30 +87,35 @@ use teksilo_core::window::TeksiloWindowId;
 use teksilo_core::{AppEventPoster, ImeOrigin, WidgetId};
 
 use windows::Win32::Foundation::{
-    E_FAIL, E_INVALIDARG, E_NOTIMPL, E_UNEXPECTED, HWND, LPARAM, POINT, RECT, S_OK, WPARAM,
+    E_FAIL, E_INVALIDARG, E_NOTIMPL, E_OUTOFMEMORY, E_UNEXPECTED, HWND, LPARAM, POINT, RECT, S_OK,
+    WPARAM,
 };
 use windows::Win32::Graphics::Gdi::ScreenToClient;
-use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, FORMATETC, IDataObject};
+use windows::Win32::System::Com::{
+    CLSCTX_INPROC_SERVER, CoCreateInstance, CoTaskMemAlloc, FORMATETC, IDataObject,
+};
 use windows::Win32::System::Ole::{CONNECT_E_ADVISELIMIT, CONNECT_E_CANNOTCONNECT};
-use windows::Win32::System::Variant::{VARIANT, VT_EMPTY, VT_I4};
+use windows::Win32::System::Variant::{VARIANT, VT_EMPTY, VT_I4, VT_UNKNOWN};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows::Win32::UI::TextServices::{
     CLSID_TF_CategoryMgr, CLSID_TF_DisplayAttributeMgr, CLSID_TF_ThreadMgr,
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
-    GUID_COMPARTMENT_SPEECH_DISABLED, GUID_PROP_ATTRIBUTE, ITextStoreACP, ITextStoreACP_Impl,
-    ITextStoreACPSink, ITfCategoryMgr, ITfCompartmentMgr, ITfCompositionView, ITfContext,
-    ITfContextComposition, ITfContextOwnerCompositionServices, ITfContextOwnerCompositionSink,
+    GUID_COMPARTMENT_SPEECH_DISABLED, GUID_PROP_ATTRIBUTE, GUID_PROP_INPUTSCOPE, IS_DEFAULT,
+    IS_PASSWORD, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink, ITfCategoryMgr,
+    ITfCompartmentMgr, ITfCompositionView, ITfContext, ITfContextComposition,
+    ITfContextOwnerCompositionServices, ITfContextOwnerCompositionSink,
     ITfContextOwnerCompositionSink_Impl, ITfDisplayAttributeMgr, ITfDocumentMgr, ITfEditRecord,
-    ITfKeyTraceEventSink, ITfKeyTraceEventSink_Impl, ITfProperty, ITfRange, ITfRangeACP, ITfSource,
-    ITfTextEditSink, ITfTextEditSink_Impl, ITfThreadMgr, ITfThreadMgrEx, TEXT_STORE_LOCK_FLAGS,
-    TEXT_STORE_TEXT_CHANGE_FLAGS, TF_ATTR_CONVERTED, TF_ATTR_FIXEDCONVERTED,
-    TF_ATTR_TARGET_CONVERTED, TF_ATTR_TARGET_NOTCONVERTED, TF_DA_ATTR_INFO, TF_DEFAULT_SELECTION,
-    TF_DISABLE_COMMANDING, TF_DISABLE_DICTATION, TF_DISABLE_SPEECH, TF_DISPLAYATTRIBUTE,
-    TF_GTP_INCL_TEXT, TS_AE_END, TS_AE_START, TS_ATTRVAL, TS_E_INVALIDPOINT, TS_E_INVALIDPOS,
-    TS_E_NOLOCK, TS_E_READONLY, TS_E_SYNCHRONOUS, TS_IAS_QUERYONLY, TS_LC_CHANGE, TS_RT_PLAIN,
-    TS_RUNINFO, TS_S_ASYNC, TS_SD_INPUTPANEMANUALDISPLAYENABLE, TS_SD_READONLY, TS_SELECTION_ACP,
-    TS_SELECTIONSTYLE, TS_SS_NOHIDDENTEXT, TS_ST_CORRECTION, TS_STATUS, TS_TEXTCHANGE,
+    ITfInputScope, ITfInputScope_Impl, ITfKeyTraceEventSink, ITfKeyTraceEventSink_Impl,
+    ITfProperty, ITfRange, ITfRangeACP, ITfSource, ITfTextEditSink, ITfTextEditSink_Impl,
+    ITfThreadMgr, ITfThreadMgrEx, InputScope, TEXT_STORE_LOCK_FLAGS, TEXT_STORE_TEXT_CHANGE_FLAGS,
+    TF_ATTR_CONVERTED, TF_ATTR_FIXEDCONVERTED, TF_ATTR_TARGET_CONVERTED,
+    TF_ATTR_TARGET_NOTCONVERTED, TF_DA_ATTR_INFO, TF_DEFAULT_SELECTION, TF_DISABLE_COMMANDING,
+    TF_DISABLE_DICTATION, TF_DISABLE_SPEECH, TF_DISPLAYATTRIBUTE, TF_GTP_INCL_TEXT, TS_AE_END,
+    TS_AE_START, TS_ATTRVAL, TS_E_INVALIDPOINT, TS_E_INVALIDPOS, TS_E_NOLOCK, TS_E_READONLY,
+    TS_E_SYNCHRONOUS, TS_IAS_QUERYONLY, TS_LC_CHANGE, TS_RT_PLAIN, TS_RUNINFO, TS_S_ASYNC,
+    TS_SD_INPUTPANEMANUALDISPLAYENABLE, TS_SD_READONLY, TS_SELECTION_ACP, TS_SELECTIONSTYLE,
+    TS_SS_NOHIDDENTEXT, TS_ST_CORRECTION, TS_STATUS, TS_TEXTCHANGE,
 };
 use windows::core::{BOOL, GUID, HRESULT, IUnknown, Interface, PCWSTR, PWSTR, Ref, implement};
 
@@ -329,6 +334,7 @@ struct WindowTsf {
 /// One focus session on a field that describes its document.
 struct Session {
     widget: WidgetId,
+    secure: bool,
     manager: ITfDocumentMgr,
     context: ITfContext,
     state: Rc<StoreState>,
@@ -423,7 +429,7 @@ pub(super) fn detach(hwnd: HWND) {
         end_session(session);
     }
     if let Some((manager, client_id)) = thread() {
-        if window.applied == Some(StoreFocus::Secure) {
+        if matches!(window.applied, Some(StoreFocus::Secure { .. })) {
             disable_speech(&manager, client_id, false);
         }
         let previous = window.previous.take();
@@ -442,22 +448,25 @@ fn empty_document(manager: &ITfThreadMgr, client_id: u32) -> windows::core::Resu
     let mut cookie = 0;
     unsafe { document.CreateContext(client_id, 0, None::<&IUnknown>, &mut context, &mut cookie) }?;
     let context = context.ok_or_else(|| windows::core::Error::from(E_FAIL))?;
-    if let Ok(compartments) = context.cast::<ITfCompartmentMgr>() {
-        for guid in [
-            GUID_COMPARTMENT_KEYBOARD_DISABLED,
-            GUID_COMPARTMENT_EMPTYCONTEXT,
-        ] {
-            let set =
-                unsafe { compartments.GetCompartment(&guid) }.and_then(|compartment| unsafe {
-                    compartment.SetValue(client_id, &int_variant(1))
-                });
-            if let Err(error) = set {
-                tsf_trace!("compartment {guid:?} not set: {}", hresult(&error));
-            }
-        }
+    for guid in [
+        GUID_COMPARTMENT_KEYBOARD_DISABLED,
+        GUID_COMPARTMENT_EMPTYCONTEXT,
+    ] {
+        set_compartment(&context, client_id, guid);
     }
     unsafe { document.Push(&context) }?;
     Ok(document)
+}
+
+/// Set the context's compartment `guid` to 1.
+fn set_compartment(context: &ITfContext, client_id: u32, guid: GUID) {
+    let set = context
+        .cast::<ITfCompartmentMgr>()
+        .and_then(|compartments| unsafe { compartments.GetCompartment(&guid) })
+        .and_then(|compartment| unsafe { compartment.SetValue(client_id, &int_variant(1)) });
+    if let Err(error) = set {
+        tsf_trace!("compartment {guid:?} not set: {}", hresult(&error));
+    }
 }
 
 /// A `VT_I4` variant.
@@ -505,17 +514,23 @@ pub(super) fn set_text_store_focus(hwnd: HWND, focus: StoreFocus) {
     };
     // The session follows the focused widget, whether or not the window has
     // the Win32 focus.
-    let wanted_widget = match focus {
-        StoreFocus::Document { widget } => Some(widget),
+    let wanted = match focus {
+        StoreFocus::Document { widget } => Some((widget, false)),
+        StoreFocus::Secure { widget } => Some((widget, true)),
         _ => None,
     };
-    if window.session.as_ref().map(|session| session.widget) != wanted_widget {
+    if window
+        .session
+        .as_ref()
+        .map(|session| (session.widget, session.secure))
+        != wanted
+    {
         if let Some(session) = window.session.take() {
             end_session(session);
             window.applied = None;
         }
-        if let Some(widget) = wanted_widget {
-            match start_session(&window, client_id, widget) {
+        if let Some((widget, secure)) = wanted {
+            match start_session(&window, client_id, widget, secure) {
                 Ok(session) => window.session = Some(session),
                 Err(error) => tsf_trace!(
                     "#{} {} no store for {widget:?}: {}",
@@ -557,18 +572,22 @@ pub(super) fn set_text_store_focus(hwnd: HWND, focus: StoreFocus) {
     let has_focus = unsafe { GetFocus() } == window.hwnd;
     if has_focus {
         // Speech stays off while a secure field has the focus (section 6).
-        disable_speech(&manager, client_id, focus == StoreFocus::Secure);
+        disable_speech(
+            &manager,
+            client_id,
+            matches!(focus, StoreFocus::Secure { .. }),
+        );
     }
     if imm {
         // CUAS focuses its own document as winit's IMM context activates.
         window.applied = Some(focus);
     } else if has_focus && window.applied != Some(focus) {
         let target = match focus {
-            StoreFocus::Document { .. } => window
+            StoreFocus::Document { .. } | StoreFocus::Secure { .. } => window
                 .session
                 .as_ref()
                 .map(|session| session.manager.clone()),
-            StoreFocus::Imm | StoreFocus::None | StoreFocus::Secure => Some(window.empty.clone()),
+            StoreFocus::Imm | StoreFocus::None => Some(window.empty.clone()),
         };
         let result = unsafe { manager.SetFocus(target.as_ref()) };
         tsf_trace!(
@@ -672,16 +691,21 @@ fn int_of(variant: &VARIANT) -> Option<i32> {
     }
 }
 
+/// A focus session's context over a store for `widget`: its document's, or,
+/// for a `secure` field, one that holds no text, takes no input method
+/// (keyboard disabled) and answers the `IS_PASSWORD` input scope.
 fn start_session(
     window: &WindowTsf,
     client_id: u32,
     widget: WidgetId,
+    secure: bool,
 ) -> windows::core::Result<Session> {
     let (manager, _) = thread().ok_or_else(|| windows::core::Error::from(E_FAIL))?;
     let state = Rc::new(StoreState {
         hwnd: window.hwnd,
         window_id: window.window_id,
         widget,
+        scope: if secure { IS_PASSWORD } else { IS_DEFAULT },
         surfaces: window.surfaces.clone(),
         service: window.service.clone(),
         inner: RefCell::new(StoreInner::default()),
@@ -697,6 +721,9 @@ fn start_session(
     let mut cookie = 0;
     unsafe { document.CreateContext(client_id, 0, &store, &mut context, &mut cookie) }?;
     let context = context.ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+    if secure {
+        set_compartment(&context, client_id, GUID_COMPARTMENT_KEYBOARD_DISABLED);
+    }
     let edit_sink: ITfTextEditSink = EditSink {
         state: state.clone(),
     }
@@ -708,13 +735,15 @@ fn start_session(
         .ok();
     unsafe { document.Push(&context) }?;
     tsf_trace!(
-        "#{} {} store for {widget:?}: {} units",
+        "#{} {} {}store for {widget:?}: {} units",
         next_sequence(),
         window.window_id,
+        if secure { "secure " } else { "" },
         state.inner.borrow().mirror.len()
     );
     Ok(Session {
         widget,
+        secure,
         manager: document,
         context,
         state,
@@ -748,6 +777,9 @@ struct StoreState {
     window_id: TeksiloWindowId,
     /// The field the store is for.
     widget: WidgetId,
+    /// What `GUID_PROP_INPUTSCOPE` answers: `IS_PASSWORD` for a secure
+    /// field, `IS_DEFAULT` otherwise.
+    scope: InputScope,
     surfaces: TextSurfaces,
     service: Rc<Service>,
     inner: RefCell<StoreInner>,
@@ -766,6 +798,10 @@ struct StoreInner {
     locks: LockArbiter,
     sink: Option<ITextStoreACPSink>,
     compositions: u32,
+    /// The composition carried a display attribute (a clause) at some point:
+    /// a keyboard input method's. One that never did is the emoji panel's
+    /// one-shot pick (M5), an insertion (section 5).
+    styled: bool,
     editable: bool,
     /// The document's revisions at the last report; `None` until the first,
     /// and for a document that counts none (a full comparison each time).
@@ -777,6 +813,10 @@ struct StoreInner {
     /// service's last write left: the text service knows it, so it is not
     /// reported back to it.
     store_selection: Option<(Range<usize>, bool)>,
+    /// The text service asked for the input scope
+    /// (`RequestSupportedAttrs`, `RequestAttrsAtPosition`), which
+    /// `RetrieveRequestedAttrs` answers.
+    scope_requested: bool,
     /// Window-logical, at the last report: answered while the document
     /// cannot place a range.
     caret: Option<Rect>,
@@ -1188,6 +1228,21 @@ impl StoreState {
     }
 }
 
+/// Which part of the input system a composition that ends was, from what
+/// the store saw of it (section 5). Every composition has the same owner
+/// (M4), so the owner tells nothing; a keyboard input method marks its
+/// clauses with display attributes, and the emoji panel's one-shot pick
+/// carries none (M5), so a composition that never had one is an insertion.
+/// Voice typing's is not measured yet (M1): until it is, it is whichever of
+/// the two its properties make it, never `Dictation`.
+fn origin_of(styled: bool) -> ImeOrigin {
+    if styled {
+        ImeOrigin::Composition
+    } else {
+        ImeOrigin::Insertion
+    }
+}
+
 /// An `ITfRange`'s extent in ACP offsets (start, length).
 fn acp_extent(range: &ITfRange) -> Option<(usize, usize)> {
     let acp: ITfRangeACP = range.cast().ok()?;
@@ -1424,6 +1479,10 @@ impl ITextStoreACP_Impl for TextStore_Impl {
     fn GetStatus(&self) -> windows::core::Result<TS_STATUS> {
         guarded(|| {
             let editable = self.inner()?.editable;
+            // The touch keyboard is shown by Teksilo, not by the system
+            // (`soft_keyboard.rs`). Its autocorrection and its predictions
+            // (`TS_SD_TKBAUTOCORRECTENABLE`, `TS_SD_TKBPREDICTIONENABLE`) are
+            // left off: a field that wants them would ask, and none can yet.
             let mut dynamic = TS_SD_INPUTPANEMANUALDISPLAYENABLE;
             if !editable {
                 dynamic |= TS_SD_READONLY;
@@ -1751,7 +1810,10 @@ impl ITextStoreACP_Impl for TextStore_Impl {
             cfilterattrs,
             pafilterattrs,
         );
-        Ok(())
+        guarded(|| {
+            self.inner()?.scope_requested = asks_scope(cfilterattrs, pafilterattrs);
+            Ok(())
+        })
     }
 
     fn RequestAttrsAtPosition(
@@ -1767,7 +1829,10 @@ impl ITextStoreACP_Impl for TextStore_Impl {
             cfilterattrs,
             pafilterattrs,
         );
-        Ok(())
+        guarded(|| {
+            self.inner()?.scope_requested = asks_scope(cfilterattrs, pafilterattrs);
+            Ok(())
+        })
     }
 
     fn RequestAttrsTransitioningAtPosition(
@@ -1808,13 +1873,34 @@ impl ITextStoreACP_Impl for TextStore_Impl {
 
     fn RetrieveRequestedAttrs(
         &self,
-        _ulcount: u32,
-        _paattrvals: *mut TS_ATTRVAL,
+        ulcount: u32,
+        paattrvals: *mut TS_ATTRVAL,
         pcfetched: *mut u32,
     ) -> windows::core::Result<()> {
-        // SAFETY: TSF passes a valid out pointer.
-        unsafe { *pcfetched = 0 };
-        Ok(())
+        guarded(|| {
+            let asked = std::mem::take(&mut self.inner()?.scope_requested);
+            let fetched = u32::from(asked && ulcount > 0 && !paattrvals.is_null());
+            if fetched == 1 {
+                let scope: ITfInputScope = Scope(self.state.scope).into();
+                // SAFETY: TSF passes room for `ulcount` values, and owns the
+                // reference the variant carries (it clears the variant).
+                unsafe {
+                    *paattrvals = TS_ATTRVAL {
+                        idAttr: GUID_PROP_INPUTSCOPE,
+                        dwOverlapId: 0,
+                        varValue: unknown_variant(scope.cast()?),
+                    };
+                }
+                tsf_trace!(
+                    "#{} RetrieveRequestedAttrs -> input scope {}",
+                    next_sequence(),
+                    self.state.scope.0
+                );
+            }
+            // SAFETY: TSF passes a valid out pointer.
+            unsafe { *pcfetched = fetched };
+            Ok(())
+        })
     }
 
     fn GetEndACP(&self) -> windows::core::Result<i32> {
@@ -1917,8 +2003,76 @@ impl ITextStoreACP_Impl for TextStore_Impl {
     }
 }
 
-/// Trace the attributes a text service asks for (`GUID_PROP_INPUTSCOPE`
-/// among them, which the store does not answer yet).
+/// Whether the attributes a text service asks for include the input scope.
+fn asks_scope(count: u32, attrs: *const GUID) -> bool {
+    if attrs.is_null() || count == 0 {
+        return false;
+    }
+    // SAFETY: TSF passes `count` GUIDs.
+    unsafe { std::slice::from_raw_parts(attrs, count as usize) }.contains(&GUID_PROP_INPUTSCOPE)
+}
+
+/// A `VT_UNKNOWN` variant holding `value`, whose reference it owns.
+fn unknown_variant(value: IUnknown) -> VARIANT {
+    let mut variant = VARIANT::default();
+    // SAFETY: `vt` and the member it names are written together.
+    unsafe {
+        let tagged = &mut *variant.Anonymous.Anonymous;
+        tagged.vt = VT_UNKNOWN;
+        tagged.Anonymous.punkVal = ManuallyDrop::new(Some(value));
+    }
+    variant
+}
+
+/// The input scope a store answers for `GUID_PROP_INPUTSCOPE` (Chromium's
+/// `TSFInputScope`): one scope, no phrase list, no grammar.
+#[implement(ITfInputScope)]
+struct Scope(InputScope);
+
+impl ITfInputScope_Impl for Scope_Impl {
+    fn GetInputScopes(
+        &self,
+        pprginputscopes: *mut *mut InputScope,
+        pccount: *mut u32,
+    ) -> windows::core::Result<()> {
+        // TSF frees the array with `CoTaskMemFree`.
+        let scopes =
+            unsafe { CoTaskMemAlloc(std::mem::size_of::<InputScope>()) }.cast::<InputScope>();
+        if scopes.is_null() {
+            return Err(E_OUTOFMEMORY.into());
+        }
+        // SAFETY: room for one scope was just allocated; TSF passes valid
+        // out pointers.
+        unsafe {
+            *scopes = self.0;
+            *pprginputscopes = scopes;
+            *pccount = 1;
+        }
+        Ok(())
+    }
+
+    fn GetPhrase(
+        &self,
+        _ppbstrphrases: *mut *mut windows::core::BSTR,
+        _pccount: *mut u32,
+    ) -> windows::core::Result<()> {
+        Err(E_NOTIMPL.into())
+    }
+
+    fn GetRegularExpression(&self) -> windows::core::Result<windows::core::BSTR> {
+        Err(E_NOTIMPL.into())
+    }
+
+    fn GetSRGS(&self) -> windows::core::Result<windows::core::BSTR> {
+        Err(E_NOTIMPL.into())
+    }
+
+    fn GetXML(&self) -> windows::core::Result<windows::core::BSTR> {
+        Err(E_NOTIMPL.into())
+    }
+}
+
+/// Trace the attributes a text service asks for.
 fn trace_attrs(what: &str, flags: u32, count: u32, attrs: *const GUID) {
     if !super::super::trace_enabled() {
         return;
@@ -1956,7 +2110,9 @@ impl ITfContextOwnerCompositionSink_Impl for TextStore_Impl {
                         .is_some_and(|marked| marked.is_ok())
                 });
             if accepted {
-                self.inner()?.compositions += 1;
+                let mut inner = self.inner()?;
+                inner.compositions += 1;
+                inner.styled = false;
             }
             tsf_trace!(
                 "#{} OnStartComposition owner={} characters {range:?} -> {}",
@@ -1989,18 +2145,17 @@ impl ITfContextOwnerCompositionSink_Impl for TextStore_Impl {
 
     fn OnEndComposition(&self, pcomposition: Ref<ITfCompositionView>) -> windows::core::Result<()> {
         guarded(|| {
-            {
+            let origin = {
                 let mut inner = self.inner()?;
                 inner.compositions = inner.compositions.saturating_sub(1);
-            }
+                origin_of(inner.styled)
+            };
             // The text the text service left is the commit: one undo step,
             // through the field's rules (4.9).
-            let ended = self
-                .state
-                .editor(|editor| editor.end_composition(ImeOrigin::Composition));
+            let ended = self.state.editor(|editor| editor.end_composition(origin));
             self.state.note_store_selection();
             tsf_trace!(
-                "#{} OnEndComposition owner={} -> {ended:?}",
+                "#{} OnEndComposition owner={} as {origin:?} -> {ended:?}",
                 next_sequence(),
                 owner(pcomposition.ok().ok()),
             );
@@ -2109,6 +2264,11 @@ impl EditSink_Impl {
         let Some((range, segments)) = marked else {
             return;
         };
+        if !segments.is_empty()
+            && let Ok(mut inner) = self.state.inner.try_borrow_mut()
+        {
+            inner.styled = true;
+        }
         let result = self
             .state
             .editor(|editor| editor.mark_composition(range.clone(), &segments));
@@ -2731,6 +2891,7 @@ mod tests {
             hwnd: HWND::default(),
             window_id,
             widget: id,
+            scope: IS_DEFAULT,
             surfaces: tree.text_surfaces(),
             service: Rc::new(Service {
                 window_id,
@@ -3204,7 +3365,7 @@ mod tests {
             vec![
                 "begin",
                 "replace 2..2 \"\u{65E5}\u{672C}\"",
-                "end Composition",
+                "end Insertion",
                 "end batch"
             ]
         );
@@ -3309,6 +3470,49 @@ mod tests {
             Some(3)
         );
         assert_eq!(rig.read_text(), "abc");
+    }
+
+    /// The input scope is answered when asked for, once per request: the
+    /// field's purpose, as one `ITfInputScope` scope.
+    #[test]
+    fn the_input_scope_is_answered_when_asked_for() {
+        let rig = rig("abc", 0);
+        let mut values = [TS_ATTRVAL::default()];
+        let mut fetched = 0;
+        unsafe { rig.store.RetrieveRequestedAttrs(&mut values, &mut fetched) }.unwrap();
+        assert_eq!(fetched, 0, "nothing asked for");
+        unsafe {
+            rig.store
+                .RequestSupportedAttrs(0, &[GUID_PROP_ATTRIBUTE, GUID_PROP_INPUTSCOPE])
+        }
+        .unwrap();
+        unsafe { rig.store.RetrieveRequestedAttrs(&mut values, &mut fetched) }.unwrap();
+        assert_eq!(fetched, 1);
+        assert_eq!(values[0].idAttr, GUID_PROP_INPUTSCOPE);
+        let scope: ITfInputScope = unsafe {
+            let tagged = &values[0].varValue.Anonymous.Anonymous;
+            assert_eq!(tagged.vt, VT_UNKNOWN);
+            tagged.Anonymous.punkVal.as_ref().unwrap().cast().unwrap()
+        };
+        let mut scopes = std::ptr::null_mut();
+        let mut count = 0;
+        unsafe { scope.GetInputScopes(&mut scopes, &mut count) }.unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(unsafe { *scopes }, IS_DEFAULT);
+        unsafe {
+            windows::Win32::System::Com::CoTaskMemFree(Some(scopes.cast()));
+            let _ = windows::Win32::System::Variant::VariantClear(&mut values[0].varValue);
+        }
+        unsafe { rig.store.RetrieveRequestedAttrs(&mut values, &mut fetched) }.unwrap();
+        assert_eq!(fetched, 0, "answered once");
+    }
+
+    /// A composition that never carried a clause is the emoji panel's pick,
+    /// an insertion; one that did, a keyboard input method's.
+    #[test]
+    fn a_composition_with_clauses_is_a_composition_and_one_without_an_insertion() {
+        assert_eq!(origin_of(true), ImeOrigin::Composition);
+        assert_eq!(origin_of(false), ImeOrigin::Insertion);
     }
 
     #[test]

@@ -591,7 +591,7 @@ pub(crate) fn store_focus(
     };
     let password = ime.is_some_and(|ime| ime.purpose == teksilo_core::ImePurpose::Password);
     if password || secure == Some(true) {
-        return StoreFocus::Secure;
+        return StoreFocus::Secure { widget };
     }
     match (secure, ime) {
         (Some(_), _) => StoreFocus::Document { widget },
@@ -1397,16 +1397,16 @@ mod tests {
         );
         assert_eq!(
             store_focus(Some(widget), text, Some(true)),
-            StoreFocus::Secure,
+            StoreFocus::Secure { widget },
             "a secure document: the empty context, speech off"
         );
         assert_eq!(
             store_focus(Some(widget), Some(ImeContext::password()), Some(false)),
-            StoreFocus::Secure
+            StoreFocus::Secure { widget }
         );
         assert_eq!(
             store_focus(Some(widget), Some(ImeContext::password()), None),
-            StoreFocus::Secure
+            StoreFocus::Secure { widget }
         );
         assert_eq!(
             store_focus(Some(widget), None, Some(false)),

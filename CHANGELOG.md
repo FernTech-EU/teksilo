@@ -26,12 +26,16 @@ by crate for clarity, not because crates version independently.
   [docs/native-menu.md](docs/native-menu.md).
 - **`TEKSILO_TEXT_INPUT_TRACE=1`** logs what the platform's text input system
   sends a window, on macOS and Windows.
-- **`TEKSILO_TSF=1`** (Windows, experimental) runs a TSF text store: text
-  services read the focused field's text, selection and character positions
-  through it and write into it, compositions included (each one undo step,
-  its clauses underlined), and are told of its changes; a press or a focus
-  change ends a composition with the text service's last text. Read-only and
-  secure fields are presented as such. Off by default while it is measured.
+- **`TeksiloAppBuilder::windows_text_store(bool)`** (Windows, experimental,
+  off by default) runs text input through a TSF text store: input methods,
+  the emoji panel and voice typing read the focused field's text, selection
+  and character positions and write into it, compositions included (each one
+  undo step, its clauses underlined), and are told of its changes; a press or
+  a focus change ends a composition with the input method's last text.
+  Read-only fields are presented as such, and a password field as one (the
+  touch keyboard's password layout). `CodeEditor` takes part too. The
+  environment variable `TEKSILO_TSF` overrides the choice for diagnosis (`0`
+  off, `1` on).
 - **Windows: a text field answers the input method's questions about its
   text.** The candidate window follows the character being converted, and
   the input method reads the text around the composition as it predicts.
@@ -141,6 +145,12 @@ by crate for clarity, not because crates version independently.
   alignment, indentation and list, where it started another heading; in the
   middle it splits the heading in two, and at the start it puts an empty
   heading above. One undo takes the break back with the level change.
+- **`CodeEditor` describes its document to the platform's text input
+  system** and takes its writes, as the text fields and `RichTextEditor` do:
+  the macOS input system's questions about its text are answered, and on
+  Windows it takes the TSF text store when that is on. A composition the input
+  system writes ends, its text kept, before a key it passes on, a press, an
+  edit command or a focus change.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.
