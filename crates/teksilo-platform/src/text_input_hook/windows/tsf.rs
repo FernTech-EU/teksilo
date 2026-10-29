@@ -101,8 +101,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows::Win32::UI::TextServices::{
     CLSID_TF_CategoryMgr, CLSID_TF_DisplayAttributeMgr, CLSID_TF_ThreadMgr,
     GUID_COMPARTMENT_EMPTYCONTEXT, GUID_COMPARTMENT_KEYBOARD_DISABLED,
-    GUID_COMPARTMENT_SPEECH_DISABLED, GUID_PROP_ATTRIBUTE, GUID_PROP_INPUTSCOPE, IS_PASSWORD,
-    IS_SEARCH_INCREMENTAL, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink, ITfCategoryMgr,
+    GUID_COMPARTMENT_SPEECH_DISABLED, GUID_PROP_ATTRIBUTE, GUID_PROP_INPUTSCOPE, IS_DEFAULT,
+    IS_PASSWORD, ITextStoreACP, ITextStoreACP_Impl, ITextStoreACPSink, ITfCategoryMgr,
     ITfCompartmentMgr, ITfCompositionView, ITfContext, ITfContextComposition,
     ITfContextOwnerCompositionServices, ITfContextOwnerCompositionSink,
     ITfContextOwnerCompositionSink_Impl, ITfDisplayAttributeMgr, ITfDocumentMgr, ITfEditRecord,
@@ -461,21 +461,15 @@ fn empty_document(manager: &ITfThreadMgr, client_id: u32) -> windows::core::Resu
 /// The input scope a field's store answers (`GUID_PROP_INPUTSCOPE`).
 ///
 /// A secure field's is `IS_PASSWORD`: the touch keyboard's password layout,
-/// no suggestion strip (measured, Phase 4). Any other field's is
-/// `IS_SEARCH_INCREMENTAL`, the one scope Microsoft documents with the
-/// default layout and the touch keyboard's text prediction and
-/// autocorrection always off ("Use input scope to change the touch
-/// keyboard"): `IS_DEFAULT` showed suggestions (measured, Phase 4) although
-/// the store never sets `TS_SD_TKBPREDICTIONENABLE` or
-/// `TS_SD_TKBAUTOCORRECTENABLE`, which say that a document supports them,
-/// not that the keyboard must stay quiet. Suggestions stay off until a field
-/// can ask for them.
+/// with no suggestion strip (measured, Phase 4). Any other field's is
+/// `IS_DEFAULT`, as Chromium's. The touch keyboard's suggestion strip is the
+/// user's own setting ("text suggestions"), as in a native edit control: a
+/// native Win32 edit shows it under every other scope tried (0, 1, 3, 4, 6,
+/// 40, 50, 52, 65, 68 on Windows 11 22621), and `IS_SEARCH_INCREMENTAL`
+/// also switched off the Microsoft Japanese IME's prediction list
+/// (measured, Phase 4 round 2). So Teksilo sets nothing for it.
 fn scope_for(secure: bool) -> InputScope {
-    if secure {
-        IS_PASSWORD
-    } else {
-        IS_SEARCH_INCREMENTAL
-    }
+    if secure { IS_PASSWORD } else { IS_DEFAULT }
 }
 
 /// Set the context's compartment `guid` to 1.
@@ -1500,10 +1494,10 @@ impl ITextStoreACP_Impl for TextStore_Impl {
             let editable = self.inner()?.editable;
             // The touch keyboard is shown by Teksilo, not by the system
             // (`soft_keyboard.rs`). `TS_SD_TKBAUTOCORRECTENABLE` and
-            // `TS_SD_TKBPREDICTIONENABLE` say the document supports the
-            // keyboard's autocorrection and suggestions; leaving them out
-            // does not keep it quiet (measured), the input scope does
-            // (`scope_for`).
+            // `TS_SD_TKBPREDICTIONENABLE` (the document supports the
+            // keyboard's autocorrection and suggestions) stay unset: the
+            // suggestion strip follows the user's own setting, as in a
+            // native edit control (measured, see `scope_for`).
             let mut dynamic = TS_SD_INPUTPANEMANUALDISPLAYENABLE;
             if !editable {
                 dynamic |= TS_SD_READONLY;
@@ -3519,7 +3513,7 @@ mod tests {
         let mut count = 0;
         unsafe { scope.GetInputScopes(&mut scopes, &mut count) }.unwrap();
         assert_eq!(count, 1);
-        assert_eq!(unsafe { *scopes }, IS_SEARCH_INCREMENTAL);
+        assert_eq!(unsafe { *scopes }, IS_DEFAULT);
         unsafe {
             windows::Win32::System::Com::CoTaskMemFree(Some(scopes.cast()));
             let _ = windows::Win32::System::Variant::VariantClear(&mut values[0].varValue);
@@ -3528,11 +3522,11 @@ mod tests {
         assert_eq!(fetched, 0, "answered once");
     }
 
-    /// A field's scope keeps the touch keyboard's suggestions off; a secure
-    /// field's is the password scope.
+    /// A field's scope is the default one; a secure field's is the password
+    /// scope.
     #[test]
-    fn a_fields_scope_keeps_suggestions_off_and_a_passwords_is_the_password_scope() {
-        assert_eq!(scope_for(false), IS_SEARCH_INCREMENTAL);
+    fn a_fields_scope_is_the_default_and_a_passwords_is_the_password_scope() {
+        assert_eq!(scope_for(false), IS_DEFAULT);
         assert_eq!(scope_for(true), IS_PASSWORD);
     }
 

@@ -558,8 +558,8 @@ cannot compose breaks every IME.
   `ImeOrigin::Insertion` and one that did as `Composition`; both are `EditSource::Ime` in the
   widgets, as before. Voice typing is unmeasured (M1) and is never `Dictation` yet. **Touch
   keyboard**: `TS_SD_INPUTPANEMANUALDISPLAYENABLE` as before, autocorrection and prediction
-  (`TS_SD_TKBAUTOCORRECTENABLE`, `TS_SD_TKBPREDICTIONENABLE`) off; a per-field opt-in is public API
-  and waits for the maintainer. **Input scope**: the store answers `GUID_PROP_INPUTSCOPE`
+  (`TS_SD_TKBAUTOCORRECTENABLE`, `TS_SD_TKBPREDICTIONENABLE`) unset (see the measurement below: the
+  suggestion strip is the user's setting). **Input scope**: the store answers `GUID_PROP_INPUTSCOPE`
   (`RequestSupportedAttrs`, `RequestAttrsAtPosition`, then `RetrieveRequestedAttrs` with an
   `ITfInputScope` of one scope, Chromium's `TSFInputScope`): `IS_DEFAULT` for a field,
   `IS_PASSWORD` for a secure field, which now gets a context of its own over a store that holds no
@@ -574,16 +574,18 @@ cannot compose breaks every IME.
   Measured (`tsf-phase-4-windows-findings.md`): no FAIL. The password context answers scope 31 and
   the touch keyboard shows its password layout; attribution, `CodeEditor` through the store and
   `TEKSILO_TSF=0` pass. **The touch keyboard showed suggestions in a field** (a misspelt "the": the, ten, tea,
-  tee) without autocorrecting, the store setting neither TKB flag. The facts: the flags say a
-  document *supports* the keyboard's autocorrection and suggestions (`TS_STATUS`), so leaving them
-  out is not "off"; the keyboard types by injecting keys (`WM_KEYDOWN src=keyboard/system`) and
-  shows its own suggestions from the input scope; Chromium's store sets neither flag and answers
-  `IS_DEFAULT` (or `IS_PRIVATE` when it must not learn), and Firefox's source does not use them;
-  Microsoft documents
-  `SearchIncremental` (`IS_SEARCH_INCREMENTAL`, 52) as the default layout with text prediction and
-  autocorrection always off, and `IS_DEFAULT` with them on. So a field's store now answers
-  `IS_SEARCH_INCREMENTAL` until a field can ask for suggestions. To measure: whether the input
-  methods treat that scope differently (the Microsoft Japanese IME's own predictions). The GUID
+  tee) without autocorrecting, the store setting neither TKB flag. The flags say a document
+  *supports* the keyboard's autocorrection and suggestions (`TS_STATUS`); the keyboard types by
+  injecting keys (`WM_KEYDOWN src=keyboard/system`) and shows its strip anyway. Chromium's store
+  sets neither flag and answers `IS_DEFAULT` (or `IS_PRIVATE` when it must not learn), and
+  Firefox's source does not use them. Round 2 (`tsf-phase-4-windows-2-findings.md`) tried
+  `IS_SEARCH_INCREMENTAL` (52, documented for UWP as prediction off): the strip stayed, and a native
+  Win32 edit with `SetInputScope` shows it under every non-password scope tried (0, 1, 3, 4, 6, 40,
+  50, 52, 65, 68 on 22621) while the layouts change; and that scope switched off the Microsoft
+  Japanese IME's own prediction list, in the native box too. **The suggestion strip is the user's
+  system setting ("text suggestions"), as in native applications**: Teksilo sets nothing for it,
+  there is no per-field opt-in, the TKB flags stay unset, and a field's store answers `IS_DEFAULT`
+  (the password context keeps `IS_PASSWORD`, which has no strip). The GUID
   `D5138268-A1BF-4308-BCBF-2E739398E234` a text service asks as a supported attribute (no
   `RetrieveRequestedAttrs` follows) is in no public header; the store does not answer it.
   `CodeEditor` now draws its composition's underline, clause by clause, as the other two widgets do.
@@ -692,9 +694,10 @@ Microsoft Japanese, Pinyin and Korean IMEs, the emoji panel; no hang, no crash).
    decided it applies on Windows and X11 only: on Wayland, turning text-input-v3 off would take the
    on-screen keyboard away (GTK keeps it on with the password purpose), and macOS composes dead keys
    through the input system, as a secure text field does.
-4. **Touch keyboard autocorrect and prediction**: off by default, a per-field opt-in (the touch
-   keyboard rewrites committed words with `SetText`; Chromium had to add revert logic for
-   `autocorrect="off"`), through the dynamic `TS_SD_TKB*` flags.
+4. **Touch keyboard autocorrect and prediction**: decided at first as off by default with a
+   per-field opt-in through the dynamic `TS_SD_TKB*` flags; measured in Phase 4, the suggestion
+   strip follows the user's own setting whatever a field says (native edits included), so Teksilo
+   sets nothing and there is no opt-in. The flags stay unset, so the keyboard does not autocorrect.
 5. **A voice command that deletes or replaces** inside a speech-owned session is a `Dictation` edit
    (an empty-text commit with a replacement range, as macOS posts deletions); a selection-only
    command is not an edit and reports nothing.

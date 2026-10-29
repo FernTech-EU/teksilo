@@ -33,8 +33,8 @@ by crate for clarity, not because crates version independently.
   undo step, its clauses underlined), and are told of its changes; a press or
   a focus change ends a composition with the input method's last text.
   Read-only fields are presented as such, and a password field as one (the
-  touch keyboard's password layout); the touch keyboard's suggestions and
-  autocorrection are off. `CodeEditor` takes part too. The
+  touch keyboard's password layout). The touch keyboard's suggestion strip
+  follows the user's own system setting, as in native applications. `CodeEditor` takes part too. The
   environment variable `TEKSILO_TSF` overrides the choice for diagnosis (`0`
   off, `1` on).
 - **Windows: a text field answers the input method's questions about its
