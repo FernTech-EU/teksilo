@@ -1057,6 +1057,13 @@ first character of the selected range, so the reading is
 stable and matches what a user would expect from "tell me the
 format of what I have selected."
 
+On a collapsed caret it is the format the next typed character takes:
+the format of the character before the caret, which typed text
+inherits (at the start of a paragraph the format of its first
+character, none in an empty paragraph), with Bold, Italic,
+Underline and Strikethrough as toggled on that caret since it was put
+there (see `toggle_bold`).
+
 <a id="richtexteditor-scroll_y"></a>
 
 #### `pub fn scroll_y(&self) -> Signal<f32>`
@@ -1259,9 +1266,10 @@ move, it glides.
 
 #### `pub fn set_bold(&self, enabled: bool)`
 
-Apply **bold** to the current selection. A no-op when nothing is
-selected — the document model has no typing format. Pairs with
-`is_bold` and `toggle_bold`.
+Apply **bold** to the current selection. On a collapsed caret, bold
+(or not) is kept for the text typed next at the caret, until the caret
+moves. Pairs with `is_bold` and
+`toggle_bold`.
 
 <a id="richtexteditor-set_italic"></a>
 
@@ -2552,9 +2560,10 @@ Apply strikethrough to the current selection.
 
 Set the font family for the current selection (a character-format
 change applied over the selected range). Like the other char-format
-setters (`set_bold`, …), this is a **no-op when there is no
-selection** — the document model has no typing/pending format, so a
-bare caret has no range to format. `family` must be a name resolvable
+setters other than the four toggles (`set_bold`, `set_italic`,
+`set_underline`, `set_strikethrough`, which a collapsed caret keeps for
+the text typed next), this is a **no-op when there is no selection**:
+a bare caret has no range to format. `family` must be a name resolvable
 by the shared typesetter's font registrar — e.g. a value chosen from
 a `FontPicker`.
 
