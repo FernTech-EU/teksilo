@@ -253,6 +253,13 @@ pub(crate) fn union_rect_in_visible_selection(document: &dyn TextInputDocument) 
 /// none of which is visible is answered whole, as cut off, so a candidate
 /// window still opens next to it. At most [`MAX_UNION_LINES`] lines are
 /// walked. `None` when the document cannot place the range's first line.
+#[cfg_attr(
+    target_os = "macos",
+    allow(
+        dead_code,
+        reason = "the Windows store asks it; the macOS view asks firstRect"
+    )
+)]
 pub(crate) fn range_rect(
     document: &dyn TextInputDocument,
     range: Range<usize>,

@@ -22,7 +22,9 @@ by crate for clarity, not because crates version independently.
   and Writing Tools (in its panel) insert into the focused `TextInput`,
   `SearchField`, `PasswordField` (Writing Tools excepted) and
   `RichTextEditor`, and read the field's selection and text. AutoFill is not
-  supported. See [docs/text-input-system.md](docs/text-input-system.md) and
+  supported. Text they insert with no composition going on lands in the
+  field at once, so the next question AppKit asks is answered from the text
+  after it. See [docs/text-input-system.md](docs/text-input-system.md) and
   [docs/native-menu.md](docs/native-menu.md).
 - **`TEKSILO_TEXT_INPUT_TRACE=1`** logs what the platform's text input system
   sends a window, on macOS and Windows.

@@ -82,6 +82,7 @@ mod tsf_mirror;
 #[cfg(target_os = "windows")]
 mod windows;
 mod winit_ime;
+mod write_half;
 
 /// Whether `TEKSILO_TEXT_INPUT_TRACE` is set to anything but `0`. Read once.
 pub fn trace_enabled() -> bool {
@@ -129,6 +130,21 @@ pub struct ImeCommitPayload {
     /// character offsets, when the input system named one. `None` replaces
     /// the selection, or inserts at the caret.
     pub replacement: Option<Range<usize>>,
+}
+
+/// Text the platform's input system inserted outside a key press, already
+/// written into the window's focused field through its write half (macOS,
+/// design decision 7 of `engineering/docs/tsf-text-store.md`): posted
+/// through the window's [`AppEventPoster::post_external`] so that
+/// `teksilo-app` does what it does for a commit, the field's own work
+/// aside: the user's activation, the window's empty-preedit dedup reset, a
+/// settle and a redraw. A payload for a window that has closed since is
+/// dropped.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImeWrittenPayload {
+    /// The window whose focused field took the text.
+    pub window_id_owner: TeksiloWindowId,
 }
 
 /// What the platform tells about text that arrived outside a key press, for

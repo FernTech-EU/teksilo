@@ -3838,6 +3838,37 @@ impl TeksiloAppHandler {
         Ok(())
     }
 
+    /// Try to route an `AppEvent::External` payload as an
+    /// [`ImeWrittenPayload`](teksilo_platform::text_input_hook::ImeWrittenPayload):
+    /// text the platform's input system inserted outside a key press, which
+    /// the window's text input hook has already written into the focused
+    /// field through its write half (macOS). What a commit's route does
+    /// beside the field's own work follows: it counts as the user acting,
+    /// the next empty preedit is meaningful again, and the window is
+    /// settled and redrawn. The field took the text before this payload was
+    /// posted, so a window a modal child blocks has it too: AppKit sends it
+    /// to the key window, which a blocked one is not. A payload for a window
+    /// that has closed since is dropped.
+    fn try_route_ime_written_payload(
+        &mut self,
+        payload: Box<dyn std::any::Any + Send>,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        use teksilo_platform::text_input_hook::ImeWrittenPayload;
+
+        let ImeWrittenPayload { window_id_owner } = *payload.downcast::<ImeWrittenPayload>()?;
+        self.wm.note_user_activation();
+        let last_area = self.wm.ime_cursor_area(window_id_owner);
+        if let Some(managed) = self.wm.get_by_teksilo_mut(window_id_owner) {
+            managed.last_ime_preedit_empty = false;
+            Self::settle_ime(managed, last_area);
+            if let Some(trace) = &mut self.idle_trace {
+                trace.note_redraw_request("ime");
+            }
+            managed.request_redraw();
+        }
+        Ok(())
+    }
+
     /// Try to route an `AppEvent::External` payload as a
     /// [`TextStorePayload`](teksilo_platform::text_input_hook::TextStorePayload):
     /// the window's text store (Windows, `TEKSILO_TSF`) asks to be settled
@@ -5310,6 +5341,10 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
                 let payload = match payload {
                     None => None,
                     Some(payload) => self.try_route_text_store_payload(payload).err(),
+                };
+                let payload = match payload {
+                    None => None,
+                    Some(payload) => self.try_route_ime_written_payload(payload).err(),
                 };
                 let payload = match payload {
                     None => None,

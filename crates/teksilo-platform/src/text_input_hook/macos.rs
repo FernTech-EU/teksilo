@@ -2250,6 +2250,9 @@ enum Inserted {
     /// Posted to the view's window from this origin, replacing these
     /// characters of the focused document (the selection, for none).
     Posted(ImeOrigin, Option<std::ops::Range<usize>>),
+    /// Written into the focused field at once from this origin, through its
+    /// write half; these are the characters the text took.
+    Written(ImeOrigin, std::ops::Range<usize>),
 }
 
 impl fmt::Display for Inserted {
@@ -2270,6 +2273,11 @@ impl fmt::Display for Inserted {
             Self::Posted(origin, Some(chars)) => write!(
                 f,
                 "posted as {origin:?}, replacing characters {}..{}",
+                chars.start, chars.end
+            ),
+            Self::Written(origin, chars) => write!(
+                f,
+                "written into the field as {origin:?}, characters {}..{}",
                 chars.start, chars.end
             ),
         }
@@ -2402,6 +2410,36 @@ fn insert_out_of_band(
         dictation_session: dictation,
         writing_tools_session: writing_tools,
     });
+    // With no marked text, written into the field at once through its write
+    // half, so that AppKit's next question (`selectedRange`, asked right
+    // after) is answered from the text after it; a composition's commit is
+    // winit's composition's, and stays an event (design section 3). What the
+    // field cannot take now is posted as before.
+    if !had_marked_text && key_down_depth() == 0 {
+        let surfaces = with_attached(view, |attached| attached.surfaces.clone());
+        let written = surfaces.map(|surfaces| {
+            catch_unwind(AssertUnwindSafe(|| {
+                super::write_half::write(&surfaces, &string, replacement_chars.clone(), origin)
+            }))
+            .unwrap_or(super::write_half::Written::No("a panic in the field"))
+        });
+        match written {
+            Some(super::write_half::Written::Yes(range)) => {
+                poster.post_external(Box::new(super::ImeWrittenPayload {
+                    window_id_owner: window_id,
+                }));
+                composition_over(view, "insertText:replacementRange:");
+                return Inserted::Written(origin, range);
+            }
+            Some(super::write_half::Written::No(why)) => log(|line| {
+                let _ = write!(
+                    line,
+                    "insertText:replacementRange: not written ({why}), posted"
+                );
+            }),
+            None => {}
+        }
+    }
     poster.post_external(Box::new(ImeCommitPayload {
         window_id_owner: window_id,
         text: string,
