@@ -652,7 +652,14 @@ Microsoft Japanese, Pinyin and Korean IMEs, the emoji panel; no hang, no crash).
 - M6: the candidate list and the prediction list open under the caret. Phase 0's store answers every
   `GetTextExt` with the caret rectangle (the composition is in the mirror, not the document), so
   per-clause placement waits for the write half.
-- M7, M8, M11, M13: not measured yet. For M8, on a 7709-unit document the text service read about
+- M11, NVDA over the finished store, measured on 2026-11-01 (`cross_tasks/tsf-nvda-windows-findings.md`,
+  NVDA 2026.3, `65ca434b`): Japanese, Pinyin and Korean in the editor, the Title field and the code
+  editor, plain typing, undo, the emoji panel, reading back, Alt+Tab mid-composition, the password
+  field. With the store and without (`TEKSILO_TSF=0`) NVDA says the same words in the same order;
+  nothing doubled, no key lost, no lock queued, speech 31 to 40 ms after a key (16 to 32 without).
+  NVDA's helper adds no reads: during a composition its read-only locks call only `GetTextExt`. The
+  password field is "astérisque" for every key and takes no composition.
+- M7, M8, M13: not measured yet. For M8, on a 7709-unit document the text service read about
   6000 units at focus, in 63 `GetText` calls of 128 units stepping by 96.
 - M9: Alt+` with the Japanese IME toggles it and **the menu bar keeps away**: between Alt's down
   and up winit sees `WM_SYSKEYDOWN`/`WM_SYSKEYUP` for `VK_KANJI` (the key was passed on), so the
