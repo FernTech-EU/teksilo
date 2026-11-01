@@ -90,14 +90,27 @@ impl TextMirror {
     }
 
     /// Follow a change of the document: `range` (UTF-16 units of the
-    /// mirror's text) became `text`. A selection after the range moves with
-    /// it; one inside it collapses to the end of the new text. The change to
-    /// report, `None` for a range outside the text.
-    pub(crate) fn follow(&mut self, range: Range<usize>, text: &[u16]) -> Option<TextChange> {
+    /// mirror's text) became `text`. The change to report is the smallest
+    /// one inside the range: a document that names a wider range than it
+    /// changed (text-document's undo names the whole paragraph) is not told
+    /// on, and `Some(None)` when the range reads as it did. A selection after
+    /// the change moves with it; one inside it collapses to the end of the new
+    /// text. `None` for a range outside the text.
+    pub(crate) fn follow(
+        &mut self,
+        range: Range<usize>,
+        text: &[u16],
+    ) -> Option<Option<TextChange>> {
         if range.start > range.end || range.end > self.units.len() {
             return None;
         }
-        let new_end = range.start + text.len();
+        let Some(local) = diff(&self.units[range.clone()], text) else {
+            return Some(None);
+        };
+        let start = range.start + local.start;
+        let range = start..range.start + local.old_end;
+        let text = &text[local.start..local.new_end];
+        let new_end = start + text.len();
         self.units.splice(range.clone(), text.iter().copied());
         let shift = |offset: usize| -> usize {
             if offset >= range.end {
@@ -109,11 +122,11 @@ impl TextMirror {
             }
         };
         self.selection = shift(self.selection.start)..shift(self.selection.end);
-        Some(TextChange {
-            start: range.start,
+        Some(Some(TextChange {
+            start,
             old_end: range.end,
             new_end,
-        })
+        }))
     }
 
     /// Follow the document's selection (UTF-16 offsets), clamped; whether
@@ -211,7 +224,7 @@ mod tests {
             &[0xDE00, u16::from(b'b')][..],
             "clamped, in units"
         );
-        let change = mirror.follow(1..3, &units("xyz")).unwrap();
+        let change = mirror.follow(1..3, &units("xyz")).unwrap().unwrap();
         assert_eq!(
             change,
             TextChange {
@@ -223,6 +236,31 @@ mod tests {
         assert_eq!(mirror.text(), "axyzb");
         assert_eq!(mirror.selection(), 5..5, "after the range: moved with it");
         assert_eq!(mirror.follow(3..9, &[]), None);
+    }
+
+    /// text-document's undo names the whole paragraph it restored; only the
+    /// text that changed in it is reported.
+    #[test]
+    fn a_followed_range_is_narrowed_to_what_changed_in_it() {
+        let mut mirror = synced("Title\nA sentence. Dictated", 26..26);
+        let change = mirror
+            .follow(6..26, &units("A sentence."))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            change,
+            TextChange {
+                start: 17,
+                old_end: 26,
+                new_end: 17
+            }
+        );
+        assert_eq!(mirror.text(), "Title\nA sentence.");
+        assert_eq!(
+            mirror.follow(0..5, &units("Title")),
+            Some(None),
+            "unchanged"
+        );
     }
 
     #[test]

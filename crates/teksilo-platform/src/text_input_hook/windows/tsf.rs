@@ -1307,7 +1307,7 @@ fn follow_journal(
         return None;
     }
     let change = mirror.follow(start..old_end, &units)?;
-    Some((changed.cause == ChangeCause::Other).then_some(change))
+    Some(change.filter(|_| changed.cause == ChangeCause::Other))
 }
 
 fn text_change(change: TextChange) -> TS_TEXTCHANGE {
