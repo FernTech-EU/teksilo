@@ -27,6 +27,7 @@ use std::cell::{Cell, RefCell};
 use std::ops::Range;
 
 use teksilo_canvas::Rect;
+use teksilo_core::ImeOrigin;
 use teksilo_core::text_input_document::{
     CompositionSegment, InputRevisions, Landed, SegmentStyle, WriteOptions, WriteRefused,
 };
@@ -303,10 +304,15 @@ pub(crate) fn replace(
             replaced: range,
         });
     }
-    if let Some(landed) = writing
-        .input
-        .journal
-        .input_system_write(|| join_typing(&writing, &range, &kept))
+    // Only the input system's own replacement of what was just typed (the
+    // accent popup) joins the typing: dictation or a rewrite over it is a
+    // step of its own.
+    let joins_typing = matches!(options.origin, None | Some(ImeOrigin::Insertion));
+    if joins_typing
+        && let Some(landed) = writing
+            .input
+            .journal
+            .input_system_write(|| join_typing(&writing, &range, &kept))
     {
         return Ok(landed);
     }

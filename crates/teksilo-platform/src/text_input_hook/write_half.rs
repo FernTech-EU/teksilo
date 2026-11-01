@@ -12,17 +12,12 @@
 //! right after an `insertText:`) was answered from the text before it.
 //! Written at once, the answer is the text after it.
 //!
-//! The origin [`classify`](super::classify) gave is kept:
-//!
-//! - an [`ImeOrigin::Insertion`] (Emoji & Symbols, the accent popup,
-//!   AutoFill) goes in as the input system's write outside a composition
-//!   (`replace_text`), through the field's rules;
-//! - any other origin (dictation, Writing Tools) as a composition the input
-//!   system writes and ends at once (`mark_composition`, `replace_text`,
-//!   `end_composition` with the origin): one undo step, the field's rules
-//!   applied to it as it ends, reported under its origin. A text with a line
-//!   break is not written so: a composition's text lands as written, and a
-//!   break would not become a paragraph. It is posted as before.
+//! The origin [`classify`](super::classify) gave goes with the write
+//! ([`WriteOptions::origin`]), so the field reports what lands under it
+//! (dictation as dictated, Writing Tools as a rewrite, Emoji & Symbols, the
+//! accent popup and AutoFill as an input method's) and puts it through its
+//! rules like any other write: one undo step, a line break a paragraph in a
+//! rich text editor.
 //!
 //! What the field cannot take now (busy, read-only, no write half) is
 //! posted as before ([`Written::No`]), and the application commits it.
@@ -57,10 +52,6 @@ pub(crate) fn write(
     replacement: Option<Range<usize>>,
     origin: ImeOrigin,
 ) -> Written {
-    let composed = origin != ImeOrigin::Insertion;
-    if composed && text.contains(['\n', '\r', '\u{2029}', '\u{2028}']) {
-        return Written::No("a line break in a text that is not an insertion");
-    }
     let range = surfaces.with_focused_input_document(|document| {
         let _ = document.flush_pending_input();
         if !document.is_available() || !document.is_editable() {
@@ -73,14 +64,11 @@ pub(crate) fn write(
     };
     let written = surfaces.with_focused_input_editor(|editor| {
         editor.begin_input_batch();
-        let result = if composed {
-            editor
-                .mark_composition(range.clone(), &[])
-                .and_then(|()| editor.replace_text(range.clone(), text, WriteOptions::default()))
-                .and_then(|landed| editor.end_composition(origin).map(|()| landed))
-        } else {
-            editor.replace_text(range.clone(), text, WriteOptions::default())
+        let options = WriteOptions {
+            origin: Some(origin),
+            ..WriteOptions::default()
         };
+        let result = editor.replace_text(range.clone(), text, options);
         editor.end_input_batch();
         result
     });
@@ -202,14 +190,15 @@ mod tests {
             &self,
             range: Range<usize>,
             text: &str,
-            _: WriteOptions,
+            options: WriteOptions,
         ) -> Result<Landed, WriteRefused> {
             if self.busy.get() {
                 return Err(WriteRefused::Busy);
             }
+            let origin = options.origin;
             self.log
                 .borrow_mut()
-                .push(format!("replace {range:?} {text:?}"));
+                .push(format!("replace {range:?} {text:?} {origin:?}"));
             self.splice(range.clone(), text);
             Ok(Landed {
                 inserted: range.start..range.start + text.chars().count(),
@@ -311,10 +300,10 @@ mod tests {
             *field.log.borrow(),
             vec![
                 "begin",
-                "replace 4..4 \"\u{1F600}\"",
+                "replace 4..4 \"\u{1F600}\" Some(Insertion)",
                 "end batch",
                 "begin",
-                "replace 3..4 \"\u{E9}\"",
+                "replace 3..4 \"\u{E9}\" Some(Insertion)",
                 "end batch"
             ]
         );
@@ -326,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn dictation_and_writing_tools_keep_their_origin_as_a_composition_ended_at_once() {
+    fn dictation_and_writing_tools_are_written_with_their_origin_line_breaks_included() {
         let field = Field::new("ab", 2);
         let tree = focused(&field);
         let surfaces = tree.text_surfaces();
@@ -335,23 +324,20 @@ mod tests {
             Written::Yes(2..8)
         );
         assert_eq!(
+            write(&surfaces, "one\ntwo", Some(0..2), ImeOrigin::WritingTools),
+            Written::Yes(0..7)
+        );
+        assert_eq!(*field.text.borrow(), "one\ntwo hello");
+        assert_eq!(
             *field.log.borrow(),
             vec![
                 "begin",
-                "mark 2..2",
-                "replace 2..2 \" hello\"",
-                "end Dictation",
+                "replace 2..2 \" hello\" Some(Dictation)",
+                "end batch",
+                "begin",
+                "replace 0..2 \"one\\ntwo\" Some(WritingTools)",
                 "end batch"
             ]
-        );
-        assert!(matches!(
-            write(&surfaces, "one\ntwo", Some(0..2), ImeOrigin::WritingTools),
-            Written::No(_)
-        ));
-        assert_eq!(
-            *field.text.borrow(),
-            "ab hello",
-            "a line break: posted instead"
         );
     }
 

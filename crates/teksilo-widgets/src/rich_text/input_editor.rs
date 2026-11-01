@@ -132,7 +132,8 @@ impl TextInputEditor for EditorHandle {
                 },
             )?;
             if !composing && !options.dry_run {
-                st.report_inserted_chars(EditSource::Ime, landed.inserted.len());
+                let source = options.origin.map_or(EditSource::Ime, source_of);
+                st.report_inserted_chars(source, landed.inserted.len());
             }
             Ok(landed)
         })

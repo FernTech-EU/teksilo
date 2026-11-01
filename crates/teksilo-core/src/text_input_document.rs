@@ -275,6 +275,16 @@ pub struct WriteOptions {
     /// A correction: the new text takes the replaced text's character format
     /// (`TS_ST_CORRECTION`).
     pub correction: bool,
+    /// Who the text comes from, when the input system says: the field
+    /// reports what lands under that origin's `EditSource` (teksilo-widgets),
+    /// and dictated text or a Writing Tools rewrite goes in through the
+    /// field's rules like any other write (a line break makes a paragraph in
+    /// a rich text editor, a single-line field drops it). `None` is
+    /// the input system's ordinary write, reported as an input method's.
+    /// A write inside a composition ignores it: the composition's text is
+    /// reported under the origin [`TextInputEditor::end_composition`] is
+    /// handed.
+    pub origin: Option<crate::ImeOrigin>,
 }
 
 /// Where a write landed, in the document's character offsets.

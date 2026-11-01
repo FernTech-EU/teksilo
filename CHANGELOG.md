@@ -60,7 +60,8 @@ by crate for clarity, not because crates version independently.
 - **`TextInputEditor`**, the half of a text widget's document the
   platform's input system writes through, handed out by
   `TextSurface::input_editor` (and `TextSurfaces::with_focused_input_editor`):
-  `replace_text` with `WriteOptions` (a dry run, a correction) answering
+  `replace_text` with `WriteOptions` (a dry run, a correction, the origin the
+  text is reported under) answering
   `Landed` or `WriteRefused`, `set_selection`, a composition marked as a range
   of text (`mark_composition` with `CompositionSegment`s and their
   `SegmentStyle`) and ended as one undo step (`end_composition`), and a batch

@@ -186,3 +186,19 @@ fn a_replacement_of_the_last_typed_character_is_undone_with_that_typing() {
         "one undo takes back the typing and the pick"
     );
 }
+
+#[test]
+fn a_write_with_an_origin_is_reported_under_it() {
+    let mut f = Field::new("ab", |field| field);
+    let options = WriteOptions {
+        origin: Some(ImeOrigin::WritingTools),
+        ..WriteOptions::default()
+    };
+    let landed = f
+        .edit(|e| e.replace_text(0..2, "one\ntwo", options))
+        .unwrap();
+    assert_eq!(landed.inserted, 0..6, "a single line drops the break");
+    assert_eq!(*f.arrivals.borrow(), vec![(EditSource::WritingTools, 6)]);
+    f.settle();
+    assert_eq!(f.text.get(), "onetwo");
+}

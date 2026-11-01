@@ -430,3 +430,47 @@ fn a_replacement_ending_typing_over_a_selection_is_undone_with_it() {
     editor.settle();
     assert_eq!(editor.text(), "one abé three");
 }
+
+/// Dictated text written with its origin: reported as dictated, its line
+/// break a paragraph, one undo step.
+#[test]
+fn a_write_with_an_origin_is_reported_under_it_and_breaks_into_paragraphs() {
+    let mut editor = Editor::with_text("ab");
+    editor.handle.select_range(2, 2);
+    editor.doc.break_undo_merge();
+    let options = WriteOptions {
+        origin: Some(ImeOrigin::Dictation),
+        ..WriteOptions::default()
+    };
+    editor
+        .edit(|e| e.replace_text(2..2, " one\ntwo", options))
+        .unwrap();
+    assert_eq!(editor.text(), "ab one\ntwo");
+    assert_eq!(editor.doc.block_count(), 2);
+    assert_eq!(*editor.arrivals.borrow(), vec![(EditSource::Dictation, 8)]);
+    editor.settle();
+    editor.tree.press_key(Key::Z, Modifiers::COMMAND);
+    editor.settle();
+    assert_eq!(editor.text(), "ab");
+}
+
+/// A dictated correction of what was just typed is a step of its own: the
+/// first undo gives the typing back, not the text before it.
+#[test]
+fn a_dictated_replacement_of_typing_does_not_join_it() {
+    let mut editor = Editor::with_text("x ");
+    editor.handle.select_range(2, 2);
+    editor.doc.break_undo_merge();
+    editor.tree.type_text(editor.id, "e");
+    editor.settle();
+    let options = WriteOptions {
+        origin: Some(ImeOrigin::Dictation),
+        ..WriteOptions::default()
+    };
+    editor.edit(|e| e.replace_text(2..3, "é", options)).unwrap();
+    editor.settle();
+    assert_eq!(editor.text(), "x é");
+    editor.tree.press_key(Key::Z, Modifiers::COMMAND);
+    editor.settle();
+    assert_eq!(editor.text(), "x e");
+}

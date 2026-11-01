@@ -705,12 +705,13 @@ Microsoft Japanese, Pinyin and Korean IMEs, the emoji panel; no hang, no crash).
 7. **macOS**: its `insertText:` outside a key press moves to the write half after Windows (3).
    Built: text AppKit inserts outside a key press with no marked text (Emoji & Symbols, the accent
    popup, AutoFill, and Dictation or Writing Tools when they insert without marking) is written into
-   the focused field at once (`text_input_hook/write_half.rs`), inside a batch: an `Insertion` as the
-   input system's write outside a composition, any other origin as a composition written and ended
-   at once, so it keeps its origin (`end_composition`) and is one undo step. A text with a line break
-   and an origin other than `Insertion` is still posted, because a composition's text lands as
-   written and a break would not become a paragraph; so is a commit that ends winit's marked text
-   (that composition is winit's, section 3), and anything the field cannot take now. A doc-hidden
+   the focused field at once (`text_input_hook/write_half.rs`), inside a batch, as the input
+   system's write outside a composition carrying its origin (`WriteOptions::origin`, decided
+   2026-11-01): the field reports it under that origin's `EditSource`, puts it through its rules (a
+   line break becomes a paragraph in a rich text editor) and records one undo step. Only a write
+   with no origin or an `Insertion` joins the typing it replaces (the accent popup); a dictated
+   correction of what was just typed is a step of its own. Still posted: a commit that ends winit's
+   marked text (that composition is winit's, section 3), and anything the field cannot take now. A doc-hidden
    `ImeWrittenPayload` then tells `teksilo-app` to do a commit's bookkeeping (the user's activation,
    the preedit dedup, a settle and a redraw). An insertion is now its own undo step, where the event
    batched it with the typing. `CodeEditor`, which describes its document since Phase 4, honours the
