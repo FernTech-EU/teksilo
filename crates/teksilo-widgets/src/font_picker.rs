@@ -223,10 +223,7 @@ impl FontPicker {
     pub fn families(mut self, families: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let mut list: Vec<FontFamilyInfo> = families
             .into_iter()
-            .map(|n| FontFamilyInfo {
-                name: n.into(),
-                monospaced: false,
-            })
+            .map(|n| FontFamilyInfo::new(n, false))
             .collect();
         // Present alphabetized, like the typesetter-backed path.
         list.sort_by_key(|f| f.name.to_lowercase());
@@ -246,10 +243,7 @@ impl FontPicker {
             // the typesetter-backed index uses — so lookups agree regardless
             // of the display casing (see `passes` / `sample_for`).
             meta.insert(name.to_lowercase(), m.writing_systems);
-            list.push(FontFamilyInfo {
-                name,
-                monospaced: m.monospaced,
-            });
+            list.push(FontFamilyInfo::new(name, m.monospaced));
         }
         list.sort_by_key(|f| f.name.to_lowercase());
         self.families_override = Some(list);
@@ -837,10 +831,7 @@ mod tests {
     }
 
     fn info(name: &str, mono: bool) -> FontFamilyInfo {
-        FontFamilyInfo {
-            name: name.to_string(),
-            monospaced: mono,
-        }
+        FontFamilyInfo::new(name, mono)
     }
 
     #[test]

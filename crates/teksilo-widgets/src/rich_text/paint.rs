@@ -351,11 +351,7 @@ mod image_paint_tests {
     }
 
     fn quad(name: &str) -> ImageQuad {
-        ImageQuad {
-            screen: [0.0, 0.0, 20.0, 20.0],
-            name: name.to_string(),
-            char_offset: 0,
-        }
+        ImageQuad::new([0.0, 0.0, 20.0, 20.0], name, 0)
     }
 
     fn run(doc: &TextDocument, cache: &mut ImageCache, quads: &[ImageQuad]) -> RenderFrame {

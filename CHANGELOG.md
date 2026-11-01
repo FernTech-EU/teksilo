@@ -90,6 +90,12 @@ by crate for clarity, not because crates version independently.
   and emoji insertions to `on_text_inserted` under `EditSource::Dictation`,
   `EditSource::WritingTools` and `EditSource::Ime`.
 
+#### Workspace
+
+- Teksilo depends on text-document 1.15 and text-typeset 3.0. text-typeset
+  3.0 takes ICU4X 2.4, so Teksilo moves to ICU4X 2.4 too (`icu_experimental`
+  0.7): an application that pins an ICU4X crate at 2.3 needs to move it.
+
 ### Fixed
 
 #### Platform
