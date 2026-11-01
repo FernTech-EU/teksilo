@@ -376,8 +376,10 @@ impl Composition {
 
     /// Commit the composition as `text`, the cursor left after it. Returns how
     /// many characters arrived. Nothing is committed when `doc` holds no
-    /// composition of this surface's; an empty `text` commits nothing and ends
-    /// the composition as a cancel.
+    /// composition of this surface's. An empty `text` removes the text the
+    /// composition took the place of, as one undo step: Windows voice typing's
+    /// "delete that" is a composition over the phrase, emptied and committed.
+    /// With no such text it records nothing, as a cancel does.
     ///
     /// The commit is **one undo step of its own**, closed on both sides
     /// (`TextCursor::commit_transient_text`): an undo takes back exactly the
@@ -398,10 +400,6 @@ impl Composition {
     ) -> usize {
         if !self.is_held(doc) {
             self.forget();
-            return 0;
-        }
-        if text.is_empty() {
-            self.cancel(doc);
             return 0;
         }
         self.forget();
@@ -585,6 +583,38 @@ mod tests {
         assert_eq!(text(&doc), "ab二本");
         assert!(composition.cancel(&doc));
         assert_eq!(text(&doc), "ab日本");
+    }
+
+    /// Voice typing's "delete that": a composition over recorded text,
+    /// emptied, then committed. The text goes, and one undo gives it back.
+    #[test]
+    fn an_emptied_composition_over_recorded_text_commits_its_removal() {
+        let (doc, cursor) = doc("ab one two");
+        let mut composition = Composition::default();
+        composition.begin_written(&doc);
+        assert!(composition.write(&doc, &cursor, 2..10, " one two"));
+        assert!(composition.write(&doc, &cursor, 2..10, ""));
+        assert_eq!(text(&doc), "ab");
+        assert_eq!(composition.commit(&doc, &cursor, "", false), 0);
+        assert_eq!(text(&doc), "ab", "the removal is recorded, not reverted");
+        assert!(!composition.is_held(&doc));
+        doc.undo().unwrap();
+        assert_eq!(text(&doc), "ab one two");
+    }
+
+    /// An emptied composition that took the place of nothing is a cancel:
+    /// nothing recorded, the step before it left open.
+    #[test]
+    fn an_emptied_composition_at_the_caret_records_nothing() {
+        let (doc, cursor) = doc("ab");
+        cursor.set_position(2, MoveMode::MoveAnchor);
+        let mut composition = Composition::default();
+        composition.begin_written(&doc);
+        assert!(composition.write(&doc, &cursor, 2..2, " eff"));
+        assert!(composition.write(&doc, &cursor, 2..6, ""));
+        assert_eq!(composition.commit(&doc, &cursor, "", false), 0);
+        assert_eq!(text(&doc), "ab");
+        assert!(!doc.can_undo());
     }
 
     #[test]

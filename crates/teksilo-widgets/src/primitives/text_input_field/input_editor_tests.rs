@@ -166,6 +166,21 @@ fn a_read_only_or_secure_field_hands_out_no_writing_half() {
     }
 }
 
+/// Windows voice typing's "delete that" in a field: a composition over the
+/// phrase, emptied and ended, deletes it.
+#[test]
+fn an_emptied_composition_over_recorded_text_deletes_it() {
+    let mut f = Field::new("ab is it", |field| field);
+    f.edit(|e| {
+        e.mark_composition(2..8, &[]).unwrap();
+        e.replace_text(2..8, "", WriteOptions::default()).unwrap();
+        e.end_composition(ImeOrigin::Composition)
+    })
+    .unwrap();
+    f.settle();
+    assert_eq!(f.text.get(), "ab");
+}
+
 /// The macOS accent popup in a field: the held key typed `e`, the character
 /// picked in the popup replaces it, and one undo takes back both.
 #[test]

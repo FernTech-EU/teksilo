@@ -168,6 +168,23 @@ fn a_reconversion_composes_over_recorded_text() {
     assert_eq!(editor.text(), "ab日本");
 }
 
+/// Windows voice typing's "delete that": the speech service composes over the
+/// phrase it wrote, empties it and ends. The phrase goes, as one undo step.
+#[test]
+fn an_emptied_composition_over_recorded_text_deletes_it() {
+    let mut editor = Editor::with_text("ab is it");
+    editor.edit(|e| {
+        e.mark_composition(2..8, &[]).unwrap();
+        e.replace_text(2..8, "", WriteOptions::default()).unwrap();
+        e.end_composition(ImeOrigin::Composition).unwrap();
+    });
+    assert_eq!(editor.text(), "ab");
+    editor.settle();
+    assert_eq!(editor.text(), "ab", "the removal is kept");
+    editor.doc.undo().unwrap();
+    assert_eq!(editor.text(), "ab is it");
+}
+
 /// Inside a batch the application sees nothing: the arrivals and the caret's
 /// signals wait for its end.
 #[test]
