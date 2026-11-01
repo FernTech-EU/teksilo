@@ -45,6 +45,9 @@ pub(crate) struct InputSystemState {
     pub(crate) batch: InputBatch,
     /// The styled stretches of the written composition, for drawing it.
     pub(crate) segments: RefCell<Vec<CompositionSegment>>,
+    /// The text a written composition began over (a reconversion), while it
+    /// lasts: an end that leaves that text as it was records nothing.
+    reconverted: RefCell<Option<String>>,
     /// The selection last answered, and its revision.
     selection_seen: Cell<(usize, usize, u64)>,
     /// The caret and visible rectangles last answered, and the layout
@@ -81,6 +84,7 @@ impl InputSystemState {
             journal: DocumentJournal::watching(document),
             batch: InputBatch::default(),
             segments: RefCell::new(Vec::new()),
+            reconverted: RefCell::new(None),
             selection_seen: Cell::new((0, 0, 0)),
             layout_seen: Cell::new(([0; 8], 0)),
             typed: Cell::new(None),
@@ -467,10 +471,12 @@ pub(crate) fn mark(
     } = writing;
     if !composition.is_written(document) {
         composition.begin_written(document);
+        *input.reconverted.borrow_mut() = None;
         if !range.is_empty() {
             let text = document
                 .text_at(range.start, range.len())
                 .map_err(|_| WriteRefused::InvalidRange)?;
+            *input.reconverted.borrow_mut() = Some(text.clone());
             let written = input
                 .journal
                 .input_system_write(|| composition.write(document, cursor, range, &text));
@@ -500,13 +506,32 @@ pub(crate) fn end(
         input,
         ..
     } = writing;
+    let original = input.reconverted.borrow_mut().take();
     let text = composition.written_text(document)?;
     input.segments.borrow_mut().clear();
     let kept = rules(&text);
+    if original.as_deref() == Some(kept.as_str()) {
+        // A reconversion that leaves its text as it was (cancelled, or the
+        // same conversion picked again): the document goes back to its
+        // recorded text, formats included, and no undo step is made.
+        input
+            .journal
+            .input_system_write(|| composition.cancel(document));
+        super::input_trace::trace(format_args!(
+            "composition over {kept:?} ended as it began: nothing recorded"
+        ));
+        return Some(0);
+    }
     let can_undo = document.can_undo();
     let arrived = input
         .journal
         .input_system_write(|| composition.commit(document, cursor, &kept, paragraphs));
+    if kept != text {
+        // The field's rules cut what the text service wrote: the text
+        // services must hear of the difference, which a write logged as
+        // theirs would keep from them.
+        input.journal.note_unknown();
+    }
     super::input_trace::trace(format_args!(
         "composition {text:?} committed as {kept:?}: {arrived} characters; can undo {can_undo} -> {}",
         document.can_undo()

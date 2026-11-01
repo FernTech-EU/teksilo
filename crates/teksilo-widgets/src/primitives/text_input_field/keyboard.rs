@@ -723,7 +723,9 @@ pub(crate) fn finish_composition(state: &SharedState, ctx: &mut EventContext) {
         let st = &mut *guard;
         if settle_cancelled_composition(st) {
             false
-        } else if st.composition.is_live(&st.document) {
+        } else if st.composition.is_live(&st.document) || st.composition.is_written(&st.document) {
+            // A written composition is told even before anything was written
+            // in it: the text service opened it and holds it until told.
             true
         } else {
             return;

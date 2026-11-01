@@ -108,8 +108,14 @@ fn a_composition_meets_the_rules_only_as_it_ends() {
         "abにほん",
         "past the cap while composing"
     );
+    let start = f.read(|d| d.revisions()).unwrap().text;
     f.edit(|e| e.end_composition(ImeOrigin::Dictation)).unwrap();
     assert_eq!(*f.arrivals.borrow(), vec![(EditSource::Dictation, 1)]);
+    assert_eq!(
+        f.read(|d| d.text_changed_since(start)),
+        None,
+        "the cut is not the text service's own write: the next report compares the text"
+    );
     f.settle();
     assert_eq!(f.text.get(), "abに");
 }

@@ -240,7 +240,10 @@ impl Composition {
     /// whether there was one to forget.
     pub(crate) fn reconcile(&mut self, doc: &TextDocument) -> bool {
         let claimed = self.shown.is_some() || self.ended;
-        if claimed && !self.owns_layer(doc) {
+        // A written composition has no layer until its first write: nothing
+        // reverted it, and the text service still holds it.
+        let unwritten = self.written && self.layer.is_none();
+        if claimed && !unwritten && !self.owns_layer(doc) {
             self.forget();
             true
         } else {

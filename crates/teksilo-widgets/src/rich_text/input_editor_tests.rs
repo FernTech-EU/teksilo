@@ -168,6 +168,27 @@ fn a_reconversion_composes_over_recorded_text() {
     assert_eq!(editor.text(), "ab日本");
 }
 
+/// A text service that opened a composition and wrote nothing in it yet
+/// still holds it: a key it passed on tells the platform the composition is
+/// over, as one with text in it does.
+#[test]
+fn a_written_composition_with_nothing_in_it_is_ended_by_a_passed_key() {
+    let mut editor = Editor::with_text("ab");
+    editor.edit(|e| e.mark_composition(2..2, &[]).unwrap());
+    let mut ops = crate::common::ime_ops_test::ImeOps::default();
+    editor.tree.dispatch_event_with_ops(
+        teksilo_core::event::WidgetEvent::KeyDown {
+            key: Key::ArrowLeft,
+            modifiers: Modifiers::NONE,
+            text: None,
+        },
+        &mut ops,
+    );
+    editor.settle();
+    assert_eq!(ops.finished, 1, "the platform is told");
+    assert_eq!(editor.text(), "ab");
+}
+
 /// Windows voice typing's "delete that": the speech service composes over the
 /// phrase it wrote, empties it and ends. The phrase goes, as one undo step.
 #[test]
@@ -183,6 +204,26 @@ fn an_emptied_composition_over_recorded_text_deletes_it() {
     assert_eq!(editor.text(), "ab", "the removal is kept");
     editor.doc.undo().unwrap();
     assert_eq!(editor.text(), "ab is it");
+}
+
+/// A reconversion the user cancels (the Microsoft Japanese IME writes the
+/// original back) or ends on the same conversion leaves the document as it
+/// was, with no undo step that changes nothing.
+#[test]
+fn a_reconversion_that_ends_on_its_original_text_records_nothing() {
+    let mut editor = Editor::with_text("ab日本");
+    assert!(!editor.doc.can_undo());
+    editor.edit(|e| {
+        e.mark_composition(2..4, &[]).unwrap();
+        e.replace_text(2..4, "二本", WriteOptions::default())
+            .unwrap();
+        e.replace_text(2..4, "日本", WriteOptions::default())
+            .unwrap();
+        e.end_composition(ImeOrigin::Composition).unwrap();
+    });
+    editor.settle();
+    assert_eq!(editor.text(), "ab日本");
+    assert!(!editor.doc.can_undo(), "no step that changes nothing");
 }
 
 /// Inside a batch the application sees nothing: the arrivals and the caret's

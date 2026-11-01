@@ -185,6 +185,16 @@ impl DocumentJournal {
         self.log.lock().ok()?.changed_since(revision)
     }
 
+    /// Log that the text changed in a way no logged change accounts for, so
+    /// the next report compares the whole text: a composition's commit the
+    /// field's rules cut, which is the input system's write and is not its
+    /// text.
+    pub(crate) fn note_unknown(&self) {
+        if let Ok(mut log) = self.log.lock() {
+            log.record_unknown();
+        }
+    }
+
     /// Run `write`, the changes it makes logged as the input system's.
     pub(crate) fn input_system_write<R>(&self, write: impl FnOnce() -> R) -> R {
         self.marker().while_writing(write)
