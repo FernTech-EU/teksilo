@@ -35,6 +35,8 @@ by crate for clarity, not because crates version independently.
   and character positions and write into it, compositions included (each one
   undo step, its clauses underlined), and are told of its changes; a press or
   a focus change ends a composition with the input method's last text.
+  Voice typing's text is reported as dictated (`EditSource::Dictation`),
+  and its "delete that" removes the phrase.
   Read-only fields are presented as such, and a password field as one (the
   touch keyboard's password layout). The touch keyboard's suggestion strip
   follows the user's own system setting, as in native applications. `CodeEditor` takes part too. The

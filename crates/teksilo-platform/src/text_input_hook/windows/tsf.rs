@@ -815,6 +815,10 @@ struct StoreInner {
     /// a keyboard input method's. One that never did is the emoji panel's
     /// one-shot pick (M5), an insertion (section 5).
     styled: bool,
+    /// The composition was still open when an edit session ended: it was
+    /// written over several. The emoji panel starts, writes and ends its pick
+    /// in one; voice typing writes its hypotheses across many (M1).
+    spanned: bool,
     editable: bool,
     /// The document's revisions at the last report; `None` until the first,
     /// and for a document that counts none (a full comparison each time).
@@ -1243,14 +1247,15 @@ impl StoreState {
 
 /// Which part of the input system a composition that ends was, from what
 /// the store saw of it (section 5). Every composition has the same owner
-/// (M4), so the owner tells nothing; a keyboard input method marks its
-/// clauses with display attributes, and the emoji panel's one-shot pick
-/// carries none (M5), so a composition that never had one is an insertion.
-/// Voice typing's is not measured yet (M1): until it is, it is whichever of
-/// the two its properties make it, never `Dictation`.
-fn origin_of(styled: bool) -> ImeOrigin {
+/// (M4), so the owner tells nothing. A keyboard input method marks its
+/// clauses with display attributes. Voice typing never does, and writes its
+/// hypotheses over several edit sessions (M1); the emoji panel's pick carries
+/// no attribute either, but is written in one (M5), an insertion.
+fn origin_of(styled: bool, spanned: bool) -> ImeOrigin {
     if styled {
         ImeOrigin::Composition
+    } else if spanned {
+        ImeOrigin::Dictation
     } else {
         ImeOrigin::Insertion
     }
@@ -2128,6 +2133,7 @@ impl ITfContextOwnerCompositionSink_Impl for TextStore_Impl {
                 let mut inner = self.inner()?;
                 inner.compositions += 1;
                 inner.styled = false;
+                inner.spanned = false;
             }
             tsf_trace!(
                 "#{} OnStartComposition owner={} characters {range:?} -> {}",
@@ -2163,7 +2169,7 @@ impl ITfContextOwnerCompositionSink_Impl for TextStore_Impl {
             let origin = {
                 let mut inner = self.inner()?;
                 inner.compositions = inner.compositions.saturating_sub(1);
-                origin_of(inner.styled)
+                origin_of(inner.styled, inner.spanned)
             };
             // The text the text service left is the commit: one undo step,
             // through the field's rules (4.9).
@@ -2207,12 +2213,17 @@ impl ITfTextEditSink_Impl for EditSink_Impl {
             let context = pic.ok()?;
             // The clauses of the composition, for drawing it (display
             // attributes, `GUID_PROP_ATTRIBUTE`).
-            if self
+            let composing = self
                 .state
                 .inner
-                .try_borrow()
-                .is_ok_and(|inner| inner.compositions > 0)
-            {
+                .try_borrow_mut()
+                .map(|mut inner| {
+                    let composing = inner.compositions > 0;
+                    inner.spanned |= composing;
+                    composing
+                })
+                .unwrap_or(false);
+            if composing {
                 self.mark_clauses(context, ecreadonly);
             }
             if !super::super::trace_enabled() {
@@ -3530,12 +3541,15 @@ mod tests {
         assert_eq!(scope_for(true), IS_PASSWORD);
     }
 
-    /// A composition that never carried a clause is the emoji panel's pick,
-    /// an insertion; one that did, a keyboard input method's.
+    /// A composition that carried a clause is a keyboard input method's; one
+    /// that never did is voice typing's when it was written over several edit
+    /// sessions, and the emoji panel's pick, an insertion, when in one.
     #[test]
-    fn a_composition_with_clauses_is_a_composition_and_one_without_an_insertion() {
-        assert_eq!(origin_of(true), ImeOrigin::Composition);
-        assert_eq!(origin_of(false), ImeOrigin::Insertion);
+    fn clauses_make_a_composition_and_several_edit_sessions_dictation() {
+        assert_eq!(origin_of(true, true), ImeOrigin::Composition);
+        assert_eq!(origin_of(true, false), ImeOrigin::Composition);
+        assert_eq!(origin_of(false, true), ImeOrigin::Dictation);
+        assert_eq!(origin_of(false, false), ImeOrigin::Insertion);
     }
 
     #[test]

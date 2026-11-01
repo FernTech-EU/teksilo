@@ -3,7 +3,8 @@
 
 # A TSF text store on Windows: design
 
-Status: a design. Phase -1 (7.1) is implemented; the store is not. Revised on 2026-10-28 after an independent review, against
+Status: Phases -1 to 4 (7.1) are built behind `TeksiloAppBuilder::windows_text_store`, off by
+default until the runs 7.1 lists pass. Revised on 2026-10-28 after an independent review, against
 `feat/system-text-input` at `4b1f697a` and the eight rounds of
 `cross_tasks/system-text-input-windows-findings.md` (Windows 11 22621, French UI and AZERTY;
 Japanese, Pinyin and Korean from round 4). The first version (`ee8716db`) knew three rounds.
@@ -369,11 +370,15 @@ M4 and M5:
 3. **Hints only**: an active speech profile, the speech compartments (empty under CUAS).
 
 Measured for the keyboard IMEs and the emoji panel (M4, M5): candidate 1 fails, every composition
-has the same owner (`D7487DBF-804E-41C5-894D-AD96FD4EEA13`) and the same `TEXTOWNER` atom. Whether
-voice typing's writes carry a property of their own (candidate 2, the lattice) is M1.
-
-`classify` gains a speech-owner input that yields `Dictation`. Without a signal, text written
-outside a composition is `Insertion` and a composition's is `Composition`, as today.
+has the same owner (`D7487DBF-804E-41C5-894D-AD96FD4EEA13`) and the same `TEXTOWNER` atom. Voice
+typing (M1) has that owner too, and no property of its own: its writes carry `COMPOSING` and
+`TEXTOWNER`, never `ATTRIBUTE` or `READING`, and no lattice. What tells it apart is the shape of
+its composition: it writes its hypotheses over several edit sessions, where the emoji panel starts,
+writes and ends its pick in one. So a composition that never carried a display attribute is
+`Dictation` when an edit session ended while it was open, and `Insertion` otherwise
+(`origin_of`). Measured on French and English voice typing only; another unstyled text service that
+composes across edit sessions (handwriting, a third-party IME that draws no clauses) would be
+counted as dictation too.
 
 ## 6. Secure fields, read-only fields, purposes, accessibility
 
@@ -556,7 +561,8 @@ cannot compose breaks every IME.
   owner, but a keyboard input method marks its clauses with display attributes and the emoji
   panel's one-shot pick carries none, so a composition that never carried one ends as
   `ImeOrigin::Insertion` and one that did as `Composition`; both are `EditSource::Ime` in the
-  widgets, as before. Voice typing is unmeasured (M1) and is never `Dictation` yet. **Touch
+  widgets, as before. Voice typing, measured since (M1), ends as `ImeOrigin::Dictation`, so
+`EditSource::Dictation`: its compositions carry no attribute and span edit sessions. **Touch
   keyboard**: `TS_SD_INPUTPANEMANUALDISPLAYENABLE` as before, autocorrection and prediction
   (`TS_SD_TKBAUTOCORRECTENABLE`, `TS_SD_TKBPREDICTIONENABLE`) unset (see the measurement below: the
   suggestion strip is the user's setting). **Input scope**: the store answers `GUID_PROP_INPUTSCOPE`
@@ -607,8 +613,15 @@ store (its source). Still to be measured on the VM, through the `win` worker on 
 Measured in Phase 0 (`cross_tasks/tsf-phase-0-windows-findings.md`, Windows 11 22621, the
 Microsoft Japanese, Pinyin and Korean IMEs, the emoji panel; no hang, no crash). The answers:
 
-- M1: voice typing into the store: **not measured yet** (it needs someone to speak); flyout, interim
-  text, commands, the calls it makes and how much it reads; voice access.
+- M1: voice typing into the store, measured on 2026-11-01 (`cross_tasks/tsf-voice-typing-windows-findings.md`,
+  French and English, `df31b028`): no flyout, interim text shown, every lock granted, no refused or
+  misplaced write; the password field refuses it ("la saisie vocale n'est pas prise en charge dans
+  cette zone de texte"). Its compositions have the common owner, carry `COMPOSING` and `TEXTOWNER`
+  only, and span edit sessions (section 5). "Delete that" is a composition over the last phrase,
+  emptied and committed: the widgets committed an empty composition as a cancel, which put the
+  phrase back without telling the text service, so the next command deleted the wrong text; an
+  empty commit now removes the text the composition took the place of. The French command
+  ("efface ça") was typed as text. Voice access, not measured.
 - M2: **with our empty document associated with the HWND, the IMM path did not compose**: TSF focused
   that disabled context as winit's IMM context activated (the probe read a context with no flags
   where CUAS's reads `[TRANSITORY]`), Alt+` toggled nothing and keys stayed plain. Fixed by
@@ -630,7 +643,7 @@ Microsoft Japanese, Pinyin and Korean IMEs, the emoji panel; no hang, no crash).
   `COMPOSING`, `TEXTOWNER`; Pinyin `ATTRIBUTE` 94, `COMPOSING`, `TEXTOWNER`, no `READING`; Korean
   `ATTRIBUTE` 126, `READING` the syllable itself, one composition per syllable, the next one started
   in the same edit session. After a composition ends, `READING` and `TEXTOWNER` stay (Japanese),
-  `TEXTOWNER` alone (Pinyin, emoji). Voice typing's are M1's.
+  `TEXTOWNER` alone (Pinyin, emoji). Voice typing: `COMPOSING` and `TEXTOWNER` (M1).
 - M5: **an emoji pick is a one-shot composition** (`OnStartComposition`, `SetText`,
   `OnEndComposition` in one edit session), not `InsertTextAtSelection`, with the same owner and
   `TEXTOWNER` alone; search works when typed right after Win+. **With a non-text widget focused (the
