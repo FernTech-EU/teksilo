@@ -133,8 +133,12 @@ impl WidgetTree {
             let _ = cached;
             let moved = self.patch_accessibility_bounds();
             // A move alone can still announce: a live node its clipping
-            // parent brings back into view enters the filtered tree, and the
-            // adapters get this update as they get any other. Replaying costs
+            // parent brings back into view enters the filtered tree. The
+            // ring records it now; a platform adapter learns of it with the
+            // next delivery, which `teksilo-app` holds back up to 100 ms
+            // while only moves are owed, so a live node a fling carries into
+            // view and out again inside that window is recorded here and
+            // never announced by the adapter. Replaying costs
             // a pass of the consumer over every node, on every frame of a
             // scroll, so it is done only when something besides the
             // announcers is live: nothing else can be announced by a move,
@@ -266,6 +270,20 @@ impl WidgetTree {
             return update;
         }
         self.deliver_accessibility(window_focused)
+    }
+
+    /// What to hand a platform adapter on a frame that holds back what is
+    /// [owed](Self::accessibility_delivery_owed): an update with no node and
+    /// the focus the adapter was last handed, so it compares nothing and
+    /// hears nothing new. `None` when what is owed cannot wait: nothing was
+    /// delivered yet, or the window's focus changed since the last delivery.
+    /// The caller delivers what was held later, through
+    /// [`deliver_accessibility`](Self::deliver_accessibility), which hands
+    /// out the tree as it then is.
+    #[doc(hidden)]
+    pub fn accessibility_held(&self, window_focused: bool) -> Option<accesskit::TreeUpdate> {
+        self.cached_a11y.as_ref()?;
+        self.adapter_ids.held(window_focused)
     }
 
     /// An action a platform adapter asked for, with its node ids back in the

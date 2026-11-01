@@ -445,6 +445,12 @@ by crate for clarity, not because crates version independently.
   one copy to compare node by node; it now copies nothing and gives it
   nothing to compare. A blinking caret in the `rich-text-editor` example
   cost about 30 % less CPU on Linux.
+- **While an assistive technology is attached, a scrolling list or table
+  hands it new positions at most ten times a second**, as it was meant to:
+  the limit held nothing back, and every frame of a scroll sent them. A
+  fling through the `data-grid` table now raises about 2.6 times fewer
+  `bounds-changed` events on Linux. Content, focus and a change of the
+  window's focus still reach the screen reader at once.
 
 ## [0.23.0] - 2026-10-27
 

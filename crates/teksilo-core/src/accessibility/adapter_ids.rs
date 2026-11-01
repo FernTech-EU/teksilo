@@ -139,6 +139,18 @@ impl AdapterIds {
         })
     }
 
+    /// What [`unchanged`](Self::unchanged) hands out, also while the tree's
+    /// own update changed since the last one handed out: the caller holds that
+    /// change back for a later delivery. `None` when it cannot be held: nothing
+    /// was handed out yet, or the window's focus changed since (the adapter
+    /// must hear that at once).
+    pub(crate) fn held(&self, window_focused: bool) -> Option<TreeUpdate> {
+        if window_focused != self.window_focused {
+            return None;
+        }
+        self.unchanged()
+    }
+
     /// `source` as the adapter must be handed it.
     ///
     /// `window_focused` is what the adapter was last told about its window's
@@ -681,5 +693,27 @@ mod tests {
             first,
             "without a change of source, the last update stands"
         );
+    }
+
+    /// A changed source can be held back: the adapter is handed nothing new.
+    /// A change of the window's focus cannot, nor can a first delivery.
+    #[test]
+    fn a_changed_source_is_held_but_a_window_focus_change_is_not() {
+        let mut ids = AdapterIds::new();
+        assert_eq!(ids.held(true), None, "nothing handed out yet");
+        let tree = update(
+            vec![(NodeId(0), window(&[BUTTON])), (BUTTON, button())],
+            BUTTON,
+        );
+        ids.deliver(&tree, true, |_| true);
+        ids.source_changed();
+        assert!(ids.owes(true));
+        let held = ids.held(true).expect("a changed source is held");
+        assert!(
+            held.nodes.is_empty(),
+            "no node: the adapter keeps what it has"
+        );
+        assert_eq!(held.focus, BUTTON, "and the focus it was last handed");
+        assert_eq!(ids.held(false), None, "the window's focus changed");
     }
 }

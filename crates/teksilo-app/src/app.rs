@@ -1229,6 +1229,30 @@ fn a11y_delivery(
     }
 }
 
+/// What a frame hands the adapter for what [`a11y_delivery`] `decided`, and
+/// what the frame then did. Every arm hands an update of its own, so the
+/// adapter's fallback never runs: the fallback delivers whatever is owed, and
+/// a held frame left to it sent its moves at every frame. A frame that holds
+/// moves back hands an update with no node, so the adapter keeps what it has.
+/// What cannot wait (the window's focus changed) goes at once.
+fn a11y_update(
+    decided: A11yDelivery,
+    tree: &mut WidgetTree,
+    window_focused: bool,
+) -> (A11yDelivery, teksilo_core::accesskit::TreeUpdate) {
+    match decided {
+        A11yDelivery::HoldUntil(_) => match tree.accessibility_held(window_focused) {
+            Some(held) => (decided, held),
+            None => (
+                A11yDelivery::Deliver,
+                tree.deliver_accessibility(window_focused),
+            ),
+        },
+        A11yDelivery::Deliver => (decided, tree.deliver_accessibility(window_focused)),
+        A11yDelivery::Nothing => (decided, tree.accessibility_unchanged(window_focused)),
+    }
+}
+
 /// An app-supplied router for [`AppEvent::External`] payloads that need to
 /// perform **window operations** — open a window, focus one, look one up by its
 /// string id.
@@ -4294,10 +4318,12 @@ impl TeksiloAppHandler {
                     let owed = tree.borrow().accessibility_delivery_owed(window_focused);
                     let decided =
                         a11y_delivery(owed, needs_full, walk != delivered_walk, delivered_at, now);
-                    delivery = Some(decided);
-                    (decided == A11yDelivery::Deliver)
-                        .then(|| tree.borrow_mut().deliver_accessibility(window_focused))
+                    let (done, update) =
+                        a11y_update(decided, &mut tree.borrow_mut(), window_focused);
+                    delivery = Some(done);
+                    Some(update)
                 },
+                // Never reached: `a11y_update` hands an update in every arm.
                 || tree.borrow_mut().accessibility_unchanged(window_focused),
             );
         }
@@ -10097,6 +10123,133 @@ mod a11y_delivery_tests {
     use super::*;
 
     const MS: Duration = Duration::from_millis(1);
+
+    /// A row, its own accessibility node.
+    #[derive(Debug)]
+    struct Row;
+
+    impl teksilo_core::widget::Widget for Row {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &teksilo_core::widget::LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            proposal.resolve(200.0, 20.0).into()
+        }
+    }
+
+    /// Rows stacked against the bottom edge: a taller layout moves every
+    /// row, as a scroll does, and changes nothing else.
+    #[derive(Debug)]
+    struct BottomColumn {
+        rows: Vec<WidgetId>,
+    }
+
+    impl teksilo_core::widget::Widget for BottomColumn {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &teksilo_core::widget::LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            proposal.resolve(200.0, 400.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: teksilo_canvas::Rect,
+            _proposal: SizeProposal,
+            children: &mut [teksilo_core::widget::WidgetPlacement],
+            _ctx: &teksilo_core::widget::LayoutContext,
+        ) {
+            let count = children.len() as f32;
+            for (index, child) in children.iter_mut().enumerate() {
+                child.origin = teksilo_canvas::Point::new(
+                    bounds.x,
+                    bounds.y + bounds.height - 20.0 * (count - index as f32),
+                );
+                child.size = teksilo_canvas::Size::new(200.0, 20.0);
+            }
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.rows.clone()
+        }
+    }
+
+    /// A frame the throttle holds hands the adapter an update with no node,
+    /// not nothing: given nothing, the adapter's fallback delivered what was
+    /// owed, and the moves went at every frame. A change of the window's
+    /// focus is not held.
+    #[test]
+    fn a_held_frame_hands_the_adapter_nothing_new_but_a_window_focus_change_goes() {
+        use teksilo_core::widget_builder::WidgetBuilder;
+
+        let mut tree = WidgetTree::new();
+        let rows = (0..5)
+            .map(|index| {
+                tree.add(
+                    Row.access_role(teksilo_core::accesskit::Role::Label)
+                        .access_label(format!("Row {index}")),
+                )
+            })
+            .collect();
+        tree.add(BottomColumn { rows });
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        tree.refresh_accessibility();
+        let _ = tree.deliver_accessibility(true);
+        tree.refresh_accessibility();
+        assert!(!tree.accessibility_delivery_owed(true), "delivered");
+
+        tree.layout(SizeProposal::exact(200.0, 440.0));
+        tree.refresh_accessibility();
+        assert!(tree.accessibility_delivery_owed(true), "the rows moved");
+        let delivered_at = Instant::now();
+        let frame = |tree: &mut WidgetTree, now: Instant, window_focused: bool| {
+            let owed = tree.accessibility_delivery_owed(window_focused);
+            let decided = a11y_delivery(owed, false, false, Some(delivered_at), now);
+            a11y_update(decided, tree, window_focused)
+        };
+
+        // A frame inside the interval: held.
+        let (done, update) = frame(&mut tree, delivered_at + 40 * MS, true);
+        assert_eq!(
+            done,
+            A11yDelivery::HoldUntil(delivered_at + MOVE_DELIVERY_INTERVAL)
+        );
+        assert!(update.nodes.is_empty(), "the moves are held: {update:?}");
+        assert!(tree.accessibility_delivery_owed(true), "and still owed");
+
+        // The frame the wake brings at the interval's end: the moves go.
+        let (done, update) = frame(&mut tree, delivered_at + MOVE_DELIVERY_INTERVAL, true);
+        assert_eq!(done, A11yDelivery::Deliver);
+        let moved: Vec<f64> = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == teksilo_core::accesskit::Role::Label)
+            .filter_map(|(_, node)| node.bounds().map(|b| b.y0))
+            .collect();
+        assert_eq!(moved.len(), 5, "every row is in it: {update:?}");
+        assert!(
+            moved.iter().all(|y| *y >= 340.0),
+            "at the rows' new places, against the bottom of 440: {moved:?}"
+        );
+        assert!(
+            !tree.accessibility_delivery_owed(true),
+            "nothing owed after it"
+        );
+
+        // A held frame whose window's focus changed: not held.
+        tree.layout(SizeProposal::exact(200.0, 400.0));
+        tree.refresh_accessibility();
+        let later = delivered_at + MOVE_DELIVERY_INTERVAL;
+        let owed = tree.accessibility_delivery_owed(false);
+        let decided = a11y_delivery(owed, false, false, Some(later), later + 40 * MS);
+        assert!(matches!(decided, A11yDelivery::HoldUntil(_)));
+        let (done, update) = a11y_update(decided, &mut tree, false);
+        assert_eq!(done, A11yDelivery::Deliver, "the window's focus changed");
+        assert!(!update.nodes.is_empty());
+        assert!(!tree.accessibility_delivery_owed(false));
+    }
 
     #[test]
     fn a_frame_owing_the_adapter_nothing_neither_delivers_nor_asks_for_a_frame() {
