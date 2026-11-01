@@ -164,6 +164,8 @@ thread_local! {
     /// The thread's speech compartment as it was before a secure field took
     /// the focus, while one has it.
     static SPEECH_SAVED: Cell<Option<i32>> = const { Cell::new(None) };
+    /// The window whose secure field turned speech off, while it is off.
+    static SPEECH_TAKER: Cell<isize> = const { Cell::new(0) };
 }
 
 /// One `RequestLock` (or deferred grant) on the stack, for [`LOCK_DEPTH`].
@@ -422,6 +424,21 @@ pub(super) fn detach(hwnd: HWND) {
     else {
         return;
     };
+    // A composition still open ends first, its text written (4.5): a
+    // context popped under a live composition leaves the text service
+    // holding it. Not from inside a lock call (4.7), and with no borrow of
+    // the window across the TSF call.
+    if !LockDepth::active() {
+        let session = window.try_borrow().ok().and_then(|window| {
+            window
+                .session
+                .as_ref()
+                .map(|session| (session.state.clone(), session.context.clone()))
+        });
+        if let Some((state, context)) = session {
+            state.terminate(&context);
+        }
+    }
     let Ok(mut window) = window.try_borrow_mut() else {
         return;
     };
@@ -429,8 +446,12 @@ pub(super) fn detach(hwnd: HWND) {
         end_session(session);
     }
     if let Some((manager, client_id)) = thread() {
-        if matches!(window.applied, Some(StoreFocus::Secure { .. })) {
+        // Given back when this window took it, whatever it last applied: a
+        // focus lost to another application forgets what was applied, and
+        // the thread's speech would stay off (section 6).
+        if SPEECH_TAKER.try_with(Cell::get).ok() == Some(hwnd.0 as isize) {
             disable_speech(&manager, client_id, false);
+            let _ = SPEECH_TAKER.try_with(|taker| taker.set(0));
         }
         let previous = window.previous.take();
         let _ = unsafe { manager.AssociateFocus(hwnd, previous.as_ref()) };
@@ -586,11 +607,10 @@ pub(super) fn set_text_store_focus(hwnd: HWND, focus: StoreFocus) {
     let has_focus = unsafe { GetFocus() } == window.hwnd;
     if has_focus {
         // Speech stays off while a secure field has the focus (section 6).
-        disable_speech(
-            &manager,
-            client_id,
-            matches!(focus, StoreFocus::Secure { .. }),
-        );
+        let secure = matches!(focus, StoreFocus::Secure { .. });
+        disable_speech(&manager, client_id, secure);
+        let taker = if secure { window.hwnd.0 as isize } else { 0 };
+        let _ = SPEECH_TAKER.try_with(|cell| cell.set(taker));
     }
     if imm {
         // CUAS focuses its own document as winit's IMM context activates.
@@ -728,6 +748,7 @@ fn start_session(
         window_id: window.window_id,
         widget,
         scope: scope_for(secure),
+        secure,
         surfaces: window.surfaces.clone(),
         service: window.service.clone(),
         inner: RefCell::new(StoreInner::default()),
@@ -801,6 +822,10 @@ struct StoreState {
     widget: WidgetId,
     /// What `GUID_PROP_INPUTSCOPE` answers ([`scope_for`]).
     scope: InputScope,
+    /// A secure session (section 6): the store reads and writes nothing,
+    /// whatever the document says of itself, so a field that is a password
+    /// only by its purpose hands out no text either.
+    secure: bool,
     surfaces: TextSurfaces,
     service: Rc<Service>,
     inner: RefCell<StoreInner>,
@@ -875,6 +900,9 @@ impl StoreState {
     /// writes from the input system (read-only, secure, or a widget that
     /// implements none).
     fn editor<R>(&self, f: impl FnOnce(&dyn TextInputEditor) -> R) -> Option<R> {
+        if self.secure {
+            return None;
+        }
         let surface = self.surface()?;
         let editor = surface.input_editor()?;
         Some(f(editor))
@@ -934,7 +962,7 @@ impl StoreState {
     /// say what to tell the text services. `None` when nothing is to be told
     /// or the document cannot be read now.
     fn compare(&self, document: &dyn TextInputDocument) -> Option<Notifications> {
-        if document.is_secure() || !document.is_available() {
+        if self.secure || document.is_secure() || !document.is_available() {
             return None;
         }
         let editable = document.is_editable() && self.editor(|_| ()).is_some();
@@ -1128,6 +1156,9 @@ impl StoreState {
         &self,
         read: impl FnOnce(&dyn TextInputDocument, &Utf16Index) -> Option<T>,
     ) -> Option<T> {
+        if self.secure {
+            return None;
+        }
         self.document(|document| {
             if document.is_secure() || !document.is_available() {
                 return None;
@@ -1197,10 +1228,12 @@ impl StoreState {
             .unwrap_or(Err(WriteRefused::ReadOnly))
             .map_err(refusal)?;
         let start = old.char_to_utf16(landed.replaced.start);
-        // A dry run changes nothing to index: the units of what would land.
+        // A dry run changes nothing to index: the units of what would land,
+        // its line breaks normalized as the field normalizes them.
         let new_end = if options.dry_run {
             start
                 + text
+                    .replace("\r\n", "\n")
                     .chars()
                     .take(landed.inserted.len())
                     .map(char::len_utf16)
@@ -1535,6 +1568,9 @@ impl ITextStoreACP_Impl for TextStore_Impl {
             let start = position(acpteststart, len)?;
             let end = position(acptestend, len)?;
             tsf_trace!("#{} QueryInsert {start}..{end} cch={cch}", next_sequence());
+            if start > end {
+                return Err(TS_E_INVALIDPOS.into());
+            }
             // SAFETY: TSF passes valid out pointers.
             unsafe {
                 *pacpresultstart = start as i32;
@@ -1784,6 +1820,27 @@ impl ITextStoreACP_Impl for TextStore_Impl {
                 .state
                 .selection16()
                 .ok_or_else(|| windows::core::Error::from(E_FAIL))?;
+            if query_only && text.is_empty() {
+                // Where text would go: the selection it would replace. A text
+                // service starts its composition over this range (Chromium
+                // and Firefox answer the same), so an empty answer at its
+                // start would compose in front of a selection, not over it.
+                tsf_trace!(
+                    "#{} InsertTextAtSelection flags={dwflags:#x} (query) -> {selection:?}",
+                    next_sequence()
+                );
+                // SAFETY: TSF passes valid out pointers, or null for those
+                // it does not want.
+                unsafe {
+                    if !pacpstart.is_null() {
+                        *pacpstart = selection.start as i32;
+                    }
+                    if !pacpend.is_null() {
+                        *pacpend = selection.end as i32;
+                    }
+                }
+                return Ok(());
+            }
             let options = WriteOptions {
                 dry_run: query_only,
                 ..WriteOptions::default()
@@ -2015,9 +2072,17 @@ impl ITextStoreACP_Impl for TextStore_Impl {
 
     fn GetScreenExt(&self, _vcview: u32) -> windows::core::Result<RECT> {
         guarded(|| {
+            // Only while the document can answer with no change, as every
+            // other read (section 3): asking with typing batched would
+            // insert it.
             let visible = self
                 .state
-                .document(|document| document.visible_text_rect())
+                .document(|document| {
+                    document
+                        .is_available()
+                        .then(|| document.visible_text_rect())
+                        .flatten()
+                })
                 .flatten()
                 .or(self.inner()?.visible);
             Ok(visible
@@ -2914,6 +2979,11 @@ mod tests {
     /// with the test's sink advised; with `journal`, the field counts
     /// revisions.
     fn rig_with(text: &str, caret: usize, journal: bool) -> Rig {
+        rig_built(text, caret, journal, false)
+    }
+
+    /// As [`rig_with`], for a secure session when `secure`.
+    fn rig_built(text: &str, caret: usize, journal: bool, secure: bool) -> Rig {
         let doc = Rc::new(Doc::new(text, caret, journal));
         let mut tree = WidgetTree::new();
         let id = tree.add(Field { doc: doc.clone() });
@@ -2925,7 +2995,8 @@ mod tests {
             hwnd: HWND::default(),
             window_id,
             widget: id,
-            scope: scope_for(false),
+            scope: scope_for(secure),
+            secure,
             surfaces: tree.text_surfaces(),
             service: Rc::new(Service {
                 window_id,
@@ -3013,6 +3084,31 @@ mod tests {
             )
         }?;
         Ok(buffer[..count as usize].to_vec())
+    }
+
+    /// A field that is a password by its purpose but whose document does
+    /// not say it is secure: the secure session hands out no text and
+    /// takes no write.
+    #[test]
+    fn a_secure_session_reads_and_writes_nothing_whatever_the_document_says() {
+        let rig = rig_built("hunter2", 7, true, true);
+        assert_eq!(rig.read_text(), "", "no text");
+        let store = rig.store.clone();
+        let refused = Rc::new(RefCell::new(None));
+        let out = refused.clone();
+        rig.during_grant(move || {
+            *out.borrow_mut() = Some(
+                unsafe { store.SetText(0, 0, 0, &[u16::from(b'x')]) }
+                    .map(|_| ())
+                    .map_err(|error| error.code()),
+            );
+        });
+        assert_eq!(
+            unsafe { rig.store.RequestLock(LF_READWRITE | LF_SYNC) }.unwrap(),
+            S_OK
+        );
+        assert_eq!(*refused.borrow(), Some(Err(TS_E_READONLY)));
+        assert_eq!(*rig.doc.text.borrow(), "hunter2");
     }
 
     #[test]
@@ -3122,6 +3218,41 @@ mod tests {
         );
         assert_eq!(*seen.borrow(), vec![(1, 3, 2), (2, 2, 4)]);
         assert_eq!(*rig.doc.text.borrow(), "aeb", "the query wrote nothing");
+    }
+
+    /// A text service asks where a composition would go with no text (the
+    /// SDK sample TIP's `InsertTextAtSelection(TF_IAS_QUERYONLY, NULL, 0)`
+    /// before `StartComposition`): the answer is the selection it would
+    /// replace, so typing over a selection replaces it.
+    #[test]
+    fn an_empty_query_answers_the_selection() {
+        let rig = rig_with("abcd", 3, true);
+        rig.doc.select(1..3);
+        // Told, as the window's settle tells it before a text service asks.
+        rig.state.report(true);
+        let store = rig.store.clone();
+        let seen = Rc::new(RefCell::new(None));
+        let out = seen.clone();
+        rig.during_grant(move || {
+            let (mut start, mut end) = (0, 0);
+            unsafe {
+                store.InsertTextAtSelection(
+                    TS_IAS_QUERYONLY,
+                    &[],
+                    &mut start,
+                    &mut end,
+                    std::ptr::null_mut(),
+                )
+            }
+            .unwrap();
+            *out.borrow_mut() = Some((start, end));
+        });
+        assert_eq!(
+            unsafe { rig.store.RequestLock(LF_READ | LF_SYNC) }.unwrap(),
+            S_OK
+        );
+        assert_eq!(*seen.borrow(), Some((1, 3)));
+        assert_eq!(*rig.doc.text.borrow(), "abcd");
     }
 
     #[test]
