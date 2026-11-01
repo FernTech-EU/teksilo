@@ -20,70 +20,49 @@ by crate for clarity, not because crates version independently.
 - **The rows AppKit adds to a Mac app's Edit menu work in Teksilo text
   fields.** Emoji & Symbols, Start Dictation, the press-and-hold accent popup
   and Writing Tools (in its panel) insert into the focused `TextInput`,
-  `SearchField`, `PasswordField` (Writing Tools excepted) and
-  `RichTextEditor`, and read the field's selection and text. AutoFill is not
-  supported. Text they insert with no composition going on lands in the
-  field at once, so the next question AppKit asks is answered from the text
-  after it. The accent popup's character and the key it replaces are one
+  `SearchField`, `PasswordField` (Writing Tools excepted), `RichTextEditor`
+  and `CodeEditor`, and read the field's selection and text. AutoFill is not
+  supported. The accent popup's character and the key it replaces are one
   undo step, as in TextEdit. See [docs/text-input-system.md](docs/text-input-system.md) and
   [docs/native-menu.md](docs/native-menu.md).
+- **`TeksiloAppBuilder::windows_text_store(bool)`** chooses whether text input
+  on Windows goes through Teksilo's TSF text store (on by default, see
+  Changed) or IMM32. The environment variable `TEKSILO_TSF` overrides it
+  (`0` off, `1` on).
 - **`TEKSILO_TEXT_INPUT_TRACE=1`** logs what the platform's text input system
   sends a window, on macOS and Windows.
-- **`TeksiloAppBuilder::windows_text_store(bool)`** (Windows, experimental,
-  off by default) runs text input through a TSF text store: input methods,
-  the emoji panel and voice typing read the focused field's text, selection
-  and character positions and write into it, compositions included (each one
-  undo step, its clauses underlined), and are told of its changes; a press or
-  a focus change ends a composition with the input method's last text.
-  Voice typing's text is reported as dictated (`EditSource::Dictation`),
-  and its "delete that" removes the phrase.
-  Read-only fields are presented as such, and a password field as one (the
-  touch keyboard's password layout). The touch keyboard's suggestion strip
-  follows the user's own system setting, as in native applications. `CodeEditor` takes part too. The
-  environment variable `TEKSILO_TSF` overrides the choice for diagnosis (`0`
-  off, `1` on).
-- **Windows: a text field answers the input method's questions about its
-  text.** The candidate window follows the character being converted, and
-  the input method reads the text around the composition as it predicts.
-  Reconversion of committed text is not answered yet.
 
 #### Core
 
 - **`ImeOrigin`** (`Composition`, `Dictation`, `WritingTools`, `Insertion`;
   `#[non_exhaustive]`) says which part of the input system committed a text.
-- **`WidgetEvent::ime_commit(text)`** builds the plain composition commit.
-- **`WidgetEvent::ime_composition(text, cursor)`** builds a composition
-  update that takes the place of no text.
+- **`WidgetEvent::ime_commit(text)`** and
+  **`WidgetEvent::ime_composition(text, cursor)`** build a plain commit and a
+  composition update that takes the place of no text.
 - **`EventContext::finish_ime_composition`** (and
   `WindowOps::finish_ime_composition`) tells the platform's input method that
   the focused field's composition is over, and returns the text the input
   method committed for it, which the field keeps in place of what the
   composition showed (`None` keeps what it showed).
-- **`TextInputEditor`**, the half of a text widget's document the
-  platform's input system writes through, handed out by
-  `TextSurface::input_editor` (and `TextSurfaces::with_focused_input_editor`):
-  `replace_text` with `WriteOptions` (a dry run, a correction, the origin the
-  text is reported under) answering
-  `Landed` or `WriteRefused`, `set_selection`, a composition marked as a range
-  of text (`mark_composition` with `CompositionSegment`s and their
-  `SegmentStyle`) and ended as one undo step (`end_composition`), and a batch
+- **A custom text widget can take part in the platform's text input
+  system.** `TextInputDocument`, reached through
+  `TextSurface::input_document` and `TextSurfaces::with_focused_input_document`,
+  tells the platform where the widget's selection is, what its text is and
+  where a range is drawn (`flush_pending_input`, `revisions`,
+  `text_changed_since` with `InputRevisions`, `TextChanged` and `ChangeCause`,
+  and `is_available`, `true` by default, for whether it can answer without
+  any change). `TextInputEditor`, handed out by `TextSurface::input_editor`
+  and `TextSurfaces::with_focused_input_editor`, is the half the input system
+  writes through: `replace_text` with `WriteOptions` (a dry run, a
+  correction, the origin the text is reported under) answering `Landed` or
+  `WriteRefused`, `set_selection`, a composition marked as a range of text
+  (`mark_composition` with `CompositionSegment`s and their `SegmentStyle`)
+  and ended as one undo step (`end_composition`), and a batch
   (`begin_input_batch`, `end_input_batch`) that holds back what the
   application sees until it ends. Every method has a default that refuses or
-  does nothing. `RichTextEditor` and `TextInputField` implement it.
-- **`TextSurfaces::surface(owner)`**: the text widget registered under a
-  widget id, focused or not, for a platform bridge that finishes a
-  composition in the field the writer has just left.
-- **`TextInputDocument::flush_pending_input`**, **`revisions`** and
-  **`text_changed_since`** (`InputRevisions`, `TextChanged`, `ChangeCause`):
-  insert batched typing where a change may be reported, and tell what changed
-  since a revision and whether the input system caused it.
-- **`TextInputDocument::is_available`** says whether a document can answer
-  the platform now without any change (no batched typing inserted, no
-  callback run). `true` by default.
-- **`TextInputDocument`**, reached through `TextSurface::input_document` and
-  `TextSurfaces::with_focused_input_document`, lets a custom text widget tell
-  the platform where its selection is, what its text is and where a range is
-  drawn, so Dictation and Writing Tools work in it on macOS.
+  does nothing. `RichTextEditor`, `TextInputField` and `CodeEditor` implement
+  both. `TextSurfaces::surface(owner)` finds a text widget by its widget id,
+  focused or not.
 
 #### Text
 
@@ -95,13 +74,15 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **`EditSource::Dictation` and `EditSource::WritingTools`.** A
+  `RichTextEditor` and a `TextInputField` report dictation, Writing Tools and
+  emoji insertions under `Dictation`, `WritingTools` and `Ime`.
 - **`TextInputField::on_text_inserted`**, forwarded by `TextInput`,
   `PasswordField` and `SearchField`, reports each insertion's `EditSource`
   and character count.
 - **`.writing_tools(impl Into<Prop<bool>>)`** on `TextInputField`,
   `TextInput`, `SearchField` and `RichTextEditor` turns Writing Tools off for
   a field (on by default; a password field is always off).
-- **`EditSource::Dictation` and `EditSource::WritingTools`.**
 - **`show_transient_edits(bool)`** on `RichTextEditor`, `CodeEditor` and
   `PlainTextEditor` makes a view show every transient edit of its document,
   for those the host makes itself through `text-document` (a suggestion shown
@@ -126,6 +107,28 @@ by crate for clarity, not because crates version independently.
 
 ### Changed
 
+#### Platform
+
+- **On Windows, input methods, the emoji panel, voice typing and the touch
+  keyboard write into text fields through Teksilo's TSF text store**, as in
+  a native edit control, where they went through IMM32. They read the
+  focused field's text, selection and character positions and are told of
+  its changes; a composition is one undo step with its clauses underlined,
+  and a press or a focus change ends it with the input method's last text.
+  Voice typing shows its text as you speak, reports it as dictated
+  (`EditSource::Dictation`) and no longer shows the "some features may not
+  work" notice; its "delete that" removes the phrase. A password field
+  refuses input methods and voice typing (the touch keyboard shows its
+  password layout), a read-only field is presented as one, and the touch
+  keyboard's suggestion strip follows the user's system setting. A field
+  keeps IMM32 when the application calls `windows_text_store(false)`, under
+  `TEKSILO_TSF=0`, in a widget that describes no document (the terminal),
+  in a window whose store could not start, and while an IMM32-only input
+  method is active. On that path a text field now answers the input
+  method's questions about its text: the candidate window follows the
+  character being converted, and the input method reads the text around the
+  composition; reconversion of committed text is not answered there.
+
 #### Core
 
 - **Breaking.** `WidgetEvent::ImeCommit` is `{ text, origin, replacement }`
@@ -147,24 +150,26 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
+  `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
+  two new variants, so an exhaustive `match` over it needs the two arms.
 - **Enter in a `RichTextEditor` heading works as in LibreOffice Writer.** At
   the end of a heading it starts a body paragraph, which keeps the heading's
   alignment, indentation and list, where it started another heading; in the
   middle it splits the heading in two, and at the start it puts an empty
   heading above. One undo takes the break back with the level change.
 - **`CodeEditor` describes its document to the platform's text input
-  system** and takes its writes, as the text fields and `RichTextEditor` do:
-  the macOS input system's questions about its text are answered, and on
-  Windows it takes the TSF text store when that is on. A composition the input
-  system writes ends, its text kept, before a key it passes on, a press, an
-  edit command or a focus change. Its composition is now underlined, clause
-  by clause, as in the other text widgets.
-- **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
-  `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
-  two new variants, so an exhaustive `match` over it needs the two arms.
-- A `RichTextEditor` and a `TextInputField` report dictation, Writing Tools
-  and emoji insertions to `on_text_inserted` under `EditSource::Dictation`,
-  `EditSource::WritingTools` and `EditSource::Ime`.
+  system** and takes its writes, as the text fields and `RichTextEditor` do.
+  A composition the input system writes ends, its text kept, before a key it
+  passes on, a press, an edit command or a focus change. Its composition is
+  underlined, clause by clause, as in the other text widgets.
+- **The segment an input method is converting is underlined thick.** In a
+  `TextInput`, `SearchField`, `PasswordField`, `RichTextEditor` and the other
+  text fields, the part of a composition the input method is working on (a
+  Mozc clause, Pinyin's highlighted run, a macOS conversion segment) has a
+  thick underline and the rest of the composition a thin one, so with several
+  segments you can see which one a key will convert. A caret the input method
+  puts inside its composition is where the caret shows.
 - **A password field takes no input method on Windows and X11**: a
   `PasswordField`, or any field with `ImePurpose::Password`, takes its text
   there from the keys alone, as native password fields do. Compositions, the
@@ -203,12 +208,6 @@ by crate for clarity, not because crates version independently.
   as one undo step, and the input method's later copy is dropped. Choosing
   another mode of the same input method (Kotoeri's Katakana after its
   Hiragana) is not such a switch: the composition goes on, as in TextEdit.
-- **On macOS, an input method asking where its composition is just after
-  committing it is told there is none.** Kotoeri, committing at the end of a
-  heading, was pointed at the document's first characters.
-  The field says it holds no marked text then either, so Korean Hanja
-  conversion of the syllable just committed (Option+Return) takes its place
-  again instead of landing after it.
 - **On macOS, a character the input method types in place of a key's own
   is the one typed.** With nothing composed, Kotoeri's Space typed a
   half-width space instead of its full-width U+3000, and Pinyin's "；" and
@@ -229,7 +228,7 @@ by crate for clarity, not because crates version independently.
   `TextInput`, and after a 🇯🇵 the Chinese and Korean that followed drew as
   blank space. The characters the default font lacks were set in the font
   found for the first of them, and what that font lacked was looked for
-  nowhere else. Needs text-typeset 3.0.
+  nowhere else.
 - **A CJK character the first CJK font lacks is drawn.** On Windows 你 was
   blank in "中你好" and "我你好你好" (a Heading 1, the Title field) and drew
   in "exer你好cises": the first system font with 中 or 我 has no 你. A word
@@ -241,7 +240,7 @@ by crate for clarity, not because crates version independently.
   defaults to emoji presentation, now comes from a colour emoji font when
   one is installed. On Linux an emoji came from the first system font that
   had it, often a monochrome one such as VL Gothic. ❤ with no U+FE0F after
-  it stays a text heart. Needs text-typeset 3.0.
+  it stays a text heart.
 - **A COLRv1 emoji is drawn in colour.** Noto Color Emoji as Fedora ships it
   is COLRv1, which the glyph rasterizer did not paint, and an emoji set in it
   was blank space. COLRv1 glyphs are now painted, with their gradients,
@@ -250,24 +249,24 @@ by crate for clarity, not because crates version independently.
   **Behaviour change:** on Windows 11 every emoji looks different. Segoe UI
   Emoji carries both formats, and its emoji are now drawn from their COLRv1
   design, with the gradients Windows itself shows, where its flat COLRv0
-  design was drawn before. Needs text-typeset 3.0.
+  design was drawn before.
 - **CJK text the default font lacks keeps the weight of the text around
   it.** On Windows regular 中你好 came out in BIZ UDGothic Bold, and on Linux
   in Noto Sans CJK Bold: fallback took the first font file with the
   character, and a family's Bold file can sort before its Regular one. It
   now takes the face of that family whose weight, style and width match the
-  text. Needs text-typeset 3.0.
+  text.
 - **Bold text in a font with no bold is drawn bold.** On the Mac every CJK
   character comes from Arial Unicode MS, which has one weight, so Cmd+B
   made the Latin text bold and left the CJK regular. A face lighter than a
   bold weight, with no weight axis to reach it, is now emboldened as
   FreeType does it, its advances widened by as much, so the caret and
-  selection stay with the glyphs. Needs text-typeset 3.0.
+  selection stay with the glyphs.
 - **Italic text in a font with no italic is drawn slanted.** No CJK font has
   an italic, so Ctrl+I (Cmd+I on the Mac) left CJK text upright. A face
   with no italic, oblique or slant axis is now slanted about the baseline
   by fontconfig's synthetic oblique angle; the advances do not change, so
-  the caret and selection stay where they were. Needs text-typeset 3.0.
+  the caret and selection stay where they were.
 - **Chinese, Japanese and Korean text a fallback font draws comes from the
   font the system uses for that language.** On Windows 中你好 was drawn in BIZ
   UDGothic, a Japanese font, and 日本 next to 한글 in Batang, a thin Korean
@@ -281,14 +280,14 @@ by crate for clarity, not because crates version independently.
   or Korean (Simplified Chinese when it is none of them): the application
   passes its active locale to the shared typesetter at startup and on every
   locale switch, and text already laid out is laid out again in the fonts
-  of the new language. Needs text-typeset 3.0.
+  of the new language.
 - **Headings keep their proportion to the body text.** A heading in a
   `RichTextEditor` or `RichTextViewer` was sized from a fixed 16 px (32 px
   for a Heading 1) whatever the text size, so with Teksilo's 14 px body
   headings were too large, and under the font-size scale they kept their
   excess. A heading is now twice, 1.5, 1.25 and 1.1 times the body size
   for levels 1 to 4. **Behaviour change:** with a 14 px body a Heading 1
-  is 28 px where it was 32. Needs text-typeset 3.0.
+  is 28 px where it was 32.
 
 #### Widgets
 
@@ -354,13 +353,6 @@ by crate for clarity, not because crates version independently.
   character**, in a `RichTextEditor` as in Word and TextEdit: at the start
   of a bold paragraph it is bold, where it came out plain. An empty
   paragraph still types plain.
-- **The segment an input method is converting is underlined thick.** In a
-  `TextInput`, `SearchField`, `PasswordField`, `RichTextEditor` and the other
-  text fields, the part of a composition the input method is working on (a
-  Mozc clause, Pinyin's highlighted run, a macOS conversion segment) has a
-  thick underline and the rest of the composition a thin one, so with several
-  segments you can see which one a key will convert. A caret the input method
-  puts inside its composition is where the caret shows.
 - **A click in the padding of a text field places the caret.** A press in
   the few pixels above or below the text line of a `TextInput`, `SearchField`,
   `PasswordField`, `SpinBox`, the date and time editors, `HexColorInput` or
