@@ -726,7 +726,14 @@ impl crate::input_loop::InputChrome for WindowChrome<'_> {
     }
 
     fn text_store_mode(&self) -> teksilo_platform::text_input_hook::TextStoreMode {
-        teksilo_platform::text_input_hook::text_store_mode()
+        teksilo_core::raw_handle::ParentHandle::from_window(self.window.window()).map_or(
+            teksilo_platform::text_input_hook::TextStoreMode::Off,
+            |parent| teksilo_platform::text_input_hook::text_store_mode_for(&parent),
+        )
+    }
+
+    fn legacy_input_method_active(&self) -> bool {
+        teksilo_platform::text_input_hook::legacy_input_method_active()
     }
 
     fn set_text_store_focus(&mut self, focus: teksilo_platform::text_input_hook::StoreFocus) {
@@ -5906,7 +5913,7 @@ impl TeksiloAppBuilder {
             quit_guard: None,
             termination_signals: true,
             window_tabbing: false,
-            windows_text_store: false,
+            windows_text_store: true,
             event_source: None,
             app_state_registry: HashMap::new(),
             i18n: None,
@@ -6627,13 +6634,15 @@ impl TeksiloAppBuilder {
         self
     }
 
-    /// Run text input on Windows through a TSF text store of Teksilo's: input
-    /// methods, the emoji panel, voice typing and the touch keyboard then
-    /// read and write the focused field directly, as in a native edit
-    /// control, instead of through IMM32. Experimental, so off by default;
-    /// ignored on other platforms. A field that describes no document (the
-    /// terminal) keeps IMM32. The environment variable `TEKSILO_TSF` overrides
-    /// it for diagnosis: `0` turns the store off, `1` on.
+    /// Run text input on Windows through a TSF text store of Teksilo's (on by
+    /// default): input methods, the emoji panel, voice typing and the touch
+    /// keyboard read and write the focused field directly, as in a native
+    /// edit control, instead of through IMM32. `false` keeps IMM32 for every
+    /// field. Ignored on other platforms. A field that describes no document
+    /// (the terminal) keeps IMM32, and so does every field of a window whose
+    /// store could not start, and every field while an IMM32-only input
+    /// method is active. The environment variable `TEKSILO_TSF` overrides
+    /// the choice: `0` turns the store off, `1` on.
     pub fn windows_text_store(mut self, enabled: bool) -> Self {
         self.windows_text_store = enabled;
         self

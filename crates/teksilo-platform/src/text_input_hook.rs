@@ -331,20 +331,20 @@ pub fn take_marked_replacement(window_id: TeksiloWindowId) -> Option<Range<usize
 }
 
 /// Which path the platform's text input system takes to a focused text
-/// field, chosen with `TEKSILO_TSF` (read once). Windows only; `Off`
-/// everywhere else.
+/// field: the application's choice (`TeksiloAppBuilder::windows_text_store`,
+/// on by default), or `TEKSILO_TSF` (read once) when it names a mode.
+/// Windows only; `Off` everywhere else.
 ///
-/// The TSF text store is Phase 0 of `engineering/docs/tsf-text-store.md`: a
-/// measuring build. Its store answers text services from a copy of the
-/// focused document and keeps what they write to itself, so text composed
-/// or dictated through it does **not** reach the field.
+/// The TSF text store (`engineering/docs/tsf-text-store.md`) answers text
+/// services from the focused field's document and writes what they write
+/// into it.
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextStoreMode {
-    /// IMM32 alone, through winit (the default).
+    /// IMM32 alone, through winit.
     Off,
-    /// `TEKSILO_TSF=1`: a TSF text store for every focused field that
-    /// describes its document, and winit's IME off there.
+    /// A TSF text store for every focused field that describes its
+    /// document, and winit's IME off there (the default; `TEKSILO_TSF=1`).
     Store,
     /// `TEKSILO_TSF=associated`: the same store, with winit's IME (its IMM
     /// context) left on, for comparing the two (M10).
@@ -353,7 +353,7 @@ pub enum TextStoreMode {
 
 /// Whether the application asked for the text store
 /// (`TeksiloAppBuilder::windows_text_store`), before any window exists.
-static STORE_PREFERRED: AtomicBool = AtomicBool::new(false);
+static STORE_PREFERRED: AtomicBool = AtomicBool::new(true);
 
 /// Ask for the text store, or not, from the application's builder. Read by
 /// [`text_store_mode`] when `TEKSILO_TSF` says nothing; set before the first
@@ -380,6 +380,40 @@ pub fn text_store_mode() -> TextStoreMode {
     } else {
         TextStoreMode::Off
     })
+}
+
+/// The [`TextStoreMode`] a window runs with: [`text_store_mode`], but
+/// [`TextStoreMode::Off`] for a window that has no store, because TSF could
+/// not be activated on its thread or the window was never attached. With the
+/// store on by default, a window whose store did not start keeps IMM32
+/// rather than losing its input method.
+#[doc(hidden)]
+pub fn text_store_mode_for(window: &ParentHandle) -> TextStoreMode {
+    #[cfg(target_os = "windows")]
+    {
+        windows::text_store_mode_for(window)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        TextStoreMode::Off
+    }
+}
+
+/// Whether the active input method is an IMM32 one that has no TSF text
+/// service (a keyboard layout handle whose device half starts with `E`):
+/// it reaches a field only through IMM32, so a field takes the IMM path
+/// while it is active. Always `false` but on Windows.
+#[doc(hidden)]
+pub fn legacy_input_method_active() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        windows::legacy_input_method_active()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
 }
 
 /// `TEKSILO_TSF`'s value as a mode: `0` (or `off`), `1` (or `store`) and

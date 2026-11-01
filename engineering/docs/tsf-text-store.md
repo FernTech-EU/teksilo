@@ -3,8 +3,9 @@
 
 # A TSF text store on Windows: design
 
-Status: Phases -1 to 4 (7.1) are built behind `TeksiloAppBuilder::windows_text_store`, off by
-default until the runs 7.1 lists pass. Revised on 2026-10-28 after an independent review, against
+Status: Phases -1 to 4 (7.1) are built, and the store is on by default since the runs 7.1 lists
+passed (2026-11-01); `TeksiloAppBuilder::windows_text_store(false)` and `TEKSILO_TSF=0` turn it off.
+Revised on 2026-10-28 after an independent review, against
 `feat/system-text-input` at `4b1f697a` and the eight rounds of
 `cross_tasks/system-text-input-windows-findings.md` (Windows 11 22621, French UI and AZERTY;
 Japanese, Pinyin and Korean from round 4). The first version (`ee8716db`) knew three rounds.
@@ -740,7 +741,11 @@ Microsoft Japanese, Pinyin and Korean IMEs, the emoji panel; no hang, no crash).
 8. **Focus lost mid-composition**: terminate, before the event is dispatched (4.11).
 9. **The switch**: `TEKSILO_TSF=1` through Phases 2 and 3, then on by default with a
    `TeksiloAppBuilder` option forcing IMM; the variable stays as a kill switch; IMM is taken
-   automatically when activation fails or a legacy IMM-IME is active.
+   automatically when activation fails or a legacy IMM-IME is active. Done: a window whose store
+   did not start answers `TextStoreMode::Off` (`text_store_mode_for`), and while the active
+   keyboard layout is an IMM32 input method's (device `0xE0xx`) a document field takes the IMM
+   path (`legacy_input_method_active`, read at each `settle_ime`, so a switch to such an input
+   method takes effect at the next turn).
 
 Still for the maintainer: the teksilo-core API of section 3 item by item (`is_available` exists,
 with a default of `true`); the builder option's name; the touch keyboard default.

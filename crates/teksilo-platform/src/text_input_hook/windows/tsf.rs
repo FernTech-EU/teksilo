@@ -629,6 +629,14 @@ pub(super) fn set_text_store_focus(hwnd: HWND, focus: StoreFocus) {
     }
 }
 
+/// Whether the window has a store: attached, with TSF activated on its
+/// thread.
+pub(super) fn has_store(hwnd: HWND) -> bool {
+    WINDOWS
+        .try_with(|windows| windows.borrow().contains_key(&(hwnd.0 as isize)))
+        .unwrap_or(false)
+}
+
 /// End the composition a text service holds in the window's store, outside
 /// any lock (4.11): before a press is dispatched, or as a field ends its
 /// composition. Whether one was open. Never while a lock call is on the

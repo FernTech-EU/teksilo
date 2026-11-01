@@ -188,7 +188,7 @@ mod tsf;
 
 use super::imm_completion::{self, ImmCompletion, ImmMessage};
 use super::imm_requests::{self, ReconvertString};
-use super::{FinishedComposition, StoreFocus};
+use super::{FinishedComposition, StoreFocus, TextStoreMode, text_store_mode};
 
 use windows::Win32::Foundation::{
     CO_E_NOTINITIALIZED, CloseHandle, HWND, LPARAM, LRESULT, POINT, RECT, S_OK, WPARAM,
@@ -222,7 +222,7 @@ use windows::Win32::UI::Input::Ime::{
     ImmGetConversionStatus, ImmGetOpenStatus, ImmNotifyIME, ImmReleaseContext, NI_COMPOSITIONSTR,
     RECONVERTSTRING,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_PACKET, VK_PROCESSKEY};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardLayout, VK_PACKET, VK_PROCESSKEY};
 use windows::Win32::UI::Input::{
     GetCurrentInputMessageSource, IMDT_KEYBOARD, IMDT_MOUSE, IMDT_PEN, IMDT_TOUCH, IMDT_TOUCHPAD,
     IMDT_UNAVAILABLE, IMO_HARDWARE, IMO_INJECTED, IMO_SYSTEM, IMO_UNAVAILABLE,
@@ -354,6 +354,29 @@ pub(super) fn set_text_store_focus(parent: &ParentHandle, focus: StoreFocus) {
     if let Some(hwnd) = hwnd_of(parent) {
         tsf::set_text_store_focus(hwnd, focus);
     }
+}
+
+/// See [`super::text_store_mode_for`].
+pub(super) fn text_store_mode_for(parent: &ParentHandle) -> TextStoreMode {
+    let mode = text_store_mode();
+    if mode != TextStoreMode::Off && hwnd_of(parent).is_some_and(tsf::has_store) {
+        mode
+    } else {
+        TextStoreMode::Off
+    }
+}
+
+/// See [`super::legacy_input_method_active`].
+pub(super) fn legacy_input_method_active() -> bool {
+    let layout = unsafe { GetKeyboardLayout(0) };
+    is_legacy_input_method(layout.0 as usize)
+}
+
+/// Whether a keyboard layout handle is an IMM32 input method's: its high
+/// word, the device, is `0xE0xx`. A TSF text service runs over a plain
+/// keyboard layout (the Microsoft Japanese IME's is `0x04110411`).
+fn is_legacy_input_method(layout: usize) -> bool {
+    (layout as u32) >> 28 == 0xE
 }
 
 /// See [`super::terminate_text_store_composition`].
@@ -2376,5 +2399,18 @@ mod tests {
         unsafe {
             let _ = DestroyWindow(hwnd);
         }
+    }
+
+    /// An IMM32 input method's layout handle has device `0xE0xx`; a plain
+    /// keyboard layout, under which a TSF text service runs, does not.
+    #[test]
+    fn a_legacy_input_method_is_told_by_its_layout_handle() {
+        assert!(is_legacy_input_method(0xE001_0411));
+        assert!(!is_legacy_input_method(0x0411_0411), "Japanese, a TIP");
+        assert!(!is_legacy_input_method(0x040C_040C), "French");
+        assert!(
+            !is_legacy_input_method(0xF002_0409),
+            "Dvorak, a layout variant"
+        );
     }
 }

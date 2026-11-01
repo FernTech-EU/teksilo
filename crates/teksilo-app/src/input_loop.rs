@@ -101,6 +101,13 @@ pub(crate) trait InputChrome {
     /// ([`teksilo_platform::text_input_hook::text_store_mode`]).
     fn text_store_mode(&self) -> TextStoreMode;
 
+    /// Whether the active input method is an IMM32 one with no TSF text
+    /// service ([`teksilo_platform::text_input_hook::legacy_input_method_active`]):
+    /// it reaches a field only through IMM32.
+    fn legacy_input_method_active(&self) -> bool {
+        false
+    }
+
     /// Give the window's text store the focus [`settle_ime`] decided, and
     /// let it bring its copy of the focused document up to date.
     fn set_text_store_focus(&mut self, focus: StoreFocus);
@@ -560,7 +567,12 @@ pub(crate) fn settle_ime(
         let secure = tree
             .text_surfaces()
             .with_focused_input_document(|document| document.is_secure());
-        let focus = store_focus(tree.focused(), ime, secure);
+        let mut focus = store_focus(tree.focused(), ime, secure);
+        if matches!(focus, StoreFocus::Document { .. }) && chrome.legacy_input_method_active() {
+            // An IMM32-only input method reaches the field through IMM32
+            // alone: the store gives way while it is active.
+            focus = StoreFocus::Imm;
+        }
         if mode == TextStoreMode::Store && matches!(focus, StoreFocus::Document { .. }) {
             // The store takes the field's input: winit's IME (its IMM
             // context) is off there (design 4.2).
@@ -677,6 +689,8 @@ mod tests {
         host: Option<ImeHost>,
         /// What [`InputChrome::text_store_mode`] answers; `Off` when unset.
         store_mode: Option<TextStoreMode>,
+        /// What [`InputChrome::legacy_input_method_active`] answers.
+        legacy: bool,
         /// Every [`InputChrome::set_text_store_focus`], in order.
         store_focus: Vec<StoreFocus>,
         /// What [`InputChrome::terminate_text_store_composition`] answers,
@@ -715,6 +729,9 @@ mod tests {
         }
         fn text_store_mode(&self) -> TextStoreMode {
             self.store_mode.unwrap_or(TextStoreMode::Off)
+        }
+        fn legacy_input_method_active(&self) -> bool {
+            self.legacy
         }
         fn set_text_store_focus(&mut self, focus: StoreFocus) {
             self.store_focus.push(focus);
@@ -1464,6 +1481,42 @@ mod tests {
                 assert_eq!(chrome.ime, vec![(Some(ImePurpose::Normal), Some(true))]);
             }
         }
+    }
+
+    /// An IMM32-only input method reaches a field through IMM32 alone: while
+    /// it is active the store gives the field to the IMM path and winit's
+    /// IME stays on.
+    #[test]
+    fn with_an_imm32_only_input_method_the_field_takes_the_imm_path() {
+        use teksilo_canvas::SizeProposal;
+        use teksilo_core::ImePurpose;
+        use teksilo_core::signal::Signal;
+        use teksilo_widgets::TextInput;
+
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let root = tree
+            .add(teksilo_widgets::VStack::new().child(TextInput::new(Signal::new(String::new()))));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let field = tree.tab_stops_within(root)[0];
+        tree.focus(field);
+
+        let mut chrome = Chrome {
+            host: Some(ImeHost::Windows),
+            store_mode: Some(TextStoreMode::Store),
+            legacy: true,
+            ..Chrome::default()
+        };
+        let mut purpose = None;
+        let mut last_allowed = None;
+        settle_ime(
+            &mut chrome,
+            &mut tree,
+            SoftKeyboardSupport::None,
+            &mut purpose,
+            &mut last_allowed,
+        );
+        assert_eq!(chrome.store_focus, vec![StoreFocus::Imm]);
+        assert_eq!(chrome.ime, vec![(Some(ImePurpose::Normal), Some(true))]);
     }
 
     #[test]
