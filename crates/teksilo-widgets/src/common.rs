@@ -25,6 +25,8 @@ pub(crate) mod enabled_test;
 #[cfg(test)]
 pub(crate) mod heard_test;
 #[cfg(test)]
+mod ime_commit_record_tests;
+#[cfg(test)]
 pub(crate) mod ime_ops_test;
 pub(crate) mod input_batch;
 pub(crate) mod input_editor;

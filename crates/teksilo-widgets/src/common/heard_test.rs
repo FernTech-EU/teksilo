@@ -410,3 +410,164 @@ impl TreeChangeHandler for Handler<'_> {
         }
     }
 }
+
+/// One event the Windows adapter raises for an accessibility update, in the
+/// terms of UI Automation, the record NVDA's speech is mapped against.
+///
+/// Read from `accesskit_windows-0.35.2` `adapter.rs` (`AdapterChangeHandler`)
+/// and `node.rs` (`NodeWrapper`):
+/// - a `TextRun` added, removed or whose text changed raises one
+///   `TextChanged` per update on its filtered parent, when that parent
+///   supports text ranges (`insert_text_change_if_needed`);
+/// - a node whose text selection changed raises `TextSelectionChanged`
+///   (`enqueue_property_implied_events`);
+/// - a focus move raises `Focus`;
+/// - a live node with a name that enters the tree, or whose name or live
+///   setting changes, raises `LiveRegionChanged`;
+/// - the Name, Value and FullDescription properties raise a change when they
+///   change, to nothing too. Name is the node's value for a node whose label
+///   comes from its value (a `Role::Label`, a text run), its label
+///   otherwise; Value exists only where the Value pattern does: a node with
+///   a value whose label does not come from it (`name`,
+///   `is_value_pattern_supported`).
+///
+/// Not modelled: the other simple and pattern properties (`properties!`:
+/// HelpText, HasKeyboardFocus, IsReadOnly, AriaProperties and the rest),
+/// SelectionItem events, a window opened or closed. "Only" in a test about
+/// this record means only among the kinds above.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Uia {
+    /// `UIA_AutomationFocusChangedEventId` on the node of this role.
+    Focus(Role),
+    /// `UIA_Text_TextChangedEventId` on the node of this role.
+    TextChanged(Role),
+    /// `UIA_Text_TextSelectionChangedEventId` on the node of this role.
+    TextSelectionChanged(Role),
+    /// `UIA_LiveRegionChangedEventId` on the node of this role.
+    LiveRegionChanged(Role),
+    /// `UIA_NamePropertyId` changed on the node of this role.
+    Name(Role, Option<String>),
+    /// `UIA_ValueValuePropertyId` changed on the node of this role.
+    Value(Role, Option<String>),
+    /// `UIA_FullDescriptionPropertyId` changed on the node of this role.
+    Description(Role, Option<String>),
+}
+
+/// The node's UIA Name, as the adapter computes it.
+fn uia_name(node: &NodeRef) -> Option<String> {
+    if node.label_comes_from_value() {
+        node.value()
+    } else {
+        node.label()
+    }
+}
+
+/// The node's UIA Value, `None` where the Value pattern does not exist.
+fn uia_value(node: &NodeRef) -> Option<String> {
+    (node.has_value() && !node.label_comes_from_value())
+        .then(|| node.value())
+        .flatten()
+}
+
+/// The Windows adapter attached to a tree, recording what it would raise.
+pub(crate) struct UiaRecorder {
+    platform: Tree,
+}
+
+impl UiaRecorder {
+    /// Attach to `tree` as it stands now; nothing already in it is recorded.
+    pub(crate) fn attach(tree: &mut WidgetTree) -> Self {
+        Self {
+            platform: Tree::new(delivered(tree), true),
+        }
+    }
+
+    /// The events of one frame: one update handed to the adapter, as
+    /// `teksilo-app` hands it after the frame's layout.
+    pub(crate) fn frame(&mut self, tree: &mut WidgetTree) -> Vec<Uia> {
+        let mut handler = UiaHandler {
+            events: Vec::new(),
+            text_changed: HashSet::new(),
+        };
+        let update = delivered(tree);
+        self.platform
+            .update_and_process_changes(update, &mut handler);
+        handler.events
+    }
+}
+
+struct UiaHandler {
+    events: Vec<Uia>,
+    text_changed: HashSet<NodeId>,
+}
+
+impl UiaHandler {
+    fn text_change(&mut self, node: &NodeRef) {
+        if node.role() != Role::TextRun {
+            return;
+        }
+        if let Some(parent) = node.filtered_parent(&common_filter)
+            && parent.supports_text_ranges()
+            && self.text_changed.insert(parent.locate().0)
+        {
+            // The adapter puts text changes before every other event of the
+            // update.
+            self.events.insert(0, Uia::TextChanged(parent.role()));
+        }
+    }
+}
+
+impl TreeChangeHandler for UiaHandler {
+    fn node_added(&mut self, node: &NodeRef) {
+        self.text_change(node);
+        if included(node)
+            && node.live() != teksilo_core::accesskit::Live::Off
+            && uia_name(node).is_some()
+        {
+            self.events.push(Uia::LiveRegionChanged(node.role()));
+        }
+    }
+
+    fn node_updated(&mut self, old: &NodeRef, new: &NodeRef) {
+        if old.raw_value() != new.raw_value() {
+            self.text_change(new);
+        }
+        if !included(new) {
+            return;
+        }
+        let (old_name, new_name) = (uia_name(old), uia_name(new));
+        if new_name != old_name {
+            self.events.push(Uia::Name(new.role(), new_name.clone()));
+        }
+        let value = uia_value(new);
+        if value != uia_value(old) {
+            self.events.push(Uia::Value(new.role(), value));
+        }
+        if new.description() != old.description() {
+            self.events
+                .push(Uia::Description(new.role(), new.description()));
+        }
+        if new_name.is_some()
+            && new.live() != teksilo_core::accesskit::Live::Off
+            && (new.live() != old.live() || !included(old) || new_name != old_name)
+        {
+            self.events.push(Uia::LiveRegionChanged(new.role()));
+        }
+        if new.supports_text_ranges()
+            && old.supports_text_ranges()
+            && new.raw_text_selection() != old.raw_text_selection()
+        {
+            self.events.push(Uia::TextSelectionChanged(new.role()));
+        }
+    }
+
+    fn focus_moved(&mut self, _old: Option<&NodeRef>, new: Option<&NodeRef>) {
+        if let Some(node) = new {
+            self.events.push(Uia::Focus(node.role()));
+        }
+    }
+
+    fn node_removed(&mut self, node: &NodeRef) {
+        self.text_change(node);
+    }
+}
