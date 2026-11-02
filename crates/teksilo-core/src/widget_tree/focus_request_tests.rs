@@ -437,3 +437,45 @@ fn a_delayed_overlay_focus_target_that_cannot_take_focus_lands_on_its_field() {
     tree.layout(size());
     assert_eq!(tree.focused(), Some(field));
 }
+
+/// A delayed overlay whose focus target names no live node opens and moves
+/// nothing: what a submenu opened by hover asks for, so the keyboard stays in
+/// the menu the pointer is in.
+#[test]
+fn a_delayed_overlay_with_the_null_focus_target_moves_no_focus() {
+    use crate::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    let mut tree = WidgetTree::new();
+    let field = tree.add(FillWidget::new().focusable());
+    let content = tree.add(StackWidget::new().child(field));
+    let other = tree.add(FillWidget::new().focusable());
+    let pin = tree.add(FillWidget::new());
+    let anchor = {
+        tree.add(FillWidget::new().on_tap(move |_, ctx| {
+            ctx.show_overlay_after_replacing_siblings(
+                OverlayRequest::new(
+                    content,
+                    pin,
+                    OverlayPlacement::BelowPreferred,
+                    DismissBehavior::Manual,
+                ),
+                std::time::Duration::ZERO,
+                WidgetId::default(),
+            );
+        }))
+    };
+    tree.add(
+        StackWidget::new()
+            .child(other)
+            .child(pin)
+            .child(content)
+            .child(anchor),
+    );
+    tree.set_dormant(content);
+    tree.layout(size());
+    tree.focus(other);
+    tree.click(anchor);
+    tree.advance_time(std::time::Duration::from_millis(1));
+    tree.layout(size());
+    assert!(tree.is_active(content), "the overlay opened");
+    assert_eq!(tree.focused(), Some(other));
+}

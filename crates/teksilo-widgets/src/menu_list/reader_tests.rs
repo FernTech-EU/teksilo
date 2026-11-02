@@ -237,16 +237,16 @@ fn a_menu_opened_from_the_menu_bar_is_named_after_its_trigger() {
     lay_out(&mut tree);
     let mut reader = Listener::attach(&mut tree);
 
+    // Opened from the keyboard, the menu highlights its first row, which is
+    // what the reader hears.
     press(&mut tree, Key::ArrowDown);
     let heard = reader.heard(&mut tree);
     assert!(
         reader.finds(Role::Menu, "File"),
         "the open menu must be named after the File trigger"
     );
-    assert_eq!(heard, focus("File"));
+    assert_eq!(heard, focus("New"));
 
-    press(&mut tree, Key::ArrowDown);
-    assert_eq!(reader.heard(&mut tree), focus("New"));
     press(&mut tree, Key::ArrowDown);
     assert_eq!(reader.heard(&mut tree), focus("Recent"));
 
@@ -256,10 +256,7 @@ fn a_menu_opened_from_the_menu_bar_is_named_after_its_trigger() {
         reader.finds(Role::Menu, "Recent"),
         "a submenu must be named after the row that opened it"
     );
-    assert_eq!(heard, focus("Recent"));
-
-    press(&mut tree, Key::ArrowDown);
-    assert_eq!(reader.heard(&mut tree), focus("notes.md"));
+    assert_eq!(heard, focus("notes.md"));
 }
 
 #[test]
@@ -280,9 +277,7 @@ fn a_menu_in_a_popover_is_named_after_its_button() {
         reader.finds(Role::Menu, "Add"),
         "the popover's menu must be named after the button that opened it"
     );
-    assert_eq!(heard, focus("Add"));
-    press(&mut tree, Key::ArrowDown);
-    assert_eq!(reader.heard(&mut tree), focus("Rectangle"));
+    assert_eq!(heard, focus("Rectangle"), "its first row, highlighted");
 }
 
 // ── A submenu the keyboard opened stays open ────────────────────
@@ -336,4 +331,105 @@ fn a_submenu_opened_from_the_keyboard_outlives_a_resting_pointer() {
             "a submenu {open:?} opened must stay open until Escape, Left or a choice"
         );
     }
+}
+
+// ── Where the highlight starts when a menu opens ────────────────
+
+/// A menu bar whose File menu holds three commands and a submenu, with
+/// focus on the File trigger and a reader listening.
+fn focused_menu_bar() -> (WidgetTree, WidgetId, Listener) {
+    let mut tree = tree_with_window();
+    tree.add(crate::MenuBar::new().menu(lit!("&File"), || {
+        Box::new(
+            MenuList::new()
+                .item(MenuItem::new(lit!("New")).on_activate_fn(|_| {}))
+                .item(MenuItem::new(lit!("Open")).on_activate_fn(|_| {}))
+                .item(MenuItem::new(lit!("Save")).on_activate_fn(|_| {}))
+                .item(MenuItem::submenu(lit!("&Recent"), || {
+                    Box::new(MenuList::new().item(MenuItem::new(lit!("notes.md"))))
+                })),
+        )
+    }));
+    lay_out(&mut tree);
+    let file = trigger_named(&mut tree, Role::MenuItem, "File");
+    tree.focus(file);
+    lay_out(&mut tree);
+    let reader = Listener::attach(&mut tree);
+    (tree, file, reader)
+}
+
+/// Opened again from the keyboard, a menu starts on its first row, not on
+/// the row chosen last time, whether it closed by Escape or by choosing a
+/// row.
+#[test]
+fn a_menu_reopened_from_the_keyboard_starts_on_its_first_row() {
+    let (mut tree, file, mut reader) = focused_menu_bar();
+    press(&mut tree, Key::ArrowDown);
+    assert_eq!(reader.heard(&mut tree), focus("New"));
+    press(&mut tree, Key::ArrowDown);
+    press(&mut tree, Key::ArrowDown);
+    assert_eq!(reader.heard(&mut tree), focus("Save"));
+
+    press(&mut tree, Key::Escape);
+    tree.advance_time(Duration::from_secs(1));
+    lay_out(&mut tree);
+    assert_eq!(reader.heard(&mut tree).last(), focus("File").last());
+    press(&mut tree, Key::ArrowDown);
+    assert_eq!(reader.heard(&mut tree).last(), focus("New").last());
+
+    press(&mut tree, Key::ArrowDown);
+    press(&mut tree, Key::ArrowDown);
+    press(&mut tree, Key::Enter);
+    tree.advance_time(Duration::from_secs(1));
+    lay_out(&mut tree);
+    // A row chosen gives focus back to what had it before the bar took it,
+    // nothing here; the trigger is focused again to reopen from the keyboard.
+    tree.focus(file);
+    lay_out(&mut tree);
+    let _ = reader.heard(&mut tree);
+    press(&mut tree, Key::ArrowDown);
+    assert_eq!(reader.heard(&mut tree).last(), focus("New").last());
+}
+
+/// A pointer opening highlights nothing: the menu itself is heard.
+#[test]
+fn a_menu_opened_by_a_click_highlights_nothing() {
+    let (mut tree, file, mut reader) = focused_menu_bar();
+    tree.click(file);
+    lay_out(&mut tree);
+    assert_eq!(reader.heard(&mut tree).last(), focus("File").last());
+}
+
+/// A submenu opened from the keyboard starts on its first row, and coming
+/// back leaves the parent on the row that opened it.
+#[test]
+fn a_submenu_starts_on_its_first_row_and_the_parent_keeps_its_row() {
+    let (mut tree, _file, mut reader) = focused_menu_bar();
+    press(&mut tree, Key::ArrowDown);
+    press(&mut tree, Key::End);
+    assert_eq!(reader.heard(&mut tree).last(), focus("Recent").last());
+    press(&mut tree, Key::ArrowRight);
+    assert_eq!(reader.heard(&mut tree).last(), focus("notes.md").last());
+    press(&mut tree, Key::ArrowLeft);
+    assert_eq!(reader.heard(&mut tree).last(), focus("Recent").last());
+}
+
+/// A context menu opened with the menu key starts on its first row.
+#[test]
+fn a_context_menu_opened_from_the_keyboard_starts_on_its_first_row() {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let mut tree = light_tree();
+    let field = tree.add(crate::Button::new(lit!("Field")).context_menu(|_at, _ctx| {
+        Some(Box::new(
+            MenuList::new()
+                .item(MenuItem::new(lit!("Cut")))
+                .item(MenuItem::new(lit!("Copy"))),
+        ))
+    }));
+    lay_out(&mut tree);
+    tree.focus(field);
+    lay_out(&mut tree);
+    let mut reader = Listener::attach(&mut tree);
+    press(&mut tree, Key::ContextMenu);
+    assert_eq!(reader.heard(&mut tree).last(), focus("Cut").last());
 }

@@ -253,11 +253,13 @@ by crate for clarity, not because crates version independently.
 - **Focusing a widget that cannot take focus focuses the first Tab stop
   inside it.** `WidgetTree::focus`, `BuildContext::focus`, an
   `initial_focus_hint`, a modal's focus target and the focus target of
-  `EventContext::show_overlay_after_with_focus` land on the field of a
+  `EventContext::show_overlay_after_with_focus` and
+  `show_overlay_after_replacing_siblings` land on the field of a
   composite such as a `SearchField` or a `TextInput`, where they used to
   leave keyboard focus on its outer node, which takes no keys. A focusable
   widget is still focused itself, and a widget with no Tab stop inside it is
-  still focused as named.
+  still focused as named. A delayed overlay whose focus target is not a live
+  node (`WidgetId::default()`) opens without moving focus.
 
 #### Widgets
 
@@ -584,6 +586,11 @@ by crate for clarity, not because crates version independently.
   (`access_label`, `access_labelled_by`, `access_described_by`, a tooltip)
   reaches the field a screen reader lands on**, as it already did for
   `SpinBox` and `DateEdit`.
+- **Resting the pointer on a menu row that opens a submenu no longer takes
+  keyboard focus out of the menu.** The submenu opens and the keys stay in
+  the menu the row belongs to; Right, Enter or Space on the row enters the
+  submenu. Before, focus went to a part of the submenu that took no keys and
+  that a screen reader could not report, and Right no longer entered it.
 - **A `SearchField` is one named field to screen readers.** Its editing
   field is the `SearchInput`, named by `.label`, and with suggestions it
   carries the popup state itself: it opens a list box, says whether the list
@@ -595,6 +602,10 @@ by crate for clarity, not because crates version independently.
   label and `access_described_by` on a `SearchField` now name its field. A
   `CommandPalette`'s query field is a `SearchInput` too, so a screen reader
   calls it a search field.
+- **Menus opened from the keyboard start on their first row**, so a screen
+  reader hears a row and Enter has one to run; a menu opened again no
+  longer starts on the row chosen last time, and one opened by a click
+  highlights nothing.
 - **In a `CodeEditor`, the completion list follows text the input system
   commits.** After the accent popup replaced a typed `e` with `é`, or an
   emoji or dictated text was inserted, the list stayed open on the old word;

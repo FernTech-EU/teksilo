@@ -640,6 +640,21 @@ impl Widget for MenuList {
             teksilo_core::binding::BindingLevel::AccessibilityOnly,
         );
         self.highlight = focused_index.clone();
+        // A parked menu reopens with no highlight: menu bar menus and
+        // submenus are built once and parked between openings, and the row
+        // chosen last time is not where the next opening starts. A
+        // submenu's dismissal parks the submenu's list, not its parent's, so
+        // the parent keeps the row that opened it.
+        {
+            let active = ctx.activation_signal(ctx.self_id());
+            let highlight = focused_index.clone();
+            ctx.effect(&active, move |active| {
+                if !*active && highlight.get().is_some() {
+                    highlight.set(None);
+                }
+            });
+        }
+        let focus_visible = ctx.focus_visible();
         // The rows as a reader counts them, filled in once every row has an id.
         let rows: SharedMenuRows = Rc::new(RefCell::new(MenuRows::default()));
         self.rows = rows.clone();
@@ -1029,7 +1044,11 @@ impl Widget for MenuList {
                             EventResponse::Ignored
                         }
                         Key::Escape => {
-                            // Bubble to the tree-level Escape overlay dismissal.
+                            // Bubble to the tree-level Escape overlay
+                            // dismissal. The menu is closing: forget its
+                            // highlight now, since a reopening before the
+                            // next layout pass would not see it parked.
+                            focused_index.set(None);
                             EventResponse::Ignored
                         }
                         _ => {
@@ -1119,6 +1138,31 @@ impl Widget for MenuList {
                     }
                 },
             )
+            .on_focus({
+                let focused_index = self.highlight.clone();
+                let visibilities = Rc::new(self.item_visibility.clone());
+                move |gained, ctx| {
+                    // Arriving from the keyboard (F10 then Down, Alt+letter,
+                    // the menu key, Shift+F10, a screen reader) with nothing
+                    // highlighted: highlight the first shown row, the row
+                    // Home goes to, so the reader hears a row and Enter
+                    // has one to run. A pointer opening leaves no highlight.
+                    if !gained || focused_index.get().is_some() || !focus_visible.get() {
+                        return;
+                    }
+                    let first = (0..item_count).find(|&i| {
+                        visibilities
+                            .get(i)
+                            .and_then(|o| o.as_ref())
+                            .map(|p| p.get())
+                            .unwrap_or(true)
+                    });
+                    if let Some(first) = first {
+                        focused_index.set(Some(first));
+                        ctx.request_accessibility_update();
+                    }
+                }
+            })
             .focusable(true);
 
         ctx.apply_self_handlers(handler_set);

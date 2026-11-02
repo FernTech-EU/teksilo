@@ -663,6 +663,13 @@ impl Widget for MenuItem {
                             // submenu already open two rows up must not
                             // take that submenu down with it. See
                             // `show_overlay_after_replacing_siblings`.
+                            //
+                            // A submenu the pointer opens leaves the keyboard
+                            // in this row's menu, as on every desktop: the
+                            // keys enter it on Right, Enter or Space, an AT
+                            // action or a click, the routes above. So the
+                            // focus target is the null id, which names no live
+                            // node and therefore moves nothing.
                             ctx.show_overlay_after_replacing_siblings(
                                 OverlayRequest::new(
                                     sub_id,
@@ -672,7 +679,7 @@ impl Widget for MenuItem {
                                 )
                                 .on_dismiss(dismiss_for_hover.clone()),
                                 open_delay,
-                                sub_id,
+                                WidgetId::default(),
                             );
                         } else {
                             int_hover.set(MenuItemState::Idle);

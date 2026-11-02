@@ -579,9 +579,8 @@ fn picking_a_segment_from_the_overflow_menu_by_keyboard_fires_on_change() {
     pick.tree.focus(chevron);
     pick.tree.press_key(Key::Enter, Modifiers::NONE);
     pick.settle();
-    // Rows "Five", "Six" and "Seven" are in the menu; Down highlights the
-    // first of them.
-    pick.tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    // Rows "Five", "Six" and "Seven" are in the menu; opened from the
+    // keyboard, it highlights the first of them.
     pick.tree.press_key(Key::Enter, Modifiers::NONE);
     pick.settle();
 

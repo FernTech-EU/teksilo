@@ -2111,7 +2111,10 @@ impl<'ops> EventContext<'ops> {
     ///
     /// `focus_target` is focused as
     /// [`WidgetTree::focus`](crate::widget_tree::WidgetTree::focus) focuses a
-    /// node: one that cannot take focus hands it to its first Tab stop.
+    /// node: one that cannot take focus hands it to its first Tab stop. A
+    /// `focus_target` that is not a live, active node when the overlay opens
+    /// moves nothing, which is what the null id (`WidgetId::default()`) asks
+    /// for.
     pub fn show_overlay_after_with_focus(
         &mut self,
         request: crate::overlay::OverlayRequest,
@@ -2133,6 +2136,13 @@ impl<'ops> EventContext<'ops> {
     /// new submenu actually opens means a pointer merely passing through
     /// costs nothing, and one that settles gets the swap on the same
     /// frame — no window with two submenus on screen.
+    ///
+    /// `focus_target` follows the rule of
+    /// [`show_overlay_after_with_focus`](Self::show_overlay_after_with_focus):
+    /// a node that cannot take focus hands it to its first Tab stop, and one
+    /// that is not a live, active node when the overlay opens (the null id,
+    /// `WidgetId::default()`) moves nothing. A submenu opened by hover passes
+    /// the null id, so the keyboard stays in the menu the pointer is in.
     pub fn show_overlay_after_replacing_siblings(
         &mut self,
         request: crate::overlay::OverlayRequest,
