@@ -33,6 +33,7 @@ a11y-window-maximize-name = הגדלה
 a11y-window-restore-name = שחזור
 a11y-window-close-name = סגירה
 a11y-stepper-indicator-strip-name = שלבים
+a11y-stepper-step-announcement = שלב { $n } מתוך { $total }, { $title }
 a11y-stepper-content-name = תוכן השלב
 tab-close-tooltip = סגירת הלשונית
 a11y-builtin-browse = עיון

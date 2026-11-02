@@ -34,6 +34,7 @@ a11y-window-maximize-name = Maximalizovat
 a11y-window-restore-name = Obnovit
 a11y-window-close-name = Zavřít
 a11y-stepper-indicator-strip-name = Kroky
+a11y-stepper-step-announcement = Krok { $n } z { $total }, { $title }
 a11y-stepper-content-name = Obsah kroku
 tab-close-tooltip = Zavřít kartu
 a11y-builtin-browse = Procházet

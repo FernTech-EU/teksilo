@@ -35,6 +35,7 @@ a11y-window-maximize-name = Μεγιστοποίηση
 a11y-window-restore-name = Επαναφορά
 a11y-window-close-name = Κλείσιμο
 a11y-stepper-indicator-strip-name = Βήματα
+a11y-stepper-step-announcement = Βήμα { $n } από { $total }, { $title }
 a11y-stepper-content-name = Περιεχόμενο βήματος
 tab-close-tooltip = Κλείσιμο καρτέλας
 a11y-builtin-browse = Περιήγηση

@@ -109,6 +109,27 @@ and **non-linear** (clickable) navigation, optional + skippable steps, per
 step validation gating, a generic chrome slot, and a
 `StepperController` handle for programmatic reset / jump / introspection.
 
+### Focus and announcement
+
+After Next, Back, Skip or <kbd>Enter</kbd> moves a linear stepper, focus
+goes to the first control of the new step, or to the footer's primary
+button (Next, else Finish) when that first control is not enabled, as on a
+summary page with no control at all. Focus moves once.
+The new step is then announced to a screen reader ("Step 2 of 3, Details"),
+after the focused control has been read. Only visible steps are counted, in
+the announcement and on the step markers alike. A move that is refused (a
+closed `complete_when` gate, a failing `validate_on_next`) moves nothing and
+says nothing; neither does a programmatic `go_to`, and activating a marker
+of a non-linear stepper leaves focus on the marker.
+
+The choice follows the step's **first** control, by its enabled state as of
+the last layout pass: a step whose first control is disabled gets the
+primary button even if a later control is enabled. A first control that is
+hidden at the moment of the move is not noticed; focus then goes to the
+step's next control, or nowhere when there is none.
+<kbd>Enter</kbd> in a single-line field of the last step still finishes,
+see `Stepper::enter_advances`.
+
 ### Data flow
 
 The application owns its form state as `Signal`s. A step's content factory

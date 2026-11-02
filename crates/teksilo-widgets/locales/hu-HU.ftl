@@ -34,6 +34,7 @@ a11y-window-maximize-name = Maximalizálás
 a11y-window-restore-name = Visszaállítás
 a11y-window-close-name = Bezárás
 a11y-stepper-indicator-strip-name = Lépések
+a11y-stepper-step-announcement = { $n }. lépés, összesen { $total }, { $title }
 a11y-stepper-content-name = Lépés tartalma
 tab-close-tooltip = Lap bezárása
 a11y-builtin-browse = Tallózás

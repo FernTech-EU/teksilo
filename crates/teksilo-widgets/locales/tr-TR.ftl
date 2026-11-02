@@ -34,6 +34,7 @@ a11y-window-maximize-name = Büyült
 a11y-window-restore-name = Geri yükle
 a11y-window-close-name = Kapat
 a11y-stepper-indicator-strip-name = Adımlar
+a11y-stepper-step-announcement = Adım { $n }, toplam { $total }, { $title }
 a11y-stepper-content-name = Adım içeriği
 tab-close-tooltip = Sekmeyi kapat
 a11y-builtin-browse = Gözat

@@ -34,6 +34,7 @@ a11y-window-maximize-name = Maximera
 a11y-window-restore-name = Återställ
 a11y-window-close-name = Stäng
 a11y-stepper-indicator-strip-name = Steg
+a11y-stepper-step-announcement = Steg { $n } av { $total }, { $title }
 a11y-stepper-content-name = Stegets innehåll
 tab-close-tooltip = Stäng fliken
 a11y-builtin-browse = Bläddra

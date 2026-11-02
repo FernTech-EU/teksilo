@@ -30,6 +30,7 @@ use teksilo_tokens::{
 };
 
 use super::StepperOrientation;
+use super::controller::StepperController;
 use super::step::StepStatus;
 use crate::primitives::{TextWidget, VStack};
 use teksilo_core::styles::density::spacing;
@@ -59,6 +60,8 @@ pub(crate) struct StepIndicator {
     /// Shared, declaration-order panel ids — used to resolve `controls`.
     panel_ids: Rc<RefCell<Vec<WidgetId>>>,
     label_block_id: Option<WidgetId>,
+    /// For the position among the visible steps.
+    controller: StepperController,
 }
 
 impl StepIndicator {
@@ -75,6 +78,7 @@ impl StepIndicator {
         circle_size: f32,
         on_activate: Option<ActivateFn>,
         panel_ids: Rc<RefCell<Vec<WidgetId>>>,
+        controller: StepperController,
     ) -> Self {
         Self {
             index,
@@ -89,7 +93,17 @@ impl StepIndicator {
             on_activate,
             panel_ids,
             label_block_id: None,
+            controller,
         }
+    }
+
+    /// The number in the circle: the position among the visible steps, the
+    /// one the reader and the step announcement give.
+    pub(crate) fn number_label(&self) -> String {
+        self.controller
+            .visible_position(self.index)
+            .unwrap_or(self.index + 1)
+            .to_string()
     }
 
     fn is_active(&self) -> bool {
@@ -115,6 +129,10 @@ impl std::fmt::Debug for StepIndicator {
 }
 
 impl Widget for StepIndicator {
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        Some(self)
+    }
+
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Locale-reactive title (+ optional supporting line). Resolving inside
         // a locale-bound `map` keeps the bound text widgets retitling on a
@@ -276,7 +294,7 @@ impl Widget for StepIndicator {
 
         // Glyph (number / check / bang / dash), centred in the circle.
         let text = match glyph {
-            Glyph::Number => (self.index + 1).to_string(),
+            Glyph::Number => self.number_label(),
             Glyph::Check => "✓".to_string(),
             Glyph::Bang => "!".to_string(),
             Glyph::Dash => "–".to_string(),
@@ -320,7 +338,11 @@ impl Widget for StepIndicator {
         if active {
             builder.set_aria_current(teksilo_core::accesskit::AriaCurrent::Step);
         }
-        builder.set_position_in_set(self.index + 1);
+        builder.set_position_in_set(
+            self.controller
+                .visible_position(self.index)
+                .unwrap_or(self.index + 1),
+        );
         // The "of N" half lives on the indicator strip, which owns the
         // `Role::TabList` / `Role::List` container node.
         let _ = self.orientation; // orientation drives strip layout, not the node

@@ -11,6 +11,27 @@
 //! step validation gating, a generic chrome slot, and a
 //! [`StepperController`] handle for programmatic reset / jump / introspection.
 //!
+//! # Focus and announcement
+//!
+//! After Next, Back, Skip or <kbd>Enter</kbd> moves a linear stepper, focus
+//! goes to the first control of the new step, or to the footer's primary
+//! button (Next, else Finish) when that first control is not enabled, as on a
+//! summary page with no control at all. Focus moves once.
+//! The new step is then announced to a screen reader ("Step 2 of 3, Details"),
+//! after the focused control has been read. Only visible steps are counted, in
+//! the announcement and on the step markers alike. A move that is refused (a
+//! closed `complete_when` gate, a failing `validate_on_next`) moves nothing and
+//! says nothing; neither does a programmatic `go_to`, and activating a marker
+//! of a non-linear stepper leaves focus on the marker.
+//!
+//! The choice follows the step's **first** control, by its enabled state as of
+//! the last layout pass: a step whose first control is disabled gets the
+//! primary button even if a later control is enabled. A first control that is
+//! hidden at the moment of the move is not noticed; focus then goes to the
+//! step's next control, or nowhere when there is none.
+//! <kbd>Enter</kbd> in a single-line field of the last step still finishes,
+//! see [`Stepper::enter_advances`].
+//!
 //! # Data flow
 //!
 //! The application owns its form state as `Signal`s. A step's content factory
@@ -57,6 +78,7 @@ use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
@@ -397,6 +419,7 @@ impl Widget for Stepper {
             self.steps.iter().map(|s| s.validate.clone()).collect(),
             self.steps.iter().map(|s| s.complete.clone()).collect(),
             self.finish_action.clone(),
+            self.steps.iter().map(|s| s.title.clone()).collect(),
         ));
 
         let panel_ids: Rc<RefCell<Vec<WidgetId>>> = Rc::new(RefCell::new(Vec::new()));
@@ -405,6 +428,8 @@ impl Widget for Stepper {
         // Pre-mount every step pane so `panel_ids` is complete on the first
         // build (required for the indicators' `controls` and the panes'
         // `labelled_by`). The content factory runs eagerly here.
+        let mut pane_first_enabled: Vec<Option<Signal<bool>>> =
+            Vec::with_capacity(self.steps.len());
         let mut switcher = Switcher::new(controller.current_step_signal())
             .capture_child_ids_into(panel_ids.clone());
         for step in &self.steps {
@@ -421,8 +446,16 @@ impl Widget for Stepper {
                 indicator_ids.clone(),
             );
             let pane_id = ctx.add(pane);
+            // Panes are still active here, before the `Switcher` parks them,
+            // so this is the one place to find each pane's first control. Its
+            // enabled state is node-resident and kept current while the pane
+            // is dormant, so a move can tell whether a request into the pane
+            // will land.
+            let first = ctx.first_focus_capable_descendant(pane_id);
+            pane_first_enabled.push(first.map(|id| ctx.effective_enabled_signal(id)));
             switcher = switcher.child(pane_id);
         }
+        nav.set_panes(panel_ids.clone(), pane_first_enabled);
         let switcher_id = ctx.add(switcher);
 
         let metas: Vec<StepMeta> = self

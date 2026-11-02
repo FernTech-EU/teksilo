@@ -157,6 +157,11 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **After Next, Back, Skip or Enter, a `Stepper` moves focus into the new step
+  and announces it** ("Step 2 of 3, Details"). Focus lands on the step's first
+  control, or on Next (Finish on the last step) when the step has no enabled
+  control, and moves once. Step markers and their numbers count only visible
+  steps.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.

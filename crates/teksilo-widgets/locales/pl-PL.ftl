@@ -33,6 +33,7 @@ a11y-window-maximize-name = Maksymalizuj
 a11y-window-restore-name = Przywróć
 a11y-window-close-name = Zamknij
 a11y-stepper-indicator-strip-name = Kroki
+a11y-stepper-step-announcement = Krok { $n } z { $total }, { $title }
 a11y-stepper-content-name = Zawartość kroku
 tab-close-tooltip = Zamknij kartę
 a11y-builtin-browse = Przeglądaj

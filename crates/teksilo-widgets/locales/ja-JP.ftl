@@ -34,6 +34,7 @@ a11y-window-maximize-name = 最大化
 a11y-window-restore-name = 元に戻す
 a11y-window-close-name = 閉じる
 a11y-stepper-indicator-strip-name = ステップ
+a11y-stepper-step-announcement = ステップ { $n }（全{ $total }ステップ）、{ $title }
 a11y-stepper-content-name = ステップの内容
 tab-close-tooltip = タブを閉じる
 a11y-builtin-browse = 参照

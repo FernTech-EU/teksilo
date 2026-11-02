@@ -34,6 +34,7 @@ a11y-window-maximize-name = Maximaliseren
 a11y-window-restore-name = Herstellen
 a11y-window-close-name = Sluiten
 a11y-stepper-indicator-strip-name = Stappen
+a11y-stepper-step-announcement = Stap { $n } van { $total }, { $title }
 a11y-stepper-content-name = Inhoud van de stap
 tab-close-tooltip = Tabblad sluiten
 a11y-builtin-browse = Bladeren

@@ -33,6 +33,7 @@ a11y-window-maximize-name = Suurenna
 a11y-window-restore-name = Palauta
 a11y-window-close-name = Sulje
 a11y-stepper-indicator-strip-name = Vaiheet
+a11y-stepper-step-announcement = Vaihe { $n }, yhteensä { $total }, { $title }
 a11y-stepper-content-name = Vaiheen sisältö
 tab-close-tooltip = Sulje välilehti
 a11y-builtin-browse = Selaa

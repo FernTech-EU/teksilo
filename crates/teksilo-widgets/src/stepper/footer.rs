@@ -106,8 +106,9 @@ impl Widget for StepperFooter {
                 .on_activate_fn({
                     let nav = self.nav.clone();
                     move |ctx| {
+                        let from = nav.controller().current();
                         nav.controller().back();
-                        nav.focus_primary(ctx);
+                        nav.focus_step(ctx, from);
                     }
                 }),
         );
@@ -143,8 +144,9 @@ impl Widget for StepperFooter {
                 .on_activate_fn({
                     let nav = self.nav.clone();
                     move |ctx| {
+                        let from = nav.controller().current();
                         nav.controller().skip();
-                        nav.focus_primary(ctx);
+                        nav.focus_step(ctx, from);
                     }
                 }),
         );

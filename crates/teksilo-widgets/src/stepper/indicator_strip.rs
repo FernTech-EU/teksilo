@@ -107,6 +107,7 @@ impl Widget for IndicatorStrip {
                 self.circle_size,
                 on_activate,
                 self.panel_ids.clone(),
+                self.controller.clone(),
             ));
             // A step gated out by `Step::visible_when` drops its marker too —
             // otherwise the strip advertises a step navigation refuses to
@@ -181,8 +182,10 @@ impl Widget for IndicatorStrip {
         // item's set size by walking *up* from it.
         // In a wizard the total is the whole point: "step 2 of 4" is what
         // tells the user how much is left.
-        if !self.steps.is_empty() {
-            builder.set_size_of_set(self.steps.len());
+        // Hidden steps are not on the strip, so they are not in the set.
+        let visible = self.controller.visible_count();
+        if visible > 0 {
+            builder.set_size_of_set(visible);
         }
     }
 

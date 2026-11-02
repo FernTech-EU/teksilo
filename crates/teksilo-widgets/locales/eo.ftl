@@ -23,6 +23,7 @@ a11y-window-maximize-name = Maksimumigi
 a11y-window-restore-name = Restarigi
 a11y-window-close-name = Fermi
 a11y-stepper-indicator-strip-name = Paŝoj
+a11y-stepper-step-announcement = Paŝo { $n } el { $total }, { $title }
 a11y-stepper-content-name = Enhavo de la paŝo
 tab-close-tooltip = Fermi langeton
 a11y-builtin-browse = Foliumi

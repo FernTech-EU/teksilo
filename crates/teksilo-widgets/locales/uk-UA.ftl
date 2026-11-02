@@ -34,6 +34,7 @@ a11y-window-maximize-name = Розгорнути
 a11y-window-restore-name = Відновити
 a11y-window-close-name = Закрити
 a11y-stepper-indicator-strip-name = Кроки
+a11y-stepper-step-announcement = Крок { $n } з { $total }, { $title }
 a11y-stepper-content-name = Вміст кроку
 tab-close-tooltip = Закрити вкладку
 a11y-builtin-browse = Огляд

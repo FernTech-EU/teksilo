@@ -11,6 +11,7 @@ use std::rc::Rc;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::widget::EventContext;
 use teksilo_core::widget_id::WidgetId;
+use teksilo_i18n::LocalizedString;
 
 use super::controller::StepperController;
 use super::step::{StepStatus, StepValidator};
@@ -93,6 +94,15 @@ pub(crate) struct StepNav {
     /// follows the flow instead of being stranded on the dormant pane.
     next_focus: RefCell<Option<WidgetId>>,
     finish_focus: RefCell<Option<WidgetId>>,
+    /// Step titles, in declaration order, for the step announcement.
+    titles: Vec<LocalizedString>,
+    /// The step panes, read at call time (re-captured on a rebuild).
+    panel_ids: RefCell<Option<Rc<RefCell<Vec<WidgetId>>>>>,
+    /// The enabled state of each pane's first control, found when the pane
+    /// was built (`None`: no control). A dormant pane cannot be asked when
+    /// the handler runs, and there is one pending focus request, so the
+    /// choice between the pane and the primary button is made from this.
+    pane_first_enabled: RefCell<Vec<Option<Signal<bool>>>>,
 }
 
 impl StepNav {
@@ -101,6 +111,7 @@ impl StepNav {
         validators: Vec<Option<StepValidator>>,
         completion: Vec<Option<Prop<bool>>>,
         finish_action: Option<FinishAction>,
+        titles: Vec<LocalizedString>,
     ) -> Self {
         Self {
             controller,
@@ -109,7 +120,21 @@ impl StepNav {
             finish_action,
             next_focus: RefCell::new(None),
             finish_focus: RefCell::new(None),
+            titles,
+            panel_ids: RefCell::new(None),
+            pane_first_enabled: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Hand over the step panes and the enabled state of each one's first
+    /// control.
+    pub(crate) fn set_panes(
+        &self,
+        panel_ids: Rc<RefCell<Vec<WidgetId>>>,
+        first_enabled: Vec<Option<Signal<bool>>>,
+    ) {
+        *self.panel_ids.borrow_mut() = Some(panel_ids);
+        *self.pane_first_enabled.borrow_mut() = first_enabled;
     }
 
     pub(crate) fn controller(&self) -> &StepperController {
@@ -153,17 +178,64 @@ impl StepNav {
         }
     }
 
-    /// Move focus to whichever primary button is shown for the *current*
-    /// step, so a navigation that hides the focused control (Back / Skip /
-    /// Enter) does not strand focus on a dormant pane.
-    pub(crate) fn focus_primary(&self, ctx: &mut EventContext) {
-        let target = if self.controller.has_next() {
-            *self.next_focus.borrow()
-        } else {
-            *self.finish_focus.borrow()
-        };
-        if let Some(t) = target {
-            ctx.request_focus(t);
+    /// After the controller moved from step `from`: put focus in the new step
+    /// and say which step it is.
+    ///
+    /// Exactly one focus request is made. Focus goes to the new page's first
+    /// control when that control is enabled; otherwise (a summary page, or a
+    /// page whose controls are disabled) to the primary button, Next while a
+    /// step remains and Finish on the last one. Either request waits for the
+    /// layout that wakes its target, so a button the move has just hidden is
+    /// never the target and focus is not left on the control that went away.
+    ///
+    /// The sentence "Step 2 of 3, Details" is announced afterwards: the
+    /// announcer holds it out of the update that moves focus, so the reader
+    /// says the field first and the step right after. Nothing happens when
+    /// the step did not change.
+    ///
+    /// Only the first control is checked, by its enabled state as of the last
+    /// layout pass. A first control hidden at the moment of the move is not
+    /// noticed: the request into the page lands on the next control, or finds
+    /// nothing when there is none.
+    pub(crate) fn focus_step(&self, ctx: &mut EventContext, from: usize) {
+        let to = self.controller.current();
+        if to == from {
+            return;
+        }
+        let pane = self
+            .panel_ids
+            .borrow()
+            .as_ref()
+            .and_then(|ids| ids.borrow().get(to).copied());
+        let control_enabled = self
+            .pane_first_enabled
+            .borrow()
+            .get(to)
+            .and_then(|s| s.as_ref().map(|s| s.get()))
+            .unwrap_or(false);
+        match pane {
+            Some(pane) if control_enabled => ctx.request_focus_into(pane),
+            _ => {
+                let target = if self.controller.has_next() {
+                    *self.next_focus.borrow()
+                } else {
+                    *self.finish_focus.borrow()
+                };
+                if let Some(t) = target {
+                    ctx.request_focus(t);
+                }
+            }
+        }
+        if let (Some(n), Some(title)) = (self.controller.visible_position(to), self.titles.get(to))
+        {
+            ctx.announce(
+                teksilo_i18n::tr_widget!(a11y_stepper_step_announcement(
+                    n = n as i64,
+                    total = self.controller.visible_count() as i64,
+                    title = title.resolve_now()
+                ))
+                .resolve_now(),
+            );
         }
     }
 
@@ -182,7 +254,7 @@ impl StepNav {
         // in Error).
         self.controller.set_status(i, StepStatus::Complete);
         self.controller.next();
-        self.focus_primary(ctx);
+        self.focus_step(ctx, i);
         true
     }
 

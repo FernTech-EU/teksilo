@@ -32,6 +32,7 @@ a11y-window-maximize-name = 최대화
 a11y-window-restore-name = 복원
 a11y-window-close-name = 닫기
 a11y-stepper-indicator-strip-name = 단계
+a11y-stepper-step-announcement = { $total }단계 중 { $n }단계, { $title }
 a11y-stepper-content-name = 단계 내용
 tab-close-tooltip = 탭 닫기
 a11y-builtin-browse = 찾아보기

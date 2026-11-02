@@ -34,6 +34,7 @@ a11y-window-maximize-name = Развернуть
 a11y-window-restore-name = Восстановить
 a11y-window-close-name = Закрыть
 a11y-stepper-indicator-strip-name = Шаги
+a11y-stepper-step-announcement = Шаг { $n } из { $total }, { $title }
 a11y-stepper-content-name = Содержимое шага
 tab-close-tooltip = Закрыть вкладку
 a11y-builtin-browse = Обзор

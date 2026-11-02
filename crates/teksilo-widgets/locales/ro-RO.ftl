@@ -34,6 +34,7 @@ a11y-window-maximize-name = Maximizare
 a11y-window-restore-name = Restaurare
 a11y-window-close-name = Închidere
 a11y-stepper-indicator-strip-name = Pași
+a11y-stepper-step-announcement = Pasul { $n } din { $total }, { $title }
 a11y-stepper-content-name = Conținutul pasului
 tab-close-tooltip = Închidere filă
 a11y-builtin-browse = Răsfoire

@@ -33,6 +33,7 @@ a11y-window-maximize-name = تكبير
 a11y-window-restore-name = استعادة
 a11y-window-close-name = إغلاق
 a11y-stepper-indicator-strip-name = الخطوات
+a11y-stepper-step-announcement = الخطوة { $n } من { $total }، { $title }
 a11y-stepper-content-name = محتوى الخطوة
 tab-close-tooltip = إغلاق علامة التبويب
 a11y-builtin-browse = استعراض

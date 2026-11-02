@@ -34,6 +34,7 @@ a11y-window-maximize-name = Maksimer
 a11y-window-restore-name = Gjenopprett
 a11y-window-close-name = Lukk
 a11y-stepper-indicator-strip-name = Trinn
+a11y-stepper-step-announcement = Trinn { $n } av { $total }, { $title }
 a11y-stepper-content-name = Trinninnhold
 tab-close-tooltip = Lukk fane
 a11y-builtin-browse = Bla gjennom

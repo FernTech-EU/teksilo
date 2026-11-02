@@ -315,6 +315,22 @@ impl StepperController {
             .unwrap_or(false)
     }
 
+    /// The 1-based position of step `idx` among the visible steps (disabled
+    /// ones included, they stay on the strip), or `None` for a hidden step.
+    /// The one count the step markers and the step announcement share.
+    pub(crate) fn visible_position(&self, idx: usize) -> Option<usize> {
+        let st = self.inner.borrow();
+        if !st.visible.get(idx).copied().unwrap_or(false) {
+            return None;
+        }
+        Some(st.visible[..idx].iter().filter(|v| **v).count() + 1)
+    }
+
+    /// How many steps are visible (disabled ones included).
+    pub(crate) fn visible_count(&self) -> usize {
+        self.inner.borrow().visible.iter().filter(|v| **v).count()
+    }
+
     /// `true` if step `idx` participates in the flow — visible **and** not
     /// [`StepStatus::Disabled`].
     pub fn is_reachable(&self, idx: usize) -> bool {

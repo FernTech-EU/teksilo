@@ -897,3 +897,515 @@ fn tooltip_appears_on_hover() {
     );
     assert!(tree.find_by_label("Tip").is_some());
 }
+
+// ── focus and announcement after a move ─────────────────────────────────────
+
+/// A focusable stand-in for a form field.
+fn field(
+    label: &'static str,
+) -> impl Fn() -> teksilo_core::widget_builder::WidgetWithHandlers<crate::primitives::TextWidget> {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    move || crate::primitives::TextWidget::new(lit!(label)).focusable(true)
+}
+
+/// Field, summary (no control), field.
+fn field_summary_field() -> Vec<Step> {
+    vec![
+        Step::new(lit!("Details")).content(field("field one")),
+        Step::new(lit!("Review")).content(|| crate::primitives::TextWidget::new(lit!("summary"))),
+        Step::new(lit!("Extras")).content(field("field three")),
+    ]
+}
+
+fn named_form_steps() -> Vec<Step> {
+    vec![
+        Step::new(lit!("Template")).content(field("field one")),
+        Step::new(lit!("Details")).content(field("field two")),
+        Step::new(lit!("Options")).content(field("field three")),
+    ]
+}
+
+fn focused_label(t: &WidgetTree, label: &str) -> bool {
+    t.focused().is_some() && t.focused() == t.find_by_label(label)
+}
+
+/// Every announcement after `seen`, once the focus update and the next one
+/// have both been handed out (the announcer holds a message out of an update
+/// that moves focus).
+fn heard_since(t: &mut WidgetTree, seen: u64) -> Vec<String> {
+    let _ = t.sync_accessibility();
+    let _ = t.sync_accessibility();
+    t.announcements_since(seen)
+        .into_iter()
+        .map(|a| a.text)
+        .collect()
+}
+
+fn mark(t: &mut WidgetTree) -> u64 {
+    let _ = t.sync_accessibility();
+    let _ = t.sync_accessibility();
+    t.announcements_since(0).last().map_or(0, |a| a.seq)
+}
+
+#[test]
+fn next_moves_focus_to_the_first_control_of_the_new_step() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(named_form_steps()),
+    );
+    layout(&mut t);
+    click_label(&mut t, "Next");
+    assert_eq!(ctrl.current(), 1);
+    layout(&mut t);
+    assert!(
+        focused_label(&t, "field two"),
+        "focus is in step 2, got {:?}",
+        t.focused()
+    );
+}
+
+#[test]
+fn back_moves_focus_to_the_first_control_of_the_previous_step() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(named_form_steps()),
+    );
+    layout(&mut t);
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    click_label(&mut t, "Back");
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 0);
+    assert!(focused_label(&t, "field one"), "got {:?}", t.focused());
+}
+
+#[test]
+fn enter_in_a_field_lands_in_the_next_steps_first_field() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(named_form_steps()),
+    );
+    layout(&mut t);
+    let one = t.find_by_label("field one").unwrap();
+    t.focus(one);
+    press_enter(&mut t);
+    assert_eq!(ctrl.current(), 1);
+    layout(&mut t);
+    assert!(focused_label(&t, "field two"), "got {:?}", t.focused());
+}
+
+#[test]
+fn a_last_page_without_a_control_focuses_finish() {
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(vec![
+        Step::new(lit!("Details")).content(field("field one")),
+        Step::new(lit!("Review")).content(|| crate::primitives::TextWidget::new(lit!("summary"))),
+    ]));
+    layout(&mut t);
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    assert!(t.find_by_label("Next").is_none(), "Next is dormant");
+    assert!(focused_label(&t, "Finish"), "got {:?}", t.focused());
+}
+
+#[test]
+fn a_middle_page_without_a_control_focuses_next() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(field_summary_field()),
+    );
+    layout(&mut t);
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 1);
+    assert!(focused_label(&t, "Next"), "got {:?}", t.focused());
+}
+
+#[test]
+fn finish_stays_the_last_tab_stop_of_the_last_page() {
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    let stepper = t.add(Stepper::new().controller(ctrl.clone()).steps(form_steps()));
+    layout(&mut t);
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    let stops = t.tab_stops_within(stepper);
+    let finish = t.find_by_label("Finish").expect("Finish is shown");
+    assert_eq!(stops.last(), Some(&finish), "stops: {stops:?}");
+}
+
+#[test]
+fn a_refused_next_moves_no_focus_and_says_nothing() {
+    let gate = Signal::new(false);
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(vec![
+        Step::new(lit!("One"))
+            .complete_when(gate.clone())
+            .content(field("field one")),
+        Step::new(lit!("Two")).content(field("field two")),
+    ]));
+    layout(&mut t);
+    let one = t.find_by_label("field one").unwrap();
+    t.focus(one);
+    let seen = mark(&mut t);
+    press_enter(&mut t);
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 0);
+    assert_eq!(t.focused(), Some(one), "focus did not move");
+    assert!(heard_since(&mut t, seen).is_empty());
+}
+
+#[test]
+fn the_new_step_is_announced_after_the_focus_lands() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(named_form_steps()),
+    );
+    layout(&mut t);
+    assert!(
+        heard_since(&mut t, 0)
+            .iter()
+            .all(|s| !s.starts_with("Step "))
+    );
+    let seen = mark(&mut t);
+
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    // The update that moves focus carries nothing: the announcer holds the
+    // sentence out of it, so the reader says the field first.
+    let _ = t.sync_accessibility();
+    assert!(t.announcements_since(seen).is_empty());
+    let heard = heard_since(&mut t, seen);
+    assert_eq!(heard, vec!["Step 2 of 3, Details".to_string()]);
+}
+
+#[test]
+fn programmatic_moves_and_marker_clicks_say_nothing() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .non_linear(true)
+            .steps(named_form_steps()),
+    );
+    layout(&mut t);
+    let seen = mark(&mut t);
+    ctrl.go_to(2);
+    layout(&mut t);
+    click_label(&mut t, "Template");
+    assert_eq!(ctrl.current(), 0);
+    assert!(heard_since(&mut t, seen).is_empty());
+}
+
+#[test]
+fn the_step_announcement_is_localized() {
+    let (_mgr, mut t) = crate::common::locale_switch_test::speaking("fr-FR");
+    let ctrl = StepperController::new(3);
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(named_form_steps()),
+    );
+    layout(&mut t);
+    let seen = mark(&mut t);
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    assert_eq!(
+        heard_since(&mut t, seen),
+        vec!["Étape 2 sur 3, Details".to_string()]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn hidden_steps_are_left_out_of_the_count_in_the_sentence_and_the_markers() {
+    let shown = Signal::new(false);
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .non_linear(true)
+            .steps(branching(&shown)),
+    );
+    layout(&mut t);
+    let update = t.sync_accessibility();
+    let three = node_id_by_label(&update, "Three").unwrap();
+    crate::a11y_set_semantics::assert_announces(&update, three, 2, 2, "the third declared step");
+
+    let seen = mark(&mut t);
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 2);
+    assert_eq!(
+        heard_since(&mut t, seen),
+        vec!["Step 2 of 2, Three".to_string()]
+    );
+}
+
+// ── more paths through focus_step ───────────────────────────────────────────
+
+/// Field, optional field, field.
+fn field_optional_field() -> Vec<Step> {
+    vec![
+        Step::new(lit!("Template")).content(field("field one")),
+        Step::new(lit!("Details"))
+            .optional(true)
+            .content(field("field two")),
+        Step::new(lit!("Options")).content(field("field three")),
+    ]
+}
+
+#[test]
+fn skip_lands_in_the_step_after_the_skipped_one_and_announces_it() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(field_optional_field()),
+    );
+    layout(&mut t);
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    let seen = mark(&mut t);
+    click_label(&mut t, "Skip");
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 2);
+    assert!(focused_label(&t, "field three"), "got {:?}", t.focused());
+    assert_eq!(
+        heard_since(&mut t, seen),
+        vec!["Step 3 of 3, Options".to_string()]
+    );
+}
+
+#[test]
+fn a_move_that_goes_nowhere_says_nothing_and_leaves_focus_alone() {
+    // Skip on an optional last step cannot move: the guard on an unchanged
+    // step keeps both the focus request and the sentence out.
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(vec![
+        Step::new(lit!("Template")).content(field("field one")),
+        Step::new(lit!("Details"))
+            .optional(true)
+            .content(field("field two")),
+    ]));
+    layout(&mut t);
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    let two = t.find_by_label("field two").unwrap();
+    t.focus(two);
+    let seen = mark(&mut t);
+    click_label(&mut t, "Skip");
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 1, "there is nowhere to skip to");
+    assert_eq!(t.focused(), Some(two));
+    assert!(heard_since(&mut t, seen).is_empty());
+}
+
+#[test]
+fn a_failing_validator_moves_no_focus_and_says_nothing() {
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(vec![
+        Step::new(lit!("One"))
+            .validate_on_next(|| false)
+            .content(field("field one")),
+        Step::new(lit!("Two")).content(field("field two")),
+    ]));
+    layout(&mut t);
+    let one = t.find_by_label("field one").unwrap();
+    t.focus(one);
+    let seen = mark(&mut t);
+    press_enter(&mut t);
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 0);
+    assert_eq!(t.focused(), Some(one));
+    assert!(heard_since(&mut t, seen).is_empty());
+}
+
+#[test]
+fn activating_a_marker_leaves_focus_on_the_marker() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .non_linear(true)
+            .steps(named_form_steps()),
+    );
+    layout(&mut t);
+    let marker = t.find_by_label("Options").expect("the third marker");
+    t.focus(marker);
+    click_label(&mut t, "Options");
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 2);
+    assert_eq!(t.focused(), Some(marker));
+}
+
+/// A page whose only control is disabled: the request into the page has
+/// nothing to land on, and the control that had focus goes dormant.
+fn field_disabled_field() -> Vec<Step> {
+    vec![
+        Step::new(lit!("One")).content(field("field one")),
+        Step::new(lit!("Two")).content(|| crate::button::Button::new(lit!("off")).enabled(false)),
+        Step::new(lit!("Three"))
+            .content(|| crate::button::Button::new(lit!("off too")).enabled(false)),
+    ]
+}
+
+#[test]
+fn a_page_with_only_disabled_controls_never_leaves_focus_on_nothing() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(field_disabled_field()),
+    );
+    layout(&mut t);
+
+    // Enter from the field of the old page, onto a middle page.
+    let one = t.find_by_label("field one").unwrap();
+    t.focus(one);
+    press_enter(&mut t);
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 1);
+    assert!(focused_label(&t, "Next"), "got {:?}", t.focused());
+
+    // Next onto the last page: Next goes dormant, Finish is not awake yet.
+    click_label(&mut t, "Next");
+    layout(&mut t);
+    assert_eq!(ctrl.current(), 2);
+    assert!(focused_label(&t, "Finish"), "got {:?}", t.focused());
+}
+
+#[test]
+fn a_step_shown_later_joins_the_marker_numbers_and_the_set_size() {
+    let shown = Signal::new(false);
+    let mut t = tree();
+    t.add(Stepper::new().non_linear(true).steps(branching(&shown)));
+    layout(&mut t);
+    let update = t.sync_accessibility();
+    let three = node_id_by_label(&update, "Three").unwrap();
+    crate::a11y_set_semantics::assert_announces(&update, three, 2, 2, "Three while Two is hidden");
+
+    shown.set(true);
+    layout(&mut t);
+    let update = t.sync_accessibility();
+    let three = node_id_by_label(&update, "Three").unwrap();
+    crate::a11y_set_semantics::assert_announces(&update, three, 3, 3, "Three once Two shows");
+    let two = node_id_by_label(&update, "Two").unwrap();
+    crate::a11y_set_semantics::assert_announces(&update, two, 2, 3, "Two once shown");
+}
+
+fn circle_number(t: &mut WidgetTree, label: &str) -> String {
+    let update = t.sync_accessibility();
+    let node = update
+        .nodes
+        .iter()
+        .find(|(_, n)| {
+            n.role() == accesskit::Role::ListItem
+                && teksilo_core::accessibility::announced_text(n) == Some(label)
+        })
+        .map(|(id, _)| *id)
+        .expect("the marker's list item");
+    let id = teksilo_core::accessibility::node_id_to_widget_id_maybe(node).expect("a widget");
+    t.widget_as_any(id)
+        .and_then(|w| w.downcast_ref::<indicator::StepIndicator>())
+        .expect("a step indicator")
+        .number_label()
+}
+
+#[test]
+fn the_circle_shows_the_position_among_the_visible_steps() {
+    let shown = Signal::new(false);
+    let mut t = tree();
+    t.add(Stepper::new().steps(branching(&shown)));
+    layout(&mut t);
+    assert_eq!(circle_number(&mut t, "One"), "1");
+    assert_eq!(circle_number(&mut t, "Three"), "2", "Two is hidden");
+
+    shown.set(true);
+    layout(&mut t);
+    assert_eq!(circle_number(&mut t, "Three"), "3");
+}
+
+/// Every widget the tree focused while `f` ran, in order.
+fn focus_moves(t: &mut WidgetTree, f: impl FnOnce(&mut WidgetTree)) -> Vec<WidgetId> {
+    let moves = Rc::new(RefCell::new(Vec::<WidgetId>::new()));
+    let _watch = {
+        let moves = moves.clone();
+        t.focused_signal().observe(move |id| {
+            if let Some(id) = id {
+                moves.borrow_mut().push(*id);
+            }
+        })
+    };
+    f(t);
+    moves.borrow().clone()
+}
+
+#[test]
+fn a_step_change_moves_focus_exactly_once() {
+    let ctrl = StepperController::new(3);
+    let mut t = tree();
+    t.add(
+        Stepper::new()
+            .controller(ctrl.clone())
+            .steps(named_form_steps()),
+    );
+    layout(&mut t);
+    let one = t.find_by_label("field one").unwrap();
+    t.focus(one);
+
+    // Enter from a field, onto a middle page.
+    let moves = focus_moves(&mut t, |t| {
+        press_enter(t);
+        layout(t);
+    });
+    let two = t.find_by_label("field two").unwrap();
+    assert_eq!(moves, vec![two], "one move, into the new page");
+
+    // Next onto the last page (its first control).
+    let moves = focus_moves(&mut t, |t| click_label(t, "Next"));
+    let three = t.find_by_label("field three").unwrap();
+    assert_eq!(moves, vec![three]);
+
+    // Back.
+    let moves = focus_moves(&mut t, |t| click_label(t, "Back"));
+    assert_eq!(moves, vec![two]);
+}
+
+#[test]
+fn a_summary_last_page_takes_one_move_onto_finish() {
+    let ctrl = StepperController::new(2);
+    let mut t = tree();
+    t.add(Stepper::new().controller(ctrl.clone()).steps(vec![
+        Step::new(lit!("Details")).content(field("field one")),
+        Step::new(lit!("Review")).content(|| crate::primitives::TextWidget::new(lit!("summary"))),
+    ]));
+    layout(&mut t);
+    let moves = focus_moves(&mut t, |t| click_label(t, "Next"));
+    let finish = t.find_by_label("Finish").unwrap();
+    assert_eq!(moves, vec![finish]);
+}

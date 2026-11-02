@@ -34,6 +34,7 @@ a11y-window-maximize-name = Agrandir
 a11y-window-restore-name = Restaurer
 a11y-window-close-name = Fermer
 a11y-stepper-indicator-strip-name = Étapes
+a11y-stepper-step-announcement = Étape { $n } sur { $total }, { $title }
 a11y-stepper-content-name = Contenu de l'étape
 tab-close-tooltip = Fermer l'onglet
 a11y-builtin-browse = Parcourir
