@@ -327,6 +327,7 @@ menu-copy = Kopiuj
 menu-paste = Wklej
 menu-paste-unformatted = Wklej bez formatowania
 menu-select-all = Zaznacz wszystko
+menu-open-link = Otwórz link
 menu-undo = Cofnij
 menu-redo = Ponów
 menu-toggle-blockquote = Przełącz cytat blokowy

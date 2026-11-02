@@ -868,11 +868,40 @@ impl Widget for RichTextEditorBody {
             .composition
             .range(&st.document)
             .filter(|_| st.shows_transient_edits());
+        let is_composing = composing.is_some();
         let (user_anchor, user_pos) = match composing {
             Some(range) => (range.start, range.end),
             None => st.shown_selection(),
         };
         let emits_children = !builder.emits_no_children();
+
+        // A link Tab moved to is where a screen reader's focus is (see below),
+        // while the editor has focus, no composition is shown, and the
+        // selection is still exactly the link the Tab selected.
+        let link_stop = st.link_stop.filter(|&stop| {
+            st.has_focus
+                && !is_composing
+                && (user_anchor.min(user_pos), user_anchor.max(user_pos)) == stop
+        });
+        // The walk that moves the reader's focus from the document onto that
+        // link publishes the document's selection as the last walk did, and
+        // the frame tick asks for the walk that publishes the link's text: an
+        // update that changed both told NVDA "<link> selected" before
+        // "<link>, link" (see `ReaderView`).
+        let told = st.reader_view.get();
+        let shown = match told.selection {
+            Some(published)
+                if emits_children
+                    && link_stop.is_some()
+                    && !told.on_link
+                    && !told.held
+                    && published != (user_anchor, user_pos) =>
+            {
+                published
+            }
+            _ => (user_anchor, user_pos),
+        };
+        let holds_selection = shown != (user_anchor, user_pos);
 
         // A name probe (and an owner-less builder) can emit no children, and
         // `push_text_runs` writes nothing to the builder in that mode — so
@@ -880,12 +909,43 @@ impl Widget for RichTextEditorBody {
         // block's geometry and produce an empty emission whose `runs` no
         // caret can be resolved against. Skip it: on a document with a large
         // table that is thousands of layout queries for a tree nobody reads.
-        let mut walk = FlowWalk::new(&st, emits_children, user_anchor, user_pos);
+        let mut walk = FlowWalk::new(&st, emits_children, shown.0, shown.1);
         if let (Some(snap), true) = (snap, emits_children) {
             walk.document(builder, &snap.elements);
         }
         let (anchor_pair, caret_pair) = walk.selection();
         let syn_map = walk.syn_map;
+        let link_map = walk.link_map;
+
+        // A link Tab moved to is where a screen reader's focus is: the link's
+        // node, as the editor's active descendant, which `accesskit_consumer`
+        // resolves focus through. NVDA otherwise heard the link as selected
+        // text in the document and never as a link. The editable editor,
+        // which keeps Tab, never has a link stop.
+        let link_focus = link_stop.and_then(|stop| {
+            walk.link_ranges
+                .iter()
+                .find(|&&(_, start, end)| (start, end) == stop)
+                .map(|&(id, _, _)| id)
+        });
+        if let Some(id) = link_focus {
+            builder.set_active_descendant(id);
+        }
+        // Only a real walk is what the reader is told (a name probe publishes
+        // no selection).
+        if emits_children {
+            st.reader_view.set(super::state::ReaderView {
+                selection: Some(shown),
+                on_link: link_focus.is_some(),
+                held: holds_selection,
+            });
+            if holds_selection {
+                st.reader_selection_held.set(true);
+                if let Some(handle) = &st.frame_request {
+                    handle.set(true);
+                }
+            }
+        }
 
         // Attach the text selection on the editor itself, referencing the
         // TextRun children both endpoints landed in.
@@ -899,6 +959,7 @@ impl Widget for RichTextEditorBody {
         // screen-reader-initiated caret move until the next one.
         if emits_children {
             *st.synthetic_to_element.borrow_mut() = syn_map;
+            *st.link_nodes.borrow_mut() = link_map;
         }
 
         builder.add_action(Action::Focus);

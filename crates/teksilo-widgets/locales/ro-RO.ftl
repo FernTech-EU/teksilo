@@ -328,6 +328,7 @@ menu-copy = Copiere
 menu-paste = Lipire
 menu-paste-unformatted = Lipire fără formatare
 menu-select-all = Selectare totală
+menu-open-link = Deschidere link
 menu-undo = Anulează
 menu-redo = Refă
 menu-toggle-blockquote = Comutare citat

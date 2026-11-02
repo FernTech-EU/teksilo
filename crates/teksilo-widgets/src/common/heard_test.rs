@@ -482,6 +482,11 @@ impl UiaRecorder {
         }
     }
 
+    /// The tree as the adapter held it after the last frame.
+    pub(crate) fn platform(&self) -> &Tree {
+        &self.platform
+    }
+
     /// The events of one frame: one update handed to the adapter, as
     /// `teksilo-app` hands it after the frame's layout.
     pub(crate) fn frame(&mut self, tree: &mut WidgetTree) -> Vec<Uia> {

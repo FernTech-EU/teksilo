@@ -326,6 +326,7 @@ menu-copy = העתקה
 menu-paste = הדבקה
 menu-paste-unformatted = הדבקה ללא עיצוב
 menu-select-all = בחירת הכול
+menu-open-link = פתיחת קישור
 menu-undo = ביטול
 menu-redo = ביצוע חוזר
 menu-toggle-blockquote = סימון כציטוט

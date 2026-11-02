@@ -329,6 +329,7 @@ menu-copy = Kopioi
 menu-paste = Liitä
 menu-paste-unformatted = Liitä muotoilemattomana
 menu-select-all = Valitse kaikki
+menu-open-link = Avaa linkki
 menu-undo = Kumoa
 menu-redo = Tee uudelleen
 menu-toggle-blockquote = Lisää lainauslohko

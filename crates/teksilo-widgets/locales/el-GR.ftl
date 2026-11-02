@@ -329,6 +329,7 @@ menu-copy = Αντιγραφή
 menu-paste = Επικόλληση
 menu-paste-unformatted = Επικόλληση χωρίς μορφοποίηση
 menu-select-all = Επιλογή όλων
+menu-open-link = Άνοιγμα συνδέσμου
 menu-undo = Αναίρεση
 menu-redo = Επανάληψη
 menu-toggle-blockquote = Εναλλαγή παράθεσης

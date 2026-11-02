@@ -149,6 +149,30 @@ fn build_menu(state: SharedState) -> MenuList {
         .unwrap_or_default()
         .is_empty();
 
+    // --- Open Link -----------------------------------------------
+    // First, as browsers and word processors put it, when the caret is on a
+    // link and the editor follows links. The factory has already moved the
+    // caret to a pointer's right-click, so the caret answers for the pointer
+    // and for the keyboard's menu alike. In a viewer and in an editor: an
+    // editor follows a link on Ctrl(⌘)+click only, and this is the route
+    // that needs no chord.
+    let link = {
+        let st = state.borrow();
+        st.on_link_activated
+            .is_some()
+            .then(|| st.cursor.link_at_caret())
+            .flatten()
+    };
+    if let Some(link) = link {
+        let state_for_link = state.clone();
+        list = list.item(MenuItem::new(tr_widget!(menu_open_link())).on_activate_fn(
+            move |evt_ctx| {
+                super::follow_link(&state_for_link, &link.href, evt_ctx);
+            },
+        ));
+        list = list.separator();
+    }
+
     // --- Cut -----------------------------------------------------
     // The command filter is the only gate, the one `Ctrl+X` asks: a
     // forward-only editor rejects Cut (`is_regressive`) and a read-only one

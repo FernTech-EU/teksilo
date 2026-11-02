@@ -54,6 +54,33 @@ use crate::common::pending_arrivals::PendingArrivals;
 
 pub(crate) type SharedState = Rc<RefCell<EditorState>>;
 
+/// What an accessibility walk told a screen reader about the document, kept
+/// for the next walk.
+///
+/// The walk that moves the reader's focus onto a link a Tab selected (the
+/// link named as the editor's active descendant) publishes the document's
+/// selection as it last was, and the next walk publishes the link's text.
+/// `accesskit_consumer` hands an adapter an update's node changes before its
+/// focus move (`tree.rs`, `process_changes`), so with both in one update
+/// `accesskit_windows` raised `TextSelectionChanged` on the document before
+/// the focus event on the link, and NVDA, its focus still on the document,
+/// said "notes selected" before "notes, link". Once its focus is on the link
+/// it ignores the document's selection events.
+///
+/// That first Tab from the document onto a link therefore walks the document
+/// twice, once for each update.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ReaderView {
+    /// The `(anchor, position)` the walk published, in the text the view
+    /// shows. `None` before the first walk.
+    pub selection: Option<(usize, usize)>,
+    /// Whether the walk named a link as the editor's active descendant.
+    pub on_link: bool,
+    /// Whether the walk held the selection back. The next walk never does,
+    /// so a link the walk did not find cannot hold it for good.
+    pub held: bool,
+}
+
 pub(crate) struct EditorState {
     pub document: TextDocument,
     /// The document's UTF-16 index, for the platform's text input system,
@@ -145,6 +172,14 @@ pub(crate) struct EditorState {
     pub viewport_width: f32,
     pub viewport_height: f32,
     pub viewport_origin: teksilo_canvas::Point,
+
+    /// How tall the view the editor's clipping ancestors leave (a page's
+    /// viewport, as much of it as any outer clip shows) was at the editor's
+    /// last paint, from the wrapper's `PaintContext::clip_bounds`. `None`
+    /// before the first paint, and when no ancestor clips, where there is no
+    /// page to scroll. The page reveal of a link a Tab selected falls back to
+    /// the caret's line when the link does not fit in it.
+    pub visible_height: Option<f32>,
 
     // The **wrapper** node's top-left in window coordinates, recorded by
     // the wrapper's `place_children`. Pointer positions now arrive
@@ -360,6 +395,25 @@ pub(crate) struct EditorState {
     // Focus — mirrored from `on_focus` so paint can gate the caret.
     pub has_focus: bool,
 
+    /// The link Tab or Shift+Tab last selected in a viewer, as the range the
+    /// view shows. While the selection is still exactly that link, the
+    /// accessibility walk names the link's node as the editor's
+    /// `active_descendant`, so a screen reader's focus moves onto the link
+    /// and it is heard as a link rather than as selected text. Any other key,
+    /// a press and a blur clear it.
+    pub link_stop: Option<(usize, usize)>,
+
+    /// What the last accessibility walk told a screen reader: the selection
+    /// it published on the document, and whether it named a link as the
+    /// editor's active descendant. Read by the walk that moves the reader's
+    /// focus from the document onto a link (see [`ReaderView`]).
+    pub reader_view: std::cell::Cell<ReaderView>,
+
+    /// The last walk held the document's selection back while it moved the
+    /// reader's focus onto a link. The frame tick asks for the walk that
+    /// publishes it.
+    pub reader_selection_held: std::cell::Cell<bool>,
+
     /// A drag is hovering this editor, and the caret is showing where it would
     /// land.
     ///
@@ -565,7 +619,8 @@ pub(crate) struct EditorState {
     /// Bumped by every change of the command filter or of `tab_key` on a
     /// mounted editor. The body binds it at `AccessibilityOnly`, because the
     /// description that says how to leave the editor depends on both, and
-    /// neither changes the document.
+    /// neither changes the document. The frame tick also bumps it to publish
+    /// a selection the walk held back (`reader_selection_held`).
     pub a11y_policy_version: Signal<u64>,
 
     /// Whether the caret was last placed by the **pointer**. While set, the
@@ -661,6 +716,11 @@ pub(crate) struct EditorState {
     /// Invalidated from `drain_events` when a `ContentsChanged` or
     /// `FormatChanged` event arrives.
     pub accessibility_flow_snapshot: RefCell<Option<teksilo_text::text_document::FlowSnapshot>>,
+
+    /// The `Role::Link` nodes the last accessibility walk emitted, with each
+    /// link's destination, so an assistive technology's Click on one follows
+    /// it. Replaced by every real walk, as `synthetic_to_element` is.
+    pub link_nodes: RefCell<std::collections::HashMap<teksilo_core::accesskit::NodeId, String>>,
 
     /// Per-synthetic-NodeId lookup table populated during the
     /// accessibility walk. Maps each emitted `Role::TextRun` NodeId
@@ -865,7 +925,9 @@ impl EditorState {
                 .accepts(super::policy::EditCommandKind::NavigateTableCell)
     }
 
-    /// Tell the accessibility walk that the policy it describes changed.
+    /// Tell the accessibility walk that the policy it describes changed, or
+    /// that a selection it held back is due (see
+    /// [`reader_selection_held`](Self::reader_selection_held)).
     pub(crate) fn bump_a11y_policy(&self) {
         let v = self.a11y_policy_version.get();
         self.a11y_policy_version.set(v.wrapping_add(1));
@@ -951,6 +1013,7 @@ impl EditorState {
             #[cfg(test)]
             full_layouts: std::cell::Cell::new(0),
             window_to_clip: false,
+            visible_height: None,
             estimate_height_before_layout: false,
             widest_measured_width: 0.0,
             highlight_mask: HighlightMask::all(),
@@ -968,6 +1031,9 @@ impl EditorState {
             last_code_block_fg: None,
             last_link_fg: None,
             has_focus: false,
+            link_stop: None,
+            reader_view: std::cell::Cell::new(ReaderView::default()),
+            reader_selection_held: std::cell::Cell::new(false),
             drop_caret: false,
             drag_holds_cells: false,
             selected_cells_memo: None,
@@ -1016,6 +1082,7 @@ impl EditorState {
             on_image_activated: None,
             select_all_level: 0,
             accessibility_flow_snapshot: RefCell::new(None),
+            link_nodes: RefCell::new(std::collections::HashMap::new()),
             synthetic_to_element: RefCell::new(std::collections::HashMap::new()),
         }))
     }
@@ -1660,6 +1727,7 @@ impl EditorState {
     pub fn invalidate_accessibility_cache(&self) {
         *self.accessibility_flow_snapshot.borrow_mut() = None;
         self.synthetic_to_element.borrow_mut().clear();
+        self.link_nodes.borrow_mut().clear();
     }
 }
 

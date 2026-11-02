@@ -81,6 +81,7 @@ pub(crate) mod image_cache;
 mod input_document;
 mod input_editor;
 mod keyboard;
+mod links;
 pub(crate) use keyboard::neighbour_line_center_y;
 mod lists;
 mod mouse;
@@ -96,6 +97,8 @@ mod typing_format;
 pub use self::lists::list_style_is_ordered;
 
 #[cfg(test)]
+mod a11y_walk_cost;
+#[cfg(test)]
 mod composition_tests;
 #[cfg(test)]
 mod find_highlight_tests;
@@ -105,6 +108,8 @@ mod input_document_tests;
 mod input_editor_tests;
 #[cfg(test)]
 mod line_break_tests;
+#[cfg(test)]
+mod links_tests;
 #[cfg(test)]
 mod lists_tests;
 #[cfg(test)]
@@ -2238,9 +2243,29 @@ impl RichTextEditor {
     // on a Primary PointerDown whose hit lands on a `HitRegion::Link`
     // or `HitRegion::Image`, before any caret placement.
 
-    /// Install a callback fired when the user Primary-clicks a link
-    /// (an element with an anchor `href`). The callback receives the
-    /// href string and the active `EventContext`.
+    /// Install a callback fired when the user follows a link (an element
+    /// with an anchor `href`). The callback receives the href string and the
+    /// active `EventContext`.
+    ///
+    /// A link is followed by a click (a plain one in a viewer, Ctrl(⌘)+click
+    /// in an editable editor), a tap, the context menu's "Open Link" row,
+    /// an assistive technology's Click on the link's node, and, in an editor
+    /// that takes no new paragraphs (a [`read_only`](Self::read_only)
+    /// viewer), Enter with the caret on the link. In such an editor Tab and
+    /// Shift+Tab also move between its links, selecting each in turn, and
+    /// leave the editor after the last one (or before the first); with
+    /// [`TabKey::MoveFocus`] they leave at once. While a link Tab selected
+    /// stays selected, a screen reader's focus is on the link itself (the
+    /// editor names its node as the active descendant), so it is heard as a
+    /// link; any other key, a press or leaving the editor gives focus back to
+    /// the text.
+    ///
+    /// All of these exist only while this callback is installed. Without it
+    /// a link is still a `Role::Link` a screen reader finds and hears the
+    /// destination of, but it advertises no Click, Enter and Tab treat it as
+    /// text, and the menu has no "Open Link" row. Set it once, before the
+    /// editor is mounted: the link nodes' Click is decided by the
+    /// accessibility walk.
     ///
     /// The callback replaces any prior link-click callback on this
     /// builder chain. To stop observing, reconstruct the editor
@@ -4032,6 +4057,12 @@ impl Widget for RichTextEditor {
                 }
                 let mut st = state.borrow_mut();
                 let more = frame_loop::tick(&mut st, *delta);
+                // The last accessibility walk moved the reader's focus onto a
+                // link and held the document's selection back: publish it now,
+                // in an update of its own (see `state::ReaderView`).
+                if st.reader_selection_held.replace(false) {
+                    st.bump_a11y_policy();
+                }
                 // Signal::set is unconditional (clones+invokes every
                 // observer even when value unchanged), so only call it
                 // when the bool actually flipped. Avoids per-tick fanout
@@ -4233,6 +4264,7 @@ impl Widget for RichTextEditor {
                 move |gained, ctx| {
                     let mut st = state.borrow_mut();
                     st.has_focus = gained;
+                    let ended_link_stop = !gained && st.link_stop.take().is_some();
                     // Mirror onto the reactive signal so chrome
                     // installed by `RichTextEditorStyle::make_body`
                     // (focus-aware border / ring) re-renders.
@@ -4242,6 +4274,9 @@ impl Widget for RichTextEditor {
                         st.caret_visible.set(true);
                     }
                     drop(st);
+                    if ended_link_stop {
+                        ctx.request_accessibility_update();
+                    }
                     if gained {
                         // Seed the OS IME candidate area at the caret.
                         self::keyboard::report_ime_cursor_area(&state, ctx);
@@ -4717,6 +4752,15 @@ impl Widget for RichTextEditor {
         true
     }
 
+    fn paint(&self, _bounds: Rect, _canvas: &mut Canvas, ctx: &PaintContext) {
+        // Draws nothing (the body and the chrome do). It records how tall the
+        // view its clipping ancestors leave is, for the page reveal of a link
+        // a Tab selected: here, not in the body, whose clip also takes this
+        // editor's own bounds and so measures only the part of the editor on
+        // screen, not what the page could show.
+        self.state.borrow_mut().visible_height = ctx.clip_bounds.map(|clip| clip.height.max(0.0));
+    }
+
     fn focus_reveal_rect(&self, _bounds: Rect) -> Option<Rect> {
         // On focus gain the framework reveals the focused widget into any
         // enclosing ScrollArea. Reveal the caret *line*, not the (potentially
@@ -4900,7 +4944,7 @@ pub(super) fn sync_cursor_signals(state: &SharedState) {
 fn handle_access_action_request(
     state: &SharedState,
     action: teksilo_core::accesskit::Action,
-    _target_node: teksilo_core::accesskit::NodeId,
+    target_node: teksilo_core::accesskit::NodeId,
     data: Option<teksilo_core::accesskit::ActionData>,
     ctx: &mut teksilo_core::widget::EventContext,
 ) -> teksilo_core::event::EventResponse {
@@ -5014,7 +5058,40 @@ fn handle_access_action_request(
             ctx.request_frame();
             EventResponse::Handled
         }
+        // A Click on one of the walk's `Role::Link` nodes follows that link.
+        (Action::Click, _) => {
+            let href = state
+                .borrow()
+                .link_nodes
+                .borrow()
+                .get(&target_node)
+                .cloned();
+            match href {
+                Some(href) => follow_link(state, &href, ctx),
+                None => EventResponse::Ignored,
+            }
+        }
         _ => EventResponse::Ignored,
+    }
+}
+
+/// Hand `href` to the editor's `on_link_activated`, the one way every route
+/// follows a link. The callback is cloned out of the state first and called
+/// with no borrow held, since it may replace the very document (a help viewer
+/// navigating). `Ignored` with no callback installed.
+pub(super) fn follow_link(
+    state: &SharedState,
+    href: &str,
+    ctx: &mut teksilo_core::widget::EventContext,
+) -> teksilo_core::event::EventResponse {
+    let callback = state.borrow().on_link_activated.clone();
+    match callback {
+        Some(callback) => {
+            callback(href, ctx);
+            ctx.request_frame();
+            teksilo_core::event::EventResponse::Handled
+        }
+        None => teksilo_core::event::EventResponse::Ignored,
     }
 }
 

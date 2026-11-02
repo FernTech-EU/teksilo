@@ -416,6 +416,22 @@ by crate for clarity, not because crates version independently.
   `DockingLayout` accordion pane.
 - **A `Splitter` sized to its content no longer counts hidden panes, nor a
   collapsed pane's content.**
+- **The links of a read-only `RichTextEditor` that follows links
+  (`on_link_activated`) can be reached and followed from the keyboard and by
+  screen readers.** Tab and Shift+Tab move from link to link, selecting
+  each and scrolling all of it into view when it fits (the caret's line
+  when it does not), and leave
+  the editor after the last one (or before the first); Enter follows the
+  link under the caret, in any editor whose command filter takes no new
+  paragraph. Every link, in every rich text editor, is a link to a
+  screen reader, in its place in the text; its Click follows it when the
+  editor follows links. The context menu of every rich text editor offers
+  "Open Link" on a link when `on_link_activated` is installed.
+- **A link that Tab selects in a `RichTextEditor` viewer is heard as a
+  link.** Screen reader focus moves onto the link while it stays selected,
+  and back to the text on any other key, a click or leaving the editor.
+  NVDA used to read it as selected text in the document and never said
+  "link".
 - **An editable `RichTextEditor` tells screen readers how to leave it.** Its
   description says what Tab does there and that Ctrl+Tab and Ctrl+Shift+Tab
   move to the next and the previous control, as the `CodeEditor`'s already

@@ -309,6 +309,7 @@ menu-copy = Kopii
 menu-paste = Alglui
 menu-paste-unformatted = Alglui sen formatado
 menu-select-all = Elekti ĉion
+menu-open-link = Malfermi ligilon
 menu-undo = Malfari
 menu-redo = Refari
 menu-toggle-blockquote = Ŝalti blokcitaĵon

@@ -326,6 +326,7 @@ menu-copy = Copier
 menu-paste = Coller
 menu-paste-unformatted = Coller sans mise en forme
 menu-select-all = Tout sélectionner
+menu-open-link = Ouvrir le lien
 menu-undo = Annuler
 menu-redo = Rétablir
 menu-toggle-blockquote = Basculer la citation

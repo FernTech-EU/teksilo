@@ -324,6 +324,7 @@ menu-copy = 복사
 menu-paste = 붙여넣기
 menu-paste-unformatted = 서식 없이 붙여넣기
 menu-select-all = 모두 선택
+menu-open-link = 링크 열기
 menu-undo = 실행 취소
 menu-redo = 다시 실행
 menu-toggle-blockquote = 인용 블록 전환

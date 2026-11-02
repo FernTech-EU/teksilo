@@ -328,6 +328,7 @@ menu-copy = Kopírovat
 menu-paste = Vložit
 menu-paste-unformatted = Vložit bez formátování
 menu-select-all = Vybrat vše
+menu-open-link = Otevřít odkaz
 menu-undo = Zpět
 menu-redo = Znovu
 menu-toggle-blockquote = Přepnout citaci

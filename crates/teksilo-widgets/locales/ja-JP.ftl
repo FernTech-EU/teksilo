@@ -328,6 +328,7 @@ menu-copy = コピー
 menu-paste = 貼り付け
 menu-paste-unformatted = 書式なしで貼り付け
 menu-select-all = すべて選択
+menu-open-link = リンクを開く
 menu-undo = 元に戻す
 menu-redo = やり直し
 menu-toggle-blockquote = 引用ブロックの切り替え

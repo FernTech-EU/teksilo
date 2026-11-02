@@ -329,6 +329,7 @@ menu-copy = Kopier
 menu-paste = Lim inn
 menu-paste-unformatted = Lim inn uformatert
 menu-select-all = Merk alt
+menu-open-link = Åpne lenke
 menu-undo = Angre
 menu-redo = Gjør om
 menu-toggle-blockquote = Slå sitatblokk på/av

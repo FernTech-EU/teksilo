@@ -357,6 +357,7 @@ menu-copy = Copy
 menu-paste = Paste
 menu-paste-unformatted = Paste Unformatted
 menu-select-all = Select All
+menu-open-link = Open Link
 menu-undo = Undo
 menu-redo = Redo
 menu-toggle-blockquote = Toggle blockquote

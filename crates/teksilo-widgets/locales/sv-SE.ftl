@@ -326,6 +326,7 @@ menu-copy = Kopiera
 menu-paste = Klistra in
 menu-paste-unformatted = Klistra in oformaterat
 menu-select-all = Markera allt
+menu-open-link = Öppna länk
 menu-undo = Ångra
 menu-redo = Gör om
 menu-toggle-blockquote = Växla blockcitat

@@ -328,6 +328,7 @@ menu-copy = Kopieren
 menu-paste = Einfügen
 menu-paste-unformatted = Unformatiert einfügen
 menu-select-all = Alles auswählen
+menu-open-link = Link öffnen
 menu-undo = Rückgängig
 menu-redo = Wiederholen
 menu-toggle-blockquote = Zitatblock umschalten

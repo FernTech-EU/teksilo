@@ -328,6 +328,7 @@ menu-copy = نسخ
 menu-paste = لصق
 menu-paste-unformatted = لصق بدون تنسيق
 menu-select-all = تحديد الكل
+menu-open-link = فتح الرابط
 menu-undo = تراجع
 menu-redo = إعادة
 menu-toggle-blockquote = تبديل الاقتباس

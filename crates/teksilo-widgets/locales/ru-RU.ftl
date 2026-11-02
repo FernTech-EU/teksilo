@@ -328,6 +328,7 @@ menu-copy = Копировать
 menu-paste = Вставить
 menu-paste-unformatted = Вставить без форматирования
 menu-select-all = Выделить всё
+menu-open-link = Открыть ссылку
 menu-undo = Отменить
 menu-redo = Повторить
 menu-toggle-blockquote = Переключить цитату

@@ -421,6 +421,13 @@ pub(super) fn handle_pointer_event(
     event: &WidgetEvent,
     ctx: &mut EventContext,
 ) -> EventResponse {
+    // A press ends a link stop, and asks for the walk that gives the reader's
+    // focus back to the text (see `keyboard::handle_key`).
+    if matches!(event, WidgetEvent::PointerDown { .. })
+        && state.borrow_mut().link_stop.take().is_some()
+    {
+        ctx.request_accessibility_update();
+    }
     if ctx.pointer_kind().is_direct() {
         return handle_direct_pointer_event(
             state,

@@ -1998,9 +1998,29 @@ finishes.
 
 #### `pub fn on_link_activated( self, handler: impl Fn(&str, &mut teksilo_core::widget::EventContext) + 'static, ) -> Self`
 
-Install a callback fired when the user Primary-clicks a link
-(an element with an anchor `href`). The callback receives the
-href string and the active `EventContext`.
+Install a callback fired when the user follows a link (an element
+with an anchor `href`). The callback receives the href string and the
+active `EventContext`.
+
+A link is followed by a click (a plain one in a viewer, Ctrl(⌘)+click
+in an editable editor), a tap, the context menu's "Open Link" row,
+an assistive technology's Click on the link's node, and, in an editor
+that takes no new paragraphs (a `read_only`
+viewer), Enter with the caret on the link. In such an editor Tab and
+Shift+Tab also move between its links, selecting each in turn, and
+leave the editor after the last one (or before the first); with
+`TabKey::MoveFocus` they leave at once. While a link Tab selected
+stays selected, a screen reader's focus is on the link itself (the
+editor names its node as the active descendant), so it is heard as a
+link; any other key, a press or leaving the editor gives focus back to
+the text.
+
+All of these exist only while this callback is installed. Without it
+a link is still a `Role::Link` a screen reader finds and hears the
+destination of, but it advertises no Click, Enter and Tab treat it as
+text, and the menu has no "Open Link" row. Set it once, before the
+editor is mounted: the link nodes' Click is decided by the
+accessibility walk.
 
 The callback replaces any prior link-click callback on this
 builder chain. To stop observing, reconstruct the editor

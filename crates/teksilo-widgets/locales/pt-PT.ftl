@@ -334,6 +334,7 @@ menu-copy = Copiar
 menu-paste = Colar
 menu-paste-unformatted = Colar sem formatação
 menu-select-all = Selecionar tudo
+menu-open-link = Abrir ligação
 menu-undo = Anular
 menu-redo = Refazer
 menu-toggle-blockquote = Alternar citação

@@ -948,6 +948,9 @@ Import from `teksilo::widgets`. The main families:
   and tells screen readers that Ctrl+Tab and Ctrl+Shift+Tab leave it. For a
   single-purpose field (a title, a synopsis, a comment) pass
   `.tab_key(teksilo::widgets::TabKey::MoveFocus)`, so Tab and Shift+Tab move focus.
+  A read-only `RichTextEditor` with `.on_link_activated(..)` is navigable from the
+  keyboard: Tab / Shift+Tab select its links one by one, Enter follows the one under
+  the caret, and screen readers see each link as a link they can click.
   Text the platform's input system inserts (macOS Dictation, Writing Tools, the emoji
   viewer, an IME) reaches a field on its own. `.on_text_inserted(|EditSource, chars| ..)`
   says by which channel each insertion came (`teksilo::widgets::EditSource`, exhaustive), and

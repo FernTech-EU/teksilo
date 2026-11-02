@@ -334,6 +334,7 @@ menu-copy = Kopiëren
 menu-paste = Plakken
 menu-paste-unformatted = Plakken zonder opmaak
 menu-select-all = Alles selecteren
+menu-open-link = Koppeling openen
 menu-undo = Ongedaan maken
 menu-redo = Opnieuw
 menu-toggle-blockquote = Blokcitaat in- of uitschakelen

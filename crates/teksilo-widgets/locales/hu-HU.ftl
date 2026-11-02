@@ -326,6 +326,7 @@ menu-copy = Másolás
 menu-paste = Beillesztés
 menu-paste-unformatted = Beillesztés formázás nélkül
 menu-select-all = Összes kijelölése
+menu-open-link = Hivatkozás megnyitása
 menu-undo = Visszavonás
 menu-redo = Mégis
 menu-toggle-blockquote = Idézetblokk be- és kikapcsolása

@@ -39,6 +39,12 @@
 //!     system's Writing Tools off and on for both the Title field and the
 //!     editor (`.writing_tools(..)`). With it off, the Writing Tools row of
 //!     the Edit menu and the context menu should grey out in both.
+//!   * Links are followed through `.on_link_activated(...)`, installed on
+//!     both panes: Ctrl+click a link in the editor, or use its context
+//!     menu's Open Link; in the preview click it, or Tab to it (the
+//!     preview's links are Tab stops while it follows them) and press Enter.
+//!     The last line under the panes names the link followed instead of
+//!     opening it.
 //!   * The "Editor: typed ..." line under the panes counts the characters
 //!     that reached the editable editor, per source (`on_text_inserted`):
 //!     typed, IME, dictated, Writing Tools, pasted, assistive technology,
@@ -510,10 +516,20 @@ fn main() {
                     let editor_arrivals = Signal::new(Arrivals::default());
                     let editor_line = editor_arrivals.map(|a| a.line("Editor"));
                     let writing_tools = Signal::new(true);
+                    // A followed link (in either pane) is shown on the status
+                    // line under the panes rather than opened.
+                    let link_line = Signal::new(String::from(
+                        "Links: Ctrl+click one in the editor (Cmd-click on macOS); in the preview, click one, or Tab to it and press Enter.",
+                    ));
+                    let editor_link_line = link_line.clone();
+                    let preview_link_line = link_line.clone();
                     let editor = RichTextEditor::editor(doc.clone())
                         .content_padding_symmetric(0.0, 10.0)
                         .writing_tools(writing_tools.clone())
                         .label(lit!("Editor"))
+                        .on_link_activated(move |href, _ctx| {
+                            editor_link_line.set(format!("Followed link from the editor: {href}"));
+                        })
                         .on_text_inserted(move |source, chars| {
                             let mut a = editor_arrivals.get();
                             a.record(source, chars);
@@ -583,13 +599,19 @@ fn main() {
                                         // is made in only.
                                         RichTextEditor::read_only(doc_preview)
                                             .v_scroll_policy(ScrollPolicy::Auto)
-                                            .label(lit!("Preview")),
+                                            .label(lit!("Preview"))
+                                            .on_link_activated(move |href, _ctx| {
+                                                preview_link_line.set(format!(
+                                                    "Followed link from the preview: {href}"
+                                                ));
+                                            }),
                                     ),
                                 ),
                             )
                             // One line per field.
                             .child(TextWidget::new(lit!("")).text(title_line))
-                            .child(TextWidget::new(lit!("")).text(editor_line)),
+                            .child(TextWidget::new(lit!("")).text(editor_line))
+                            .child(TextWidget::new(lit!("")).text(link_line)),
                     )
                 }),
         )

@@ -220,6 +220,14 @@ pub(super) fn handle_key(
         return EventResponse::Ignored;
     };
 
+    // Every key ends a link stop; the Tab that moves to the next link sets
+    // the next one. The walk is what moves the reader's focus back, and a
+    // key that changes nothing else it reads (Escape, a letter in a viewer)
+    // would not ask for one, so ask here.
+    if state.borrow_mut().link_stop.take().is_some() {
+        ctx.request_accessibility_update();
+    }
+
     // A key after a composition's empty update, where its commit would have
     // been: the input method cancelled it.
     if settle_cancelled_composition(&mut state.borrow_mut()) {
@@ -238,6 +246,31 @@ pub(super) fn handle_key(
     };
     if written {
         finish_composition(state, ctx);
+    }
+
+    // Enter with the caret on a link follows it, in an editor that takes no
+    // new paragraph (a viewer) and follows links: the keyboard's form of a
+    // click on the link. Resolved before the state is borrowed for the key,
+    // because the callback may replace the very document. The filter question
+    // agrees with the one that makes the links Tab stops (`tab_consumed`,
+    // which asks `NavigateTableCell`) for every shipped filter.
+    if matches!(key, Key::Enter) && *modifiers == teksilo_core::event::Modifiers::NONE {
+        let href = {
+            let st = state.borrow();
+            if st.on_link_activated.is_none()
+                || st
+                    .policy
+                    .command_filter
+                    .accepts(EditCommandKind::InsertBlock)
+            {
+                None
+            } else {
+                st.cursor.link_at_caret().map(|link| link.href)
+            }
+        };
+        if let Some(href) = href {
+            return super::follow_link(state, &href, ctx);
+        }
     }
 
     let shift = modifiers.shift();
@@ -561,6 +594,39 @@ pub(super) fn handle_key(
                     let _ = st.cursor.decrease_blockquote_depth();
                 }
                 KeyAction::ClearPreferredX
+            }
+            // In an editor that leaves Tab to focus traversal because its
+            // filter takes no edits (a viewer) and that follows links, the
+            // links are the stops inside it: Tab selects the next one and
+            // Shift+Tab the previous one, and past the last (or before the
+            // first) the key leaves the editor. `TabKey::MoveFocus` turns the
+            // stops off. The filter question agrees with Enter's (above) for
+            // every shipped filter.
+            Key::Tab
+                if !tab_escape
+                    && !tab_consumed
+                    && st.tab_key == crate::common::editor_runtime::TabKey::Edit
+                    && st.on_link_activated.is_some() =>
+            {
+                match link_tab_stop(&st, shift) {
+                    Some((start, end)) => {
+                        st.cursor.set_position(start, MoveMode::MoveAnchor);
+                        st.cursor.set_position(end, MoveMode::KeepAnchor);
+                        let (a, b) = st.shown_selection();
+                        st.link_stop = Some((a.min(b), a.max(b)));
+                        // The caret is at the link's end, which the key's
+                        // epilogue scrolls into view. Show its start first,
+                        // so a link that wraps is seen whole when it fits:
+                        // Shift+Tab up to one showed only its last line.
+                        ensure_position_visible_locked(
+                            &mut st,
+                            a.min(b),
+                            CursorAffinity::Downstream,
+                        );
+                        KeyAction::ClearPreferredX
+                    }
+                    None => KeyAction::Unhandled,
+                }
             }
             Key::Tab if !tab_escape && !shift && tab_consumed => {
                 // Tab (no Ctrl, no Shift):
@@ -1163,7 +1229,7 @@ pub(super) fn chase_caret_into_view_with(
     ctx: &mut EventContext,
     motion: ScrollMotion,
 ) {
-    let (area, pin) = {
+    let (area, pin, link, visible_height) = {
         let mut st = state.borrow_mut();
         if !st.follow_caret_in_page {
             return;
@@ -1188,6 +1254,28 @@ pub(super) fn chase_caret_into_view_with(
             Some(a) => a,
             None => return,
         };
+        // A link a Tab selected is revealed whole, from its first line to its
+        // last, not only the caret's line at its end: Shift+Tab up to a link
+        // that wraps left its first lines above the page's viewport. The
+        // editor's own viewport gets the same in the Tab arm. Only the part
+        // of the link inside that viewport: lines the editor scrolled out of
+        // its own view are not on the page either, and revealing them scrolled
+        // the page to whatever sits above the editor.
+        let link = st
+            .link_stop
+            .filter(|&stop| {
+                let (a, b) = st.shown_selection();
+                (a.min(b), a.max(b)) == stop
+            })
+            .and_then(|(start, end)| range_window_rect(&st, start, end))
+            .map(|link| {
+                let top = link.y.max(st.viewport_origin.y);
+                let bottom = (link.y + link.height)
+                    .min(st.viewport_origin.y + st.viewport_height)
+                    .max(top);
+                (top, bottom)
+            });
+        let visible_height = st.visible_height;
 
         // Reveal the caret only when it actually MOVES. A repeat call at the
         // same document position — IME preedit churn (Linux ibus/fcitx floods
@@ -1221,7 +1309,7 @@ pub(super) fn chase_caret_into_view_with(
             st.last_chase_y = None;
         }
         st.last_chase_pos = Some(pos);
-        (rect, pin)
+        (rect, pin, link, visible_height)
     };
 
     match pin {
@@ -1233,7 +1321,20 @@ pub(super) fn chase_caret_into_view_with(
             // Extend downward by one line so the line a wrapping character would
             // land on is revealed together with the current caret line.
             let line = area.height.max(1.0);
-            let area = teksilo_canvas::Rect::new(area.x, area.y, area.width, area.height + line);
+            let mut area =
+                teksilo_canvas::Rect::new(area.x, area.y, area.width, area.height + line);
+            // The link's lines with the caret's (horizontally, the caret's
+            // alone), unless together they do not fit the page's view: the
+            // page aligns the top of a target above its viewport (reached by
+            // Shift+Tab), so a link taller than that view would leave the
+            // caret below it.
+            if let Some((top, bottom)) = link {
+                let top = top.min(area.y);
+                let bottom = bottom.max(area.y + area.height);
+                if visible_height.is_none_or(|height| bottom - top <= height) {
+                    area = teksilo_canvas::Rect::new(area.x, top, area.width, bottom - top);
+                }
+            }
             ctx.ensure_visible(area);
         }
     }
@@ -1799,14 +1900,11 @@ fn ensure_caret_visible(state: &SharedState) {
 /// body's paint, which reveals the caret again after a viewport **shrink** and
 /// has the state open around the relayout that shrink forced.
 pub(super) fn ensure_caret_visible_locked(st: &mut EditorState) {
+    // Not redundant with the helper's own check: the horizontal reveal below
+    // needs a full layout too.
     if !st.engine.has_full_layout() {
         return;
     }
-    // Forward the current wheel-driven scroll so ensure_caret_visible
-    // computes the correction relative to where the viewport actually
-    // is, not where it was at last paint.
-    let current = st.scroll_y.get();
-    st.engine.set_scroll_offset(current);
     // Name the position rather than letting the engine read its own cached
     // cursor: that cache is refreshed at paint, so inside a key handler it still
     // holds the caret from *before* the keystroke. Correcting against it revealed
@@ -1815,13 +1913,28 @@ pub(super) fn ensure_caret_visible_locked(st: &mut EditorState) {
     // Where the layout shows it, which may be the recorded document's.
     let pos = st.shown_caret();
     let affinity = st.cursor_affinity;
-    if let Some(new_off) = st.engine.ensure_position_visible(pos, affinity) {
-        st.scroll_y.set(new_off);
-    }
+    ensure_position_visible_locked(st, pos, affinity);
     // Horizontal caret visibility — matches godot's `ensure_caret_h_visible`.
     // Margin is 20 logical pixels on each side so the caret doesn't sit flush
     // against the viewport edge.
     ensure_caret_h_visible_locked(st);
+}
+
+/// Scroll the editor's own viewport the least that shows the line at
+/// `position` (in the text the view lays out), as [`ensure_caret_visible`]
+/// does for the caret.
+fn ensure_position_visible_locked(st: &mut EditorState, position: usize, affinity: CursorAffinity) {
+    if !st.engine.has_full_layout() {
+        return;
+    }
+    // Forward the current wheel-driven scroll so the correction is computed
+    // relative to where the viewport actually is, not where it was at last
+    // paint.
+    let current = st.scroll_y.get();
+    st.engine.set_scroll_offset(current);
+    if let Some(new_off) = st.engine.ensure_position_visible(position, affinity) {
+        st.scroll_y.set(new_off);
+    }
 }
 
 /// Horizontal caret-visibility. Factored out so code paths that
@@ -2566,6 +2679,42 @@ fn start_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
         column.max(target_col),
     );
     true
+}
+
+/// The link Tab (or, with `back`, Shift+Tab) selects next, as document
+/// positions, or `None` when the selection is past the last (before the first).
+///
+/// The links are read off the text this view shows, so the selection is
+/// compared in that space and the stop mapped back to the document's: a view
+/// of a document another view composes in shows no composition, and mixing
+/// the two spaces selected the wrong range by the composition's length. The
+/// view's cached accessibility snapshot serves, built here when the walk has
+/// not built it yet. The cache is cleared when the frame loop drains the
+/// document's events, so a programmatic edit and a Tab in the same frame see
+/// the links as they were before the edit; the next frame sees them as they
+/// are.
+pub(super) fn link_tab_stop(st: &EditorState, back: bool) -> Option<(usize, usize)> {
+    let stop = {
+        let mut cache = st.accessibility_flow_snapshot.borrow_mut();
+        if cache.is_none() {
+            *cache = Some(st.flow_snapshot_for_a11y());
+        }
+        let links = cache
+            .as_ref()
+            .map(|snap| super::links::document_links(&snap.elements))
+            .unwrap_or_default();
+        let (a, b) = st.shown_selection();
+        let (from, to) = (a.min(b), a.max(b));
+        if back {
+            super::links::previous_link(&links, from, to).cloned()
+        } else {
+            super::links::next_link(&links, from, to).cloned()
+        }
+    }?;
+    Some((
+        st.document_position(stop.start),
+        st.document_position(stop.end),
+    ))
 }
 
 /// What a reader is told about an editor that keeps Tab: what Tab does here,

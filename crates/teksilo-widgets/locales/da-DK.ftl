@@ -326,6 +326,7 @@ menu-copy = Kopiér
 menu-paste = Sæt ind
 menu-paste-unformatted = Sæt ind uden formatering
 menu-select-all = Markér alt
+menu-open-link = Åbn link
 menu-undo = Fortryd
 menu-redo = Annuller fortryd
 menu-toggle-blockquote = Slå blokcitat til/fra

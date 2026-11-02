@@ -326,6 +326,7 @@ menu-copy = Kopyala
 menu-paste = Yapıştır
 menu-paste-unformatted = Biçimlendirmeden Yapıştır
 menu-select-all = Tümünü Seç
+menu-open-link = Bağlantıyı Aç
 menu-undo = Geri al
 menu-redo = Yinele
 menu-toggle-blockquote = Alıntıyı aç/kapat

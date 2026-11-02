@@ -57,7 +57,9 @@ use std::collections::HashMap;
 
 use teksilo_canvas::{LineEnd, Point, Rect, TextGeometry};
 use teksilo_core::accessibility::AccessNodeBuilder;
-use teksilo_core::accessibility::text_runs::{TextRunSource, push_text_runs};
+use teksilo_core::accessibility::text_runs::{
+    LinkSpan, TextRunSource, push_text_runs, push_text_runs_with_links,
+};
 use teksilo_core::accesskit::NodeId;
 use teksilo_text::text_document::{
     BlockSnapshot, CellSnapshot, FlowElementSnapshot, FragmentContent, FrameSnapshot, ListInfo,
@@ -156,6 +158,13 @@ pub(super) struct FlowWalk<'a> {
     /// Where each emitted run lives in the document, so an AT-initiated
     /// `SetTextSelection` can be resolved back to a document position.
     pub(super) syn_map: HashMap<NodeId, SyntheticElementRef>,
+    /// Every `Role::Link` node emitted, with its destination, so a Click from
+    /// an assistive technology can follow it.
+    pub(super) link_map: HashMap<NodeId, String>,
+    /// Every `Role::Link` node emitted, with the range of the view's text it
+    /// covers, so the node of the link a Tab selected can be named the
+    /// editor's active descendant.
+    pub(super) link_ranges: Vec<(NodeId, usize, usize)>,
     /// One body node per annotation for the whole walk, not one per run it
     /// covers: `push_annotation_child` derives the id from the group alone,
     /// so a second push gives two children sharing a `NodeId`, which panics
@@ -185,6 +194,8 @@ impl<'a> FlowWalk<'a> {
             anchor: None,
             nearest: [Nearest::default(), Nearest::default()],
             syn_map: HashMap::new(),
+            link_map: HashMap::new(),
+            link_ranges: Vec::new(),
             annotation_bodies: HashMap::new(),
             list_sizes: HashMap::new(),
         }
@@ -521,6 +532,96 @@ impl<'a> FlowWalk<'a> {
         Some(run)
     }
 
+    /// The block's runs, with each of its links a `Role::Link` node in
+    /// reading order: the link's runs hang under it, through a text container
+    /// (see `push_text_runs_with_links`). The link advertises Click, and a
+    /// Click follows it, only when the editor follows links
+    /// (`on_link_activated`); without one it is still a link a reader can
+    /// find, which says where it points.
+    ///
+    /// In a table cell the runs keep hanging off the cell's shared container,
+    /// which the cell's text-change events need (see the parent rule in
+    /// [`Self::block`]), and the block's links follow its runs there as
+    /// siblings (so with two blocks in a cell, between them), each with the
+    /// box of its text.
+    fn runs_and_links(
+        &mut self,
+        builder: &mut AccessNodeBuilder,
+        block: &BlockSnapshot,
+        parent: Option<NodeId>,
+        in_cell: bool,
+        source: &TextRunSource<'_>,
+    ) -> teksilo_core::accessibility::text_runs::TextRunEmission {
+        let links = if self.emits_children {
+            super::super::links::block_links(block)
+        } else {
+            Vec::new()
+        };
+        if links.is_empty() {
+            return push_text_runs(builder, parent, source);
+        }
+        let follows = self.st.on_link_activated.is_some();
+        // Each link's byte range, from one pass over the text: the links'
+        // character offsets are in order, so one table serves them all.
+        let text = source.text.as_ref();
+        let byte_of: Vec<usize> = text
+            .char_indices()
+            .map(|(byte, _)| byte)
+            .chain(std::iter::once(text.len()))
+            .collect();
+        let byte_at = |chars: usize| byte_of.get(chars).copied().unwrap_or(text.len());
+        let mut made: Vec<(NodeId, usize)> = Vec::new();
+        let emission = if in_cell {
+            let emission = push_text_runs(builder, parent, source);
+            for (index, link) in links.iter().enumerate() {
+                // The span emitter keys a link's node from the same id with
+                // its own mix; a cell's link is only ever emitted here.
+                let seed = link.element_id.rotate_left(17) ^ 0x6365_6c6c_6c69_6e6b;
+                if let Some(id) = builder.push_link_child_under(
+                    parent,
+                    seed,
+                    link.text.clone(),
+                    link.href.clone(),
+                ) {
+                    if let Some(rect) = span_box(source, byte_at(link.start)..byte_at(link.end)) {
+                        builder.set_child_bounds_local(id, rect);
+                    }
+                    made.push((id, index));
+                }
+            }
+            emission
+        } else {
+            let spans: Vec<LinkSpan> = links
+                .iter()
+                .map(|link| LinkSpan {
+                    byte_range: byte_at(link.start)..byte_at(link.end),
+                    element_id: link.element_id,
+                    label: link.text.clone(),
+                    url: link.href.clone(),
+                })
+                .collect();
+            let linked = push_text_runs_with_links(builder, parent, source, &spans);
+            made.extend(linked.links.iter().map(|l| (l.id, l.index)));
+            linked.runs
+        };
+        for &(id, index) in &made {
+            self.link_ranges.push((
+                id,
+                block.position + links[index].start,
+                block.position + links[index].end,
+            ));
+        }
+        if follows {
+            for (id, index) in made {
+                builder.with_collected_node(id, |node| {
+                    node.add_action(teksilo_core::accesskit::Action::Click)
+                });
+                self.link_map.insert(id, links[index].href.clone());
+            }
+        }
+        emission
+    }
+
     /// Emit one block's text runs.
     ///
     /// `structural` is the node this block's own structure attaches under (a
@@ -669,7 +770,7 @@ impl<'a> FlowWalk<'a> {
             marker_run = self.marker_run(builder, parent, marker, block.position, id, marker_box);
         }
 
-        let emission = push_text_runs(builder, parent, &source);
+        let emission = self.runs_and_links(builder, block, parent, cell_text.is_some(), &source);
         if let (Some(marker), Some(first)) = (marker_run, emission.runs.first()) {
             builder.link_runs_on_line(&[marker, first.id]);
         }
@@ -750,4 +851,55 @@ impl<'a> FlowWalk<'a> {
             }
         }
     }
+}
+
+/// The box of `range` (bytes of `source.text`) on the lines it covers: the
+/// union of its measured characters, or, where a line measured none of them,
+/// that line's box at its caret. `None` when no line holds the range.
+fn span_box(source: &TextRunSource<'_>, range: std::ops::Range<usize>) -> Option<Rect> {
+    let text = source.text.as_ref();
+    let mut boxes: Vec<Rect> = Vec::new();
+    for line in &source.lines {
+        let start = range.start.max(line.byte_range.start);
+        let end = range.end.min(line.byte_range.end);
+        if start >= end {
+            continue;
+        }
+        let before = boxes.len();
+        for segment in &line.segments {
+            let s = start.max(segment.byte_range.start);
+            let e = end.min(segment.byte_range.end);
+            if s >= e {
+                continue;
+            }
+            let first = text[segment.byte_range.start..s].chars().count();
+            let last = first + text[s..e].chars().count();
+            let (Some(a), Some(b)) = (
+                segment.characters.get(first),
+                segment.characters.get(last - 1),
+            ) else {
+                boxes.push(segment.rect);
+                continue;
+            };
+            let (lead, trail) = (a.position, b.position + b.width);
+            let (x0, x1) = match segment.direction {
+                teksilo_core::accesskit::TextDirection::RightToLeft => {
+                    let right = segment.rect.x + segment.rect.width;
+                    (right - trail, right - lead)
+                }
+                _ => (segment.rect.x + lead, segment.rect.x + trail),
+            };
+            boxes.push(Rect::new(x0, segment.rect.y, x1 - x0, segment.rect.height));
+        }
+        if boxes.len() == before {
+            boxes.push(Rect::new(line.caret_x, line.rect.y, 0.0, line.rect.height));
+        }
+    }
+    boxes.into_iter().reduce(|a, b| {
+        let x0 = a.x.min(b.x);
+        let y0 = a.y.min(b.y);
+        let x1 = (a.x + a.width).max(b.x + b.width);
+        let y1 = (a.y + a.height).max(b.y + b.height);
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    })
 }
