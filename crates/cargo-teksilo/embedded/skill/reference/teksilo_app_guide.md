@@ -301,6 +301,10 @@ Dispatch is a **preview pass** (root → strict ancestors) then a **bubble pass*
 - `.on_key()`, `.on_key_preview()` (ancestors claim chords before a focused descendant),
   `.on_focus()`, `.on_access_action()`.
 - `.focusable(true)`, `.cursor(CursorIcon::Pointer)`.
+- Focus by id (`ctx.focus(id)`, `ctx.request_focus(id)`, an `initial_focus_hint`, a modal's
+  focus target) may name a composite that cannot take focus itself (a `SearchField`, a
+  `TextInput`): focus lands on the first Tab stop inside it. A focusable widget is focused
+  itself. So name the composite; you never need its inner field's id for this.
 - `.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)` — framework writes `true`
   when a **strict descendant** is focused/hovered (drives unified halos around composites).
 

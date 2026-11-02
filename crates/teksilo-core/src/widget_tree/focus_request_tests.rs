@@ -316,3 +316,124 @@ fn a_focus_lost_handler_can_redirect_a_clear() {
     tree.clear_focus();
     assert_eq!(tree.focused(), Some(fallback));
 }
+
+// ── An exact request naming a node that cannot take focus ───────────
+
+/// A container that is not focusable, holding a focusable `field`, beside a
+/// focusable `other` that starts with focus.
+struct Composite {
+    tree: WidgetTree,
+    outer: WidgetId,
+    field: WidgetId,
+    other: WidgetId,
+}
+
+fn composite() -> Composite {
+    let mut tree = WidgetTree::new();
+    let decoration = tree.add(FillWidget::new());
+    let field = tree.add(FillWidget::new().focusable());
+    let outer = tree.add(StackWidget::new().child(decoration).child(field));
+    let other = tree.add(FillWidget::new().focusable());
+    tree.add(StackWidget::new().child(outer).child(other));
+    tree.layout(size());
+    tree.focus(other);
+    Composite {
+        tree,
+        outer,
+        field,
+        other,
+    }
+}
+
+/// `WidgetTree::focus` on a composite whose outer node is structure lands on
+/// the field inside it, the node that holds the keys: what an initial-focus
+/// hint naming a `SearchField` needs.
+#[test]
+fn focusing_a_container_that_cannot_take_focus_lands_on_its_first_tab_stop() {
+    let mut c = composite();
+    c.tree.focus(c.outer);
+    assert_eq!(c.tree.focused(), Some(c.field));
+}
+
+/// A focusable container is focused itself, never a descendant of it.
+#[test]
+fn a_focusable_container_keeps_the_focus_it_was_given() {
+    let mut tree = WidgetTree::new();
+    let inner = tree.add(FillWidget::new().focusable());
+    let outer = tree.add(StackWidget::new().child(inner).focusable(true));
+    tree.add(StackWidget::new().child(outer));
+    tree.layout(size());
+    tree.focus(outer);
+    assert_eq!(tree.focused(), Some(outer));
+}
+
+/// A node with no Tab stop inside it is focused as named: nothing is refused,
+/// so a test can still focus a bare node to drive its handlers.
+#[test]
+fn a_leaf_that_cannot_take_focus_is_still_focused_exactly() {
+    let mut c = composite();
+    let bare = c.tree.add(FillWidget::new());
+    c.tree.layout(size());
+    c.tree.focus(bare);
+    assert_eq!(c.tree.focused(), Some(bare));
+}
+
+/// A disabled container keeps the exact behaviour: its subtree is disabled
+/// with it, so there is nothing better to move to.
+#[test]
+fn a_disabled_container_is_focused_as_named() {
+    let mut c = composite();
+    c.tree.enabled_when(c.outer, false);
+    c.tree.layout(size());
+    c.tree.focus(c.outer);
+    assert_eq!(c.tree.focused(), Some(c.outer));
+    assert_ne!(c.tree.focused(), Some(c.other));
+}
+
+/// A request for a dormant composite waits, then lands on the field the pass
+/// woke with it.
+#[test]
+fn a_deferred_request_for_a_composite_lands_on_its_field() {
+    let mut c = composite();
+    let shown = Signal::new(false);
+    c.tree.visible_when(c.outer, shown.clone());
+    c.tree.layout(size());
+    c.tree.focus(c.outer);
+    assert_eq!(c.tree.focused(), Some(c.other));
+    shown.set(true);
+    c.tree.layout(size());
+    assert_eq!(c.tree.focused(), Some(c.field));
+}
+
+/// The focus target of a delayed overlay is named outright too, so it follows
+/// the same rule: a composite in a popover hands focus to its field.
+#[test]
+fn a_delayed_overlay_focus_target_that_cannot_take_focus_lands_on_its_field() {
+    use crate::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    let mut tree = WidgetTree::new();
+    let field = tree.add(FillWidget::new().focusable());
+    let content = tree.add(StackWidget::new().child(field));
+    let pin = tree.add(FillWidget::new());
+    let anchor = {
+        tree.add(FillWidget::new().on_tap(move |_, ctx| {
+            ctx.show_overlay_after_with_focus(
+                OverlayRequest::new(
+                    content,
+                    pin,
+                    OverlayPlacement::BelowPreferred,
+                    DismissBehavior::Manual,
+                ),
+                std::time::Duration::ZERO,
+                content,
+            );
+        }))
+    };
+    // The tapped node last, so a click at its centre lands on it.
+    tree.add(StackWidget::new().child(pin).child(content).child(anchor));
+    tree.set_dormant(content);
+    tree.layout(size());
+    tree.click(anchor);
+    tree.advance_time(std::time::Duration::from_millis(1));
+    tree.layout(size());
+    assert_eq!(tree.focused(), Some(field));
+}

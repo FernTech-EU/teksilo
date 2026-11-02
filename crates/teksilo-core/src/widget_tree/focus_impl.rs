@@ -341,6 +341,17 @@ impl WidgetTree {
 
     /// Set focus to a specific widget (programmatic origin, no ops).
     ///
+    /// **A node that cannot take focus hands it to its first Tab stop.** When
+    /// `id` is not declared focusable (a composite such as a `SearchField` or a
+    /// `TextInput`, whose outer node is structure and whose inner field holds
+    /// the keys), focus moves to the first Tab stop inside it, the node Tab
+    /// would reach first. A focusable `id` is focused itself, never a
+    /// descendant of it. A node with no Tab stop inside it, or one under a
+    /// disabled ancestor, is still focused as named: nothing is refused, so a
+    /// test can focus a bare node to drive its handlers. This does not make a
+    /// node reachable from the keyboard: only
+    /// [`tab_stops_within`](Self::tab_stops_within) proves that.
+    ///
     /// **A dormant target is focused when it wakes, not now.** If `id` sits in
     /// a parked `Switcher` page or a `visible_when(false)` branch, focus stays
     /// where it is and the request is held until the end of the next
@@ -453,7 +464,10 @@ impl WidgetTree {
         ops: &mut dyn crate::window::WindowOps,
     ) {
         match mode {
-            FocusRequestMode::Exact => self.focus_ops(id, ops),
+            FocusRequestMode::Exact => {
+                let target = self.exact_focus_target(id);
+                self.focus_ops(target, ops);
+            }
             FocusRequestMode::SelfOrDescendant => {
                 let target = self.first_focusable_descendant(id).unwrap_or(id);
                 self.focus_ops(target, ops);
@@ -464,6 +478,27 @@ impl WidgetTree {
                 }
             }
         }
+    }
+
+    /// Where a request naming `id` itself puts focus: `id` when it can take
+    /// focus, else its first Tab stop, else `id` anyway.
+    ///
+    /// A focusable `id` is never routed through
+    /// [`first_focusable_descendant`](Self::first_focusable_descendant), which
+    /// sorts by tab index and could pick a descendant over the node itself. An
+    /// `id` that is not enabled keeps the exact behaviour too: its subtree is
+    /// disabled with it, so there is nothing better to move to.
+    ///
+    /// Shared by [`focus`](Self::focus) and the focus target of a delayed
+    /// overlay, the two places an application names a node to focus outright.
+    pub(crate) fn exact_focus_target(&self, id: WidgetId) -> WidgetId {
+        let Some(node) = self.arena.get(id) else {
+            return id;
+        };
+        if self.is_node_focusable(node) || !self.arena.is_active(id) || !self.arena.is_enabled(id) {
+            return id;
+        }
+        self.first_focusable_descendant(id).unwrap_or(id)
     }
 
     /// Honour the focus request a dormant target deferred, now that the layout
@@ -1116,7 +1151,9 @@ impl WidgetTree {
 /// for a dormant node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FocusRequestMode {
-    /// The named node itself (`WidgetTree::focus`, `BuildContext::focus`).
+    /// The named node itself when it can take focus, else its first Tab stop,
+    /// else the named node anyway (`WidgetTree::focus`, `BuildContext::focus`).
+    /// See `WidgetTree::exact_focus_target`.
     Exact,
     /// The named node's first focusable descendant, or the node itself when it
     /// has none (`EventContext::request_focus`).

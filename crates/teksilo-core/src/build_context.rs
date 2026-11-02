@@ -1061,7 +1061,9 @@ impl<'a> BuildContext<'a> {
     /// when a composing widget pre-builds an editor and needs focus to
     /// land on it as soon as the subtree is wired in.
     ///
-    /// A dormant `id` is focused once the next layout pass wakes it, as for
+    /// A dormant `id` is focused once the next layout pass wakes it, and an
+    /// `id` that cannot take focus (a composite whose field is inside it) hands
+    /// focus to its first Tab stop, both as for
     /// [`WidgetTree::focus`](crate::widget_tree::WidgetTree::focus).
     pub fn focus(&mut self, id: WidgetId) {
         self.tree.focus(id);

@@ -2108,6 +2108,10 @@ impl<'ops> EventContext<'ops> {
     }
 
     /// Show an overlay after a delay and move focus when it opens.
+    ///
+    /// `focus_target` is focused as
+    /// [`WidgetTree::focus`](crate::widget_tree::WidgetTree::focus) focuses a
+    /// node: one that cannot take focus hands it to its first Tab stop.
     pub fn show_overlay_after_with_focus(
         &mut self,
         request: crate::overlay::OverlayRequest,

@@ -642,10 +642,14 @@ impl WidgetTree {
                 self.overlay_manager.set_top_focus_restore(focus_id);
             }
             self.arena.mark_needs_paint(content_id);
+            // The target is named outright, like `WidgetTree::focus`, so it
+            // follows the same rule: a composite that cannot take focus hands
+            // it to its first Tab stop.
             if let Some(focus_target) = pending.focus_target
                 && self.arena.is_active(focus_target)
             {
-                self.focus_ops(focus_target, &mut *ops);
+                let target = self.exact_focus_target(focus_target);
+                self.focus_ops(target, &mut *ops);
             }
         }
         if any_shown {

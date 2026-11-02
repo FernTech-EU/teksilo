@@ -250,6 +250,14 @@ by crate for clarity, not because crates version independently.
   row of its completion popup), on scroll chrome (another view's scroll bar,
   a tab strip's scroll arrows), on empty background, a drag and a scroll
   commit nothing.
+- **Focusing a widget that cannot take focus focuses the first Tab stop
+  inside it.** `WidgetTree::focus`, `BuildContext::focus`, an
+  `initial_focus_hint`, a modal's focus target and the focus target of
+  `EventContext::show_overlay_after_with_focus` land on the field of a
+  composite such as a `SearchField` or a `TextInput`, where they used to
+  leave keyboard focus on its outer node, which takes no keys. A focusable
+  widget is still focused itself, and a widget with no Tab stop inside it is
+  still focused as named.
 
 #### Widgets
 
