@@ -89,6 +89,16 @@ to from booking sites and analytics dashboards.
   without its text.
 - The calendar opens on the start the field holds, on its days, with
   no range begun, whatever an earlier opening left.
+- **The calendar is a small dialog** (the WAI-ARIA date-picker dialog):
+  named, and described with how to use it. Tab and Shift+Tab cycle
+  through the grid, its header buttons, Cancel and OK, and never leave
+  it. Enter or Space on a day, a click on a day, and OK commit; Escape,
+  Cancel and a click outside close it and change nothing. The page
+  behind stays clickable. A commit is announced in words, after the
+  field is read.
+  OK is enabled once the first end is picked, and then finishes the
+  range at the cursor, as the second Enter does; the commit returns
+  focus to the start field.
 
 ```ignore
 // Requires ctx.signal() — shown as ignore per convention.

@@ -99,6 +99,14 @@ is used to from booking sites, calendar apps, and form builders.
   editable text field is read with its text.
 - The calendar opens on the date the date half holds, on its days,
   whatever an earlier opening left.
+- **The calendar is a small dialog** (the WAI-ARIA date-picker dialog):
+  named, and described with how to use it. Tab and Shift+Tab cycle
+  through the grid, its header buttons, Cancel and OK, and never leave
+  it. Enter or Space on a day, a click on a day, and OK commit; Escape,
+  Cancel and a click outside close it and change nothing. The page
+  behind stays clickable. A commit is announced in words, after the
+  field is read.
+  OK sets the date half and keeps the time.
 
 ```ignore
 // Requires ctx.signal() — shown as ignore per convention.

@@ -304,6 +304,14 @@ by crate for clarity, not because crates version independently.
   dock's first control (a modal window with no focus hint, a request to
   focus the dock itself) now lands in the top or leading panel; give the
   editor an `initial_focus_hint` to start there.
+- **The calendar of `DateEdit`, `DateRangeEdit` and `DateTimeEdit` is a
+  small dialog.** Tab and Shift+Tab stay inside it, it has Cancel and OK
+  buttons, a screen reader hears its name and how to use it as it opens, and
+  the date it sets is said in words ("Date set to Sunday, May 3, 2026").
+  Enter or a click on a day still picks it; Escape, Cancel and a click
+  outside leave the value as it was. After a range is picked, focus returns
+  to its start field. The field now announces a dialog popup
+  (`HasPopup::Dialog`) and names the dialog while it is open.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.

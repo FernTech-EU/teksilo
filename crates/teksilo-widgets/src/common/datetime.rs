@@ -9,6 +9,7 @@
 //! through the type aliases re-exported here. If a future swap is ever
 //! needed, the widget code does not change.
 
+pub(crate) mod calendar_dialog;
 pub mod locale;
 pub mod month_names;
 pub mod pattern;

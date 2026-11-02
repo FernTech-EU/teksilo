@@ -369,8 +369,21 @@ fn a_range_begun_and_abandoned_is_not_finished_by_the_next_opening() {
         in_the_grid(&tree),
         "the calendar is open, the keyboard in it"
     );
+    let mark = tree.announcements_since(0).last().map_or(0, |a| a.seq);
     press(&mut tree, Key::Escape);
     assert!(!in_the_grid(&tree), "Escape closed the calendar");
+    assert!(tree.active_overlays().is_empty(), "its overlay is gone");
+    assert_eq!(
+        tree.focused(),
+        Some(trigger),
+        "Escape returns to the trigger that opened it"
+    );
+    let _ = tree.sync_accessibility();
+    let _ = tree.sync_accessibility();
+    assert!(
+        tree.announcements_since(mark).is_empty(),
+        "Escape says nothing"
+    );
 
     tree.focus(trigger);
     lay_out(&mut tree);
@@ -384,6 +397,184 @@ fn a_range_begun_and_abandoned_is_not_finished_by_the_next_opening() {
     assert!(
         in_the_grid(&tree),
         "the calendar stays open for the other end"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn ok_waits_for_the_first_end_and_the_second_end_commits_and_is_said() {
+    use crate::common::locale_switch_test::speaking;
+    use teksilo_core::event::{Key, Modifiers};
+    let (_mgr, mut tree) = speaking("en-US");
+    let held = DateRange::new(Date::constant(2026, 5, 2), Date::constant(2026, 5, 16));
+    let range = Signal::new(Some(held));
+    let id = tree.add(DateRangeEdit::new(range.clone()));
+    let lay_out = |tree: &mut WidgetTree| {
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        })
+    };
+    let press = |tree: &mut WidgetTree, key: Key| {
+        tree.press_key(key, Modifiers::NONE);
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        });
+    };
+    lay_out(&mut tree);
+    let trigger = tree
+        .find_by_label("Open range calendar")
+        .expect("the trigger");
+    tree.focus(trigger);
+    lay_out(&mut tree);
+    press(&mut tree, Key::Space);
+    let ok = tree.find_by_label("OK").expect("an OK button");
+    assert!(
+        !tree.is_enabled(ok),
+        "with no end picked, OK has nothing to finish"
+    );
+    press(&mut tree, Key::Enter);
+    assert!(
+        tree.is_enabled(ok),
+        "with the first end picked, OK finishes the range"
+    );
+    press(&mut tree, Key::ArrowRight);
+    press(&mut tree, Key::ArrowRight);
+    let mark = tree.announcements_since(0).last().map_or(0, |a| a.seq);
+    press(&mut tree, Key::Enter);
+    assert_eq!(
+        range.get(),
+        Some(DateRange::new(
+            Date::constant(2026, 5, 2),
+            Date::constant(2026, 5, 4)
+        ))
+    );
+    let start = tree.first_focusable_descendant(id).expect("the start");
+    assert_eq!(
+        tree.focused(),
+        Some(start),
+        "the commit returns to the start"
+    );
+    for _ in 0..2 {
+        lay_out(&mut tree);
+        let _ = tree.sync_accessibility();
+    }
+    let heard: Vec<String> = tree
+        .announcements_since(mark)
+        .into_iter()
+        .map(|a| a.text)
+        .collect();
+    assert_eq!(
+        heard,
+        vec!["Range set from Saturday, May 2, 2026 to Monday, May 4, 2026".to_string()]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_range_field_says_it_opens_a_dialog_and_names_it_while_open() {
+    use crate::common::locale_switch_test::speaking;
+    use teksilo_core::accesskit::{HasPopup, Role};
+    use teksilo_core::event::{Key, Modifiers};
+    let (_mgr, mut tree) = speaking("en-US");
+    let range = Signal::new(None);
+    let id = tree.add(DateRangeEdit::new(range));
+    tree.layout(SizeProposal {
+        width: Some(600.0),
+        height: None,
+    });
+    let trigger = tree
+        .find_by_label("Open range calendar")
+        .expect("the trigger");
+    tree.focus(trigger);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(SizeProposal {
+        width: Some(600.0),
+        height: None,
+    });
+    let update = tree.sync_accessibility();
+    let node = |nid| {
+        update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == nid)
+            .map(|(_, n)| n.clone())
+    };
+    let field =
+        node(teksilo_core::accessibility::widget_id_to_node_id(id)).expect("the range node");
+    assert_eq!(field.has_popup(), Some(HasPopup::Dialog));
+    assert!(field.is_expanded() == Some(true));
+    let dialog = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::Dialog)
+        .map(|(nid, n)| (*nid, n.clone()))
+        .expect("a dialog node");
+    assert_eq!(dialog.1.label(), Some("Choose a date range"));
+    assert!(field.controls().contains(&dialog.0));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn in_a_modal_dialog_tab_stays_in_the_range_popup() {
+    use crate::common::locale_switch_test::speaking;
+    use crate::primitives::VStack;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    let (_mgr, mut tree) = speaking("en-US");
+    let opener = tree.add(crate::Button::new(teksilo_i18n::lit!("Edit")));
+    let id = tree.add(DateRangeEdit::new(Signal::new(None)));
+    let modal = tree.add(VStack::new().child(id));
+    tree.layout(SizeProposal {
+        width: Some(600.0),
+        height: None,
+    });
+    tree.show_overlay(OverlayRequest::new(
+        modal,
+        opener,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    tree.layout(SizeProposal {
+        width: Some(600.0),
+        height: None,
+    });
+    let trigger = tree
+        .find_by_label("Open range calendar")
+        .expect("the trigger");
+    tree.focus(trigger);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    tree.layout(SizeProposal {
+        width: Some(600.0),
+        height: None,
+    });
+    let grid = tree.focused().expect("the grid");
+    for _ in 0..12 {
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        tree.layout(SizeProposal {
+            width: Some(600.0),
+            height: None,
+        });
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "Tab never closes the popup"
+        );
+        if tree.focused() == Some(grid) {
+            break;
+        }
+    }
+    assert_eq!(tree.focused(), Some(grid), "Tab wraps inside the popup");
+    tree.press_key(Key::Escape, Modifiers::NONE);
+    tree.layout(SizeProposal {
+        width: Some(600.0),
+        height: None,
+    });
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "Escape closes only the popup"
     );
     teksilo_i18n::thread_local::clear();
 }

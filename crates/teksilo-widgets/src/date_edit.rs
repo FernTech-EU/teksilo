@@ -25,9 +25,8 @@
 //!     popover; `Alt+ArrowUp` closes it and `F4` toggles it.
 //!   - A chord holding `Ctrl` or `Super` is not the field's and falls
 //!     through to the application.
-//! - **Calendar popover**: dismisses on click-outside or Escape,
-//!   commits on cell click. The request carries no `fade_duration`, so
-//!   it appears and goes without a fade.
+//! - **Calendar popover**: a small dialog, see Accessibility. The request
+//!   carries no `fade_duration`, so it appears and goes without a fade.
 //! - **Min / Max**: clamps on commit and on step. Out-of-range values
 //!   in the popover cell are disabled.
 //!
@@ -40,8 +39,16 @@
 //!   written for someone listening, not for a parser. UIA and macOS expose
 //!   it; AT-SPI carries a string value on no interface.
 //! - Calendar trigger button — `Role::Button`, named from its tooltip.
-//!   `set_has_popup(HasPopup::Grid)` and `set_expanded(open)` sit on the
-//!   container node above, not on the button.
+//!   `set_has_popup(HasPopup::Dialog)`, `set_expanded(open)` and, while
+//!   open, `controls` the dialog sit on the container node above, not on
+//!   the button.
+//! - **The calendar is a small dialog** (the WAI-ARIA date-picker dialog):
+//!   named, and described with how to use it. Tab and Shift+Tab cycle
+//!   through the grid, its header buttons, Cancel and OK, and never leave
+//!   it. Enter or Space on a day, a click on a day, and OK commit; Escape,
+//!   Cancel and a click outside close it and change nothing. The page
+//!   behind stays clickable. A commit is announced in words, after the
+//!   field is read.
 //! - Internally the editing surface remains a `Role::TextInput` for
 //!   AT discoverability (so screen readers know it accepts text); the
 //!   wrapper carries the DateInput role on the outer node. The field is
@@ -86,6 +93,8 @@
 #[cfg(test)]
 mod tests;
 
+use crate::common::datetime::calendar_dialog::CalendarDialog;
+use std::cell::Cell;
 use std::rc::Rc;
 use teksilo_i18n::localized;
 
@@ -218,6 +227,9 @@ pub struct DateEdit {
     style_override: Option<teksilo_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
     calendar_id: Option<WidgetId>,
+    /// The popup's dialog node, once built: what the field's `controls`
+    /// names while the popup is open.
+    dialog_slot: Rc<Cell<Option<WidgetId>>>,
     /// The locale the accessibility value writes the date in, resolved
     /// from the tree's locale in `build()`, which a locale switch re-runs.
     lang: LanguageIdentifier,
@@ -263,6 +275,7 @@ impl DateEdit {
             style_override: None,
             root_child_id: None,
             calendar_id: None,
+            dialog_slot: Rc::new(Cell::new(None)),
             lang: date_locale(None),
         }
     }
@@ -658,6 +671,7 @@ impl Widget for DateEdit {
         // Built before the TextInput composite so the trailing-slot
         // trigger button can capture the calendar's id.
         let mut calendar_opening = None;
+        let mut calendar_focus: Option<Rc<Cell<Option<WidgetId>>>> = None;
         let calendar_id_opt = if self.show_calendar_button {
             // Bridge signal: the calendar binds to a parallel
             // `Signal<Option<Date>>` so its internal cell-render +
@@ -682,6 +696,7 @@ impl Widget for DateEdit {
             let pattern_for_cal = pattern_rc.clone();
             let on_value_changed_for_cal = on_value_changed.clone();
             let return_focus_to = ctx.self_id();
+            let lang_for_cal = self.lang.clone();
             let mut calendar =
                 Calendar::single(calendar_temp.clone()).on_activate(move |d, ctx_evt| {
                     let clamped = clamp_date(d, min, max);
@@ -690,6 +705,16 @@ impl Widget for DateEdit {
                     if let Some(cb) = on_value_changed_for_cal.as_ref() {
                         cb(Some(clamped), ctx_evt);
                     }
+                    // Said after the field is read: a reader speaks the field
+                    // in its short pattern form ("02/05/2026"), and this is
+                    // the date in words, weekday included.
+                    ctx_evt.announce(resolve_message_widget(
+                        "date-edit-committed",
+                        &[(
+                            "date",
+                            teksilo_i18n::FluentValue::from(full_date(clamped, &lang_for_cal)),
+                        )],
+                    ));
                     popover_open.set(false);
                     ctx_evt.dismiss_self_overlay_chain();
                     // Return focus to the DateEdit so keyboard users
@@ -710,7 +735,27 @@ impl Widget for DateEdit {
             if let Some(fdow) = self.first_day_of_week {
                 calendar = calendar.first_day_of_week(fdow);
             }
+            // Cancel closes without writing and returns to the field.
+            calendar = calendar.dialog_footer({
+                let popover_open = self.popover_open.clone();
+                move |ctx_evt| {
+                    popover_open.set(false);
+                    ctx_evt.dismiss_self_overlay_chain();
+                    ctx_evt.request_focus(return_focus_to);
+                    ctx_evt.request_frame();
+                }
+            });
             calendar_opening = Some(calendar.opening());
+            let dialog_name = self.label.clone().unwrap_or_else(|| {
+                localized(|| resolve_message_widget("date-edit-calendar-button", &[]))
+            });
+            let dialog = CalendarDialog::new(
+                calendar,
+                dialog_name,
+                localized(|| resolve_message_widget("date-edit-dialog-description", &[])),
+            );
+            calendar_focus = Some(dialog.calendar_slot());
+            self.dialog_slot = dialog.dialog_slot();
             // Detached, not a child: the popup must not wake or paint with the
             // field. `add_detached` records the ownership edge anyway, so the
             // calendar dies with this widget and each rebuild reaps the
@@ -718,7 +763,7 @@ impl Widget for DateEdit {
             // in the arena per rebuild.
             // Built the first time the popup is opened, not on every rebuild of the
             // field. See `teksilo_core::deferred_subtree::DeferredSubtree`.
-            let calendar_id = ctx.add_detached_deferred(self.popover_open.clone(), calendar);
+            let calendar_id = ctx.add_detached_deferred(self.popover_open.clone(), dialog);
             ctx.set_dormant(calendar_id);
             Some(calendar_id)
         } else {
@@ -752,6 +797,9 @@ impl Widget for DateEdit {
                 })
             };
             let opening = calendar_opening
+                .clone()
+                .expect("calendar built when button enabled");
+            let calendar_focus = calendar_focus
                 .clone()
                 .expect("calendar built when button enabled");
             let value = self.value.clone();
@@ -791,8 +839,9 @@ impl Widget for DateEdit {
                         // navigate cells immediately — standard date-
                         // picker UX (macOS Calendar, JetBrains, etc.).
                         // Without this the user must Tab through
-                        // unrelated widgets first.
-                        ctx_evt.request_focus(calendar_id);
+                        // unrelated widgets first. The grid, not the popup:
+                        // asking the popup lands on its first header button.
+                        ctx_evt.request_focus(calendar_focus.get().unwrap_or(calendar_id));
                     }
                 }
             });
@@ -1153,15 +1202,16 @@ impl Widget for DateEdit {
         // itself) and is dropped by the presentational-node collapse, so the
         // AT tree is exactly DateInput -> TextInput(editable) with its
         // character runs.
-        builder.set_has_popup(HasPopup::Grid);
+        builder.set_has_popup(HasPopup::Dialog);
         builder.set_expanded(self.popover_open.get());
-        // Wire popup-controlled relationship when the calendar
-        // exists. Pointing only when open caused stale ids on the
-        // first frame after open; safe to point when closed too —
-        // the calendar widget remains in the arena (dormant) and
-        // its NodeId is valid.
-        if let Some(cal_id) = self.calendar_id {
-            builder.push_controlled(widget_id_to_node_id(cal_id));
+        // The popup's dialog node, while it is open. A closed popup is
+        // dormant and out of the tree, and the walker strips a relation to
+        // it; the dialog node exists only once the popup was first built.
+        if self.calendar_id.is_some()
+            && self.popover_open.get()
+            && let Some(dialog) = self.dialog_slot.get()
+        {
+            builder.push_controlled(widget_id_to_node_id(dialog));
         }
     }
 }

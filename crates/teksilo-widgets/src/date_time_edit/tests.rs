@@ -340,3 +340,49 @@ fn each_part_is_an_entry_named_for_what_it_holds() {
     );
     teksilo_i18n::thread_local::clear();
 }
+
+#[test]
+fn ok_sets_the_date_keeps_the_time_and_says_both() {
+    use crate::common::locale_switch_test::speaking;
+    use teksilo_core::event::{Key, Modifiers};
+    let (_mgr, mut tree) = speaking("en-US");
+    let value = Signal::new(Some(make_dt()));
+    let id = tree.add(DateTimeEdit::new(value.clone()));
+    let lay_out = |tree: &mut WidgetTree| {
+        tree.layout(teksilo_canvas::SizeProposal {
+            width: Some(600.0),
+            height: None,
+        })
+    };
+    lay_out(&mut tree);
+    let trigger = tree
+        .find_by_role(teksilo_core::accesskit::Role::Button)
+        .expect("the calendar trigger");
+    tree.focus(trigger);
+    lay_out(&mut tree);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    lay_out(&mut tree);
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    lay_out(&mut tree);
+    let mark = tree.announcements_since(0).last().map_or(0, |a| a.seq);
+    let ok = tree.find_by_label("OK").expect("an OK button");
+    tree.click(ok);
+    lay_out(&mut tree);
+    let before = make_dt();
+    let after = value.get().expect("a value");
+    assert_eq!(after.date(), before.date().tomorrow().unwrap());
+    assert_eq!(after.time(), before.time(), "the time half is kept");
+    for _ in 0..2 {
+        lay_out(&mut tree);
+        let _ = tree.sync_accessibility();
+    }
+    let heard: Vec<String> = tree
+        .announcements_since(mark)
+        .into_iter()
+        .map(|a| a.text)
+        .collect();
+    assert_eq!(heard.len(), 1, "one sentence: {heard:?}");
+    assert!(heard[0].starts_with("Date and time set to "), "{heard:?}");
+    let _ = id;
+    teksilo_i18n::thread_local::clear();
+}

@@ -58,6 +58,14 @@
 //!   editable text field is read with its text.
 //! - The calendar opens on the date the date half holds, on its days,
 //!   whatever an earlier opening left.
+//! - **The calendar is a small dialog** (the WAI-ARIA date-picker dialog):
+//!   named, and described with how to use it. Tab and Shift+Tab cycle
+//!   through the grid, its header buttons, Cancel and OK, and never leave
+//!   it. Enter or Space on a day, a click on a day, and OK commit; Escape,
+//!   Cancel and a click outside close it and change nothing. The page
+//!   behind stays clickable. A commit is announced in words, after the
+//!   field is read.
+//!   OK sets the date half and keeps the time.
 //!
 //! ```ignore
 //! // Requires ctx.signal() — shown as ignore per convention.
@@ -77,7 +85,10 @@
 #[cfg(test)]
 mod tests;
 
+use crate::common::datetime::calendar_dialog::CalendarDialog;
+use std::cell::Cell;
 use std::rc::Rc;
+use teksilo_i18n::FluentValue;
 use teksilo_i18n::lit;
 use teksilo_i18n::localized;
 
@@ -103,7 +114,7 @@ use crate::common::datetime::pattern::{
     segment_at_position, step_date_field, step_time_field,
 };
 use crate::common::datetime::types::today_local;
-use crate::common::datetime::written::{date_locale, full_date_time};
+use crate::common::datetime::written::{date_locale, full_date, full_date_time};
 use crate::common::datetime::{Date, DateTime, Time};
 use crate::date_edit::{ValidationBehavior, build_date_validator, calendar_glyph_icon, clamp_date};
 use crate::icon_button::{IconButton, IconButtonSize};
@@ -170,6 +181,8 @@ pub struct DateTimeEdit {
     style_override: Option<teksilo_core::styles::SharedDateEditStyle>,
     root_child_id: Option<WidgetId>,
     calendar_id: Option<WidgetId>,
+    /// The popup's dialog node, once built (see `DateEdit`).
+    dialog_slot: Rc<Cell<Option<WidgetId>>>,
     /// The locale the accessibility value writes the date and time in,
     /// resolved from the tree's locale in `build()`, which a locale switch
     /// re-runs.
@@ -225,6 +238,7 @@ impl DateTimeEdit {
             style_override: None,
             root_child_id: None,
             calendar_id: None,
+            dialog_slot: Rc::new(Cell::new(None)),
             lang: date_locale(None),
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -620,6 +634,8 @@ impl Widget for DateTimeEdit {
             let time_part = self.time_part.clone();
             let on_changed = self.on_value_changed.clone();
             let return_focus_to = ctx.self_id();
+            let lang_for_cal = self.lang.clone();
+            let seconds_shown = matches!(self.seconds, SecondsMode::Editable);
             let mut calendar =
                 Calendar::single(calendar_temp.clone()).on_activate(move |d, ctx_evt| {
                     let clamped = clamp_date(d, date_min, date_max);
@@ -635,6 +651,22 @@ impl Widget for DateTimeEdit {
                             cb(combined, ctx_evt);
                         }
                     }
+                    // The value in words, after the field is read (see
+                    // `DateEdit`); the date alone while no time is set.
+                    let message = match combined {
+                        Some(dt) => resolve_message_widget(
+                            "date-time-edit-committed",
+                            &[(
+                                "value",
+                                FluentValue::from(full_date_time(dt, seconds_shown, &lang_for_cal)),
+                            )],
+                        ),
+                        None => resolve_message_widget(
+                            "date-edit-committed",
+                            &[("date", FluentValue::from(full_date(clamped, &lang_for_cal)))],
+                        ),
+                    };
+                    ctx_evt.announce(message);
                     popover_open.set(false);
                     ctx_evt.dismiss_self_overlay_chain();
                     ctx_evt.request_focus(return_focus_to);
@@ -649,10 +681,30 @@ impl Widget for DateTimeEdit {
             if let Some(fdow) = self.first_day_of_week {
                 calendar = calendar.first_day_of_week(fdow);
             }
+            // Cancel closes without writing and returns to the field.
+            calendar = calendar.dialog_footer({
+                let popover_open = self.calendar_popover_open.clone();
+                move |ctx_evt| {
+                    popover_open.set(false);
+                    ctx_evt.dismiss_self_overlay_chain();
+                    ctx_evt.request_focus(return_focus_to);
+                    ctx_evt.request_frame();
+                }
+            });
             let opening = calendar.opening();
+            let dialog_name = self.label.clone().unwrap_or_else(|| {
+                localized(|| resolve_message_widget("date-edit-calendar-button", &[]))
+            });
+            let dialog = CalendarDialog::new(
+                calendar,
+                dialog_name,
+                localized(|| resolve_message_widget("date-edit-dialog-description", &[])),
+            );
+            let calendar_focus = dialog.calendar_slot();
+            self.dialog_slot = dialog.dialog_slot();
             // Built the first time the popup is opened, not on every rebuild of the
             // field. See `teksilo_core::deferred_subtree::DeferredSubtree`.
-            let cal_id = ctx.add_deferred(self.calendar_popover_open.clone(), calendar);
+            let cal_id = ctx.add_deferred(self.calendar_popover_open.clone(), dialog);
             ctx.set_dormant(cal_id);
             self.calendar_id = Some(cal_id);
 
@@ -695,7 +747,7 @@ impl Widget for DateTimeEdit {
                             )
                             .on_dismiss(dismiss_cb.clone()),
                         );
-                        ctx_evt.request_focus(cal_id);
+                        ctx_evt.request_focus(calendar_focus.get().unwrap_or(cal_id));
                     }
                 });
             Some(ctx.add(trigger_btn))
@@ -947,8 +999,13 @@ impl Widget for DateTimeEdit {
         if self.show_calendar_button {
             builder
                 .inner_mut()
-                .set_has_popup(teksilo_core::accesskit::HasPopup::Grid);
+                .set_has_popup(teksilo_core::accesskit::HasPopup::Dialog);
             builder.set_expanded(self.calendar_popover_open.get());
+            if self.calendar_popover_open.get()
+                && let Some(dialog) = self.dialog_slot.get()
+            {
+                builder.push_controlled(teksilo_core::accessibility::widget_id_to_node_id(dialog));
+            }
         }
         builder.add_action(Action::Focus);
     }

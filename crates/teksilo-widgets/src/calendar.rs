@@ -299,6 +299,9 @@ pub struct Calendar {
     /// year: where `accessibility()` finds the one under the cursor there.
     month_cells: zoom_grid::ZoomCells,
     year_cells: zoom_grid::ZoomCells,
+    /// Set by a date field showing the calendar as a dialog: Cancel runs
+    /// this, and an OK beside it does what Enter on the grid does.
+    dialog_cancel: Option<Rc<dyn Fn(&mut EventContext)>>,
     // Build state
     root_child_id: Option<WidgetId>,
 }
@@ -351,6 +354,7 @@ impl Calendar {
             day_cells: DayCells::default(),
             month_cells: zoom_grid::ZoomCells::default(),
             year_cells: zoom_grid::ZoomCells::default(),
+            dialog_cancel: None,
             root_child_id: None,
         }
     }
@@ -468,6 +472,17 @@ impl Calendar {
     /// changes, or write to it to programmatically zoom in/out.
     pub fn mode_signal(&self) -> Signal<CalendarMode> {
         self.mode.clone()
+    }
+
+    /// Give the calendar a Cancel and an OK button under its grid, for a date
+    /// field that shows it as a dialog. Cancel runs `on_cancel`; OK does
+    /// exactly what Enter on the grid does: picks the day under the cursor
+    /// (nothing on a disabled day), and in the months or years view goes in
+    /// one level. On a range calendar OK is enabled only once the first end
+    /// is picked, and then finishes the range at the cursor.
+    pub(crate) fn dialog_footer(mut self, on_cancel: impl Fn(&mut EventContext) + 'static) -> Self {
+        self.dialog_cancel = Some(Rc::new(on_cancel));
+        self
     }
 
     /// What a host that shows this calendar in a popup sets on each opening.
@@ -702,6 +717,58 @@ impl Widget for Calendar {
                 None
             };
 
+        // ── Dialog buttons (a date field's popup) ──────────────
+        let dialog_buttons_id = self.dialog_cancel.clone().map(|on_cancel| {
+            // OK is Enter on the grid, through the same handler, so the two
+            // cannot drift: a disabled day, the zoom views and a range's
+            // two ends behave alike for both.
+            let enter = build_keyboard_handler(
+                self.visible_month.clone(),
+                self.focused_date.clone(),
+                self.mode.clone(),
+                self.selection.clone(),
+                self.min_date,
+                self.max_date,
+                self.disabled_date_filter.clone(),
+                self.on_selection_changed.clone(),
+                self.on_range_changed.clone(),
+                self.on_activate.clone(),
+                self.on_month_changed.clone(),
+                enabled,
+                first_dow,
+            );
+            let ok_enabled: Prop<bool> = match &self.selection {
+                SelectionBinding::Single(_) => Prop::Static(enabled),
+                SelectionBinding::Range { anchor, .. } => {
+                    Prop::Bound(anchor.map(move |a| enabled && a.is_some()))
+                }
+            };
+            let cancel =
+                crate::button::Button::new(teksilo_i18n::tr_widget!(messagebox_btn_cancel()))
+                    .enabled(enabled)
+                    .on_activate_fn(move |ctx_evt| on_cancel(ctx_evt));
+            let ok = crate::button::Button::new(teksilo_i18n::tr_widget!(messagebox_btn_ok()))
+                .variant(crate::button::ButtonVariant::Filled)
+                .enabled(ok_enabled)
+                .on_activate_fn(move |ctx_evt| {
+                    let press = WidgetEvent::KeyDown {
+                        key: Key::Enter,
+                        modifiers: teksilo_core::event::Modifiers::NONE,
+                        text: None,
+                    };
+                    let _ = enter(&press, ctx_evt);
+                });
+            // Cancel before OK in source order, so Tab reaches them in that
+            // order; a right-to-left layout mirrors only where they sit.
+            ctx.add(
+                HStack::new()
+                    .spacing(cal_recipe::CALENDAR_SECTION_GAP * scale)
+                    .child(Spacer::new())
+                    .child(cancel)
+                    .child(ok),
+            )
+        });
+
         // ── Assemble VStack ─────────────────────────────────────
         let mut col = VStack::new()
             .spacing(cal_recipe::CALENDAR_SECTION_GAP * scale)
@@ -711,6 +778,10 @@ impl Widget for Calendar {
         if let Some(footer_id) = footer_id {
             let divider_id = ctx.add(Divider::horizontal());
             col = col.child(divider_id).child(footer_id);
+        }
+        if let Some(buttons_id) = dialog_buttons_id {
+            let divider_id = ctx.add(Divider::horizontal());
+            col = col.child(divider_id).child(buttons_id);
         }
         let col_id = ctx.add(col);
         let padded_id =

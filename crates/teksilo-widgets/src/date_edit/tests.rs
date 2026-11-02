@@ -800,3 +800,351 @@ fn a_date_edit_built_disabled_works_once_enabled() {
         "an arrow steps the caret's segment"
     );
 }
+
+// ── The popup is a dialog (APG date picker) ───────────────────────
+
+/// An English tree with a `DateEdit` on 2 May 2026, its field focused.
+fn opened_dialog() -> (
+    Rc<teksilo_i18n::I18nManager>,
+    WidgetTree,
+    WidgetId,
+    Signal<Option<Date>>,
+) {
+    use crate::common::locale_switch_test::speaking;
+    let (mgr, mut tree) = speaking("en-US");
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value.clone()));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+    laid_out(&mut tree);
+    tree.press_key(Key::F4, Modifiers::NONE);
+    laid_out(&mut tree);
+    (mgr, tree, id, value)
+}
+
+/// The popup is really closed: its overlay is gone, not only the flag the
+/// field reads (which every close path sets, whether the overlay closed or
+/// not), and focus is back in the field.
+fn closed_back_in_the_field(tree: &WidgetTree, id: WidgetId) {
+    assert!(
+        !tree.accessibility_node(id).is_expanded(),
+        "the field says closed"
+    );
+    assert!(
+        tree.active_overlays().is_empty(),
+        "the popup's overlay is gone"
+    );
+    let focus = tree.focused().expect("focus is somewhere");
+    assert!(
+        tree.is_descendant_of(focus, id),
+        "focus is back in the field"
+    );
+}
+
+fn focused_role(tree: &WidgetTree) -> Option<teksilo_core::accesskit::Role> {
+    tree.focused().map(|f| tree.accessibility_node(f).role())
+}
+
+fn heard_mark(tree: &WidgetTree) -> u64 {
+    tree.announcements_since(0).last().map_or(0, |a| a.seq)
+}
+
+fn heard_since(tree: &mut WidgetTree, mark: u64) -> Vec<String> {
+    for _ in 0..2 {
+        laid_out(tree);
+        let _ = tree.sync_accessibility();
+    }
+    tree.announcements_since(mark)
+        .into_iter()
+        .map(|a| a.text)
+        .collect()
+}
+
+#[test]
+fn the_calendar_opens_on_its_grid_and_tab_cycles_inside_it() {
+    use teksilo_core::accesskit::Role;
+    let (_mgr, mut tree, id, _value) = opened_dialog();
+    assert_eq!(
+        focused_role(&tree),
+        Some(Role::Grid),
+        "focus starts on the grid"
+    );
+    let grid = tree.focused().expect("the grid");
+
+    let ok = tree.find_by_label("OK").expect("an OK button");
+    let cancel = tree.find_by_label("Cancel").expect("a Cancel button");
+    let mut stops = Vec::new();
+    for _ in 0..12 {
+        stops.push(tree.focused().expect("focus stays in the popup"));
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        laid_out(&mut tree);
+        assert!(
+            tree.accessibility_node(id).is_expanded(),
+            "Tab never closes the popup"
+        );
+        if tree.focused() == Some(grid) {
+            break;
+        }
+    }
+    assert_eq!(tree.focused(), Some(grid), "Tab from OK wraps to the grid");
+    let at = |w| stops.iter().position(|&s| s == w);
+    assert!(
+        at(cancel) < at(ok) && at(ok) == Some(stops.len() - 1),
+        "Cancel, then OK, last"
+    );
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    laid_out(&mut tree);
+    assert_eq!(
+        tree.focused(),
+        Some(ok),
+        "Shift+Tab from the grid reaches OK"
+    );
+    assert!(tree.accessibility_node(id).is_expanded());
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_popup_is_a_named_described_dialog_the_field_controls() {
+    use teksilo_core::accesskit::{HasPopup, Role};
+    let (_mgr, mut tree, id, _value) = opened_dialog();
+    // The overlay's content root (the popup's top widget, detached from the
+    // field) must not be a dialog itself: the overlay stack would take it
+    // for a host surface, which the field's trigger cannot close.
+    let mut root = tree.focused().expect("the grid");
+    while !tree
+        .widget_type_name(root)
+        .is_some_and(|n| n.ends_with("CalendarDialog"))
+    {
+        root = tree
+            .parent(root)
+            .expect("the grid is inside the popup's root");
+    }
+    assert_ne!(
+        tree.accessibility_node(root).role(),
+        Role::Dialog,
+        "the dialog role sits on an inner node, never on the overlay's root"
+    );
+    let update = tree.sync_accessibility();
+    let dialog = update
+        .nodes
+        .iter()
+        .find(|(_, n)| n.role() == Role::Dialog)
+        .map(|(nid, n)| (*nid, n.clone()))
+        .expect("a dialog node");
+    assert_eq!(dialog.1.label(), Some("Choose date"));
+    assert_eq!(
+        dialog.1.description(),
+        Some("Enter selects the date, Escape cancels.")
+    );
+    let field = update
+        .nodes
+        .iter()
+        .find(|(nid, _)| *nid == teksilo_core::accessibility::widget_id_to_node_id(id))
+        .map(|(_, n)| n.clone())
+        .expect("the date input");
+    assert_eq!(field.has_popup(), Some(HasPopup::Dialog));
+    assert!(field.controls().contains(&dialog.0));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn enter_commits_and_says_the_date_in_words() {
+    let (_mgr, mut tree, id, value) = opened_dialog();
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    laid_out(&mut tree);
+    let mark = heard_mark(&tree);
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 3)));
+    closed_back_in_the_field(&tree, id);
+    assert_eq!(
+        heard_since(&mut tree, mark),
+        vec!["Date set to Sunday, May 3, 2026".to_string()]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn ok_commits_the_day_under_the_cursor() {
+    let (_mgr, mut tree, id, value) = opened_dialog();
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    laid_out(&mut tree);
+    let ok = tree.find_by_label("OK").expect("an OK button");
+    tree.click(ok);
+    laid_out(&mut tree);
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 3)));
+    closed_back_in_the_field(&tree, id);
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn cancel_and_escape_leave_the_value_and_say_nothing() {
+    let (_mgr, mut tree, id, value) = opened_dialog();
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    laid_out(&mut tree);
+    let mark = heard_mark(&tree);
+    let cancel = tree.find_by_label("Cancel").expect("a Cancel button");
+    tree.click(cancel);
+    laid_out(&mut tree);
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 2)));
+    closed_back_in_the_field(&tree, id);
+
+    tree.press_key(Key::F4, Modifiers::NONE);
+    laid_out(&mut tree);
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    laid_out(&mut tree);
+    tree.press_key(Key::Escape, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 2)));
+    // Opened with F4 from the field, so Escape returns to the field.
+    closed_back_in_the_field(&tree, id);
+    assert!(heard_since(&mut tree, mark).is_empty());
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn ok_in_the_months_view_goes_in_and_writes_nothing() {
+    let (_mgr, mut tree, id, value) = opened_dialog();
+    // The header's title zooms out to the months.
+    let title = tree.find_by_label("May 2026").expect("the header's title");
+    tree.click(title);
+    laid_out(&mut tree);
+    let title_now = |tree: &WidgetTree| tree.accessibility_node(title).name().map(str::to_owned);
+    assert_eq!(
+        title_now(&tree).as_deref(),
+        Some("2026"),
+        "the months view titles the year"
+    );
+    let ok = tree.find_by_label("OK").expect("an OK button");
+    tree.click(ok);
+    laid_out(&mut tree);
+    assert_eq!(
+        title_now(&tree).as_deref(),
+        Some("May 2026"),
+        "OK went in a level: back on the days of May"
+    );
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 2)));
+    assert!(
+        tree.accessibility_node(id).is_expanded(),
+        "OK in a zoom view goes in a level and keeps the popup"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_trigger_closes_the_popup_it_opened() {
+    use crate::common::locale_switch_test::speaking;
+    let (_mgr, mut tree) = speaking("en-US");
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value.clone()));
+    laid_out(&mut tree);
+    let trigger = tree.find_by_label("Open calendar").expect("the trigger");
+    tree.click(trigger);
+    laid_out(&mut tree);
+    assert_eq!(tree.active_overlays().len(), 1, "the popup is open");
+    // An assistive technology's Click on the trigger, with focus still in the
+    // popup: the one way to the trigger's own close path. (A pointer click
+    // outside the popup closes it first, and so does focus leaving it.)
+    let mut ops = teksilo_core::window::NoopWindowOps;
+    tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(trigger),
+        teksilo_core::accesskit::Action::Click,
+        None,
+        &mut ops,
+    );
+    laid_out(&mut tree);
+    assert!(!tree.accessibility_node(id).is_expanded());
+    assert!(
+        tree.active_overlays().is_empty(),
+        "the trigger closes the overlay itself, not only the flag"
+    );
+    assert_eq!(value.get(), Some(Date::constant(2026, 5, 2)));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn the_commit_is_said_in_french() {
+    use crate::common::locale_switch_test::speaking;
+    let (_mgr, mut tree) = speaking("fr-FR");
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value.clone()));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+    laid_out(&mut tree);
+    tree.press_key(Key::F4, Modifiers::NONE);
+    laid_out(&mut tree);
+    let mark = heard_mark(&tree);
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(
+        heard_since(&mut tree, mark),
+        vec!["Date choisie : samedi 2 mai 2026".to_string()]
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+/// A date field inside a modal dialog: Tab still cycles inside its popup,
+/// and closing the popup leaves the dialog open.
+#[test]
+fn in_a_modal_dialog_tab_stays_in_the_popup_and_cancel_closes_only_it() {
+    use crate::common::locale_switch_test::speaking;
+    use crate::primitives::VStack;
+    use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    let (_mgr, mut tree) = speaking("en-US");
+    let opener = tree.add(crate::Button::new(lit!("Edit")));
+    let value = Signal::new(Some(Date::constant(2026, 5, 2)));
+    let id = tree.add(DateEdit::new(value.clone()));
+    let after = tree.add(crate::Button::new(lit!("Save")));
+    let modal = tree.add(VStack::new().child(id).child(after));
+    laid_out(&mut tree);
+    tree.show_overlay(OverlayRequest::new(
+        modal,
+        opener,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    laid_out(&mut tree);
+    focus_field(&mut tree, id);
+    laid_out(&mut tree);
+    tree.press_key(Key::F4, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(tree.active_overlays().len(), 2, "the dialog and the popup");
+    let grid = tree.focused().expect("the grid");
+    let ok = tree.find_by_label("OK").expect("an OK button");
+    for _ in 0..12 {
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        laid_out(&mut tree);
+        assert_eq!(
+            tree.active_overlays().len(),
+            2,
+            "Tab never closes the popup"
+        );
+        if tree.focused() == Some(grid) {
+            break;
+        }
+    }
+    assert_eq!(tree.focused(), Some(grid), "Tab wraps inside the popup");
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    laid_out(&mut tree);
+    assert_eq!(
+        tree.focused(),
+        Some(ok),
+        "Shift+Tab from the grid reaches OK"
+    );
+
+    let cancel = tree.find_by_label("Cancel").expect("a Cancel button");
+    tree.click(cancel);
+    laid_out(&mut tree);
+    assert_eq!(tree.active_overlays().len(), 1, "only the popup closed");
+    tree.press_key(Key::F4, Modifiers::NONE);
+    laid_out(&mut tree);
+    tree.press_key(Key::Escape, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "Escape closes only the popup"
+    );
+    let _ = after;
+    teksilo_i18n::thread_local::clear();
+}

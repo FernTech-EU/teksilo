@@ -43,7 +43,9 @@ focus leaves it — which is what their ARIA patterns (Disclosure, Menu) ask
 for, and what keeps an open panel from sitting over the focus ring that
 left it. Trapping focus inside one prevents that dismissal from ever
 firing. A centered modal needs no wrapper at all: `cycle_focus` already
-roots traversal at the topmost centered overlay's content.
+roots traversal at the topmost centered overlay's content. The one
+exception is a popup that is a dialog with its own Cancel and Escape,
+such as the date fields' calendar: there Tab cycles inside by design.
 
 #### Layout & accessibility
 

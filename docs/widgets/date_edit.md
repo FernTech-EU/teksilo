@@ -71,9 +71,8 @@ popover anchored below the field for graphical date selection.
     popover; `Alt+ArrowUp` closes it and `F4` toggles it.
   - A chord holding `Ctrl` or `Super` is not the field's and falls
     through to the application.
-- **Calendar popover**: dismisses on click-outside or Escape,
-  commits on cell click. The request carries no `fade_duration`, so
-  it appears and goes without a fade.
+- **Calendar popover**: a small dialog, see Accessibility. The request
+  carries no `fade_duration`, so it appears and goes without a fade.
 - **Min / Max**: clamps on commit and on step. Out-of-range values
   in the popover cell are disabled.
 
@@ -86,8 +85,16 @@ popover anchored below the field for graphical date selection.
   written for someone listening, not for a parser. UIA and macOS expose
   it; AT-SPI carries a string value on no interface.
 - Calendar trigger button — `Role::Button`, named from its tooltip.
-  `set_has_popup(HasPopup::Grid)` and `set_expanded(open)` sit on the
-  container node above, not on the button.
+  `set_has_popup(HasPopup::Dialog)`, `set_expanded(open)` and, while
+  open, `controls` the dialog sit on the container node above, not on
+  the button.
+- **The calendar is a small dialog** (the WAI-ARIA date-picker dialog):
+  named, and described with how to use it. Tab and Shift+Tab cycle
+  through the grid, its header buttons, Cancel and OK, and never leave
+  it. Enter or Space on a day, a click on a day, and OK commit; Escape,
+  Cancel and a click outside close it and change nothing. The page
+  behind stays clickable. A commit is announced in words, after the
+  field is read.
 - Internally the editing surface remains a `Role::TextInput` for
   AT discoverability (so screen readers know it accepts text); the
   wrapper carries the DateInput role on the outer node. The field is

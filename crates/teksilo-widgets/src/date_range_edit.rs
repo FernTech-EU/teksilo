@@ -53,6 +53,16 @@
 //!   without its text.
 //! - The calendar opens on the start the field holds, on its days, with
 //!   no range begun, whatever an earlier opening left.
+//! - **The calendar is a small dialog** (the WAI-ARIA date-picker dialog):
+//!   named, and described with how to use it. Tab and Shift+Tab cycle
+//!   through the grid, its header buttons, Cancel and OK, and never leave
+//!   it. Enter or Space on a day, a click on a day, and OK commit; Escape,
+//!   Cancel and a click outside close it and change nothing. The page
+//!   behind stays clickable. A commit is announced in words, after the
+//!   field is read.
+//!   OK is enabled once the first end is picked, and then finishes the
+//!   range at the cursor, as the second Enter does; the commit returns
+//!   focus to the start field.
 //!
 //! ```ignore
 //! // Requires ctx.signal() — shown as ignore per convention.
@@ -72,6 +82,8 @@
 #[cfg(test)]
 mod tests;
 
+use crate::common::datetime::calendar_dialog::CalendarDialog;
+use std::cell::Cell;
 use std::rc::Rc;
 use teksilo_i18n::localized;
 
@@ -152,6 +164,8 @@ pub struct DateRangeEdit {
     /// The locale the accessibility value writes the dates in, resolved
     /// from the tree's locale in `build()`, which a locale switch re-runs.
     lang: LanguageIdentifier,
+    /// The popup's dialog node, once built (see `DateEdit`).
+    dialog_slot: Rc<Cell<Option<WidgetId>>>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
     /// with the rich / composite slots — every setter clears the other two so
     /// the last call wins.
@@ -198,6 +212,7 @@ impl DateRangeEdit {
             style_override: None,
             root_child_id: None,
             lang: date_locale(None),
+            dialog_slot: Rc::new(Cell::new(None)),
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -473,11 +488,28 @@ impl Widget for DateRangeEdit {
         // Pre-build the dormant range calendar once.
         let value_for_cal = self.value.clone();
         let popover_open_for_cal = self.range_popover_open.clone();
+        let lang_for_cal = self.lang.clone();
         let mut cal =
             Calendar::range(value_for_cal.clone()).on_range_changed(move |new_range, ctx_evt| {
-                if new_range.is_some() {
+                if let Some(range) = new_range {
+                    // Both ends in words, after the field is read (see
+                    // `DateEdit`), and never joined with a dash.
+                    ctx_evt.announce(resolve_message_widget(
+                        "date-range-edit-committed",
+                        &[
+                            (
+                                "start",
+                                FluentValue::from(full_date(range.start, &lang_for_cal)),
+                            ),
+                            (
+                                "end",
+                                FluentValue::from(full_date(range.end, &lang_for_cal)),
+                            ),
+                        ],
+                    ));
                     popover_open_for_cal.set(false);
                     ctx_evt.dismiss_self_overlay_chain();
+                    ctx_evt.request_focus(start_inner_id);
                     ctx_evt.request_frame();
                 }
             });
@@ -490,12 +522,32 @@ impl Widget for DateRangeEdit {
         if let Some(fdow) = self.first_day_of_week {
             cal = cal.first_day_of_week(fdow);
         }
+        // Cancel closes without writing and returns to the start field.
+        cal = cal.dialog_footer({
+            let popover_open = self.range_popover_open.clone();
+            move |ctx_evt| {
+                popover_open.set(false);
+                ctx_evt.dismiss_self_overlay_chain();
+                ctx_evt.request_focus(start_inner_id);
+                ctx_evt.request_frame();
+            }
+        });
         let opening = cal.opening();
+        let dialog_name = self.label.clone().unwrap_or_else(|| {
+            localized(|| resolve_message_widget("date-range-edit-dialog-name", &[]))
+        });
+        let dialog = CalendarDialog::new(
+            cal,
+            dialog_name,
+            localized(|| resolve_message_widget("date-range-edit-dialog-description", &[])),
+        );
+        let calendar_focus = dialog.calendar_slot();
+        self.dialog_slot = dialog.dialog_slot();
         // Detached rather than a child, and owned rather than orphaned — see
         // `DateEdit`'s calendar for why both halves matter.
         // Built the first time the popup is opened, not on every rebuild of the
         // field. See `teksilo_core::deferred_subtree::DeferredSubtree`.
-        let cal_id = ctx.add_detached_deferred(self.range_popover_open.clone(), cal);
+        let cal_id = ctx.add_detached_deferred(self.range_popover_open.clone(), dialog);
         ctx.set_dormant(cal_id);
 
         let popover_open = self.range_popover_open.clone();
@@ -537,7 +589,7 @@ impl Widget for DateRangeEdit {
                         )
                         .on_dismiss(dismiss_cb.clone()),
                     );
-                    ctx_evt.request_focus(cal_id);
+                    ctx_evt.request_focus(calendar_focus.get().unwrap_or(cal_id));
                 }
             });
         let trigger_id = ctx.add(trigger_btn);
@@ -695,9 +747,9 @@ impl Widget for DateRangeEdit {
             ctx.binding_registry(),
             teksilo_core::binding::BindingLevel::AccessibilityOnly,
         );
-        // The trigger's own AT node (`set_expanded` / `HasPopup`) is not
-        // surfaced separately yet; the button itself is already mounted in
-        // the row above.
+        // `set_expanded`, `HasPopup::Dialog` and `controls` are on this
+        // widget's own node (see `accessibility`), not on the trigger button
+        // mounted in the row above.
         let _ = trigger_id;
 
         vec![root_with_strip]
@@ -773,6 +825,17 @@ impl Widget for DateRangeEdit {
             builder
                 .inner_mut()
                 .set_invalid(teksilo_core::accesskit::Invalid::True);
+        }
+        // The calendar popup is a dialog, and while it is open the node names
+        // it, as `DateEdit` and `DateTimeEdit` do.
+        builder
+            .inner_mut()
+            .set_has_popup(teksilo_core::accesskit::HasPopup::Dialog);
+        builder.set_expanded(self.range_popover_open.get());
+        if self.range_popover_open.get()
+            && let Some(dialog) = self.dialog_slot.get()
+        {
+            builder.push_controlled(teksilo_core::accessibility::widget_id_to_node_id(dialog));
         }
         builder.add_action(Action::Focus);
     }
