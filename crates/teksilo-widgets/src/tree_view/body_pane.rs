@@ -220,18 +220,12 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
         });
         ctx.own_handle(scroll_handle);
 
-        // Selection changes refresh the `selected` argument handed to the row
-        // delegate, so they rebuild the pane. (The root separately repaints
-        // its container focus ring — see `TreeView::build`.)
-        if let Some(ref rs) = self.row_selection {
-            let v = version.clone();
-            let counter = Rc::new(Cell::new(0_u64));
-            let handle = rs.observe_for_rebuild(move || {
-                counter.set(counter.get() + 1);
-                v.set(counter.get());
-            });
-            ctx.own_handle(handle);
-        }
+        // A selection change does NOT rebuild the pane: each row's
+        // `TreeItemWrapper` watches its own selectedness and rebuilds alone, so
+        // a selection move re-runs the delegate for the two rows it flipped and
+        // every other row keeps its node (and its handlers' gesture state). The
+        // root separately repaints its container focus ring; see
+        // `TreeView::build`.
 
         // --- Create visible item widgets ---
         let (start, end) = self.visible_range();
@@ -265,35 +259,54 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
             // Row metadata (a11y level / expand state) from the source.
             let meta = self.source.meta(i);
             let item_has_children = meta.as_ref().is_some_and(|m| m.has_children);
+            // Everything the row needs to draw itself, closed over once. The
+            // pane calls it for the first build; the wrapper calls it again
+            // whenever this row's own selectedness flips.
+            let body: crate::list_item_a11y::RowBody = {
+                let source = self.source.clone();
+                let delegate = self.row_delegate.clone();
+                let tips = self.row_tooltips.clone();
+                let row_state = row_state_fn.clone();
+                Rc::new(move |ctx: &mut BuildContext, selected: bool| {
+                    // Resolve the row's tooltip inside the same borrow that
+                    // builds the row: it is the only place the item is
+                    // reachable, and attaching needs a `WidgetId` that does
+                    // not exist until afterwards.
+                    let pending_tip: RefCell<Option<crate::data_views::ResolvedRowTooltip>> =
+                        RefCell::new(None);
+                    let widget = source
+                        .with_row(i, &|item, m| {
+                            if tips.is_set() {
+                                *pending_tip.borrow_mut() = tips.resolve(i, item);
+                            }
+                            (delegate)(i, item, m, selected)
+                        })
+                        .or_else(|| {
+                            ((row_state)(i) == RowState::Loading)
+                                .then(crate::data_views::default_placeholder)
+                        })?;
+                    // The scope the pane opens around its rows is closed by
+                    // the time a row rebuilds on its own, so the row opens it
+                    // again: a `StandardTreeItem` delegate's focus-aware
+                    // selection reads the tree's keyboard focus through it.
+                    ctx.begin_view_focus_for(root_id);
+                    let inner_id = ctx.add_boxed(widget);
+                    ctx.end_view_focus();
+                    // The app cannot reach this widget to hang a tooltip on
+                    // it (the view built it), so the view attaches the
+                    // resolved tip.
+                    if let Some(tip) = pending_tip.into_inner() {
+                        tips.attach_resolved(ctx, inner_id, tip);
+                    }
+                    Some(inner_id)
+                })
+            };
             // A `Loading` row (data not yet resident) renders a placeholder
             // skeleton instead of being skipped, so the scrollbar and layout
             // stay stable while the window loads. A placeholder reports no
-            // metadata, so the expand/drag wiring below is gated off.
-            // Resolve the row's tooltip inside the same borrow that builds the
-            // row: it is the only place the item is reachable, and attaching
-            // needs a `WidgetId` that does not exist until afterwards.
-            let pending_tip: RefCell<Option<crate::data_views::ResolvedRowTooltip>> =
-                RefCell::new(None);
-            let tips = &self.row_tooltips;
-            let row_widget = self
-                .source
-                .with_row(i, &|item, m| {
-                    if tips.is_set() {
-                        *pending_tip.borrow_mut() = tips.resolve(i, item);
-                    }
-                    (self.row_delegate)(i, item, m, selected)
-                })
-                .or_else(|| {
-                    ((row_state_fn)(i) == RowState::Loading)
-                        .then(crate::data_views::default_placeholder)
-                });
-            if let Some(widget) = row_widget {
-                let inner_id = ctx.add_boxed(widget);
-                // The app cannot reach this widget to hang a tooltip on it —
-                // the view built it — so the view attaches the resolved tip.
-                if let Some(tip) = pending_tip.into_inner() {
-                    self.row_tooltips.attach_resolved(ctx, inner_id, tip);
-                }
+            // metadata, so the expand/drag wiring below is gated off. A row
+            // with nothing to show gets no wrapper at all.
+            if let Some(inner_id) = body(ctx, selected) {
                 // `sibling_pos` also returns the sibling count, which nothing
                 // publishes: a flattened tree has no per-branch container node
                 // for AccessKit to read a `size_of_set` from, so the wrapper
@@ -315,11 +328,13 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     (None, None, None)
                 };
                 let child_id = ctx.add(crate::list_item_a11y::TreeItemWrapper::new(
+                    body,
+                    self.row_selection.clone(),
+                    i,
                     inner_id,
                     level,
                     position_1based,
                     expanded_opt,
-                    selected,
                 ));
 
                 // One Tab stop for the whole tree — see the sibling call in

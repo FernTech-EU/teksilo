@@ -320,9 +320,24 @@ impl Widget for ListItemWrapper {
 }
 
 /// Wrapper that sets Role::TreeItem with level, expanded state, and selection.
-#[derive(Debug)]
+///
+/// The rebuild boundary for a selection move, as in [`ListItemWrapper`]: the
+/// wrapper builds its row widget from a [`RowBody`] and rebuilds only when its
+/// own row's selectedness flips, so a selection move re-runs the delegate for
+/// the two rows whose state changed and every other row keeps its node. The
+/// row's handlers live on this wrapper's id, which never changes for a
+/// selection move.
 pub(crate) struct TreeItemWrapper {
-    child: WidgetId,
+    body: RowBody,
+    /// The selection to watch, and this row's flat index in it.
+    selection: Option<RowSelection>,
+    index: usize,
+    /// Rebuild trigger, bumped only when *this* row's selectedness flips.
+    version: Signal<u64>,
+    /// The row widget the pane already built for the first build, so the
+    /// pane can tell a row with nothing to show (no wrapper at all) from one
+    /// that has. Adopted by the first build; every later build calls `body`.
+    first: Option<WidgetId>,
     /// 1-based depth, or `None` when the row's metadata has not resolved.
     ///
     /// A lazy `TreeDataSource` hands back no metadata for a row still
@@ -337,34 +352,89 @@ pub(crate) struct TreeItemWrapper {
     /// 1-based position within the sibling group, or `None` — see `level`.
     position: Option<usize>,
     expanded: Option<bool>, // None if leaf
+
+    // Build state.
     selected: bool,
+    child: Option<WidgetId>,
 }
 
 impl TreeItemWrapper {
+    /// `first` is the row widget the pane built with `body` for `selected`,
+    /// the selectedness the wrapper reads again at its first build.
     pub fn new(
-        child: WidgetId,
+        body: RowBody,
+        selection: Option<RowSelection>,
+        index: usize,
+        first: WidgetId,
         level_1based: Option<usize>,
         position_1based: Option<usize>,
         expanded: Option<bool>,
-        selected: bool,
     ) -> Self {
         Self {
-            child,
+            body,
+            selection,
+            index,
+            version: Signal::new(0),
+            first: Some(first),
             level: level_1based,
             position: position_1based,
             expanded,
-            selected,
+            selected: false,
+            child: None,
         }
     }
 }
 
+impl std::fmt::Debug for TreeItemWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TreeItemWrapper")
+            .field("index", &self.index)
+            .field("level", &self.level)
+            .field("position", &self.position)
+            .field("expanded", &self.expanded)
+            .field("selected", &self.selected)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Widget for TreeItemWrapper {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.version
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        let selected = self
+            .selection
+            .as_ref()
+            .map(|s| s.is_selected(self.index))
+            .unwrap_or(false);
+        self.selected = selected;
+        if let Some(ref selection) = self.selection {
+            let watched = selection.clone();
+            let index = self.index;
+            let version = self.version.clone();
+            let last = Cell::new(selected);
+            let handle = selection.observe_for_rebuild(move || {
+                let now = watched.is_selected(index);
+                if now != last.get() {
+                    last.set(now);
+                    version.set(version.get() + 1);
+                }
+            });
+            ctx.own_handle(handle);
+        }
+        self.child = match self.first.take() {
+            Some(first) => Some(first),
+            None => (self.body)(ctx, selected),
+        };
+        self.child.into_iter().collect()
+    }
+
     fn layout_response(
         &self,
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        ctx.child_size(self.child, proposal)
+        self.child
+            .and_then(|child| ctx.child_size(child, proposal))
             .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
             .into()
     }
@@ -428,6 +498,6 @@ impl Widget for TreeItemWrapper {
     }
 
     fn children(&self) -> Vec<WidgetId> {
-        vec![self.child]
+        self.child.into_iter().collect()
     }
 }

@@ -281,6 +281,10 @@ The delegate receives `(&item, &FlatEntry, selected)` and returns a
 boxed widget. The `FlatEntry` provides `depth`, `has_children`, and
 `is_expanded` for rendering indentation and expand/collapse toggles.
 
+The delegate runs again for a row only when that row's own selected
+state changes or the data changes; a selection move does not re-run it
+for the other rows, so a delegate must not read other rows' state.
+
 <a id="treeview-new_with_context"></a>
 
 #### `pub fn new_with_context( model: TreeModel<T>, delegate: impl Fn(&T, &FlatEntry, bool, &TreeRowContext<'_, T>) -> Box<dyn Widget> + 'static, ) -> Self`

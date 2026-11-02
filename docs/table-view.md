@@ -247,6 +247,13 @@ signals, keep them stable across releases.
 | `depth`          | `Some(level)` in `TreeTableView`, `None` in `TableView`         |
 | `is_tree_column` | `true` on the column hosting the twist arrow                |
 
+A cell delegate runs again when its own `is_selected` or `is_focused` changes, and when an
+edit starts or ends (`is_editing`). A selection or cursor move re-runs it for the cells
+whose state it changed and for no other: the other cells, every row and every cell node
+keep their widgets, so an accessibility client's cursor and a double click that began on a
+row both survive the move. The cell being edited is the exception: a selection or cursor
+move leaves its editor alone, and the edit's end builds it again.
+
 ---
 
 ### Stretch the last column

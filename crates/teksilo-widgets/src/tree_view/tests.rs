@@ -4044,3 +4044,175 @@ fn export_os_handoff_reaches_the_row_export() {
         .export_os_handoff(teksilo_core::OsHandoff::Eager);
     assert_eq!(view.export.os_handoff, teksilo_core::OsHandoff::Eager);
 }
+
+// ---------------------------------------------------------------------------
+// A selection move rebuilds the rows it flipped, nothing else
+// ---------------------------------------------------------------------------
+
+mod selection_rebuild_boundary {
+    use super::*;
+    use crate::common::double_click_test::{
+        click, click_held_over_a_frame, double_click_across_a_frame,
+    };
+    use crate::data_views::{ActivateOn, DragTransferMode};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    fn size() -> SizeProposal {
+        SizeProposal::exact(400.0, 300.0)
+    }
+
+    fn row_center(i: usize) -> Point {
+        Point::new(50.0, 10.0 + 20.0 * i as f32)
+    }
+
+    struct Built {
+        tree: WidgetTree,
+        tv: WidgetId,
+        selection: SelectionModel,
+        activated: Rc<RefCell<Vec<usize>>>,
+        /// The item of every delegate call, in order.
+        built: Rc<RefCell<Vec<String>>>,
+    }
+
+    /// Ten leaf roots, "Node 0" to "Node 9", 20 px rows.
+    fn build(mode: SelectionMode, preselect: Option<usize>, exportable: bool) -> Built {
+        let model = TreeModel::new();
+        for i in 0..10 {
+            model.insert_root(i, format!("Node {i}"));
+        }
+        let selection = SelectionModel::new(mode);
+        if let Some(i) = preselect {
+            selection.select(i);
+        }
+        let activated = Rc::new(RefCell::new(Vec::new()));
+        let built = Rc::new(RefCell::new(Vec::new()));
+        let log = activated.clone();
+        let calls = built.clone();
+        let mut tv = TreeView::new(model, move |item: &String, _entry, _sel| {
+            calls.borrow_mut().push(item.clone());
+            Box::new(FixedLeaf(120.0, 20.0)) as Box<dyn Widget>
+        })
+        .item_height(20.0)
+        .selection(selection.clone())
+        .activate_on(ActivateOn::DoubleClick)
+        .on_activate(move |i, _ctx| log.borrow_mut().push(i));
+        if exportable {
+            tv = tv
+                .exportable(DragTransferMode::Copy)
+                .export_external(|items: &[String]| {
+                    vec![("text/plain".into(), items.join("\n").into_bytes())]
+                });
+        }
+        let mut tree = WidgetTree::new();
+        let tv = tree.add(tv);
+        tree.layout(size());
+        tree.layout(size());
+        built.borrow_mut().clear();
+        Built {
+            tree,
+            tv,
+            selection,
+            activated,
+            built,
+        }
+    }
+
+    /// The row wrappers (the drag surface, when there is one, is skipped).
+    fn wrappers(b: &Built) -> Vec<WidgetId> {
+        row_ids(&b.tree, b.tv)
+            .into_iter()
+            .map(|id| {
+                if b.tree.accessibility_node(id).role() == teksilo_core::accesskit::Role::TreeItem {
+                    id
+                } else {
+                    b.tree.children(id)[0]
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_double_click_activates_a_row_the_first_click_selects() {
+        for (mode, preselect, exportable) in [
+            (SelectionMode::Single, None, false),
+            (SelectionMode::Single, Some(2), false),
+            (SelectionMode::Multi, None, false),
+            (SelectionMode::Single, None, true),
+        ] {
+            let mut b = build(mode, preselect, exportable);
+            double_click_across_a_frame(&mut b.tree, row_center(2), size());
+            assert_eq!(
+                *b.activated.borrow(),
+                vec![2],
+                "{mode:?}, preselect {preselect:?}, exportable {exportable}"
+            );
+            b.tree.assert_no_leaked_pointer_state();
+        }
+    }
+
+    #[test]
+    fn a_selection_move_rebuilds_only_the_two_rows_it_flips() {
+        let mut b = build(SelectionMode::Single, Some(1), false);
+        let before = wrappers(&b);
+        click(&mut b.tree, row_center(4));
+        b.tree.layout(size());
+        assert!(b.selection.is_selected(4));
+        assert_eq!(wrappers(&b), before, "every row keeps its node");
+        let mut rebuilt = b.built.borrow().clone();
+        rebuilt.sort();
+        assert_eq!(rebuilt, vec!["Node 1".to_string(), "Node 4".to_string()]);
+
+        // A programmatic move too, and the row node's AT state follows it.
+        b.built.borrow_mut().clear();
+        b.selection.select(6);
+        b.tree.layout(size());
+        assert_eq!(wrappers(&b), before);
+        let mut rebuilt = b.built.borrow().clone();
+        rebuilt.sort();
+        assert_eq!(rebuilt, vec!["Node 4".to_string(), "Node 6".to_string()]);
+        assert!(b.tree.accessibility_node(before[6]).is_selected());
+        assert!(!b.tree.accessibility_node(before[4]).is_selected());
+        b.tree.assert_no_leaked_pointer_state();
+    }
+
+    /// N18: an AT click selects (and activates) the row. The row node keeps
+    /// its id, so focus left on it survives, and the AT focus with it.
+    #[test]
+    fn an_at_click_keeps_the_focused_row_node() {
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        let mut b = build(SelectionMode::Single, None, false);
+        let rows = wrappers(&b);
+        let row = rows[3];
+        b.tree.focus(row);
+        b.tree.layout(size());
+        b.tree
+            .dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+                action: teksilo_core::accesskit::Action::Click,
+                target: Some(row),
+                target_node: widget_id_to_node_id(row),
+                data: None,
+            });
+        b.tree.layout(size());
+        assert!(b.selection.is_selected(3));
+        assert_eq!(*b.activated.borrow(), vec![3]);
+        assert_eq!(wrappers(&b), rows, "every row keeps its node");
+        assert_eq!(b.tree.focused(), Some(row), "focus stays on the row");
+        let update = b.tree.sync_accessibility();
+        assert_eq!(
+            update.focus,
+            widget_id_to_node_id(row),
+            "and so does the AT focus"
+        );
+    }
+
+    #[test]
+    fn a_press_held_over_a_frame_still_selects_and_leaks_nothing() {
+        let mut b = build(SelectionMode::Single, None, true);
+        click_held_over_a_frame(&mut b.tree, row_center(3), size());
+        assert!(b.selection.is_selected(3));
+        assert!(b.activated.borrow().is_empty());
+        b.tree.assert_no_leaked_pointer_state();
+    }
+}

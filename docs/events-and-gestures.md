@@ -533,6 +533,16 @@ An explicit `max_interval` / `max_distance` on a multi-tap recognizer can only e
 **narrow** the window, the streak is shared by every recognizer on the node and uses the
 profile.
 
+**A rebuild of the node keeps the streak.** The arena set lives in the node's own handler
+bucket, which a rebuild resets, but its streak is carried over and seeds the arena set the
+next press installs. So a double or triple click is recognized even when the widget rebuilds
+between the clicks, for example a data-view row that the first click selects. Two cases do
+not carry it: a rebuild during which a contact is live (that contact's release finds no
+arena, so carrying the earlier count could turn a later single tap into a double one), and a
+new build that wires no gesture recognizer at all. The node's destruction drops it with the
+node. A carried streak that has gone stale invalidates itself through the continuation rule
+above.
+
 ### 4.1.4 The two cancels
 
 `GestureArenaSet` revokes in two grains, and the distinction is load-bearing:

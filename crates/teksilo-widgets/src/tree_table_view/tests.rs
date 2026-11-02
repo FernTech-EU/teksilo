@@ -6622,3 +6622,433 @@ fn export_os_handoff_reaches_the_row_export() {
         .export_os_handoff(teksilo_core::OsHandoff::Eager);
     assert_eq!(view.export.os_handoff, teksilo_core::OsHandoff::Eager);
 }
+
+// ---------------------------------------------------------------------------
+// A selection or cursor move rebuilds the cells it flipped, nothing else
+// ---------------------------------------------------------------------------
+
+mod selection_rebuild_boundary {
+    use super::*;
+    use crate::common::double_click_test::{
+        click, click_held_over_a_frame, double_click_across_a_frame,
+    };
+    use crate::data_views::ActivateOn;
+    use crate::table_view::column::EditTriggers;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    fn size() -> SizeProposal {
+        SizeProposal::exact(400.0, 200.0)
+    }
+
+    type Calls = Rc<RefCell<Vec<(String, String, bool, bool)>>>;
+
+    struct Built {
+        tree: WidgetTree,
+        table: WidgetId,
+        selection: SelectionModel,
+        activated: Rc<RefCell<Vec<usize>>>,
+        /// `(item, column id, is_selected, is_focused)` per delegate call.
+        built: Calls,
+    }
+
+    fn counting_col(id: &'static str, built: &Calls) -> Column<&'static str> {
+        let built = built.clone();
+        Column::<&str>::new(id, lit!(id), move |row: &&'static str, cx: &CellContext| {
+            built.borrow_mut().push((
+                row.to_string(),
+                cx.col_id.clone(),
+                cx.is_selected,
+                cx.is_focused,
+            ));
+            if cx.is_editing {
+                Box::new(crate::text_input::TextInput::new(Signal::new(
+                    row.to_string(),
+                ))) as Box<dyn Widget>
+            } else {
+                Box::new(crate::primitives::TextWidget::new(lit!(*row))) as Box<dyn Widget>
+            }
+        })
+        .width(ColumnWidth::Fixed(150.0))
+    }
+
+    /// Five leaf rows, "r0" to "r4"; the row "r3" is full-width when
+    /// `full_width` holds.
+    fn build(mode: TableSelectionMode, edit: EditTriggers, full_width: bool) -> Built {
+        let slice = teksilo_data::TreeDataSlice::<u64, &'static str>::new();
+        slice.set_source(move || {
+            ["r0", "r1", "r2", "r3", "r4"]
+                .into_iter()
+                .enumerate()
+                .map(|(k, n)| teksilo_data::TreeRow::new(k as u64, n, 0))
+                .collect()
+        });
+        slice.reload();
+        let built: Calls = Rc::new(RefCell::new(Vec::new()));
+        let activated = Rc::new(RefCell::new(Vec::new()));
+        let log = activated.clone();
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let mut tv = TreeTableView::from_source(slice)
+            .add_column(
+                counting_col("a", &built)
+                    .editable(edit != EditTriggers::NONE)
+                    .edit_triggers(edit),
+            )
+            .add_column(counting_col("b", &built))
+            .row_height(20.0)
+            .selection_mode(mode)
+            .selection(selection.clone())
+            .activate_on(ActivateOn::DoubleClick)
+            .on_cell_edit_request(|_row, _col, _ctx| {})
+            .on_row_activate(move |row, _ctx| log.borrow_mut().push(row));
+        if full_width {
+            let calls = built.clone();
+            tv = tv
+                .full_width_row(|item: &&'static str| *item == "r3")
+                .full_width_row_delegate(move |item: &&'static str, cx: &CellContext| {
+                    calls.borrow_mut().push((
+                        item.to_string(),
+                        "band".to_string(),
+                        cx.is_selected,
+                        cx.is_focused,
+                    ));
+                    Box::new(crate::primitives::TextWidget::new(lit!(*item))) as Box<dyn Widget>
+                });
+        }
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(tv);
+        tree.layout(size());
+        tree.layout(size());
+        built.borrow_mut().clear();
+        Built {
+            tree,
+            table,
+            selection,
+            activated,
+            built,
+        }
+    }
+
+    fn view(b: &Built) -> &TreeTableView<&'static str> {
+        b.tree
+            .widget_as_any(b.table)
+            .unwrap()
+            .downcast_ref::<TreeTableView<&'static str>>()
+            .unwrap()
+    }
+
+    fn cell(b: &Built, row: usize, col: usize) -> WidgetId {
+        realized(&b.tree, b.table, row, col)
+    }
+
+    fn row_of(b: &Built, cell: WidgetId) -> WidgetId {
+        let mut at = b.tree.parent(cell).unwrap();
+        while b.tree.accessibility_node(at).role() != Role::Row {
+            at = b.tree.parent(at).unwrap();
+        }
+        at
+    }
+
+    fn all_cells(b: &Built) -> Vec<((usize, usize), WidgetId)> {
+        let mut v = view(b).cell_map.borrow().clone();
+        v.sort();
+        v
+    }
+
+    fn rebuilt(b: &Built) -> Vec<String> {
+        let mut v: Vec<String> = b.built.borrow().iter().map(|c| c.0.clone()).collect();
+        v.sort();
+        v.dedup();
+        v
+    }
+
+    #[test]
+    fn a_double_click_activates_a_row_the_first_click_selects() {
+        let mut b = build(TableSelectionMode::SingleRow, EditTriggers::NONE, false);
+        let at = b.tree.bounds(cell(&b, 2, 1)).center();
+        double_click_across_a_frame(&mut b.tree, at, size());
+        assert_eq!(*b.activated.borrow(), vec![2]);
+        b.tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_double_click_edits_a_cell_of_a_row_the_first_click_selects() {
+        let mut b = build(
+            TableSelectionMode::SingleRow,
+            EditTriggers::DOUBLE_CLICK,
+            false,
+        );
+        let at = b.tree.bounds(cell(&b, 2, 0)).center();
+        double_click_across_a_frame(&mut b.tree, at, size());
+        assert_eq!(view(&b).editing_cell_signal().get(), Some((2, 0)));
+        b.tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_click_keeps_every_node_and_rebuilds_only_the_two_rows() {
+        let mut b = build(TableSelectionMode::SingleRow, EditTriggers::NONE, false);
+        b.selection.select(1);
+        b.tree.layout(size());
+        b.built.borrow_mut().clear();
+        let chrome = b.tree.children(b.table);
+        let cells = all_cells(&b);
+        let row4 = row_of(&b, cell(&b, 4, 0));
+        // A row click writes the selection AND the cell cursor.
+        let at = b.tree.bounds(cell(&b, 4, 1)).center();
+        click(&mut b.tree, at);
+        b.tree.layout(size());
+        assert!(b.selection.is_selected(4));
+        assert_eq!(view(&b).focused_cell_signal().get().map(|c| c.0), Some(4));
+        assert_eq!(b.tree.children(b.table), chrome);
+        assert_eq!(all_cells(&b), cells, "every cell keeps its node");
+        assert_eq!(row_of(&b, cell(&b, 4, 0)), row4, "the row keeps its node");
+        assert_eq!(rebuilt(&b), vec!["r1".to_string(), "r4".to_string()]);
+
+        // A cursor move alone rebuilds the two cells it moves between.
+        b.built.borrow_mut().clear();
+        b.tree.focus(b.table);
+        b.tree.press_key(Key::ArrowRight, Modifiers::NONE);
+        b.tree.layout(size());
+        assert_eq!(all_cells(&b), cells);
+        let calls = b.built.borrow().clone();
+        assert!(calls.iter().all(|c| c.0 == "r4"), "{calls:?}");
+
+        // A programmatic selection: the AT state of the row and cell nodes
+        // follows, and the root repaints the band.
+        b.selection.select(0);
+        b.tree.layout(size());
+        assert_eq!(all_cells(&b), cells);
+        assert!(
+            b.tree
+                .accessibility_node(row_of(&b, cell(&b, 0, 0)))
+                .is_selected()
+        );
+        assert!(!b.tree.accessibility_node(row4).is_selected());
+        assert!(b.tree.accessibility_node(cell(&b, 0, 1)).is_selected());
+        assert!(!b.tree.accessibility_node(cell(&b, 4, 1)).is_selected());
+        b.tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_programmatic_selection_repaints_the_band() {
+        let mut b = build(TableSelectionMode::SingleRow, EditTriggers::NONE, false);
+        b.selection.select(1);
+        b.tree.layout(size());
+        let band_rows = |b: &mut Built| -> Vec<usize> {
+            let top = b.tree.bounds(cell(b, 0, 0)).y;
+            let frame = b.tree.render();
+            let mut rows: Vec<usize> = frame
+                .decorations
+                .iter()
+                .filter(|d| (d.rect[3] - 20.0).abs() < 0.5 && d.rect[2] > 250.0)
+                .map(|d| ((d.rect[1] - top) / 20.0).round() as usize)
+                .collect();
+            rows.sort();
+            rows.dedup();
+            rows
+        };
+        assert_eq!(band_rows(&mut b), vec![1]);
+        b.selection.select(3);
+        b.tree.layout(size());
+        assert_eq!(band_rows(&mut b), vec![3]);
+    }
+
+    /// The same with nothing else to repaint: the only cell of the row being
+    /// selected is being edited, so no cell rebuilds and only the root's own
+    /// binding can bring the band.
+    #[test]
+    fn the_band_repaints_when_no_cell_rebuilds() {
+        let built: Calls = Rc::new(RefCell::new(Vec::new()));
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TreeTableView::from_source(three_row_slice())
+                .add_column(counting_col("a", &built).width(ColumnWidth::Fixed(300.0)))
+                .row_height(20.0)
+                .selection_mode(TableSelectionMode::SingleRow)
+                .selection(selection.clone()),
+        );
+        tree.layout(size());
+        tree.layout(size());
+        {
+            let any = tree.widget_as_any(table).unwrap();
+            let view = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            view.editing_cell_signal().set(Some((2, 0)));
+        }
+        tree.layout(size());
+        let top = tree.bounds(realized(&tree, table, 0, 0)).y;
+        let band_rows = |tree: &mut WidgetTree| -> Vec<usize> {
+            let frame = tree.render();
+            let mut rows: Vec<usize> = frame
+                .decorations
+                .iter()
+                .filter(|d| (d.rect[3] - 20.0).abs() < 0.5 && d.rect[2] > 250.0)
+                .map(|d| ((d.rect[1] - top) / 20.0).round() as usize)
+                .collect();
+            rows.sort();
+            rows.dedup();
+            rows
+        };
+        assert!(band_rows(&mut tree).is_empty());
+        built.borrow_mut().clear();
+        selection.select(2);
+        tree.layout(size());
+        assert!(
+            built.borrow().is_empty(),
+            "no cell rebuilt: {:?}",
+            built.borrow()
+        );
+        assert_eq!(band_rows(&mut tree), vec![2]);
+    }
+
+    /// The screen reader hears a selection change even when no cell
+    /// rebuilds: only the root's AccessibilityOnly binding re-walks the tree.
+    #[test]
+    fn the_screen_reader_hears_a_selection_when_no_cell_rebuilds() {
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        let built: Calls = Rc::new(RefCell::new(Vec::new()));
+        let selection = SelectionModel::new(SelectionMode::Single);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TreeTableView::from_source(three_row_slice())
+                .add_column(counting_col("a", &built).width(ColumnWidth::Fixed(300.0)))
+                .row_height(20.0)
+                .selection_mode(TableSelectionMode::SingleRow)
+                .selection(selection.clone()),
+        );
+        tree.layout(size());
+        tree.layout(size());
+        {
+            let any = tree.widget_as_any(table).unwrap();
+            let view = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            view.editing_cell_signal().set(Some((2, 0)));
+        }
+        tree.layout(size());
+        let cell = realized(&tree, table, 2, 0);
+        let mut row = tree.parent(cell).unwrap();
+        while tree.accessibility_node(row).role() != Role::Row {
+            row = tree.parent(row).unwrap();
+        }
+        let _ = tree.sync_accessibility();
+        built.borrow_mut().clear();
+        selection.select(2);
+        tree.layout(size());
+        assert!(
+            built.borrow().is_empty(),
+            "no cell rebuilt: {:?}",
+            built.borrow()
+        );
+        let update = tree.sync_accessibility();
+        let published = |id: WidgetId| {
+            update
+                .nodes
+                .iter()
+                .find(|(n, _)| *n == widget_id_to_node_id(id))
+                .and_then(|(_, n)| n.is_selected())
+        };
+        assert_eq!(published(row), Some(true), "the row is published selected");
+        assert_eq!(published(cell), Some(true), "and so is its cell");
+    }
+
+    /// The table's active descendant names the cell the cursor is on, after
+    /// a click and after an arrow key, and that cell's node is the realized
+    /// one (no selection rebuild replaced it).
+    #[test]
+    fn the_active_descendant_follows_a_click_and_an_arrow() {
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        let mut b = build(TableSelectionMode::SingleRow, EditTriggers::NONE, false);
+        let active = |b: &mut Built| {
+            let update = b.tree.sync_accessibility();
+            update
+                .nodes
+                .iter()
+                .find(|(n, _)| *n == widget_id_to_node_id(b.table))
+                .and_then(|(_, n)| n.active_descendant())
+        };
+        let at = b.tree.bounds(cell(&b, 2, 1)).center();
+        crate::common::double_click_test::click(&mut b.tree, at);
+        b.tree.layout(size());
+        // A row click puts the cursor on the row; the column it keeps is the
+        // tree table's business, the row and the node are what matter here.
+        let cursor = view(&b).focused_cell_signal().get().expect("a cursor");
+        assert_eq!(cursor.0, 2);
+        assert_eq!(
+            active(&mut b),
+            Some(widget_id_to_node_id(cell(&b, 2, cursor.1)))
+        );
+        b.tree.focus(b.table);
+        b.tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        b.tree.layout(size());
+        assert_eq!(
+            active(&mut b),
+            Some(widget_id_to_node_id(cell(&b, 3, cursor.1)))
+        );
+        b.tree.press_key(Key::Enter, Modifiers::NONE);
+        b.tree.layout(size());
+        assert_eq!(
+            *b.activated.borrow(),
+            vec![3],
+            "Enter activates the cursor's row"
+        );
+    }
+
+    #[test]
+    fn a_full_width_row_follows_its_own_flags_only() {
+        let mut b = build(TableSelectionMode::SingleRow, EditTriggers::NONE, true);
+        let band = cell(&b, 3, 0);
+        b.selection.select(3);
+        b.tree.layout(size());
+        assert_eq!(cell(&b, 3, 0), band, "the band keeps its node");
+        let calls = b.built.borrow().clone();
+        assert!(
+            calls.contains(&("r3".to_string(), "band".to_string(), true, false)),
+            "{calls:?}"
+        );
+        assert!(calls.iter().all(|c| c.0 == "r3"), "{calls:?}");
+        assert!(b.tree.accessibility_node(band).is_selected());
+
+        // The cursor on the row in either column focuses the band; moving it
+        // between the row's columns changes nothing for it.
+        b.built.borrow_mut().clear();
+        view(&b).set_focused_cell(3, 1);
+        b.tree.layout(size());
+        assert!(
+            b.built
+                .borrow()
+                .contains(&("r3".to_string(), "band".to_string(), true, true))
+        );
+        b.built.borrow_mut().clear();
+        view(&b).set_focused_cell(3, 0);
+        b.tree.layout(size());
+        assert!(b.built.borrow().is_empty(), "{:?}", b.built.borrow());
+    }
+
+    #[test]
+    fn a_press_held_over_a_frame_still_selects_and_leaks_nothing() {
+        let mut b = build(TableSelectionMode::SingleRow, EditTriggers::NONE, false);
+        let at = b.tree.bounds(cell(&b, 2, 1)).center();
+        click_held_over_a_frame(&mut b.tree, at, size());
+        assert!(b.selection.is_selected(2));
+        assert!(b.activated.borrow().is_empty());
+        b.tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_selection_change_does_not_rebuild_the_cell_being_edited() {
+        let mut b = build(TableSelectionMode::SingleRow, EditTriggers::F2, false);
+        view(&b).editing_cell_signal().set(Some((2, 0)));
+        b.tree.layout(size());
+        let content = b.tree.children(b.tree.children(cell(&b, 2, 0))[0]);
+        b.built.borrow_mut().clear();
+        b.selection.select(2);
+        b.tree.layout(size());
+        assert_eq!(b.tree.children(b.tree.children(cell(&b, 2, 0))[0]), content);
+        assert!(
+            !b.built.borrow().iter().any(|c| c.0 == "r2" && c.1 == "a"),
+            "{:?}",
+            b.built.borrow()
+        );
+    }
+}

@@ -4592,3 +4592,229 @@ fn an_eager_move_onto_a_sibling_view_removes_the_rows() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// A double click on a row the first click selects
+// ---------------------------------------------------------------------------
+
+mod double_click_activation {
+    use super::*;
+    use crate::common::double_click_test::{CLICK_GAP, click, double_click_across_a_frame};
+    use crate::data_views::ActivateOn;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use teksilo_data::{SelectionMode, SelectionModel};
+
+    fn size() -> SizeProposal {
+        SizeProposal::exact(400.0, 300.0)
+    }
+
+    fn row_center(i: usize) -> Point {
+        Point::new(50.0, 15.0 + 30.0 * i as f32)
+    }
+
+    struct Setup {
+        rows: usize,
+        mode: SelectionMode,
+        activate_on: ActivateOn,
+        exportable: bool,
+        preselect: Option<usize>,
+    }
+
+    impl Default for Setup {
+        fn default() -> Self {
+            Self {
+                rows: 10,
+                mode: SelectionMode::Single,
+                activate_on: ActivateOn::DoubleClick,
+                exportable: false,
+                preselect: None,
+            }
+        }
+    }
+
+    fn build(setup: Setup) -> (WidgetTree, Rc<RefCell<Vec<usize>>>) {
+        let activated = Rc::new(RefCell::new(Vec::new()));
+        let log = activated.clone();
+        let selection = SelectionModel::new(setup.mode);
+        if let Some(i) = setup.preselect {
+            selection.select(i);
+        }
+        let mut lv = ListView::new(
+            ListModel::from_vec((0..setup.rows as i32).collect::<Vec<i32>>()),
+            |_i, _item, _sel| Box::new(FixedLeaf(100.0, 30.0)),
+        )
+        .item_height(30.0)
+        .selection(selection)
+        .activate_on(setup.activate_on)
+        .on_activate(move |i, _ctx| log.borrow_mut().push(i));
+        if setup.exportable {
+            lv = lv
+                .exportable(crate::data_views::DragTransferMode::Copy)
+                .export_external(|items: &[i32]| {
+                    vec![("text/plain".into(), format!("{items:?}").into_bytes())]
+                });
+        }
+        let mut tree = WidgetTree::new();
+        tree.add(lv);
+        tree.layout(size());
+        (tree, activated)
+    }
+
+    #[test]
+    fn a_double_click_activates_a_row_the_first_click_selects() {
+        for setup in [
+            Setup::default(),
+            Setup {
+                preselect: Some(2),
+                ..Setup::default()
+            },
+            Setup {
+                mode: SelectionMode::Multi,
+                ..Setup::default()
+            },
+            Setup {
+                exportable: true,
+                ..Setup::default()
+            },
+        ] {
+            let label = format!(
+                "{:?}/{:?}/{}",
+                setup.mode, setup.preselect, setup.exportable
+            );
+            let (mut tree, activated) = build(setup);
+            double_click_across_a_frame(&mut tree, row_center(2), size());
+            assert_eq!(*activated.borrow(), vec![2], "{label}");
+            tree.assert_no_leaked_pointer_state();
+        }
+    }
+
+    #[test]
+    fn a_single_click_view_activates_on_each_click_across_a_rebuild() {
+        let (mut tree, activated) = build(Setup {
+            activate_on: ActivateOn::SingleClick,
+            ..Setup::default()
+        });
+        double_click_across_a_frame(&mut tree, row_center(2), size());
+        assert_eq!(*activated.borrow(), vec![2, 2]);
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn two_clicks_that_are_no_double_click_activate_nothing() {
+        // Too slow.
+        let (mut tree, activated) = build(Setup::default());
+        click(&mut tree, row_center(2));
+        tree.layout(size());
+        tree.advance_input_time(
+            teksilo_tokens::GestureProfile::MOUSE.multi_tap_interval + CLICK_GAP,
+        );
+        click(&mut tree, row_center(2));
+        tree.layout(size());
+        assert!(activated.borrow().is_empty(), "late second click");
+
+        // On another row.
+        let (mut tree, activated) = build(Setup::default());
+        click(&mut tree, row_center(2));
+        tree.layout(size());
+        tree.advance_input_time(CLICK_GAP);
+        click(&mut tree, row_center(4));
+        tree.layout(size());
+        assert!(activated.borrow().is_empty(), "second click on another row");
+
+        // A cancelled press between the clicks.
+        let (mut tree, activated) = build(Setup::default());
+        click(&mut tree, row_center(2));
+        tree.layout(size());
+        tree.advance_input_time(CLICK_GAP);
+        tree.pointer_down_button(row_center(2), teksilo_core::event::PointerButton::Primary);
+        tree.cancel_pointer(
+            teksilo_core::pointer::PointerId::MOUSE,
+            teksilo_core::pointer::CancelReason::WindowDeactivated,
+            &mut teksilo_core::window::NoopWindowOps,
+        );
+        tree.layout(size());
+        assert!(activated.borrow().is_empty(), "cancelled second press");
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_touch_or_pen_double_tap_activates_a_row_the_first_tap_selects() {
+        for kind in [
+            teksilo_tokens::PointerKind::Touch,
+            teksilo_tokens::PointerKind::Pen(teksilo_tokens::PenKind::Pen),
+        ] {
+            let (mut tree, activated) = build(Setup::default());
+            tree.tap_with(kind, row_center(2));
+            tree.layout(size());
+            tree.advance_input_time(CLICK_GAP);
+            tree.tap_with(kind, row_center(2));
+            tree.layout(size());
+            assert_eq!(*activated.borrow(), vec![2], "{kind:?}");
+            tree.assert_no_leaked_pointer_state();
+        }
+    }
+
+    #[test]
+    fn enter_activates_the_row_a_click_selected() {
+        let (mut tree, activated) = build(Setup::default());
+        click(&mut tree, row_center(2));
+        tree.layout(size());
+        tree.press_key(
+            teksilo_core::event::Key::Enter,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        tree.layout(size());
+        assert_eq!(*activated.borrow(), vec![2]);
+    }
+
+    /// The row is scrolled out of the realized window and back between the
+    /// clicks: its node was destroyed, so the second click is a first one.
+    #[test]
+    fn a_click_after_the_row_left_the_window_is_a_first_click() {
+        let (mut tree, activated) = build(Setup {
+            rows: 500,
+            ..Setup::default()
+        });
+        let scroll = {
+            let any = tree.widget_as_any(row_owner(&tree)).unwrap();
+            any.downcast_ref::<ListView<i32>>()
+                .unwrap()
+                .scroll_y_signal()
+                .clone()
+        };
+        click(&mut tree, row_center(2));
+        tree.layout(size());
+        scroll.set(5000.0);
+        tree.layout(size());
+        scroll.set(0.0);
+        tree.layout(size());
+        tree.advance_input_time(CLICK_GAP);
+        click(&mut tree, row_center(2));
+        tree.layout(size());
+        assert!(activated.borrow().is_empty());
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A drag that starts on the row between the clicks ends the streak.
+    #[test]
+    fn a_click_after_a_drag_is_a_first_click() {
+        let (mut tree, activated) = build(Setup {
+            exportable: true,
+            ..Setup::default()
+        });
+        click(&mut tree, row_center(2));
+        tree.layout(size());
+        tree.drag(row_center(2), Point::new(60.0, 160.0));
+        tree.layout(size());
+        tree.advance_input_time(CLICK_GAP);
+        click(&mut tree, row_center(2));
+        tree.layout(size());
+        assert!(activated.borrow().is_empty(), "{:?}", activated.borrow());
+    }
+
+    /// The ListView root (the tree's only root widget).
+    fn row_owner(tree: &WidgetTree) -> WidgetId {
+        tree.roots()[0]
+    }
+}

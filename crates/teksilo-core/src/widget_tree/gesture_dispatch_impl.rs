@@ -258,10 +258,11 @@ impl WidgetTree {
         gesture_owners: &mut std::collections::HashSet<WidgetId>,
     ) {
         if let Some(set) = node.handlers.gesture_arena.as_mut() {
-            // Already installed — refresh the policy (a rebuild may have
-            // changed it) and make sure the owners set is in sync (covers a
-            // widget that re-enters dispatch after a pre-existing arena was
-            // carried across rebuild).
+            // Already installed: refresh the policy (a new build may have
+            // changed `multi_contact` through the builder chain) and make
+            // sure the owners set is in sync. A rebuild never keeps the set
+            // itself (it lives in the own bucket, which a rebuild resets);
+            // only its tap streak is carried, in `carried_tap_streak`.
             set.set_multi_contact(node.multi_contact);
             gesture_owners.insert(id);
             return;
@@ -271,6 +272,9 @@ impl WidgetTree {
         // disagree about which buttons this node acts on.
         let wanted = ArenaRecognizers::read(node);
         if !wanted.any() {
+            // The new build wires no recognizer: a streak carried from an
+            // earlier build has nothing to continue.
+            node.carried_tap_streak = None;
             return;
         }
         let ArenaRecognizers {
@@ -284,6 +288,9 @@ impl WidgetTree {
 
         let mut set = GestureArenaSet::new();
         set.set_multi_contact(node.multi_contact);
+        if let Some(streak) = node.carried_tap_streak.take() {
+            set.seed_streak(streak);
+        }
         // Each click-style recognizer accepts the union of the two buckets'
         // masks; `dispatch_recognized_gesture` hands the recognized event to
         // each bucket only on a button in that bucket's own mask.
@@ -2511,5 +2518,218 @@ mod arbitration_tests {
         );
         assert_eq!(tree.sequence_touch_action(id), TouchAction::PAN_Y);
         tree.dispatch_pointer(touch(id, PointerPhase::Up, at, 10));
+    }
+}
+
+/// The node's tap streak survives a rebuild of the node: the arena goes with
+/// the own handler bucket, its streak is carried to the next press.
+#[cfg(test)]
+mod streak_across_rebuild_tests {
+    use super::*;
+    use crate::binding::BindingLevel;
+    use crate::event::PointerButton;
+    use crate::signal::Signal;
+    use crate::widget_builder::{HandlerSet, WidgetBuilder};
+    use crate::{BuildContext, LayoutResponse};
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::Duration;
+
+    /// A leaf that fills its proposal and rebuilds when `version` changes.
+    /// When `own_double_tap` holds at build time it wires `on_double_tap` in
+    /// its OWN bucket (counting into `own_doubles`), as a self-styled widget
+    /// does; the external bucket is the builder chain's.
+    #[derive(Debug)]
+    struct Rebuilder {
+        version: Signal<u32>,
+        own_double_tap: Rc<Cell<bool>>,
+        own_doubles: Rc<Cell<u32>>,
+    }
+
+    impl Widget for Rebuilder {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            self.version
+                .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+            if self.own_double_tap.get() {
+                let doubles = self.own_doubles.clone();
+                ctx.apply_self_handlers(
+                    HandlerSet::new().on_double_tap(move |_e, _c| doubles.set(doubles.get() + 1)),
+                );
+            }
+            Vec::new()
+        }
+
+        fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(100.0, 50.0).into()
+        }
+    }
+
+    struct Fixture {
+        tree: WidgetTree,
+        id: WidgetId,
+        version: Signal<u32>,
+        own_double_tap: Rc<Cell<bool>>,
+        own_doubles: Rc<Cell<u32>>,
+        doubles: Rc<Cell<u32>>,
+        at: Point,
+    }
+
+    impl Fixture {
+        /// `external`: wire `on_double_tap` through the builder chain (the
+        /// external bucket, which a rebuild keeps). Otherwise the widget
+        /// wires it itself in its own bucket.
+        fn new(external: bool) -> Self {
+            let version = Signal::new(0_u32);
+            let own_double_tap = Rc::new(Cell::new(!external));
+            let own_doubles = Rc::new(Cell::new(0));
+            let doubles = Rc::new(Cell::new(0));
+            let widget = Rebuilder {
+                version: version.clone(),
+                own_double_tap: own_double_tap.clone(),
+                own_doubles: own_doubles.clone(),
+            };
+            let mut tree = WidgetTree::new();
+            let id = if external {
+                let d = doubles.clone();
+                tree.add(widget.on_double_tap(move |_e, _c| d.set(d.get() + 1)))
+            } else {
+                tree.add(widget)
+            };
+            tree.layout(SizeProposal::exact(100.0, 50.0));
+            let at = tree.bounds(id).center();
+            Self {
+                tree,
+                id,
+                version,
+                own_double_tap,
+                own_doubles,
+                doubles,
+                at,
+            }
+        }
+
+        fn click(&mut self, button: PointerButton) {
+            self.tree.enter_simulated_mode();
+            self.tree.pointer_down_button(self.at, button);
+            self.tree.pointer_up_button(self.at, button);
+        }
+
+        /// Rebuild through the real path: a `Rebuild` binding, then a layout.
+        fn rebuild(&mut self) {
+            self.version.set(self.version.get() + 1);
+            self.tree.layout(SizeProposal::exact(100.0, 50.0));
+        }
+
+        fn streak_count(&self) -> Option<u8> {
+            self.tree
+                .arena
+                .get(self.id)
+                .and_then(|n| n.handlers.gesture_arena.as_ref())
+                .map(|set| set.streak().count())
+        }
+
+        fn total_doubles(&self) -> u32 {
+            self.doubles.get() + self.own_doubles.get()
+        }
+    }
+
+    #[test]
+    fn a_double_click_counts_across_a_rebuild_between_its_clicks() {
+        for external in [true, false] {
+            let mut f = Fixture::new(external);
+            f.click(PointerButton::Primary);
+            f.rebuild();
+            assert!(
+                f.streak_count().is_none(),
+                "the rebuild dropped the arena (external = {external})"
+            );
+            f.tree.advance_input_time(Duration::from_millis(80));
+            f.click(PointerButton::Primary);
+            assert_eq!(f.total_doubles(), 1, "external = {external}");
+            assert_eq!(f.streak_count(), Some(2), "external = {external}");
+            f.tree.assert_no_leaked_pointer_state();
+        }
+    }
+
+    #[test]
+    fn two_rebuilds_before_the_second_click_still_count_two() {
+        let mut f = Fixture::new(true);
+        f.click(PointerButton::Primary);
+        f.rebuild();
+        f.rebuild();
+        f.tree.advance_input_time(Duration::from_millis(80));
+        f.click(PointerButton::Primary);
+        assert_eq!(f.doubles.get(), 1);
+        f.tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_rebuild_while_a_contact_is_live_carries_no_streak() {
+        let mut f = Fixture::new(true);
+        // A first full click, so a carried streak would hold a count.
+        f.click(PointerButton::Primary);
+        f.tree.advance_input_time(Duration::from_millis(80));
+        f.tree.enter_simulated_mode();
+        f.tree.pointer_down_button(f.at, PointerButton::Primary);
+        // The press's implicit capture defers a binding rebuild to the
+        // release, so rebuild the node directly while the contact is live.
+        f.tree.rebuild_single_widget(f.id);
+        f.tree.pointer_up_button(f.at, PointerButton::Primary);
+        f.tree.advance_input_time(Duration::from_millis(80));
+        f.click(PointerButton::Primary);
+        assert_eq!(
+            f.doubles.get(),
+            0,
+            "the release of the live contact was lost, so the next click is a first one"
+        );
+        f.tree.advance_input_time(Duration::from_millis(80));
+        f.click(PointerButton::Primary);
+        assert_eq!(f.doubles.get(), 1, "a fresh double click still fires once");
+        f.tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_carried_streak_does_not_continue_on_another_button() {
+        let mut f = Fixture::new(true);
+        f.click(PointerButton::Primary);
+        f.rebuild();
+        f.tree.advance_input_time(Duration::from_millis(80));
+        f.click(PointerButton::Secondary);
+        assert_eq!(f.doubles.get(), 0);
+        f.tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_carried_streak_does_not_continue_after_the_interval() {
+        let mut f = Fixture::new(true);
+        f.click(PointerButton::Primary);
+        f.rebuild();
+        let interval = teksilo_tokens::GestureProfile::MOUSE.multi_tap_interval;
+        f.tree
+            .advance_input_time(interval + Duration::from_millis(1));
+        f.click(PointerButton::Primary);
+        assert_eq!(f.doubles.get(), 0);
+        f.tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn a_build_with_no_recognizer_discards_the_carried_streak() {
+        let mut f = Fixture::new(false);
+        f.click(PointerButton::Primary);
+        // The next build wires nothing; a press then finds no recognizer.
+        f.own_double_tap.set(false);
+        f.rebuild();
+        f.tree.advance_input_time(Duration::from_millis(40));
+        f.tree.enter_simulated_mode();
+        f.tree.pointer_down_button(f.at, PointerButton::Primary);
+        f.tree.pointer_up_button(f.at, PointerButton::Primary);
+        // The build after that wires `on_double_tap` again: one click is a
+        // first click, not the second of the click before the empty build.
+        f.own_double_tap.set(true);
+        f.rebuild();
+        f.tree.advance_input_time(Duration::from_millis(40));
+        f.click(PointerButton::Primary);
+        assert_eq!(f.own_doubles.get(), 0);
+        f.tree.assert_no_leaked_pointer_state();
     }
 }

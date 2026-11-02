@@ -290,6 +290,17 @@ pub struct WidgetNode {
     /// fingers on a button inside a scroll area cannot start a pan with the
     /// second finger. Set via `.multi_contact(..)`.
     pub multi_contact: MultiContact,
+    /// The tap streak of a gesture arena a rebuild dropped, kept until the
+    /// next press seeds it into the arena that press installs.
+    ///
+    /// The arena lives in the own handler bucket, which a rebuild resets, so
+    /// without this a double click whose first click makes the node rebuild
+    /// (a data-view row the first click selects) would count its second
+    /// click as a first one. Only the streak is carried: the recognizers are
+    /// read again from the new build's handlers. A stale streak invalidates
+    /// itself, since `TapStreak::advance` restarts on a long gap, a long
+    /// travel or another button.
+    pub(crate) carried_tap_streak: Option<crate::gesture::TapStreak>,
     /// When `true` and this widget holds keyboard focus, a `KeyDown` is
     /// delivered straight to it **without** first running shortcut →
     /// intent → action resolution. The node is a *keyboard capture*
@@ -556,6 +567,7 @@ impl WidgetNode {
             overscroll_behavior: crate::OverscrollBehavior::Chain,
             drag_activation: teksilo_tokens::DragActivation::Auto,
             multi_contact: MultiContact::First,
+            carried_tap_streak: None,
             keyboard_capture: false,
             hit_transparent: false,
             hit_slop: None,

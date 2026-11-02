@@ -75,6 +75,34 @@ impl<T: 'static> Widget for TreeTableView<T> {
             BindingLevel::AccessibilityOnly,
         );
 
+        // The selection band is painted here from the live selection, and the
+        // rows and cells read their `selected` state live: a selection change
+        // repaints and re-walks the AT tree, and rebuilds nothing (each cell's
+        // `CellBody` rebuilds its own delegate output). Bound explicitly
+        // rather than relying on a click also writing `focused_cell`, which a
+        // programmatic selection does not.
+        let selection_refresh = ctx.signal(0_u64);
+        selection_refresh.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        selection_refresh.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
+        if let Some(ref rs) = self.row_selection {
+            let refresh = selection_refresh.clone();
+            ctx.own_handle(rs.observe_for_rebuild(move || refresh.set(refresh.get() + 1)));
+        }
+        if let Some(ref cs) = self.cell_selection {
+            let refresh = selection_refresh.clone();
+            ctx.effect(&cs.selection_signal(), move |_| {
+                refresh.set(refresh.get() + 1)
+            });
+        }
+
         // Focus-aware selection + modality-gated focus ring (mirrors TableView).
         // `begin_view_focus` keys the scope signal on this root id directly —
         // the same id the body pane uses for its row scope, and independent of

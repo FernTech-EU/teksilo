@@ -187,25 +187,32 @@ impl<T: 'static> Widget for TableView<T> {
         }));
         ctx.own_handle(upstream);
 
-        // Observe selection changes -> bump version (rebuild updates the
-        // `is_selected` arg passed to cell delegates).
+        // A selection change repaints the selection band (painted here from
+        // the live selection) and re-walks the AT tree (the rows and cells
+        // read their `selected` state live). It rebuilds nothing: each cell's
+        // `CellBody` rebuilds its own delegate output when its own flags
+        // change (see `table_view::cell_body`), so the header, the scroll
+        // bars, the rows and the cell nodes all stay.
+        let selection_refresh = ctx.signal(0_u64);
+        selection_refresh.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        selection_refresh.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::AccessibilityOnly,
+        );
         if let Some(ref rs) = self.row_selection {
-            let v_for_sel = version.clone();
-            let sel_ver = Rc::new(Cell::new(0_u64));
-            let handle = rs.observe_for_rebuild(move || {
-                let next = sel_ver.get() + 1;
-                sel_ver.set(next);
-                v_for_sel.set(next);
-            });
+            let refresh = selection_refresh.clone();
+            let handle = rs.observe_for_rebuild(move || refresh.set(refresh.get() + 1));
             ctx.own_handle(handle);
         }
         if let Some(ref cs) = self.cell_selection {
-            let v_for_csel = version.clone();
-            let csel_ver = Rc::new(Cell::new(0_u64));
+            let refresh = selection_refresh.clone();
             ctx.effect(&cs.selection_signal(), move |_| {
-                let next = csel_ver.get() + 1;
-                csel_ver.set(next);
-                v_for_csel.set(next);
+                refresh.set(refresh.get() + 1)
             });
         }
 

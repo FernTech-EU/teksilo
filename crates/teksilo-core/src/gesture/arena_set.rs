@@ -144,6 +144,17 @@ impl GestureArenaSet {
         &self.streak
     }
 
+    /// Take the node's tap streak out, leaving an empty one. Used by a rebuild,
+    /// which drops this set but carries the streak over to the next one.
+    pub(crate) fn take_streak(&mut self) -> TapStreak {
+        std::mem::replace(&mut self.streak, TapStreak::EMPTY)
+    }
+
+    /// Seed the streak a rebuild carried over from the set it dropped.
+    pub(crate) fn seed_streak(&mut self, streak: TapStreak) {
+        self.streak = streak;
+    }
+
     /// Feed one contact's event.
     ///
     /// The streak is advanced *before* the recognizers run, so a recognizer

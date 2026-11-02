@@ -553,8 +553,8 @@ edited, but only the owner knows what an ended edit means — commit,
 discard, or refuse a value that will not parse.
 
 **Why a press and not a focus change.** "The editor lost focus" is the
-obvious signal and it cannot be used: a body pane rebuilds constantly —
-selection, filtering, scroll, a reload from elsewhere — and every rebuild
+obvious signal and it cannot be used: a body pane rebuilds constantly
+(filtering, scroll, a reload from elsewhere), and every rebuild
 destroys and re-creates the open editor, so focus leaves it many times
 during an edit the writer never interrupted. A press on another cell is
 unambiguous and happens exactly once.
@@ -1365,6 +1365,11 @@ pub enum TabTraversal { /* variants */ }
 **Import:** none — `CellContext` is public in a private module of `teksilo-widgets` and nothing re-exports it.
 
 Per-cell context handed to a column's cell delegate during build.
+
+The cell delegate runs again when this cell's own `is_selected` or
+`is_focused` changes, and when an edit starts or ends; a selection or
+cursor move does not re-run the delegates of the other cells. The cell
+being edited is not rebuilt by a selection or cursor move.
 
 ```rust
 pub struct CellContext { /* fields */ }

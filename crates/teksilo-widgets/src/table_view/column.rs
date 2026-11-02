@@ -202,6 +202,11 @@ pub enum TabTraversal {
 }
 
 /// Per-cell context handed to a column's cell delegate during build.
+///
+/// The cell delegate runs again when this cell's own `is_selected` or
+/// `is_focused` changes, and when an edit starts or ends; a selection or
+/// cursor move does not re-run the delegates of the other cells. The cell
+/// being edited is not rebuilt by a selection or cursor move.
 #[derive(Debug, Clone)]
 pub struct CellContext {
     /// Row index in the visible-list space (post sort/filter).

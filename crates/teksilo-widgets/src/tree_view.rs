@@ -349,9 +349,10 @@ pub struct TreeView<T: 'static> {
     /// observer and by [`body_pane::TreeViewBodyPane::total_refresh`].
     layout_refresh: Signal<u64>,
     /// Root-level **repaint** trigger for the container focus ring, which is
-    /// suppressed as soon as anything is selected. Selection changes rebuild
-    /// the pane (the delegate's `selected` argument) but must not rebuild the
-    /// root — they only change what the root paints.
+    /// suppressed as soon as anything is selected. A selection change
+    /// rebuilds only the rows whose selected state it flips (each row watches
+    /// its own) and must not rebuild the root: it only changes what the root
+    /// paints.
     paint_refresh: Signal<u64>,
 
     /// Pane-local rebuild trigger, owned here so it survives pane rebuilds.

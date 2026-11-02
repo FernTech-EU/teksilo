@@ -237,6 +237,19 @@ by crate for clarity, not because crates version independently.
 - **On macOS, Control with Option no longer runs the type-ahead of a
   `ComboBox` or a `MenuList`**: macOS has no AltGr, and that chord is a
   command there.
+- **In a `TreeView`, a selection change re-runs the row delegate only for
+  the rows whose selected state changed**, and every row keeps its node. It
+  rebuilt every realized row.
+- **In a `TreeView` and a `TableView`, a selection change re-runs the row or
+  cell delegate only for the rows or cells whose selected or focused state
+  changed**, and every row and cell keeps its node. It rebuilt every realized
+  row, and in a `TableView` the header and the scroll bars as well.
+- **In a `TreeView`, a `TableView` and a `TreeTableView`, a selection change
+  re-runs the row or cell delegate only for the rows or cells whose selected
+  or focused state changed**, and every row and cell keeps its node. It
+  rebuilt every realized row, in a `TableView` the header and the scroll bars
+  as well, and in a `TreeTableView` every row on each move of the cell
+  cursor.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.
@@ -331,6 +344,13 @@ by crate for clarity, not because crates version independently.
   text the input method commits for it, as Notepad does**, not the text it
   showed. Microsoft Pinyin shows `nihao` as "ni'hao" and commits "nihao";
   an apostrophe the writer typed, as in "xi'an", stays.
+
+#### Core
+
+- **A double or triple click is recognized even when the widget rebuilds
+  between the clicks.** The tap count now survives a rebuild of the node, so a
+  widget whose first click makes it rebuild (a data-view row that the first
+  click selects) still sees the second click as the second.
 
 #### Text
 
@@ -444,6 +464,14 @@ by crate for clarity, not because crates version independently.
   drops, and its menu has no separator before Select All. A forward-only
   editor no longer shows a drop caret for a drag of its own text, which it
   then refused.
+- **A double click on a row that the first click selects activates it**, in
+  `ListView`, `GridView`, `TreeView`, `TableView` and `TreeTableView`, where
+  only a row that was already selected could be opened by a double click. The
+  same holds for a cell's double-click-to-edit in `TableView` and
+  `TreeTableView`. A tree branch row whose click expands it
+  (`row_click_expands`, the default) still toggles twice.
+- **In a `TableView`, `CellContext::is_focused` follows the cell cursor.** It
+  was refreshed only when something else happened to rebuild the table.
 - **In a `CodeEditor`, the completion list follows text the input system
   commits.** After the accent popup replaced a typed `e` with `é`, or an
   emoji or dictated text was inserted, the list stayed open on the old word;

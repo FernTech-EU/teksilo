@@ -12,7 +12,9 @@
 //! modules with `TableView`.
 //!
 //! Rows live in a `TreeBodyPane` — a sibling of the scrollbar — so buffer-exit /
-//! selection / expand rebuilds are never deferred mid-thumb-drag. Three row-height
+//! expand rebuilds are never deferred mid-thumb-drag. A selection or cursor move
+//! rebuilds no row: it re-runs the delegates of the cells whose state it
+//! changed, and every row and cell keeps its node. Three row-height
 //! modes: uniform (`row_height`, fast path), exact per-flat-index callback
 //! (`row_height_fn`), and auto-measured (`auto_row_height` — grows to tallest cell).
 //!

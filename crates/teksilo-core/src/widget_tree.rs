@@ -2966,6 +2966,22 @@ impl WidgetTree {
             // apply_self_handlers rewrites them if the new build
             // specifies non-None values; otherwise values from the
             // creation site survive the rebuild.
+            //
+            // The gesture arena goes with the own bucket, but its tap streak
+            // is carried over to the arena the next press installs, so a
+            // double click whose first click rebuilt the node still counts
+            // two. Only when an arena exists: with none, no press happened
+            // since the last carry and the carried value is still the latest.
+            // A contact live at this rebuild loses its release (it will find
+            // no arena), so nothing is carried then: the earlier count would
+            // turn a later single tap into a double one.
+            if let Some(set) = node.handlers.gesture_arena.as_mut() {
+                node.carried_tap_streak = if set.is_live() {
+                    None
+                } else {
+                    Some(set.take_streak())
+                };
+            }
             node.handlers = crate::event_handlers::EventHandlers::new();
             std::mem::take(&mut node.subscription_handles)
         } else {
@@ -2974,7 +2990,8 @@ impl WidgetTree {
         // Rebuild wiped the OWN handler bucket above (the gesture arena
         // lived there), so the widget no longer owns any recognizers.
         // The next pointer hit re-runs `ensure_gesture_arena` and
-        // re-inserts if the new build still wires gesture handlers.
+        // re-inserts if the new build still wires gesture handlers, seeding
+        // the new arena with the tap streak carried in `carried_tap_streak`.
         // External handlers (set via the builder chain at creation time)
         // persist, but `external_handlers` never carries a gesture arena
         // directly — it's always built by `ensure_gesture_arena` into

@@ -122,6 +122,7 @@
 pub mod a11y;
 pub mod body;
 pub mod body_pane;
+pub(crate) mod cell_body;
 pub mod column;
 pub mod filter;
 pub mod header;
@@ -925,8 +926,8 @@ impl<T: 'static> TableView<T> {
     /// discard, or refuse a value that will not parse.
     ///
     /// **Why a press and not a focus change.** "The editor lost focus" is the
-    /// obvious signal and it cannot be used: a body pane rebuilds constantly —
-    /// selection, filtering, scroll, a reload from elsewhere — and every rebuild
+    /// obvious signal and it cannot be used: a body pane rebuilds constantly
+    /// (filtering, scroll, a reload from elsewhere), and every rebuild
     /// destroys and re-creates the open editor, so focus leaves it many times
     /// during an edit the writer never interrupted. A press on another cell is
     /// unambiguous and happens exactly once.

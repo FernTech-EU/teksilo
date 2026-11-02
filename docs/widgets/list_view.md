@@ -274,7 +274,9 @@ pub struct ListView<T: 'static> { /* fields */ }
 Create a new ListView backed by a `ListModel<T>`.
 
 The `delegate` closure receives `(index, &item, selected)` and returns
-a boxed widget for that item.
+a boxed widget for that item. It runs again for a row only when that
+row's own selected state changes or the data changes; a selection move
+does not re-run it for the other rows.
 
 <a id="listview-from_source"></a>
 

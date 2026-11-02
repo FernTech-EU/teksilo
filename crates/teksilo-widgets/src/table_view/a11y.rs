@@ -18,12 +18,39 @@
 //! These wrappers do not paint or affect layout: they pass the proposed
 //! size straight through to their single child and forward all bounds.
 
+use std::rc::Rc;
+
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
 
 use teksilo_data::SortDirection;
+
+/// A flag read at each accessibility walk rather than fixed at build, so the
+/// node that publishes it need not be rebuilt when it changes.
+#[derive(Clone)]
+pub(crate) struct LiveFlag(Rc<dyn Fn() -> bool>);
+
+impl LiveFlag {
+    pub(crate) fn new(read: impl Fn() -> bool + 'static) -> Self {
+        Self(Rc::new(read))
+    }
+
+    pub(crate) fn get(&self) -> bool {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for LiveFlag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("LiveFlag").field(&self.get()).finish()
+    }
+}
+
+pub(crate) fn live_or(live: &Option<LiveFlag>, fixed: bool) -> bool {
+    live.as_ref().map_or(fixed, LiveFlag::get)
+}
 
 /// Wrapper that announces a `Role::Cell` (or `Role::RowHeader`) with
 /// row/column indices and selection state.
@@ -33,6 +60,9 @@ pub(crate) struct CellA11y {
     row_index_1based: usize,
     col_index_1based: usize,
     selected: bool,
+    /// When set, the selected state read at each accessibility walk instead
+    /// of `selected`: a selection change no longer rebuilds the cell.
+    live_selected: Option<LiveFlag>,
     /// When true, emit `Role::RowHeader` instead of `Role::Cell` — used
     /// when the table promotes a column to row-header status.
     is_row_header: bool,
@@ -73,6 +103,7 @@ impl CellA11y {
             row_index_1based,
             col_index_1based,
             selected,
+            live_selected: None,
             is_row_header: false,
             is_grid_cell: false,
             name: None,
@@ -85,6 +116,13 @@ impl CellA11y {
     /// Announce `Role::GridCell` — the cell is the selectable unit. Named for
     /// the sibling `with_role_row_header`, not `as_*`, which clippy reserves
     /// for by-reference conversions.
+    /// Read the selected state live, at each accessibility walk. The view
+    /// binds the selection at `AccessibilityOnly` so a change re-walks.
+    pub(crate) fn with_live_selected(mut self, selected: LiveFlag) -> Self {
+        self.live_selected = Some(selected);
+        self
+    }
+
     pub(crate) fn with_grid_cell_role(mut self, is_grid_cell: bool) -> Self {
         self.is_grid_cell = is_grid_cell;
         self
@@ -210,7 +248,7 @@ impl Widget for CellA11y {
         if let Some(ref name) = self.name {
             builder.set_name(name.clone());
         }
-        builder.set_selected(self.selected);
+        builder.set_selected(live_or(&self.live_selected, self.selected));
         builder.set_row_index(self.row_index_1based);
         builder.set_column_index(self.col_index_1based);
         // The floor matches `TreeRowA11y`: a caller that computed a depth of
@@ -254,6 +292,8 @@ pub(crate) struct TreeRowA11y {
     /// `Some(true|false)` for non-leaf rows; `None` for leaves.
     expanded: Option<bool>,
     selected: bool,
+    /// See `CellA11y::live_selected`.
+    live_selected: Option<LiveFlag>,
     /// 1-based position among this row's siblings (`TreeSource::sibling_pos`).
     position_in_set: usize,
 }
@@ -273,8 +313,15 @@ impl TreeRowA11y {
             level_1based,
             expanded,
             selected,
+            live_selected: None,
             position_in_set,
         }
+    }
+
+    /// See [`CellA11y::with_live_selected`].
+    pub(crate) fn with_live_selected(mut self, selected: LiveFlag) -> Self {
+        self.live_selected = Some(selected);
+        self
     }
 }
 
@@ -304,7 +351,7 @@ impl Widget for TreeRowA11y {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::Row);
-        builder.set_selected(self.selected);
+        builder.set_selected(live_or(&self.live_selected, self.selected));
         if let Some(exp) = self.expanded {
             builder.set_expanded(exp);
         }

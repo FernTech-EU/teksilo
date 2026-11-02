@@ -4403,3 +4403,52 @@ fn export_os_handoff_reaches_the_row_export() {
         .export_os_handoff(teksilo_core::OsHandoff::Eager);
     assert_eq!(grid.export.os_handoff, teksilo_core::OsHandoff::Eager);
 }
+
+/// A double click on a tile the first click selects activates it. The first
+/// click's selection rebuilds the tile's content at the frame between the
+/// clicks; the tile's tap streak has to survive that.
+#[test]
+fn a_double_click_activates_a_tile_the_first_click_selects() {
+    use crate::common::double_click_test::double_click_across_a_frame;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let size = SizeProposal::exact(400.0, 300.0);
+    for (preselect, exportable) in [(None, false), (Some(2), false), (None, true)] {
+        let activated = Rc::new(RefCell::new(Vec::new()));
+        let log = activated.clone();
+        let selection = SelectionModel::new(SelectionMode::Single);
+        if let Some(i) = preselect {
+            selection.select(i);
+        }
+        let mut grid = GridView::new(
+            ListModel::from_vec((0..12).collect::<Vec<usize>>()),
+            |_tc| Box::new(FixedLeaf(100.0, 50.0)),
+        )
+        .tile_size(100.0, 50.0)
+        .selection(selection)
+        .activate_on(crate::data_views::ActivateOn::DoubleClick)
+        .on_tile_activate(move |idx, _ctx| log.borrow_mut().push(idx));
+        if exportable {
+            grid = grid
+                .exportable(crate::data_views::DragTransferMode::Copy)
+                .export_external(|items: &[usize]| {
+                    vec![("text/plain".into(), format!("{items:?}").into_bytes())]
+                });
+        }
+        let mut tree = WidgetTree::new();
+        let id = tree.add(grid);
+        // The first layout publishes the column count, which rebuilds the
+        // pane once at the second: settle before the clicks.
+        tree.layout(size);
+        tree.layout(size);
+        let at = tree.bounds(tiles(&tree, id)[2]).center();
+        double_click_across_a_frame(&mut tree, at, size);
+        assert_eq!(
+            *activated.borrow(),
+            vec![2],
+            "preselect {preselect:?}, exportable {exportable}"
+        );
+        tree.assert_no_leaked_pointer_state();
+    }
+}

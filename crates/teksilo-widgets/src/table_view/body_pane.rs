@@ -38,6 +38,7 @@ use teksilo_data::{DragEligibility, RowState};
 
 use super::a11y::CellA11y;
 use super::body::{BodyRow, SharedColumnWidths};
+use super::cell_body::{CellBody, CellBuild, CellFlags, CellWatch};
 use super::column::{CellContext, Column};
 use super::selection::{CellSelectionModel, TableSelectionMode};
 use crate::common::row_metrics::SharedRowMetrics;
@@ -279,25 +280,10 @@ impl<T: 'static> Widget for BodyPane<T> {
         });
         ctx.own_handle(scroll_handle);
 
-        // Selection / editing changes — refresh `is_selected` /
-        // `is_editing` flags fed into the cell delegate.
-        if let Some(ref sel) = self.selection {
-            let v = version.clone();
-            let counter = Rc::new(Cell::new(0_u64));
-            let handle = sel.observe_for_rebuild(move || {
-                counter.set(counter.get() + 1);
-                v.set(counter.get());
-            });
-            ctx.own_handle(handle);
-        }
-        if let Some(ref cs) = self.cell_selection {
-            let v = version.clone();
-            let counter = Rc::new(Cell::new(0_u64));
-            ctx.effect(&cs.selection_signal(), move |_| {
-                counter.set(counter.get() + 1);
-                v.set(counter.get());
-            });
-        }
+        // An edit's start or end swaps an editor in or out, which is
+        // structural, so it rebuilds the pane. A selection or cursor move does
+        // not: each cell's `CellBody` rebuilds its own delegate output when its
+        // own flags change (see `table_view::cell_body`).
         let v_for_edit = version.clone();
         let edit_counter = Rc::new(Cell::new(0_u64));
         ctx.effect(&self.editing_cell, move |_| {
@@ -356,61 +342,109 @@ impl<T: 'static> Widget for BodyPane<T> {
             for (display_pos, &col_idx) in display_indices.iter().enumerate() {
                 let col = &columns[col_idx];
                 let is_editing = editing_state == Some((row_idx, display_pos));
-                let is_selected = match (selection_mode, &self.selection, &self.cell_selection) {
-                    (TableSelectionMode::SingleRow | TableSelectionMode::MultiRow, Some(s), _) => {
-                        s.is_selected(row_idx)
-                    }
-                    (
-                        TableSelectionMode::SingleCell | TableSelectionMode::MultiCell,
-                        _,
-                        Some(cs),
-                    ) => cs.is_selected(row_idx, display_pos),
-                    _ => false,
+                // The cell's own flags, read live: its `CellBody` rebuilds the
+                // delegate output when they change, and its `CellA11y` reads
+                // `selected` at each accessibility walk. Nothing rebuilds the
+                // pane, the row or the cell node for a selection or cursor move.
+                let flags: Rc<dyn Fn() -> CellFlags> = {
+                    let sel = self.selection.clone();
+                    let cs = self.cell_selection.clone();
+                    let focused = self.focused_cell.clone();
+                    Rc::new(move || CellFlags {
+                        selected: match (selection_mode, &sel, &cs) {
+                            (
+                                TableSelectionMode::SingleRow | TableSelectionMode::MultiRow,
+                                Some(s),
+                                _,
+                            ) => s.is_selected(row_idx),
+                            (
+                                TableSelectionMode::SingleCell | TableSelectionMode::MultiCell,
+                                _,
+                                Some(cs),
+                            ) => cs.is_selected(row_idx, display_pos),
+                            _ => false,
+                        },
+                        focused: focused.get() == Some((row_idx, display_pos)),
+                    })
                 };
-                let is_focused = self.focused_cell.get() == Some((row_idx, display_pos));
-                let cell_ctx = CellContext {
-                    row_index: row_idx,
-                    col_id: col.spec.id.clone(),
-                    col_index: display_pos,
-                    is_selected,
-                    is_focused,
-                    is_hovered: false,
-                    is_editing,
-                    depth: None,
-                    is_tree_column: false,
+                let build: CellBuild = {
+                    let cell_fn = col.cell.clone();
+                    let col_id = col.spec.id.clone();
+                    let with_item_fn = with_item_fn.clone();
+                    let scope = self.drag_anchor;
+                    Rc::new(move |ctx: &mut BuildContext, f: CellFlags| {
+                        let cell_ctx = CellContext {
+                            row_index: row_idx,
+                            col_id: col_id.clone(),
+                            col_index: display_pos,
+                            is_selected: f.selected,
+                            is_focused: f.focused,
+                            is_hovered: false,
+                            is_editing,
+                            depth: None,
+                            is_tree_column: false,
+                        };
+                        let widget = if loading {
+                            default_placeholder()
+                        } else {
+                            read_item_local(&with_item_fn, row_idx, |item| {
+                                (cell_fn)(item, &cell_ctx)
+                            })?
+                        };
+                        // The pane's focus scope is closed by the time a cell
+                        // rebuilds on its own, so the cell opens it again: a
+                        // `StandardItem` cell's focus-aware selection reads the
+                        // table's keyboard focus through it.
+                        ctx.begin_view_focus_for(scope);
+                        let inner_id = ctx.add_boxed(widget);
+                        ctx.end_view_focus();
+                        // When the cell delegate just swapped in an editor
+                        // (because `is_editing` flipped to true), the
+                        // delegate's child subtree is built fresh: focus is
+                        // still on whatever it was before the rebuild, which is
+                        // now stale. Hand keyboard focus to the editing cell's
+                        // first focusable descendant. Without this, F2 puts a
+                        // `TextInput` on screen but the user has to click it
+                        // before they can type.
+                        //
+                        // `focus_into` rather than a bare `focus` on the first
+                        // focusable descendant: it is a no-op while focus is
+                        // already inside the cell, so a later rebuild cannot
+                        // yank the caret back to the field's start mid-edit.
+                        if is_editing {
+                            ctx.focus_into(inner_id);
+                        }
+                        Some(inner_id)
+                    })
                 };
-                let cell_widget = if loading {
-                    Some(default_placeholder())
-                } else {
-                    read_item_local(&with_item_fn, row_idx, |item| (col.cell)(item, &cell_ctx))
-                };
-                if let Some(widget) = cell_widget {
-                    let inner_id = ctx.add_boxed(widget);
-                    // When the cell delegate just swapped in an editor
-                    // (because `is_editing` flipped to true), the
-                    // delegate's child subtree is built fresh — focus
-                    // is still on whatever it was before the rebuild,
-                    // which is now stale. Walk the editing cell's
-                    // subtree for the first focusable descendant and
-                    // hand keyboard focus to it. Without this, F2 puts
-                    // a `TextInput` on screen but the user has to
-                    // click it before they can type.
-                    //
-                    // `focus_into` rather than a bare `focus` on the
-                    // first focusable descendant: it is a no-op while
-                    // focus is already inside the cell, so the rebuild
-                    // storm a table lives in (selection, filtering,
-                    // scroll, the edit signal itself) cannot yank the
-                    // caret back to the field's start mid-edit.
-                    if is_editing {
-                        ctx.focus_into(inner_id);
-                    }
-                    let cell_a11y = CellA11y::new(
+                let first_flags = flags();
+                if let Some(inner_id) = build(ctx, first_flags) {
+                    let editing_cell = self.editing_cell.clone();
+                    let body_id = ctx.add(CellBody::new(
+                        build,
+                        CellWatch {
+                            row_selection: self.selection.clone(),
+                            cell_selection: self
+                                .cell_selection
+                                .as_ref()
+                                .map(|cs| cs.selection_signal()),
+                            focused_cell: self.focused_cell.clone(),
+                            flags: flags.clone(),
+                            editing: Rc::new(move || {
+                                editing_cell.get() == Some((row_idx, display_pos))
+                            }),
+                        },
                         inner_id,
+                    ));
+                    let cell_a11y = CellA11y::new(
+                        body_id,
                         row_idx + 2, // header is row 1
                         display_pos + 1,
-                        is_selected,
+                        first_flags.selected,
                     )
+                    .with_live_selected(crate::table_view::a11y::LiveFlag::new(move || {
+                        flags().selected
+                    }))
                     // `Role::GridCell` only where the cell really is the
                     // selectable unit; see `CellA11y::is_grid_cell`.
                     .with_grid_cell_role(selection_mode.is_cell_mode());
@@ -543,6 +577,15 @@ impl<T: 'static> Widget for BodyPane<T> {
             } else {
                 Some(self.row_metrics.borrow_mut().row_height(row_idx))
             };
+            let live_row_selected = {
+                let sel = self.selection.clone();
+                crate::table_view::a11y::LiveFlag::new(move || match (selection_mode, &sel) {
+                    (TableSelectionMode::SingleRow | TableSelectionMode::MultiRow, Some(s)) => {
+                        s.is_selected(row_idx)
+                    }
+                    _ => false,
+                })
+            };
             let row_widget = BodyRow::new(
                 cell_ids,
                 row_idx + 2,
@@ -551,7 +594,8 @@ impl<T: 'static> Widget for BodyPane<T> {
                 row_widths_handle.clone(),
                 self.pane_boundaries,
                 self.scroll_x.clone(),
-            );
+            )
+            .with_live_selected(live_row_selected);
             let row_id = ctx.add(row_widget);
 
             // A grid is *one* Tab stop — the cell cursor is the navigation, and

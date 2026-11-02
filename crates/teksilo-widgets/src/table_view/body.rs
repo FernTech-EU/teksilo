@@ -69,6 +69,8 @@ pub(crate) struct BodyRow {
     /// 1-based row index for AccessKit. Header is 1; first body row is 2.
     row_index_1based: usize,
     selected: bool,
+    /// See `CellA11y::live_selected`.
+    live_selected: Option<crate::table_view::a11y::LiveFlag>,
     /// `Some(h)` — fixed height (uniform / exact modes). `None` —
     /// auto-measure: `layout_response` measures each cell at its column
     /// width and reports the tallest (height-for-width).
@@ -108,6 +110,7 @@ impl BodyRow {
             cells,
             row_index_1based,
             selected,
+            live_selected: None,
             row_height,
             widths,
             pane_boundaries,
@@ -115,6 +118,17 @@ impl BodyRow {
             announce_a11y: true,
             bands: None,
         }
+    }
+
+    /// Read the row's selected state at each accessibility walk, so a
+    /// selection change does not have to rebuild the row (and with it every
+    /// cell).
+    pub(crate) fn with_live_selected(
+        mut self,
+        selected: crate::table_view::a11y::LiveFlag,
+    ) -> Self {
+        self.live_selected = Some(selected);
+        self
     }
 
     pub(crate) fn a11y_hidden(mut self) -> Self {
@@ -262,7 +276,10 @@ impl Widget for BodyRow {
             return;
         }
         builder.set_role(teksilo_core::accesskit::Role::Row);
-        builder.set_selected(self.selected);
+        builder.set_selected(crate::table_view::a11y::live_or(
+            &self.live_selected,
+            self.selected,
+        ));
         builder.set_row_index(self.row_index_1based);
         // Advertised, not just handled: every adapter gates its scroll
         // pattern on the node *supporting* the action (UIA's
