@@ -149,9 +149,9 @@ def reshown_persist(run):
     focus_act(run, "the Explorer header", EXPLORER, [said("Explorer")])
     focus_act(run, "the Source rail tab", RAIL_TAB)
     with run.act("Enter: hide the leading side",
-                 [not_in_tree(role="landmark", name="Leading panel")], should="the side hides"):
+                 [not_in_tree(role="landmark", name="Left panel")], should="the side hides"):
         run.key("Return")
-    with run.act("Enter: show it again", [in_tree(role="landmark", name="Leading panel")],
+    with run.act("Enter: show it again", [in_tree(role="landmark", name="Left panel")],
                  should="the side comes back"):
         run.key("Return")
     for visit in (1, 2, 3):
@@ -215,7 +215,7 @@ def menu_reopen(run):
                      should="the menu opens and the reader hears 'menu'"):
             run.key("Return")
         with run.act(f"Escape: close it, time {n}",
-                     [focused(role="push button", name="More actions"), said("More actions")],
+                     [focused(role="push button", name_contains="More actions"), said("More actions")],
                      should="focus returns to the options button and the reader hears it"):
             run.key("Escape")
     more = {"role": "push button", "name": "More", "nth": 0}

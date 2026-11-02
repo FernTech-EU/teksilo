@@ -469,3 +469,97 @@ shortcut-code-toggle-comment = Commentaar in-/uitschakelen
 shortcut-code-duplicate = Dupliceren
 shortcut-category-format = Opmaak
 shortcut-category-code = Code
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Linkerpaneel
+dock-side-right = Rechterpaneel
+dock-side-top = Bovenpaneel
+dock-side-bottom = Onderpaneel
+dock-rail-left = Linkeractiviteitenbalk
+dock-rail-right = Rechteractiviteitenbalk
+dock-rail-top = Bovenste activiteitenbalk
+dock-rail-bottom = Onderste activiteitenbalk
+dock-rail-actions-left =
+    { $placement ->
+        [start] Linkeractiviteitenbalk: acties (boven)
+        [pinned] Linkeractiviteitenbalk: acties (onder)
+       *[end] Linkeractiviteitenbalk: acties
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Rechteractiviteitenbalk: acties (boven)
+        [pinned] Rechteractiviteitenbalk: acties (onder)
+       *[end] Rechteractiviteitenbalk: acties
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Bovenste activiteitenbalk: acties (boven)
+        [pinned] Bovenste activiteitenbalk: acties (onder)
+       *[end] Bovenste activiteitenbalk: acties
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Onderste activiteitenbalk: acties (boven)
+        [pinned] Onderste activiteitenbalk: acties (onder)
+       *[end] Onderste activiteitenbalk: acties
+    }
+dock-rail-named = Activiteitenbalk ‘{ $label }’
+dock-rail-actions-named =
+    { $placement ->
+        [start] Activiteitenbalk ‘{ $label }’: acties (boven)
+        [pinned] Activiteitenbalk ‘{ $label }’: acties (onder)
+       *[end] Activiteitenbalk ‘{ $label }’: acties
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Links
+dock-move-right = Rechts
+dock-move-top = Boven
+dock-move-bottom = Onder
+dock-actions-name = Acties: { $title }
+dock-more-actions-name = Meer acties: { $title }
+dock-hide-activity = ‘{ $name }’ verbergen
+dock-move-to = Verplaatsen naar
+dock-move-to-new-activity = Naar nieuwe activiteit verplaatsen
+dock-move-to-side = Naar een zijde verplaatsen
+dock-activity-bar-size = Grootte van activiteitenbalk
+dock-tab-size = Grootte van tabbladen
+dock-size-default = Standaard
+dock-size-compact = Compact
+dock-size-icon-label = Pictogram en label
+dock-display-text = Tekst
+dock-display-icon = Pictogram
+dock-display-icon-text = Pictogram en tekst
+dock-fallback-title = Paneel
+dock-hidden-activities = Verborgen activiteiten
+dock-drop-here = Zet hier een paneel neer
+dock-missing-content = (inhoud ontbreekt)
+dock-more-panels = Andere panelen
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Menu tonen
+tab-bar-scroll-left = Tabbladen naar links schuiven
+tab-bar-scroll-right = Tabbladen naar rechts schuiven
+tab-bar-scroll-up = Tabbladen omhoog schuiven
+tab-bar-scroll-down = Tabbladen omlaag schuiven
+tab-bar-show-all = Alle tabbladen tonen
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Staafdiagram, { $series ->
+        [one] { $series } reeks
+       *[other] { $series } reeksen
+    }, { $categories ->
+        [one] { $categories } categorie
+       *[other] { $categories } categorieën
+    }
+chart-line-summary =
+    Lijndiagram, { $series ->
+        [one] { $series } reeks
+       *[other] { $series } reeksen
+    }
+chart-pie-summary =
+    Cirkeldiagram, { $slices ->
+        [one] { $slices } segment
+       *[other] { $slices } segmenten
+    }
+chart-legend-name = Legenda van de grafiek

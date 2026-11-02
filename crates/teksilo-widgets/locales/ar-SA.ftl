@@ -480,3 +480,113 @@ shortcut-code-toggle-comment = تبديل التعليق
 shortcut-code-duplicate = تكرار
 shortcut-category-format = تنسيق
 shortcut-category-code = الشيفرة
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = اللوحة اليسرى
+dock-side-right = اللوحة اليمنى
+dock-side-top = اللوحة العلوية
+dock-side-bottom = اللوحة السفلية
+dock-rail-left = شريط النشاط الأيسر
+dock-rail-right = شريط النشاط الأيمن
+dock-rail-top = شريط النشاط العلوي
+dock-rail-bottom = شريط النشاط السفلي
+dock-rail-actions-left =
+    { $placement ->
+        [start] شريط النشاط الأيسر: إجراءات (أعلى)
+        [pinned] شريط النشاط الأيسر: إجراءات (أسفل)
+       *[end] شريط النشاط الأيسر: إجراءات
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] شريط النشاط الأيمن: إجراءات (أعلى)
+        [pinned] شريط النشاط الأيمن: إجراءات (أسفل)
+       *[end] شريط النشاط الأيمن: إجراءات
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] شريط النشاط العلوي: إجراءات (أعلى)
+        [pinned] شريط النشاط العلوي: إجراءات (أسفل)
+       *[end] شريط النشاط العلوي: إجراءات
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] شريط النشاط السفلي: إجراءات (أعلى)
+        [pinned] شريط النشاط السفلي: إجراءات (أسفل)
+       *[end] شريط النشاط السفلي: إجراءات
+    }
+dock-rail-named = شريط النشاط «{ $label }»
+dock-rail-actions-named =
+    { $placement ->
+        [start] شريط النشاط «{ $label }»: إجراءات (أعلى)
+        [pinned] شريط النشاط «{ $label }»: إجراءات (أسفل)
+       *[end] شريط النشاط «{ $label }»: إجراءات
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = اليسار
+dock-move-right = اليمين
+dock-move-top = الأعلى
+dock-move-bottom = الأسفل
+dock-actions-name = إجراءات: { $title }
+dock-more-actions-name = إجراءات أخرى: { $title }
+dock-hide-activity = إخفاء «{ $name }»
+dock-move-to = نقل إلى
+dock-move-to-new-activity = نقل إلى نشاط جديد
+dock-move-to-side = نقل إلى جانب
+dock-activity-bar-size = حجم شريط النشاط
+dock-tab-size = حجم علامات التبويب
+dock-size-default = افتراضي
+dock-size-compact = مضغوط
+dock-size-icon-label = أيقونة وتسمية
+dock-display-text = نص
+dock-display-icon = أيقونة
+dock-display-icon-text = أيقونة ونص
+dock-fallback-title = لوحة
+dock-hidden-activities = الأنشطة المخفية
+dock-drop-here = أفلت لوحة هنا
+dock-missing-content = (المحتوى مفقود)
+dock-more-panels = لوحات أخرى
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = إظهار القائمة
+tab-bar-scroll-left = تمرير علامات التبويب إلى اليسار
+tab-bar-scroll-right = تمرير علامات التبويب إلى اليمين
+tab-bar-scroll-up = تمرير علامات التبويب إلى الأعلى
+tab-bar-scroll-down = تمرير علامات التبويب إلى الأسفل
+tab-bar-show-all = إظهار كل علامات التبويب
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    مخطط شريطي، { $series ->
+        [zero] لا سلاسل
+        [one] سلسلة واحدة
+        [two] سلسلتان
+        [few] { $series } سلاسل
+        [many] { $series } سلسلة
+       *[other] { $series } سلسلة
+    }، { $categories ->
+        [zero] لا فئات
+        [one] فئة واحدة
+        [two] فئتان
+        [few] { $categories } فئات
+        [many] { $categories } فئة
+       *[other] { $categories } فئة
+    }
+chart-line-summary =
+    مخطط خطي، { $series ->
+        [zero] لا سلاسل
+        [one] سلسلة واحدة
+        [two] سلسلتان
+        [few] { $series } سلاسل
+        [many] { $series } سلسلة
+       *[other] { $series } سلسلة
+    }
+chart-pie-summary =
+    مخطط دائري، { $slices ->
+        [zero] لا قطاعات
+        [one] قطاع واحد
+        [two] قطاعان
+        [few] { $slices } قطاعات
+        [many] { $slices } قطاعًا
+       *[other] { $slices } قطاع
+    }
+chart-legend-name = وسيلة إيضاح المخطط

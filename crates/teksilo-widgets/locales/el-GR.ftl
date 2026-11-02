@@ -466,3 +466,97 @@ shortcut-code-toggle-comment = Εναλλαγή σχολίου
 shortcut-code-duplicate = Διπλασιασμός
 shortcut-category-format = Μορφοποίηση
 shortcut-category-code = Κώδικας
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Αριστερό πλαίσιο
+dock-side-right = Δεξί πλαίσιο
+dock-side-top = Επάνω πλαίσιο
+dock-side-bottom = Κάτω πλαίσιο
+dock-rail-left = Αριστερή γραμμή δραστηριοτήτων
+dock-rail-right = Δεξιά γραμμή δραστηριοτήτων
+dock-rail-top = Επάνω γραμμή δραστηριοτήτων
+dock-rail-bottom = Κάτω γραμμή δραστηριοτήτων
+dock-rail-actions-left =
+    { $placement ->
+        [start] Αριστερή γραμμή δραστηριοτήτων: ενέργειες (επάνω)
+        [pinned] Αριστερή γραμμή δραστηριοτήτων: ενέργειες (κάτω)
+       *[end] Αριστερή γραμμή δραστηριοτήτων: ενέργειες
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Δεξιά γραμμή δραστηριοτήτων: ενέργειες (επάνω)
+        [pinned] Δεξιά γραμμή δραστηριοτήτων: ενέργειες (κάτω)
+       *[end] Δεξιά γραμμή δραστηριοτήτων: ενέργειες
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Επάνω γραμμή δραστηριοτήτων: ενέργειες (επάνω)
+        [pinned] Επάνω γραμμή δραστηριοτήτων: ενέργειες (κάτω)
+       *[end] Επάνω γραμμή δραστηριοτήτων: ενέργειες
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Κάτω γραμμή δραστηριοτήτων: ενέργειες (επάνω)
+        [pinned] Κάτω γραμμή δραστηριοτήτων: ενέργειες (κάτω)
+       *[end] Κάτω γραμμή δραστηριοτήτων: ενέργειες
+    }
+dock-rail-named = Γραμμή δραστηριοτήτων «{ $label }»
+dock-rail-actions-named =
+    { $placement ->
+        [start] Γραμμή δραστηριοτήτων «{ $label }»: ενέργειες (επάνω)
+        [pinned] Γραμμή δραστηριοτήτων «{ $label }»: ενέργειες (κάτω)
+       *[end] Γραμμή δραστηριοτήτων «{ $label }»: ενέργειες
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Αριστερά
+dock-move-right = Δεξιά
+dock-move-top = Επάνω
+dock-move-bottom = Κάτω
+dock-actions-name = Ενέργειες: { $title }
+dock-more-actions-name = Περισσότερες ενέργειες: { $title }
+dock-hide-activity = Απόκρυψη «{ $name }»
+dock-move-to = Μετακίνηση σε
+dock-move-to-new-activity = Μετακίνηση σε νέα δραστηριότητα
+dock-move-to-side = Μετακίνηση σε πλευρά
+dock-activity-bar-size = Μέγεθος γραμμής δραστηριοτήτων
+dock-tab-size = Μέγεθος καρτελών
+dock-size-default = Προεπιλογή
+dock-size-compact = Συμπαγές
+dock-size-icon-label = Εικονίδιο και ετικέτα
+dock-display-text = Κείμενο
+dock-display-icon = Εικονίδιο
+dock-display-icon-text = Εικονίδιο και κείμενο
+dock-fallback-title = Πλαίσιο
+dock-hidden-activities = Κρυφές δραστηριότητες
+dock-drop-here = Αποθέστε ένα πλαίσιο εδώ
+dock-missing-content = (λείπει περιεχόμενο)
+dock-more-panels = Άλλα πλαίσια
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Εμφάνιση μενού
+tab-bar-scroll-left = Κύλιση καρτελών αριστερά
+tab-bar-scroll-right = Κύλιση καρτελών δεξιά
+tab-bar-scroll-up = Κύλιση καρτελών επάνω
+tab-bar-scroll-down = Κύλιση καρτελών κάτω
+tab-bar-show-all = Εμφάνιση όλων των καρτελών
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Ραβδόγραμμα, { $series ->
+        [one] { $series } σειρά
+       *[other] { $series } σειρές
+    }, { $categories ->
+        [one] { $categories } κατηγορία
+       *[other] { $categories } κατηγορίες
+    }
+chart-line-summary =
+    Γράφημα γραμμών, { $series ->
+        [one] { $series } σειρά
+       *[other] { $series } σειρές
+    }
+chart-pie-summary =
+    Κυκλικό γράφημα, { $slices ->
+        [one] { $slices } τομέας
+       *[other] { $slices } τομείς
+    }
+chart-legend-name = Υπόμνημα γραφήματος

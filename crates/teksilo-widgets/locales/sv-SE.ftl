@@ -461,3 +461,97 @@ shortcut-code-toggle-comment = Växla kommentar
 shortcut-code-duplicate = Duplicera
 shortcut-category-format = Format
 shortcut-category-code = Kod
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Vänster panel
+dock-side-right = Höger panel
+dock-side-top = Övre panel
+dock-side-bottom = Nedre panel
+dock-rail-left = Vänster aktivitetsfält
+dock-rail-right = Höger aktivitetsfält
+dock-rail-top = Övre aktivitetsfält
+dock-rail-bottom = Nedre aktivitetsfält
+dock-rail-actions-left =
+    { $placement ->
+        [start] Vänster aktivitetsfält: åtgärder (överst)
+        [pinned] Vänster aktivitetsfält: åtgärder (nederst)
+       *[end] Vänster aktivitetsfält: åtgärder
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Höger aktivitetsfält: åtgärder (överst)
+        [pinned] Höger aktivitetsfält: åtgärder (nederst)
+       *[end] Höger aktivitetsfält: åtgärder
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Övre aktivitetsfält: åtgärder (överst)
+        [pinned] Övre aktivitetsfält: åtgärder (nederst)
+       *[end] Övre aktivitetsfält: åtgärder
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Nedre aktivitetsfält: åtgärder (överst)
+        [pinned] Nedre aktivitetsfält: åtgärder (nederst)
+       *[end] Nedre aktivitetsfält: åtgärder
+    }
+dock-rail-named = Aktivitetsfältet ”{ $label }”
+dock-rail-actions-named =
+    { $placement ->
+        [start] Aktivitetsfältet ”{ $label }”: åtgärder (överst)
+        [pinned] Aktivitetsfältet ”{ $label }”: åtgärder (nederst)
+       *[end] Aktivitetsfältet ”{ $label }”: åtgärder
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Vänster
+dock-move-right = Höger
+dock-move-top = Överst
+dock-move-bottom = Nederst
+dock-actions-name = Åtgärder: { $title }
+dock-more-actions-name = Fler åtgärder: { $title }
+dock-hide-activity = Dölj ”{ $name }”
+dock-move-to = Flytta till
+dock-move-to-new-activity = Flytta till ny aktivitet
+dock-move-to-side = Flytta till sida
+dock-activity-bar-size = Aktivitetsfältets storlek
+dock-tab-size = Flikarnas storlek
+dock-size-default = Standard
+dock-size-compact = Kompakt
+dock-size-icon-label = Ikon och etikett
+dock-display-text = Text
+dock-display-icon = Ikon
+dock-display-icon-text = Ikon och text
+dock-fallback-title = Panel
+dock-hidden-activities = Dolda aktiviteter
+dock-drop-here = Släpp en panel här
+dock-missing-content = (innehåll saknas)
+dock-more-panels = Andra paneler
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Visa menyn
+tab-bar-scroll-left = Rulla flikarna åt vänster
+tab-bar-scroll-right = Rulla flikarna åt höger
+tab-bar-scroll-up = Rulla flikarna uppåt
+tab-bar-scroll-down = Rulla flikarna nedåt
+tab-bar-show-all = Visa alla flikar
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Stapeldiagram, { $series ->
+        [one] { $series } serie
+       *[other] { $series } serier
+    }, { $categories ->
+        [one] { $categories } kategori
+       *[other] { $categories } kategorier
+    }
+chart-line-summary =
+    Linjediagram, { $series ->
+        [one] { $series } serie
+       *[other] { $series } serier
+    }
+chart-pie-summary =
+    Cirkeldiagram, { $slices ->
+        [one] { $slices } sektor
+       *[other] { $slices } sektorer
+    }
+chart-legend-name = Diagramförklaring

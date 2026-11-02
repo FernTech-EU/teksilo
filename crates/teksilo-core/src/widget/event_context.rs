@@ -1207,6 +1207,17 @@ impl<'ops> EventContext<'ops> {
         self.force_close_requested = true;
     }
 
+    /// Whether a modal overlay is open in this window: a dialog presented in
+    /// the window or the command palette. For a handler or a post-mount
+    /// action that would move focus programmatically: moving it under the
+    /// modal's scrim would leave the user in a page they cannot reach.
+    // Shared plumbing for teksilo-widgets (`DockingModel::focus_dock`);
+    // whether to document it is open.
+    #[doc(hidden)]
+    pub fn is_modal_open(&self) -> bool {
+        self.modal_open
+    }
+
     /// Give the window's close button's request to the in-window modal open
     /// in it, if one is: the modal does what Escape does there, and the window
     /// is not asked to close, as with Alt+F4 or the OS close button. Returns

@@ -62,6 +62,10 @@ by crate for clarity, not because crates version independently.
   link a `Role::Link` node in reading order, its runs in one character space
   with the rest of the text. Neither adds an action: a widget that follows
   links adds Click to the link nodes and routes it.
+- **`BuildContext::focused_signal()`** and
+  **`BuildContext::is_descendant_of(id, ancestor)`**: the focused widget as a
+  signal, and the subtree test, for a container that puts focus back where it
+  was inside it.
 - **`ImeOrigin`** (`Composition`, `Dictation`, `WritingTools`, `Insertion`;
   `#[non_exhaustive]`) says which part of the input system committed a text.
 - **`WidgetEvent::ime_commit(text)`** and
@@ -113,6 +117,17 @@ by crate for clarity, not because crates version independently.
   a control names the key that enters it in its accessible description. The
   default, `RowKeyboard::Toggle`, keeps the list as it was. See
   [docs/data-view-keyboard.md](docs/data-view-keyboard.md).
+- **`DockingLayout::side_label(side, label)`** names a docking side for
+  screen readers; its activity bar, its actions and the "Move to" menus use
+  the name too.
+- **`DockingModel::focus_dock(id)`** reveals a dock and moves keyboard
+  focus into it: to the control that last had focus there (the one at the
+  same place when the panel was hidden and rebuilt since), else its first
+  control, else its header, tab or rail item. It shows a hidden activity and
+  expands a collapsed pane as needed, and a screen reader hears the dock's
+  title. It acts within the layout's own window; while a modal is open there
+  it still reveals the dock, but moves no focus and announces nothing.
+  `reveal_dock` is unchanged and still leaves focus where it is.
 - **`EditSource::Dictation` and `EditSource::WritingTools`.** A
   `RichTextEditor` and a `TextInputField` report dictation, Writing Tools and
   emoji insertions under `Dictation`, `WritingTools` and `Ime`.
@@ -271,6 +286,24 @@ by crate for clarity, not because crates version independently.
   rebuilt every realized row, in a `TableView` the header and the scroll bars
   as well, and in a `TreeTableView` every row on each move of the cell
   cursor.
+- **Docking sides are named for where they are on screen**: "Left panel",
+  "Right panel", "Top panel", "Bottom panel" (the leading side is the right
+  one in right-to-left), and the "Move to" menus offer "Left", "Right",
+  "Top" and "Bottom". They were "Leading panel", "Trailing", and so on.
+- **Charts carry no English name any more**: a `BarChart`, `LineChart` or
+  `PieChart` is named by the application (`.access_label`), and its
+  description says the kind of chart and what it shows ("Bar chart, 3
+  series, 4 categories", "Line chart, 2 series", "Pie chart, 5 slices"). Hidden series are not counted, and a live line chart no
+  longer re-announces itself on every new point.
+- **Tab moves through a `DockingLayout` in reading order**: the top
+  panel, the leading side, the centre, the trailing side, the bottom panel
+  (the leading side is on the right in right-to-left), and within a side its
+  activity bar, panel and resize handle in the order they are drawn. A screen reader's browse
+  mode and landmark list meet the sides in the same order. A `tab_index` set
+  inside a dock orders only within its region. Focus that falls back to a
+  dock's first control (a modal window with no focus hint, a request to
+  focus the dock itself) now lands in the top or leading panel; give the
+  editor an `initial_focus_hint` to start there.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.
@@ -511,6 +544,14 @@ by crate for clarity, not because crates version independently.
   (`row_click_expands`, the default) still toggles twice.
 - **In a `TableView`, `CellContext::is_focused` follows the cell cursor.** It
   was refreshed only when something else happened to rebuild the table.
+- **A docked split pane collapsed from its divider (a double click, a drag
+  past its minimum, Enter) shows its accordion collapsed**, so one click on
+  the header opens it again; it used to keep the open chevron and need two.
+- **Docking, split button, tab bar and chart names and tooltips are
+  translated** and follow a locale switch, including a dock's actions
+  toolbar and options button, whose names carry the dock's title. A dock's
+  options button is now announced with that title ("More actions:
+  Explorer"); the name sat on a node no reader stops on.
 - **A field in a `FormLayout` row is read by the row's label.** A bare
   `TextInput`, `PasswordField`, `DateEdit` or `TimeEdit` was read with no
   name or by its built-in "Date" or "Time", and a field or label inside a
@@ -662,6 +703,13 @@ by crate for clarity, not because crates version independently.
 - **The terminal sends ESC and the key's own character for Option+key on
   macOS** with `alt_sends_escape`, where it sent ESC and the composed
   character.
+
+#### Automation
+
+- **A settle runs the post-mount actions**, as the app loop does each
+  iteration, so a focus move a widget makes there (`DockingModel::focus_dock`)
+  has happened when a settled reply is read, in a headless tree and through
+  the live bridge.
 
 #### App
 

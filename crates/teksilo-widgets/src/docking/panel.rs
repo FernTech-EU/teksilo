@@ -19,7 +19,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use teksilo_canvas::{Rect, SizeProposal};
-use teksilo_core::WidgetBuilder;
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
 use teksilo_core::build_context::BuildContext;
@@ -28,7 +27,7 @@ use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacemen
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::{DragPayload, DropFeedback};
-use teksilo_i18n::{LocalizedString, lit};
+use teksilo_i18n::{LocalizedString, localized, tr_widget};
 use teksilo_tokens::{SurfaceRole, TextRole, TextStyleRole};
 
 use crate::DropRegion;
@@ -167,6 +166,26 @@ impl DockWidget {
 #[derive(Default)]
 pub(crate) struct DockContentRegistry {
     factories: HashMap<DockWidgetId, DockContentFactory>,
+    /// Where each built dock's content and pane are, for
+    /// [`DockingModel::focus_dock`]. Refilled on each build of the layout.
+    focus_targets: HashMap<DockWidgetId, DockFocusTarget>,
+    /// The model version the layout was last built at: a target recorded
+    /// before a structural change names widgets that change destroys.
+    focus_targets_version: u64,
+}
+
+/// The widgets of one built dock that focus can be moved into.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DockFocusTarget {
+    /// The dock's own content, as its factory built it.
+    pub(crate) content: WidgetId,
+    /// The pane around it: the content itself for a bare dock, the accordion
+    /// (header and content) for a split pane, the header bar and content for
+    /// a dock with `show_header`.
+    pub(crate) pane: WidgetId,
+    /// The pane's first control is a header named by the dock's title (a
+    /// split pane's accordion), so landing there says the title already.
+    pub(crate) titled_header: bool,
 }
 
 impl std::fmt::Debug for DockContentRegistry {
@@ -183,6 +202,38 @@ impl DockContentRegistry {
     }
     pub(crate) fn build(&self, id: DockWidgetId) -> Option<Box<dyn Widget>> {
         self.factories.get(&id).map(|f| f(id))
+    }
+
+    /// Forget every focus target: the layout is about to rebuild its sides.
+    pub(crate) fn reset_focus_targets(&mut self, version: u64) {
+        self.focus_targets.clear();
+        self.focus_targets_version = version;
+    }
+
+    pub(crate) fn record_focus_target(&mut self, id: DockWidgetId, target: DockFocusTarget) {
+        self.focus_targets.insert(id, target);
+    }
+
+    /// The dock's focus target, when the layout was built at `version`.
+    /// The model version the focus targets were recorded at.
+    pub(crate) fn focus_targets_version(&self) -> u64 {
+        self.focus_targets_version
+    }
+
+    /// Every dock's focus target as last recorded, whatever the version: a
+    /// target from before a rebuild names destroyed widgets, which contain
+    /// nothing.
+    pub(crate) fn focus_targets(
+        &self,
+    ) -> impl Iterator<Item = (DockWidgetId, DockFocusTarget)> + '_ {
+        self.focus_targets.iter().map(|(&id, &target)| (id, target))
+    }
+
+    pub(crate) fn focus_target(&self, id: DockWidgetId, version: u64) -> Option<DockFocusTarget> {
+        if self.focus_targets_version != version {
+            return None;
+        }
+        self.focus_targets.get(&id).copied()
     }
 }
 
@@ -264,9 +315,11 @@ impl DockSidePanel {
             let hb_side = self.side;
             trailing.push(
                 ctx.add(
-                    PopoverIconButton::new(IconButton::menu().tooltip(lit!("Hidden activities")))
-                        .content(background_menu(&m, hb_side, DockMenuKind::Strip))
-                        .placement(OverlayPlacement::BelowPreferred),
+                    PopoverIconButton::new(
+                        IconButton::menu().tooltip(tr_widget!(dock_hidden_activities())),
+                    )
+                    .content(background_menu(&m, hb_side, DockMenuKind::Strip))
+                    .placement(OverlayPlacement::BelowPreferred),
                 ),
             );
         }
@@ -297,7 +350,7 @@ fn empty_side_drop_target(
     side: DockSide,
 ) -> WidgetId {
     let text = ctx.add(
-        TextWidget::new(lit!("Drop a panel here"))
+        TextWidget::new(tr_widget!(dock_drop_here()))
             .style(TextStyleRole::Body)
             .color(TextRole::Secondary),
     );
@@ -685,7 +738,7 @@ impl Widget for DockSidePanel {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use teksilo_core::accesskit::Role;
         builder.set_role(Role::Complementary);
-        builder.set_name(super::a11y::side_label(self.side).resolve_now());
+        builder.set_name(super::a11y::side_label(&self.model, self.side));
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -729,7 +782,7 @@ impl DockTabContentWidget {
     fn build_dock_content(&self, ctx: &mut BuildContext, dock: DockWidgetId) -> WidgetId {
         match self.content.borrow().build(dock) {
             Some(w) => ctx.add_boxed(w),
-            None => ctx.add(TextWidget::new(lit!("(missing content)"))),
+            None => ctx.add(TextWidget::new(tr_widget!(dock_missing_content()))),
         }
     }
 }
@@ -825,6 +878,28 @@ impl DockTabContentWidget {
         splitter: Option<&crate::splitter::SplitterModel>,
     ) -> WidgetId {
         let content = self.build_dock_content(ctx, dock);
+        let pane = self.build_pane_around(ctx, dock, content, pane_idx, splitter);
+        self.content.borrow_mut().record_focus_target(
+            dock,
+            DockFocusTarget {
+                content,
+                pane,
+                titled_header: splitter.is_some(),
+            },
+        );
+        pane
+    }
+
+    /// Everything around a dock's content in its pane: a header bar, or the
+    /// accordion of a split pane. See [`build_pane_inner`](Self::build_pane_inner).
+    fn build_pane_around(
+        &self,
+        ctx: &mut BuildContext,
+        dock: DockWidgetId,
+        content: WidgetId,
+        pane_idx: usize,
+        splitter: Option<&crate::splitter::SplitterModel>,
+    ) -> WidgetId {
         let multi_pane = splitter.is_some();
         let Some(splitter) = splitter else {
             // Sole-pane (bare) dock. By default it renders headerless (the side
@@ -836,7 +911,10 @@ impl DockTabContentWidget {
             }
             return self.build_bare_dock_header(ctx, dock, content);
         };
-        let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
+        let title = self
+            .model
+            .dock_title(dock)
+            .unwrap_or_else(|| tr_widget!(dock_fallback_title()));
         // Initial expanded state follows the Splitter (so a rebuild preserves a
         // collapsed pane); toggling drives the pane collapse/expand.
         let expanded = ctx.signal(!splitter.is_collapsed(pane_idx));
@@ -845,6 +923,18 @@ impl DockTabContentWidget {
             let sp = splitter.clone();
             ctx.effect(&expanded, move |&e| {
                 sp.set_collapsed(pane_idx, !e);
+            });
+        }
+        // And back: a pane the model expands (`DockingModel::focus_dock`)
+        // opens its accordion, which would otherwise keep its content parked.
+        {
+            let sp = splitter.clone();
+            let expanded = expanded.clone();
+            ctx.effect(&splitter.version(), move |_| {
+                let open = !sp.is_collapsed(pane_idx);
+                if expanded.get() != open {
+                    expanded.set(open);
+                }
             });
         }
         let mut accordion = Accordion::new(title, expanded)
@@ -895,7 +985,10 @@ impl DockTabContentWidget {
         // horizontal regardless of side — lays out horizontally.
         let vertical =
             multi_pane && side_orientation(self.side) == teksilo_tokens::Orientation::Horizontal;
-        let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
+        let title = self
+            .model
+            .dock_title(dock)
+            .unwrap_or_else(|| tr_widget!(dock_fallback_title()));
 
         // The app's header actions, hosted in a compact shrink-to-fit `Toolbar`
         // that collapses its excess into a `⌄` when the header is narrow. Only
@@ -909,7 +1002,13 @@ impl DockTabContentWidget {
                 })
                 .compact(true)
                 .spacing(2.0)
-                .label(lit!(format!("{} actions", title.resolve_now())));
+                // Composed when read, so a locale switch renames it.
+                .label({
+                    let title = title.clone();
+                    localized(move || {
+                        tr_widget!(dock_actions_name(title = title.resolve_now())).resolve_now()
+                    })
+                });
             for item in factory(dock) {
                 bar = bar.item(item);
             }
@@ -925,11 +1024,20 @@ impl DockTabContentWidget {
         let options_id = has_options.then(|| {
             let menu = dock_options_menu(&self.model, self.side, self.tab.id, dock, multi_pane);
             ctx.add(
-                PopoverIconButton::new(IconButton::more().size(IconButtonSize::Compact))
-                    .bare()
-                    .content(menu)
-                    .placement(OverlayPlacement::BelowPreferred)
-                    .access_label(lit!(format!("More actions: {}", title.resolve_now()))),
+                // The name goes on the focusable button, through its tooltip:
+                // the popover wrapper has no node of its own, and a name put
+                // there made an unknown-role node while the button kept the
+                // bare "More actions" (reader finding docking-08).
+                PopoverIconButton::new(IconButton::more().size(IconButtonSize::Compact).tooltip({
+                    let title = title.clone();
+                    localized(move || {
+                        tr_widget!(dock_more_actions_name(title = title.resolve_now()))
+                            .resolve_now()
+                    })
+                }))
+                .bare()
+                .content(menu)
+                .placement(OverlayPlacement::BelowPreferred),
             )
         });
 
@@ -967,7 +1075,10 @@ impl DockTabContentWidget {
         dock: DockWidgetId,
         content: WidgetId,
     ) -> WidgetId {
-        let title = self.model.dock_title(dock).unwrap_or_else(|| lit!("Panel"));
+        let title = self
+            .model
+            .dock_title(dock)
+            .unwrap_or_else(|| tr_widget!(dock_fallback_title()));
         // The title is rigid: it never truncates. When the header is tight the
         // trailing toolbar (shrinkable) absorbs the deficit and collapses its
         // actions into the `⌄`, so the dock name always stays fully readable.

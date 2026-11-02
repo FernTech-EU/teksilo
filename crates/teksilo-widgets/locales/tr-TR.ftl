@@ -461,3 +461,97 @@ shortcut-code-toggle-comment = Yorumu aç/kapat
 shortcut-code-duplicate = Çoğalt
 shortcut-category-format = Biçim
 shortcut-category-code = Kod
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Sol panel
+dock-side-right = Sağ panel
+dock-side-top = Üst panel
+dock-side-bottom = Alt panel
+dock-rail-left = Sol etkinlik çubuğu
+dock-rail-right = Sağ etkinlik çubuğu
+dock-rail-top = Üst etkinlik çubuğu
+dock-rail-bottom = Alt etkinlik çubuğu
+dock-rail-actions-left =
+    { $placement ->
+        [start] Sol etkinlik çubuğu: eylemler (üstte)
+        [pinned] Sol etkinlik çubuğu: eylemler (altta)
+       *[end] Sol etkinlik çubuğu: eylemler
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Sağ etkinlik çubuğu: eylemler (üstte)
+        [pinned] Sağ etkinlik çubuğu: eylemler (altta)
+       *[end] Sağ etkinlik çubuğu: eylemler
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Üst etkinlik çubuğu: eylemler (üstte)
+        [pinned] Üst etkinlik çubuğu: eylemler (altta)
+       *[end] Üst etkinlik çubuğu: eylemler
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Alt etkinlik çubuğu: eylemler (üstte)
+        [pinned] Alt etkinlik çubuğu: eylemler (altta)
+       *[end] Alt etkinlik çubuğu: eylemler
+    }
+dock-rail-named = “{ $label }” etkinlik çubuğu
+dock-rail-actions-named =
+    { $placement ->
+        [start] “{ $label }” etkinlik çubuğu: eylemler (üstte)
+        [pinned] “{ $label }” etkinlik çubuğu: eylemler (altta)
+       *[end] “{ $label }” etkinlik çubuğu: eylemler
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Sol
+dock-move-right = Sağ
+dock-move-top = Üst
+dock-move-bottom = Alt
+dock-actions-name = Eylemler: { $title }
+dock-more-actions-name = Diğer eylemler: { $title }
+dock-hide-activity = “{ $name }” gizle
+dock-move-to = Taşı
+dock-move-to-new-activity = Yeni etkinliğe taşı
+dock-move-to-side = Kenara taşı
+dock-activity-bar-size = Etkinlik çubuğu boyutu
+dock-tab-size = Sekme boyutu
+dock-size-default = Varsayılan
+dock-size-compact = Sıkışık
+dock-size-icon-label = Simge ve etiket
+dock-display-text = Metin
+dock-display-icon = Simge
+dock-display-icon-text = Simge ve metin
+dock-fallback-title = Panel
+dock-hidden-activities = Gizli etkinlikler
+dock-drop-here = Bir paneli buraya bırakın
+dock-missing-content = (içerik eksik)
+dock-more-panels = Diğer paneller
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Menüyü göster
+tab-bar-scroll-left = Sekmeleri sola kaydır
+tab-bar-scroll-right = Sekmeleri sağa kaydır
+tab-bar-scroll-up = Sekmeleri yukarı kaydır
+tab-bar-scroll-down = Sekmeleri aşağı kaydır
+tab-bar-show-all = Tüm sekmeleri göster
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Çubuk grafik, { $series ->
+        [one] { $series } seri
+       *[other] { $series } seri
+    }, { $categories ->
+        [one] { $categories } kategori
+       *[other] { $categories } kategori
+    }
+chart-line-summary =
+    Çizgi grafik, { $series ->
+        [one] { $series } seri
+       *[other] { $series } seri
+    }
+chart-pie-summary =
+    Pasta grafik, { $slices ->
+        [one] { $slices } dilim
+       *[other] { $slices } dilim
+    }
+chart-legend-name = Grafik açıklaması

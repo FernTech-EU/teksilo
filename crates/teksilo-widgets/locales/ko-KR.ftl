@@ -459,3 +459,93 @@ shortcut-code-toggle-comment = 주석 전환
 shortcut-code-duplicate = 복제
 shortcut-category-format = 서식
 shortcut-category-code = 코드
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = 왼쪽 패널
+dock-side-right = 오른쪽 패널
+dock-side-top = 위쪽 패널
+dock-side-bottom = 아래쪽 패널
+dock-rail-left = 왼쪽 작업 표시줄
+dock-rail-right = 오른쪽 작업 표시줄
+dock-rail-top = 위쪽 작업 표시줄
+dock-rail-bottom = 아래쪽 작업 표시줄
+dock-rail-actions-left =
+    { $placement ->
+        [start] 왼쪽 작업 표시줄: 동작 (위)
+        [pinned] 왼쪽 작업 표시줄: 동작 (아래)
+       *[end] 왼쪽 작업 표시줄: 동작
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] 오른쪽 작업 표시줄: 동작 (위)
+        [pinned] 오른쪽 작업 표시줄: 동작 (아래)
+       *[end] 오른쪽 작업 표시줄: 동작
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] 위쪽 작업 표시줄: 동작 (위)
+        [pinned] 위쪽 작업 표시줄: 동작 (아래)
+       *[end] 위쪽 작업 표시줄: 동작
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] 아래쪽 작업 표시줄: 동작 (위)
+        [pinned] 아래쪽 작업 표시줄: 동작 (아래)
+       *[end] 아래쪽 작업 표시줄: 동작
+    }
+dock-rail-named = “{ $label }” 작업 표시줄
+dock-rail-actions-named =
+    { $placement ->
+        [start] “{ $label }” 작업 표시줄: 동작 (위)
+        [pinned] “{ $label }” 작업 표시줄: 동작 (아래)
+       *[end] “{ $label }” 작업 표시줄: 동작
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = 왼쪽
+dock-move-right = 오른쪽
+dock-move-top = 위쪽
+dock-move-bottom = 아래쪽
+dock-actions-name = 동작: { $title }
+dock-more-actions-name = 기타 동작: { $title }
+dock-hide-activity = “{ $name }” 숨기기
+dock-move-to = 이동
+dock-move-to-new-activity = 새 작업으로 이동
+dock-move-to-side = 다른 쪽으로 이동
+dock-activity-bar-size = 작업 표시줄 크기
+dock-tab-size = 탭 크기
+dock-size-default = 기본
+dock-size-compact = 작게
+dock-size-icon-label = 아이콘과 레이블
+dock-display-text = 텍스트
+dock-display-icon = 아이콘
+dock-display-icon-text = 아이콘과 텍스트
+dock-fallback-title = 패널
+dock-hidden-activities = 숨긴 작업
+dock-drop-here = 여기에 패널을 놓으세요
+dock-missing-content = (내용 없음)
+dock-more-panels = 다른 패널
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = 메뉴 표시
+tab-bar-scroll-left = 탭을 왼쪽으로 스크롤
+tab-bar-scroll-right = 탭을 오른쪽으로 스크롤
+tab-bar-scroll-up = 탭을 위로 스크롤
+tab-bar-scroll-down = 탭을 아래로 스크롤
+tab-bar-show-all = 모든 탭 표시
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    막대 차트, { $series ->
+       *[other] 계열 { $series }개
+    }, { $categories ->
+       *[other] 범주 { $categories }개
+    }
+chart-line-summary =
+    선 차트, { $series ->
+       *[other] 계열 { $series }개
+    }
+chart-pie-summary =
+    원형 차트, { $slices ->
+       *[other] 조각 { $slices }개
+    }
+chart-legend-name = 차트 범례

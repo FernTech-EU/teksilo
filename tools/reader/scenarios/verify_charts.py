@@ -25,7 +25,9 @@ from reader_lib.scenario import Scenario
 SERIES = ["Revenue", "Cost", "Profit"]
 QUARTERS = ["Q1", "Q2", "Q3", "Q4"]
 PIE_LABELS = ["Storage", "Apps", "System", "Cache", "Free"]
-BAR_NAME = "Bar chart: 3 series, 4 categories"
+# A chart has no name of its own (the application gives it one); what a
+# reader hears is its description, which names the kind and the counts.
+BAR_DESCRIPTION = "Bar chart, 3 series, 4 categories"
 
 
 def quarter_value(seed: int, si: int, i: int) -> int:
@@ -168,7 +170,7 @@ def pause_feed(run):
 def quiet_bar(run):
     pause_feed(run)
     with run.act("Shift+Tab eight times to the bar chart",
-                 [focused(role="document frame", name=BAR_NAME), said(BAR_NAME)],
+                 [focused(role="document frame"), said(BAR_DESCRIPTION)],
                  should="focus lands on the bar chart"):
         run.key(*["Shift+Tab"] * 8)
     with run.act("Right: first bar (idle Orca)",
@@ -216,9 +218,9 @@ def quiet_bar(run):
                   said_word("not checked", "the reader hears Revenue is now not checked"),
                   not_in_tree(role="panel", name_contains="Revenue,"),
                   chart_name_and_marks("Bar chart"),
-                  in_tree(role="document frame", name=BAR_NAME)],
+                  in_tree(role="document frame")],
                  should="the Revenue series leaves the plot and the row says not checked; "
-                        "the chart's name still says 3 series (charts-11)", tree=True):
+                        "the chart's description no longer counts the hidden series (charts-11)", tree=True):
         run.key("space")
     failure: dict = {}
 
@@ -251,7 +253,7 @@ def quiet_bar(run):
                  should="the series is back", tree=True):
         run.key("space")
     with run.act("Shift+Tab back to the chart",
-                 [focused(role="document frame", name=BAR_NAME), said(BAR_NAME)],
+                 [focused(role="document frame"), said(BAR_DESCRIPTION)],
                  should="focus returns to the chart"):
         run.key("Shift+Tab")
     with run.act("Right: first bar on the second entry (idle Orca)",
@@ -272,8 +274,8 @@ def quiet_donut(run):
                  should="the donut replaces the bars"):
         run.key("End")
     with run.act("Tab twice to the donut",
-                 [focused(role="document frame", name_contains="Pie chart"),
-                  said("Pie chart: 5 slices")],
+                 [focused(role="document frame"),
+                  said("Pie chart, 5 slices")],
                  should="focus lands on the donut", tree=True):
         run.key("Tab", "Tab")
     with run.act("Right: first slice (idle Orca)",
@@ -302,15 +304,15 @@ def live_full(run):
     run.note("waiting 14 s so the raw window (24 samples at 600 ms) is full")
     run.wait(14.0)
     with run.act("Shift+Tab twice to the raw live chart (window full)",
-                 [focused(role="document frame", name_contains="Line chart: 1 series")],
+                 [focused(role="document frame")],
                  should="focus lands on the raw live chart", tree=True):
         run.key("Shift+Tab", "Shift+Tab")
     with run.act("rest on the full raw chart for 3 s",
-                 [no_event("object:property-change:accessible-name", role="document frame",
-                           name_contains="Line chart: 1 series, 24"),
+                 [no_event("object:property-change:accessible-description",
+                           role="document frame"),
                   in_window_speech("at most one utterance while resting on the full chart", 1),
                   events_per_second("event rate while resting")],
-                 should="once the window is full the chart's own name no longer changes",
+                 should="the chart's description does not change as samples arrive",
                  record=3.0, tree=True):
         run.wait(0.1)
     with run.act("Home: the oldest sample in the window",
@@ -323,7 +325,7 @@ def live_full(run):
                  should="the datum under focus stays the datum it was", record=3.0, tree=True):
         run.wait(0.1)
     with run.act("Tab to the rollup chart",
-                 [focused(role="document frame", name_contains="Line chart: 1 series")],
+                 [focused(role="document frame")],
                  should="focus lands on the rollup chart"):
         run.key("Tab")
     with run.act("rest on the rollup chart for 6 s",
@@ -343,7 +345,7 @@ def reshown_visited(run):
     Each comes back with the same AT-SPI path."""
     pause_feed(run)
     with run.act("Shift+Tab eight times to the bar chart",
-                 [focused(role="document frame", name=BAR_NAME), said(BAR_NAME)],
+                 [focused(role="document frame"), said(BAR_DESCRIPTION)],
                  should="focus lands on the bar chart"):
         run.key(*["Shift+Tab"] * 8)
     with run.act("Right: Revenue Q1 (first visit)",
@@ -379,7 +381,7 @@ def reshown_visited(run):
                  should="the default chart (visited) leaves the tree"):
         run.key("Shift+Tab", "Right")
     with run.act("Tab to the gradient chart (never visited)",
-                 [focused(role="document frame", name=BAR_NAME), said(BAR_NAME)],
+                 [focused(role="document frame"), said(BAR_DESCRIPTION)],
                  should="control: a chart the reader never visited"):
         run.key("Tab")
     with run.act("Shift+Tab to the style toggle, Left: Default",
@@ -387,7 +389,7 @@ def reshown_visited(run):
                  should="the default chart comes back"):
         run.key("Shift+Tab", "Left")
     with run.act("Tab to the default chart (visited, hidden, shown again)",
-                 [focused(role="document frame", name=BAR_NAME), said(BAR_NAME)],
+                 [focused(role="document frame"), said(BAR_DESCRIPTION)],
                  should="the reader hears the chart they had visited before"):
         run.key("Tab")
     with run.act("Right: Revenue Q1 of the default chart shown again",

@@ -269,7 +269,19 @@ geometry rule worth internalising:
 - A hidden **top / bottom** band collapses **completely**, rail included (a
   vertical rail cannot stand in a zero-depth band). You must give the user
   another way back: a toolbar button, a menu item, a shortcut, all calling
-  `set_side_visible` or `reveal_dock`.
+  `set_side_visible`, `reveal_dock` or `focus_dock`.
+
+`reveal_dock` shows a dock and leaves keyboard focus where it is, for a
+"show me this result" while the user keeps typing. `focus_dock` is for a
+command that takes the user to the panel: it also shows a hidden activity and
+expands a collapsed pane, moves focus to the control that last had it in the
+dock (the one at the same place among the dock's controls when its content was
+rebuilt since, as revealing a hidden side does; else to its first control), and a
+screen reader hears the dock's title. It acts within the layout's own window
+and does not raise it. While a modal is open in that window it still reveals
+the dock, but moves no focus and says nothing, and the request is not kept
+for when the modal closes; a request made before the layout is mounted is
+dropped the same way.
 
 ## 5. Tabs or an activity rail
 
@@ -529,6 +541,7 @@ model owns the truth, the menu only mirrors it.
 | Want | Call |
 |---|---|
 | Show a panel, opening its side and selecting its tab | `reveal_dock(id)` |
+| A "focus this panel" command: show it and move keyboard focus into it | `focus_dock(id)` |
 | Open/close a panel at its default location | `toggle_dock(id)` |
 | Show/hide a whole edge | `set_side_visible(side, b)` / `toggle_side_visible(side)` |
 | Is it open? | `is_dock_open(id)` → `bool`, `dock_open_signal(id)` → `Signal<bool>` |
@@ -631,8 +644,12 @@ a newer build is refused rather than truncated.
 
 You get this without asking:
 
-- Each side's content region is a named `Role::Complementary` landmark
-  ("Leading panel", "Bottom panel", …).
+- Each side's content region is a named `Role::Complementary` landmark,
+  named for where it is on screen ("Left panel", "Bottom panel", …; the
+  leading side is "Right panel" in right-to-left) and translated.
+  `DockingLayout::side_label(side, tr!(...))` gives a side a name of the
+  application's own, which its activity bar, its actions and the "Move to"
+  menus then use too.
 - An activity rail is a `Role::TabList` with `Role::Tab` items and a `controls`
   relation pointing at the content region it governs; a rail's dockless actions
   form a separate `Role::Toolbar` cluster beside it, never inside the tab list,

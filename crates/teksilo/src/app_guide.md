@@ -934,6 +934,16 @@ Import from `teksilo::widgets`. The main families:
   `PopoverButton` / `PopoverIconButton` / `PopoverCustom` aliases; there is no bare
   `Popover` type), Snackbar, GroupBox, Wizard, Breadcrumb, MessageBox, DropZone,
   DropTarget, Toast.
+- **DockingLayout notes:** Tab reads it top, leading, centre, trailing, bottom, and a
+  `tab_index` inside a dock orders only within that dock's region; a dock's first control
+  is the top or leading panel's, so give the editor an `initial_focus_hint` to start there.
+  `DockingModel::reveal_dock(id)` shows a dock and leaves focus alone; a "focus this panel"
+  command calls `DockingModel::focus_dock(id)`, which also moves focus into it (back to the
+  control it last had, or the one at its place once the panel was rebuilt) and has the
+  screen reader say its title; it acts in the layout's own window, and while a modal is
+  open there it reveals the panel but moves no focus. Sides are named "Left panel",
+  "Right panel" and so on by where they are on screen;
+  `DockingLayout::side_label(side, tr!(...))` gives one a name of your own.
 - **Menus:** MenuBar, MenuList, MenuItem (Plain/Check/Radio modes, `&`-mnemonics). Context
   menus are wired via `.context_menu(...)` builder methods / `ContextMenuFactory`, plus the
   declarative `MenuModel` (shared by the in-window bar and the native OS menu bar).
@@ -960,7 +970,8 @@ Import from `teksilo::widgets`. The main families:
 - **Rendering primitives:** RectWidget, TextWidget.
 - **Tooltips:** three tiers — plain (`.tooltip(...)`), rich (`.rich_tooltip(key)`),
   composite (`.composite_tooltip(widget)`). Setters are mutually exclusive (last wins).
-- **Charts** (`teksilo-charts`): BarChart, LineChart, PieChart.
+- **Charts** (`teksilo-charts`): BarChart, LineChart, PieChart. A chart has no accessible name of its own: give
+  it one with `.access_label(tr!(...))`; its description says the kind and the counts.
 - **Scene** (`teksilo-scene`): pannable/zoomable viewport for corkboards, mind maps,
   node graphs, CAD-style canvases.
 

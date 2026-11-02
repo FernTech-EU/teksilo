@@ -11,6 +11,10 @@
 //! series (`new` picks `ChartModel::only_series()` or the first series;
 //! `from_series` wraps a single [`ChartSeries`] into its own model).
 //!
+//! The chart has no name of its own: give it one with `.access_label(tr!(...))`
+//! (the title it is shown under). Its description, translated, says what kind
+//! of chart it is and what it shows ("Bar chart, 3 series, 4 categories").
+//!
 //! Slot integration follows the existing `Option<PendingChild>` pattern
 //! used by [`Card`](https://docs.rs/teksilo-widgets) /
 //! [`DialogContent`](https://docs.rs/teksilo-widgets) / `GroupBox`: two
@@ -712,7 +716,11 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for PieChart<T> {
             .series_id
             .map(|s| self.model.point_count(s))
             .unwrap_or(0);
-        builder.set_name(format!("Pie chart: {} slices", n));
+        // No name (an application names the chart with `.access_label`); the
+        // slice count is its description.
+        builder.set_description(
+            teksilo_i18n::tr_widget!(chart_pie_summary(slices = n as i64)).resolve_now(),
+        );
 
         let bounds = self.bounds.get();
         let (backend, label_style) = match self.paint_snapshot.borrow().as_ref() {

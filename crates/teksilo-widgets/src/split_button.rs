@@ -850,7 +850,7 @@ impl Widget for SplitButton {
             let chevron_text = self
                 .chevron_tooltip_text
                 .clone()
-                .unwrap_or_else(|| lit!("Show dropdown menu"));
+                .unwrap_or_else(|| teksilo_i18n::tr_widget!(split_button_show_menu()));
             let delay = ctx.theme().motion.tooltip_delay;
             crate::tooltip::attach_plain_tooltip(ctx, chevron_region_id, chevron_text, delay);
         }

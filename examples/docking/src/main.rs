@@ -456,6 +456,10 @@ impl DockingDemo {
         let corner_flag = self.bottom_corner_to_leading.clone();
         let model_lock = self.model.clone();
         let locked = Signal::new(false);
+        let model_fe = self.model.clone();
+        let model_fp = self.model.clone();
+        let explorer = self.ids.explorer;
+        let problems = self.ids.problems;
 
         Toolbar::new().child(
             HStack::new()
@@ -471,6 +475,16 @@ impl DockingDemo {
                 .child(
                     Button::new(lit!("Toggle Inspector"))
                         .on_activate_fn(move |_| model_t.toggle_side_visible(DockSide::Trailing)),
+                )
+                // "Focus this panel" commands: reveal the dock, move keyboard
+                // focus into it, and have the screen reader say its title.
+                .child(
+                    Button::new(lit!("Focus Explorer"))
+                        .on_activate_fn(move |_| model_fe.focus_dock(explorer)),
+                )
+                .child(
+                    Button::new(lit!("Focus Problems"))
+                        .on_activate_fn(move |_| model_fp.focus_dock(problems)),
                 )
                 .child(
                     // Flip whether the bottom panel or the leading sidebar owns

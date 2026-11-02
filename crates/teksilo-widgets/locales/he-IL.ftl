@@ -466,3 +466,101 @@ shortcut-code-toggle-comment = החלפת הערה
 shortcut-code-duplicate = שכפול
 shortcut-category-format = עיצוב
 shortcut-category-code = קוד
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = לוח שמאלי
+dock-side-right = לוח ימני
+dock-side-top = לוח עליון
+dock-side-bottom = לוח תחתון
+dock-rail-left = סרגל פעילות שמאלי
+dock-rail-right = סרגל פעילות ימני
+dock-rail-top = סרגל פעילות עליון
+dock-rail-bottom = סרגל פעילות תחתון
+dock-rail-actions-left =
+    { $placement ->
+        [start] סרגל פעילות שמאלי: פעולות (למעלה)
+        [pinned] סרגל פעילות שמאלי: פעולות (למטה)
+       *[end] סרגל פעילות שמאלי: פעולות
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] סרגל פעילות ימני: פעולות (למעלה)
+        [pinned] סרגל פעילות ימני: פעולות (למטה)
+       *[end] סרגל פעילות ימני: פעולות
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] סרגל פעילות עליון: פעולות (למעלה)
+        [pinned] סרגל פעילות עליון: פעולות (למטה)
+       *[end] סרגל פעילות עליון: פעולות
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] סרגל פעילות תחתון: פעולות (למעלה)
+        [pinned] סרגל פעילות תחתון: פעולות (למטה)
+       *[end] סרגל פעילות תחתון: פעולות
+    }
+dock-rail-named = סרגל הפעילות „{ $label }”
+dock-rail-actions-named =
+    { $placement ->
+        [start] סרגל הפעילות „{ $label }”: פעולות (למעלה)
+        [pinned] סרגל הפעילות „{ $label }”: פעולות (למטה)
+       *[end] סרגל הפעילות „{ $label }”: פעולות
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = שמאלה
+dock-move-right = ימינה
+dock-move-top = למעלה
+dock-move-bottom = למטה
+dock-actions-name = פעולות: { $title }
+dock-more-actions-name = פעולות נוספות: { $title }
+dock-hide-activity = הסתרת „{ $name }”
+dock-move-to = העברה אל
+dock-move-to-new-activity = העברה לפעילות חדשה
+dock-move-to-side = העברה לצד
+dock-activity-bar-size = גודל סרגל הפעילות
+dock-tab-size = גודל הכרטיסיות
+dock-size-default = ברירת מחדל
+dock-size-compact = דחוס
+dock-size-icon-label = סמל ותווית
+dock-display-text = טקסט
+dock-display-icon = סמל
+dock-display-icon-text = סמל וטקסט
+dock-fallback-title = לוח
+dock-hidden-activities = פעילויות מוסתרות
+dock-drop-here = שחררו כאן לוח
+dock-missing-content = (התוכן חסר)
+dock-more-panels = לוחות אחרים
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = הצגת התפריט
+tab-bar-scroll-left = גלילת הכרטיסיות שמאלה
+tab-bar-scroll-right = גלילת הכרטיסיות ימינה
+tab-bar-scroll-up = גלילת הכרטיסיות למעלה
+tab-bar-scroll-down = גלילת הכרטיסיות למטה
+tab-bar-show-all = הצגת כל הכרטיסיות
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    תרשים עמודות, { $series ->
+        [one] סדרה אחת
+        [two] שתי סדרות
+       *[other] { $series } סדרות
+    }, { $categories ->
+        [one] קטגוריה אחת
+        [two] שתי קטגוריות
+       *[other] { $categories } קטגוריות
+    }
+chart-line-summary =
+    תרשים קווי, { $series ->
+        [one] סדרה אחת
+        [two] שתי סדרות
+       *[other] { $series } סדרות
+    }
+chart-pie-summary =
+    תרשים עוגה, { $slices ->
+        [one] פלח אחד
+        [two] שני פלחים
+       *[other] { $slices } פלחים
+    }
+chart-legend-name = מקרא התרשים

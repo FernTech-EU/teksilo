@@ -8,6 +8,10 @@
 //! interactive legend, a per-datum readout with a shared tooltip card —
 //! raised by a hover, a held finger, keyboard traversal or an assistive
 //! technology — and per-datum accessibility marks.
+//!
+//! The chart has no name of its own: give it one with `.access_label(tr!(...))`
+//! (the title it is shown under). Its description, translated, says what kind
+//! of chart it is and what it shows ("Bar chart, 3 series, 4 categories").
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -777,16 +781,21 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::GraphicsDocument);
-        let n_series = self.model.series_count();
-        let n_categories = self
-            .model
-            .series_id_at(0)
-            .map(|s| self.model.point_count(s))
-            .unwrap_or(0);
-        builder.set_name(format!(
-            "Bar chart: {} series, {} categories",
-            n_series, n_categories
-        ));
+        // No name: the chart has no title of its own, and an application
+        // names it with `.access_label`. The counts are its description, of
+        // the series shown and the categories of the first one shown, so a
+        // hidden series is not counted.
+        let (n_series, n_categories) = self.model.with_all_series(|all| {
+            let shown: Vec<_> = all.iter().filter(|v| v.visible).collect();
+            (shown.len(), shown.first().map_or(0, |v| v.points.len()))
+        });
+        builder.set_description(
+            teksilo_i18n::tr_widget!(chart_bar_summary(
+                series = n_series as i64,
+                categories = n_categories as i64
+            ))
+            .resolve_now(),
+        );
 
         let bounds = self.bounds.get();
         let (backend, label_style) = match self.paint_snapshot.borrow().as_ref() {
@@ -2071,6 +2080,87 @@ mod tests {
         tree.add(BarChart::<String>::new(ChartModel::new()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let _ = tree.render();
+    }
+
+    /// In a French application the description is French: the chart keys
+    /// are found in the widgets' catalogue every application registers, not
+    /// only through the no-manager source fallback.
+    #[test]
+    fn the_description_is_translated() {
+        use teksilo_data::{ChartDatum, ChartSeries};
+        use teksilo_i18n::{I18nConfig, I18nManager, thread_local};
+        thread_local::clear();
+        let cfg = I18nConfig::new()
+            .supported_locales(["en-US".parse().unwrap(), "fr-FR".parse().unwrap()])
+            .auto_detect_os_locale(false)
+            .framework_locales(teksilo_widgets::framework_locales());
+        let mgr = I18nManager::from_config(&cfg);
+        mgr.set_locale("fr-FR".parse().unwrap());
+        thread_local::install(mgr.clone());
+        let model = ChartModel::from_series_vec(vec![ChartSeries::new("A").data(vec![
+            ChartDatum::new("x".to_string(), 1.0),
+            ChartDatum::new("y".to_string(), 2.0),
+        ])]);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.set_locale("fr-FR".to_string());
+        let id = tree.add(BarChart::new(model));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let update = tree.sync_accessibility();
+        let description = update
+            .nodes
+            .iter()
+            .find(|(nid, _)| *nid == teksilo_core::accessibility::widget_id_to_node_id(id))
+            .and_then(|(_, n)| n.description().map(str::to_owned));
+        thread_local::clear();
+        assert_eq!(
+            description.as_deref(),
+            Some("Graphique à barres, 1 série, 2 catégories")
+        );
+    }
+
+    /// The description counts the series shown, and the categories of the
+    /// first one shown: a hidden series is not counted (reader finding
+    /// charts-11).
+    #[test]
+    fn the_description_counts_the_series_shown() {
+        use teksilo_data::{ChartDatum, ChartSeries};
+        let model = ChartModel::from_series_vec(vec![
+            ChartSeries::new("A").data(vec![
+                ChartDatum::new("x".to_string(), 1.0),
+                ChartDatum::new("y".to_string(), 2.0),
+            ]),
+            ChartSeries::new("B").data(vec![
+                ChartDatum::new("x".to_string(), 3.0),
+                ChartDatum::new("y".to_string(), 4.0),
+            ]),
+        ]);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(BarChart::new(model.clone()));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let read = |tree: &mut WidgetTree| {
+            let update = tree.sync_accessibility();
+            let node = update
+                .nodes
+                .iter()
+                .find(|(nid, _)| *nid == teksilo_core::accessibility::widget_id_to_node_id(id))
+                .map(|(_, n)| n.clone())
+                .expect("the chart's node");
+            (
+                node.label().map(str::to_owned),
+                node.description().map(str::to_owned),
+            )
+        };
+        assert_eq!(
+            read(&mut tree),
+            (None, Some("Bar chart, 2 series, 2 categories".to_string()))
+        );
+        let b = model.series_id_at(1).expect("B");
+        model.set_series_visible(b, false);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        assert_eq!(
+            read(&mut tree),
+            (None, Some("Bar chart, 1 series, 2 categories".to_string()))
+        );
     }
 
     #[test]

@@ -10,7 +10,8 @@ What a reader should get (`crates/teksilo-charts/src/{bar,line,pie}_chart.rs`,
 `hit.rs`, `legend.rs`):
 
 * each chart is one Tab stop, `Role::GraphicsDocument` (AT-SPI "document
-  frame") named "Bar chart: 3 series, 4 categories" and the like;
+  frame") with no name of its own (the application names a chart) and a
+  description counting its series, "3 series, 4 categories" and the like;
 * every visible datum is a `Role::GraphicsObject` child (AT-SPI "panel")
   named "<series>, <category>: <value>" (`hit::mark_description`), with a
   Click action;
@@ -131,8 +132,8 @@ def no_raw_float(describe: str):
 
 def tab_to_bar_chart(run):
     with run.act("Tab four times to the bar chart",
-                 [focused(role="document frame", name="Bar chart: 3 series, 4 categories"),
-                  said("Bar chart: 3 series, 4 categories")],
+                 [focused(role="document frame"),
+                  said("3 series, 4 categories")],
                  should="focus lands on the bar chart and the reader hears what it is"):
         run.key("Tab", "Tab", "Tab", "Tab")
 
@@ -270,8 +271,8 @@ def style_toggle(run):
                  tree=True):
         run.key("Right")
     with run.act("Tab to the gradient bar chart",
-                 [focused(role="document frame", name="Bar chart: 3 series, 4 categories"),
-                  said("Bar chart: 3 series, 4 categories")],
+                 [focused(role="document frame"),
+                  said("3 series, 4 categories")],
                  should="focus lands on the re-styled chart, which reads the same"):
         run.key("Tab")
     with run.act("Right: first bar of the gradient chart", on_mark(BAR_ORDER[0]),
@@ -282,8 +283,8 @@ def style_toggle(run):
                  should="the default style is back and the reader hears Default"):
         run.key("Shift+Tab", "Left")
     with run.act("Tab to the default bar chart again (shown for the second time)",
-                 [focused(role="document frame", name="Bar chart: 3 series, 4 categories"),
-                  said("Bar chart: 3 series, 4 categories")],
+                 [focused(role="document frame"),
+                  said("3 series, 4 categories")],
                  should="focus lands on the chart shown again, and the reader hears it"):
         run.key("Tab")
     with run.act("Right: first bar of the chart shown again", on_mark(BAR_ORDER[0]),
@@ -305,8 +306,8 @@ def lines(run):
                  should="the line chart replaces the bars and the reader hears Lines, selected"):
         run.key("Right")
     with run.act("Tab twice to the line chart",
-                 [focused(role="document frame", name_contains="Line chart"),
-                  said("Line chart: 3 series, 4 points")],
+                 [focused(role="document frame"),
+                  said("3 series")],
                  should="focus lands on the line chart"):
         run.key("Tab", "Tab")
     with run.act("Right: first point", on_mark(LINE_ORDER[0]),
@@ -329,8 +330,8 @@ def lines(run):
                  should="the bar chart is shown again and the reader hears Bars"):
         run.key("Shift+Tab", "Shift+Tab", "Left")
     with run.act("Tab twice to the bar chart (shown for the second time)",
-                 [focused(role="document frame", name="Bar chart: 3 series, 4 categories"),
-                  said("Bar chart: 3 series, 4 categories")],
+                 [focused(role="document frame"),
+                  said("3 series, 4 categories")],
                  should="focus lands on the bar chart shown again, and the reader hears it"):
         run.key("Tab", "Tab")
     with run.act("Right: first bar of the chart shown again", on_mark(BAR_ORDER[0]),
@@ -352,8 +353,8 @@ def donut(run):
                  should="the donut replaces the bars"):
         run.key("End")
     with run.act("Tab twice to the donut",
-                 [focused(role="document frame", name_contains="Pie chart"),
-                  said("Pie chart: 5 slices")],
+                 [focused(role="document frame"),
+                  said("5 slices")],
                  should="focus lands on the donut", tree=True):
         run.key("Tab", "Tab")
     first = pie_mark(0)
@@ -387,7 +388,7 @@ def live(run):
     """The live strip chart: a reader resting on the chart and on a point while
     samples arrive, then pausing the feed and resting again."""
     with run.act("Shift+Tab twice to the raw live chart",
-                 [focused(role="document frame", name_contains="Line chart: 1 series")],
+                 [focused(role="document frame")],
                  should="focus lands on the raw (windowed) live chart"):
         run.key("Shift+Tab", "Shift+Tab")
     with run.act("rest on the chart for 3 s while samples arrive",

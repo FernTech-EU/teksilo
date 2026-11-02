@@ -7,6 +7,10 @@
 //! area fill (`area_fill` / `area_fill_opacity`) and an interactive
 //! readout tooltip (`hover_tooltip`) with a nearest-point marker and
 //! edge-flip placement so the tooltip never clips the plot rect.
+//!
+//! The chart has no name of its own: give it one with `.access_label(tr!(...))`
+//! (the title it is shown under). Its description, translated, says what kind
+//! of chart it is and what it shows ("Bar chart, 3 series, 4 categories").
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -768,16 +772,16 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for LineChart<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(teksilo_core::accesskit::Role::GraphicsDocument);
-        let n_series = self.model.series_count();
-        let n_points = self
+        // No name (an application names the chart with `.access_label`). The
+        // description counts the series shown and not their points: a live
+        // chart gains a point on every tick, and a description that changed
+        // with it was read out again on each one.
+        let n_series = self
             .model
-            .series_id_at(0)
-            .map(|s| self.model.point_count(s))
-            .unwrap_or(0);
-        builder.set_name(format!(
-            "Line chart: {} series, {} points",
-            n_series, n_points
-        ));
+            .with_all_series(|all| all.iter().filter(|v| v.visible).count());
+        builder.set_description(
+            teksilo_i18n::tr_widget!(chart_line_summary(series = n_series as i64)).resolve_now(),
+        );
 
         let bounds = self.bounds.get();
         let (backend, label_style) = match self.paint_snapshot.borrow().as_ref() {
@@ -1484,6 +1488,37 @@ mod tests {
         tree.add(LineChart::<String>::new(ChartModel::new()));
         tree.layout(SizeProposal::exact(400.0, 200.0));
         let _ = tree.render();
+    }
+
+    /// The chart's description counts its series and not their points: a
+    /// live chart gains a point on every tick, and a description that moved
+    /// with it was read out again on each one. No name: the application gives
+    /// one with `.access_label`.
+    #[test]
+    fn a_new_point_leaves_the_description_as_it_was() {
+        let model = one_series();
+        let series = model.series_id_at(0).expect("a series");
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(LineChart::new(model.clone()));
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        let read = |tree: &mut WidgetTree| {
+            let update = tree.sync_accessibility();
+            let node = update
+                .nodes
+                .iter()
+                .find(|(nid, _)| *nid == teksilo_core::accessibility::widget_id_to_node_id(id))
+                .map(|(_, n)| n.clone())
+                .expect("the chart's node");
+            (
+                node.label().map(str::to_owned),
+                node.description().map(str::to_owned),
+            )
+        };
+        let before = read(&mut tree);
+        assert_eq!(before, (None, Some("Line chart, 1 series".to_string())));
+        model.push_point(series, "E".to_string(), 3.0);
+        tree.layout(SizeProposal::exact(400.0, 200.0));
+        assert_eq!(read(&mut tree), before);
     }
 
     #[test]

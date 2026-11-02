@@ -459,3 +459,97 @@ shortcut-code-toggle-comment = Commenter/décommenter
 shortcut-code-duplicate = Dupliquer
 shortcut-category-format = Format
 shortcut-category-code = Code
+
+# Régions latérales de DockingLayout (crates/teksilo-widgets/src/docking/a11y.rs) :
+# nommées d'après leur place à l'écran, inversée de droite à gauche.
+dock-side-left = Panneau de gauche
+dock-side-right = Panneau de droite
+dock-side-top = Panneau du haut
+dock-side-bottom = Panneau du bas
+dock-rail-left = Barre d'activité de gauche
+dock-rail-right = Barre d'activité de droite
+dock-rail-top = Barre d'activité du haut
+dock-rail-bottom = Barre d'activité du bas
+dock-rail-actions-left =
+    { $placement ->
+        [start] Barre d'activité de gauche : actions (haut)
+        [pinned] Barre d'activité de gauche : actions (bas)
+       *[end] Barre d'activité de gauche : actions
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Barre d'activité de droite : actions (haut)
+        [pinned] Barre d'activité de droite : actions (bas)
+       *[end] Barre d'activité de droite : actions
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Barre d'activité du haut : actions (haut)
+        [pinned] Barre d'activité du haut : actions (bas)
+       *[end] Barre d'activité du haut : actions
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Barre d'activité du bas : actions (haut)
+        [pinned] Barre d'activité du bas : actions (bas)
+       *[end] Barre d'activité du bas : actions
+    }
+dock-rail-named = Barre d'activité « { $label } »
+dock-rail-actions-named =
+    { $placement ->
+        [start] Barre d'activité « { $label } » : actions (haut)
+        [pinned] Barre d'activité « { $label } » : actions (bas)
+       *[end] Barre d'activité « { $label } » : actions
+    }
+# Menus et en-têtes des panneaux de DockingLayout (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Gauche
+dock-move-right = Droite
+dock-move-top = Haut
+dock-move-bottom = Bas
+dock-actions-name = Actions : { $title }
+dock-more-actions-name = Plus d'actions : { $title }
+dock-hide-activity = Masquer « { $name } »
+dock-move-to = Déplacer vers
+dock-move-to-new-activity = Déplacer vers une nouvelle activité
+dock-move-to-side = Déplacer vers un côté
+dock-activity-bar-size = Taille de la barre d'activité
+dock-tab-size = Taille des onglets
+dock-size-default = Par défaut
+dock-size-compact = Compacte
+dock-size-icon-label = Icône et libellé
+dock-display-text = Texte
+dock-display-icon = Icône
+dock-display-icon-text = Icône et texte
+dock-fallback-title = Panneau
+dock-hidden-activities = Activités masquées
+dock-drop-here = Déposez un panneau ici
+dock-missing-content = (contenu absent)
+dock-more-panels = Autres panneaux
+# SplitButton et TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Afficher le menu
+tab-bar-scroll-left = Faire défiler les onglets vers la gauche
+tab-bar-scroll-right = Faire défiler les onglets vers la droite
+tab-bar-scroll-up = Faire défiler les onglets vers le haut
+tab-bar-scroll-down = Faire défiler les onglets vers le bas
+tab-bar-show-all = Afficher tous les onglets
+# teksilo-charts : BarChart, LineChart, PieChart, ChartLegend. Ces clés
+# figurent aussi dans crates/teksilo-charts/locales/en-US.ftl.
+chart-bar-summary =
+    Graphique à barres, { $series ->
+        [one] { $series } série
+       *[other] { $series } séries
+    }, { $categories ->
+        [one] { $categories } catégorie
+       *[other] { $categories } catégories
+    }
+chart-line-summary =
+    Graphique en courbes, { $series ->
+        [one] { $series } série
+       *[other] { $series } séries
+    }
+chart-pie-summary =
+    Graphique en secteurs, { $slices ->
+        [one] { $slices } secteur
+       *[other] { $slices } secteurs
+    }
+chart-legend-name = Légende du graphique

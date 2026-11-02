@@ -71,7 +71,7 @@ const HOVER_FADE_OUT: Duration = Duration::from_millis(120);
 /// handle's own helper — see that file for why routing a hit outset (never a
 /// paint dimension) through [`dp`] is not the density-rule violation it looks
 /// like.
-fn grab_outset(visual: f32, kind: PointerKind, tokens: &InputTokens) -> f32 {
+pub(super) fn grab_outset(visual: f32, kind: PointerKind, tokens: &InputTokens) -> f32 {
     if !kind.is_direct() || !visual.is_finite() || visual <= 0.0 {
         return 0.0;
     }
@@ -691,6 +691,57 @@ mod grab_tests {
     /// Probed at **Touch**, 14 dp out: the ring is 19 dp there while the
     /// miss-only slop pass reaches at most its 8 dp radius, so only the outset
     /// can answer and the test fails if `hit_outset` is removed.
+    /// The same on every side: each handle's grip sits inside its side's
+    /// region, which must take in the grip's reach over the centre, and the
+    /// side regions come after the centre in the hit walk.
+    #[test]
+    fn a_finger_grabs_every_sides_divider_over_the_content_beside_it() {
+        use teksilo_core::widget_builder::WidgetBuilder;
+        for side in [
+            DockSide::Leading,
+            DockSide::Trailing,
+            DockSide::Top,
+            DockSide::Bottom,
+        ] {
+            let model = DockingModel::new();
+            let id = DockWidgetId::fresh();
+            let dw = DockWidget::new(id, lit!("Explorer"), |_| FixedLeaf(120.0, 120.0));
+            let mut tree = WidgetTree::new().with_theme(
+                teksilo_core::presets::intui::light().with_density(TargetDensity::Touch),
+            );
+            let root = tree.add(
+                DockingLayout::new(model.clone())
+                    .center(FixedLeaf(200.0, 200.0).on_tap(|_, _| {}))
+                    .dock(dw),
+            );
+            model.open_dock(id, DockOpenLocation::side(side));
+            tree.layout(SizeProposal::exact(1000.0, 800.0));
+            tree.tick_animations(Duration::from_millis(600));
+            tree.layout(SizeProposal::exact(1000.0, 800.0));
+            let handle = find_splitter(&tree, root).expect("a dock resize handle");
+            let bar = tree.bounds(handle);
+            let contact = finger(31, true);
+            let beyond = if side.is_horizontal_axis() {
+                [
+                    Point::new(bar.right() + 14.0, bar.center().y),
+                    Point::new(bar.x - 14.0, bar.center().y),
+                ]
+            } else {
+                [
+                    Point::new(bar.center().x, bar.bottom() + 14.0),
+                    Point::new(bar.center().x, bar.y - 14.0),
+                ]
+            };
+            for at in beyond {
+                let hit = tree.hit_test_for(at, &contact);
+                assert!(
+                    hit.is_some_and(|h| h == handle || tree.is_descendant_of(h, handle)),
+                    "{side:?}: the widened divider must take the press at {at:?}, got {hit:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_finger_grabs_the_divider_over_the_content_beside_it() {
         let (tree, root, _) = leading_dock(TargetDensity::Touch);

@@ -5,6 +5,8 @@
 //! build a real layout in a `WidgetTree`, lay it out, and assert the geometry
 //! and accessibility wiring.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::time::Duration;
 
 use teksilo_canvas::{Point, Size, SizeProposal};
@@ -519,8 +521,9 @@ fn collapsing_content_keeps_full_layout_size_and_does_not_reflow() {
     model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
     t.layout(SizeProposal::exact(1000.0, 800.0));
 
-    // children: [center, leading_clip, leading_rail, leading_handle, …]
-    let clip = t.children(root)[1];
+    // children: [centre region, leading region [rail, clip, handle], …]
+    let leading = t.children(root)[1];
+    let clip = t.children(leading)[1];
     let panel = t.children(clip)[0];
     let full_w = t.bounds(panel).width;
     assert!(full_w > 100.0, "content laid out at full width ({full_w})");
@@ -1567,8 +1570,8 @@ fn dock_drag_lands_on(locked: bool) -> DockSide {
     t.layout(SizeProposal::exact(1000.0, 800.0));
 
     let header = find_role_name(&t, root, Role::Button, "Aaa").expect("A accordion header");
-    let rail = find_role_name(&t, root, Role::TabList, "Trailing activity bar")
-        .expect("the trailing rail");
+    let rail =
+        find_role_name(&t, root, Role::TabList, "Right activity bar").expect("the trailing rail");
     let hb = t.bounds(header);
     let rb = t.bounds(rail);
     // `rb` is now the rail's item column (`DockRailTabList`), not the whole
@@ -3217,6 +3220,12 @@ fn docks_plural_matches_the_singular_chain() {
 /// keeps every pane inside the centre, so nothing in it lands on (or paints
 /// over) the trailing side, and a press in the trailing side reaches the
 /// side's own control.
+/// The centre's clipping frame. It sits inside the centre's Tab region,
+/// the layout's first child.
+fn centre_frame(t: &WidgetTree, root: WidgetId) -> WidgetId {
+    t.children(t.children(root)[0])[0]
+}
+
 #[test]
 fn a_too_small_splitter_in_the_centre_stays_off_the_trailing_side() {
     use crate::button::Button;
@@ -3261,7 +3270,7 @@ fn a_too_small_splitter_in_the_centre_stays_off_the_trailing_side() {
     t.tick_animations(Duration::from_millis(600));
     t.layout(window);
 
-    let center = t.children(root)[0];
+    let center = centre_frame(&t, root);
     let cb = t.bounds(center);
     assert!(
         cb.width < 1000.0,
@@ -3343,7 +3352,7 @@ fn the_centre_clip_leaves_room_for_a_focus_ring() {
         t.tick_animations(Duration::from_millis(600));
         t.layout(SizeProposal::exact(1000.0, 800.0));
 
-        let center = t.children(root)[0];
+        let center = centre_frame(&t, root);
         let cb = t.bounds(center);
         let clip = t.children(center)[0];
         let expected = teksilo_canvas::Rect::new(
@@ -3388,7 +3397,7 @@ fn the_centre_clip_follows_a_theme_change() {
     let root = t.add(DockingLayout::new(model).center(FixedLeaf(200.0, 200.0)));
     let window = SizeProposal::exact(1000.0, 800.0);
     t.layout(window);
-    let center = t.children(root)[0];
+    let center = centre_frame(&t, root);
     let clip = t.children(center)[0];
     let grown_by = |t: &WidgetTree| t.bounds(center).x - t.bounds(clip).x;
 
@@ -3414,4 +3423,1245 @@ fn the_centre_clip_follows_a_theme_change() {
         teksilo_canvas::DrawCommand::SetClip(r)
             if (r.x - (cb.x - second)).abs() < 0.01 && (r.width - (cb.width + 2.0 * second)).abs() < 0.01
     )));
+}
+
+// ── focus_dock ────────────────────────────────────────────────────────
+
+/// A focusable field named `name`, as a dock's content would hold.
+#[derive(Debug)]
+struct FocusField(&'static str);
+impl Widget for FocusField {
+    fn layout_response(&self, _p: SizeProposal, _c: &LayoutContext) -> LayoutResponse {
+        Size::new(100.0, 24.0).into()
+    }
+    fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
+        builder.set_role(Role::TextInput);
+        builder.set_name(self.0);
+    }
+}
+
+/// A dock whose content is two focusable fields, `<title> 1` and `<title> 2`.
+fn field_dock(
+    title: &'static str,
+    first: &'static str,
+    second: &'static str,
+) -> (DockWidgetId, DockWidget) {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let id = DockWidgetId::fresh();
+    (
+        id,
+        DockWidget::new(id, lit!(title), move |_| {
+            crate::primitives::VStack::new()
+                .child(FocusField(first).focusable(true))
+                .child(FocusField(second).focusable(true))
+        }),
+    )
+}
+
+/// Lay out, run the post-mount actions (where a focus request is applied,
+/// as the app loop runs them each iteration), and hear the result.
+fn settle(t: &mut WidgetTree) {
+    for _ in 0..2 {
+        t.layout(SizeProposal::exact(1000.0, 800.0));
+        t.tick_animations(Duration::from_millis(600));
+        t.layout(SizeProposal::exact(1000.0, 800.0));
+        t.run_mount_actions(&mut teksilo_core::window::NoopWindowOps);
+        t.layout(SizeProposal::exact(1000.0, 800.0));
+        let _ = t.sync_accessibility();
+    }
+}
+
+fn heard_mark(t: &WidgetTree) -> u64 {
+    t.announcements_since(0).last().map_or(0, |a| a.seq)
+}
+
+fn heard_since(t: &WidgetTree, mark: u64) -> Vec<String> {
+    t.announcements_since(mark)
+        .into_iter()
+        .map(|a| a.text)
+        .collect()
+}
+
+fn focused_name(t: &WidgetTree) -> Option<String> {
+    let id = t.focused()?;
+    t.accessibility_node(id).name().map(str::to_owned)
+}
+
+/// A centre with a focusable field, the place a user works in.
+fn centre_field() -> impl Widget {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    FocusField("Editor").focusable(true)
+}
+
+#[test]
+fn focus_dock_reveals_a_hidden_side_focuses_its_first_field_and_says_its_title() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.set_side_visible(DockSide::Leading, false);
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    let mark = heard_mark(&t);
+
+    model.focus_dock(a);
+    settle(&mut t);
+
+    assert!(model.is_side_visible(DockSide::Leading));
+    assert_eq!(focused_name(&t).as_deref(), Some("Explorer 1"));
+    assert_eq!(heard_since(&t, mark), vec!["Explorer".to_string()]);
+}
+
+#[test]
+fn focus_dock_on_a_shown_dock_moves_focus_without_rebuilding_anything() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    let version = model.version().get();
+    let mark = heard_mark(&t);
+
+    model.focus_dock(a);
+    settle(&mut t);
+
+    assert_eq!(model.version().get(), version, "nothing was rebuilt");
+    assert_eq!(focused_name(&t).as_deref(), Some("Explorer 1"));
+    assert_eq!(heard_since(&t, mark), vec!["Explorer".to_string()]);
+}
+
+#[test]
+fn reveal_dock_on_a_shown_dock_still_moves_nothing_and_says_nothing() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    let version = model.version().get();
+    let mark = heard_mark(&t);
+
+    model.reveal_dock(a);
+    settle(&mut t);
+
+    assert_eq!(model.version().get(), version);
+    assert_eq!(t.focused(), Some(editor));
+    assert!(heard_since(&t, mark).is_empty());
+}
+
+#[test]
+fn focus_dock_returns_to_the_control_the_dock_last_had() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let second = t.find_by_label("Explorer 2").expect("the second field");
+    t.focus(second);
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    let mark = heard_mark(&t);
+
+    model.focus_dock(a);
+    settle(&mut t);
+    assert_eq!(t.focused(), Some(second));
+    assert_eq!(heard_since(&t, mark), vec!["Explorer".to_string()]);
+
+    // Already inside: focus stays, and the title is still said.
+    let mark = heard_mark(&t);
+    model.focus_dock(a);
+    settle(&mut t);
+    assert_eq!(t.focused(), Some(second));
+    assert_eq!(heard_since(&t, mark), vec!["Explorer".to_string()]);
+}
+
+#[test]
+fn focus_dock_on_a_dock_with_nothing_focusable_lands_on_its_tab_and_says_nothing_more() {
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Outline");
+    let (b, dwb) = dock("Search");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    let mark = heard_mark(&t);
+
+    model.focus_dock(a);
+    settle(&mut t);
+
+    assert_eq!(
+        focused_name(&t).as_deref(),
+        Some("Outline"),
+        "focus is on the dock's tab, named by its title"
+    );
+    assert!(
+        heard_since(&t, mark).is_empty(),
+        "the tab already says the title"
+    );
+}
+
+#[test]
+fn focus_dock_on_a_second_pane_focuses_that_pane() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let (b, dwb) = field_dock("Outline", "Outline 1", "Outline 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).stack());
+    settle(&mut t);
+
+    model.focus_dock(b);
+    settle(&mut t);
+    assert_eq!(focused_name(&t).as_deref(), Some("Outline 1"));
+}
+
+#[test]
+fn focus_dock_expands_a_collapsed_pane_and_shows_a_hidden_activity() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let (b, dwb) = field_dock("Outline", "Outline 1", "Outline 2");
+    let (c, dwc) = field_dock("Search", "Search 1", "Search 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa)
+            .dock(dwb)
+            .dock(dwc),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Leading).stack());
+    model.open_dock(c, DockOpenLocation::side(DockSide::Bottom));
+    settle(&mut t);
+
+    // Collapse the Outline pane.
+    let tab = model.activity_of(b).expect("Outline's tab");
+    let (_, view) = model.tab_view_by_id(tab).expect("its view");
+    view.splitter.set_collapsed(1, true);
+    settle(&mut t);
+    model.focus_dock(b);
+    settle(&mut t);
+    assert!(!view.splitter.is_collapsed(1), "the pane was expanded");
+    assert_eq!(focused_name(&t).as_deref(), Some("Outline 1"));
+
+    // Hide the Search activity.
+    let search = model.activity_of(c).expect("Search's tab");
+    model.set_tab_hidden(search, true);
+    settle(&mut t);
+    model.focus_dock(c);
+    settle(&mut t);
+    assert!(!model.is_tab_hidden(search), "the activity is shown again");
+    assert_eq!(focused_name(&t).as_deref(), Some("Search 1"));
+}
+
+#[test]
+fn focus_dock_does_nothing_for_an_unknown_dock_or_a_disabled_side() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.set_side_enabled(DockSide::Leading, false);
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    let mark = heard_mark(&t);
+
+    model.focus_dock(a);
+    model.focus_dock(DockWidgetId::fresh());
+    settle(&mut t);
+
+    assert_eq!(t.focused(), Some(editor));
+    assert!(heard_since(&t, mark).is_empty());
+}
+
+#[test]
+fn of_two_focus_requests_in_one_turn_the_later_wins() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let (b, dwb) = field_dock("Problems", "Problems 1", "Problems 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Bottom));
+    settle(&mut t);
+    let mark = heard_mark(&t);
+
+    model.focus_dock(a);
+    model.focus_dock(b);
+    settle(&mut t);
+
+    assert_eq!(focused_name(&t).as_deref(), Some("Problems 1"));
+    assert_eq!(heard_since(&t, mark), vec!["Problems".to_string()]);
+}
+
+/// Focus inside a side that the reveal rebuilds used to fall to a rail item
+/// (the rebuild's focus restore picked the same index among what survived).
+#[test]
+fn focus_dock_from_inside_a_side_the_reveal_rebuilds_lands_in_the_dock() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let (b, dwb) = field_dock("Problems", "Problems 1", "Problems 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa)
+            .dock(dwb),
+    );
+    model.set_side_rail(DockSide::Leading, 40.0);
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Bottom));
+    model.set_side_visible(DockSide::Bottom, false);
+    settle(&mut t);
+    let explorer = t
+        .find_by_label("Explorer 2")
+        .expect("a field in the leading side");
+    t.focus(explorer);
+    settle(&mut t);
+
+    model.focus_dock(b);
+    settle(&mut t);
+    assert_eq!(focused_name(&t).as_deref(), Some("Problems 1"));
+}
+
+#[test]
+fn a_focus_request_after_a_key_press_shows_the_focus_ring() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    t.press_key(Key::F6, Modifiers::NONE);
+    model.focus_dock(a);
+    settle(&mut t);
+    assert_eq!(focused_name(&t).as_deref(), Some("Explorer 1"));
+    assert!(t.focus_visible_signal().get(), "a chord shows the ring");
+}
+
+// ── Tab order: top, leading, centre, trailing, bottom ─────────────────
+
+/// A dock whose content is one button labelled `label`.
+fn button_dock(title: &'static str, label: &'static str) -> (DockWidgetId, DockWidget) {
+    let id = DockWidgetId::fresh();
+    (
+        id,
+        DockWidget::new(id, lit!(title), move |_| crate::Button::new(lit!(label))),
+    )
+}
+
+/// A window `[Title, DockingLayout, Status]` with one button dock on each
+/// side, a button in the centre and a rail on the leading side.
+fn five_regions(
+    trailing_content: Option<Box<dyn Fn(DockWidgetId) -> Box<dyn Widget>>>,
+) -> (WidgetTree, DockingModel, WidgetId, WidgetId) {
+    use crate::primitives::{FixedSize, VStack};
+    let model = DockingModel::new();
+    let (top, top_w) = button_dock("TopDock", "Top button");
+    let (lead, lead_w) = button_dock("LeadDock", "Leading button");
+    let (trail, trail_w) = match trailing_content {
+        Some(f) => {
+            let id = DockWidgetId::fresh();
+            (id, DockWidget::new(id, lit!("TrailDock"), f))
+        }
+        None => button_dock("TrailDock", "Trailing button"),
+    };
+    let (bottom, bottom_w) = button_dock("BottomDock", "Bottom button");
+    let mut t = tree();
+    let dock = DockingLayout::new(model.clone())
+        .center(crate::Button::new(lit!("Centre button")))
+        .dock(top_w)
+        .dock(lead_w)
+        .dock(trail_w)
+        .dock(bottom_w);
+    let dock_id = t.add(dock);
+    let root = t.add(
+        VStack::new()
+            .child(crate::Button::new(lit!("Title")))
+            .child(FixedSize::new().width(1000.0).height(700.0).child(dock_id))
+            .child(crate::Button::new(lit!("Status"))),
+    );
+    model.set_side_rail(DockSide::Leading, 40.0);
+    model.open_dock(top, DockOpenLocation::side(DockSide::Top));
+    model.open_dock(lead, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(trail, DockOpenLocation::side(DockSide::Trailing));
+    model.open_dock(bottom, DockOpenLocation::side(DockSide::Bottom));
+    settle_tab(&mut t);
+    (t, model, root, dock_id)
+}
+
+fn settle_tab(t: &mut WidgetTree) {
+    for _ in 0..2 {
+        t.layout(SizeProposal::exact(1000.0, 800.0));
+        t.tick_animations(Duration::from_millis(600));
+        t.layout(SizeProposal::exact(1000.0, 800.0));
+    }
+}
+
+/// What Tab (or Shift+Tab) reaches from `start`, by name or role, until it
+/// comes back to `start`.
+fn tab_walk(t: &mut WidgetTree, start: WidgetId, back: bool) -> Vec<String> {
+    t.focus(start);
+    settle_tab(t);
+    let mut out = Vec::new();
+    for _ in 0..64 {
+        let f = t.focused().expect("focus stays somewhere");
+        let node = t.accessibility_node(f);
+        out.push(
+            node.name()
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("{:?}", node.role())),
+        );
+        let mods = if back {
+            Modifiers::SHIFT
+        } else {
+            Modifiers::NONE
+        };
+        t.press_key(Key::Tab, mods);
+        settle_tab(t);
+        if t.focused() == Some(start) {
+            break;
+        }
+    }
+    out
+}
+
+fn position(walk: &[String], name: &str) -> usize {
+    walk.iter()
+        .position(|n| n == name)
+        .unwrap_or_else(|| panic!("{name} is not reached by Tab: {walk:?}"))
+}
+
+#[test]
+fn tab_reads_the_dock_top_leading_centre_trailing_bottom_within_the_window() {
+    let (mut t, _model, _root, _dock) = five_regions(None);
+    let title = t.find_by_label("Title").expect("the title button");
+    let walk = tab_walk(&mut t, title, false);
+    let order: Vec<usize> = [
+        "Title",
+        "Top button",
+        "Leading button",
+        "Centre button",
+        "Trailing button",
+        "Bottom button",
+        "Status",
+    ]
+    .iter()
+    .map(|n| position(&walk, n))
+    .collect();
+    assert!(
+        order.windows(2).all(|w| w[0] < w[1]),
+        "reading order, the dock between the window's own controls: {walk:?}"
+    );
+    // Inside the leading side: its rail (a tab), its content, its handle.
+    let lead = position(&walk, "Leading button");
+    let centre = position(&walk, "Centre button");
+    let top = position(&walk, "Top button");
+    assert_eq!(
+        walk[lead - 1],
+        "LeadDock",
+        "the rail item comes before the panel: {walk:?}"
+    );
+    assert!(lead - 1 > top);
+    assert!(
+        walk[lead + 1..centre].iter().any(|n| n == "Splitter"),
+        "the handle comes after the panel: {walk:?}"
+    );
+
+    // Shift+Tab walks it back.
+    let back = tab_walk(&mut t, title, true);
+    let rev: Vec<usize> = [
+        "Title",
+        "Status",
+        "Bottom button",
+        "Trailing button",
+        "Centre button",
+        "Leading button",
+        "Top button",
+    ]
+    .iter()
+    .map(|n| position(&back, n))
+    .collect();
+    assert!(rev.windows(2).all(|w| w[0] < w[1]), "{back:?}");
+}
+
+#[test]
+fn right_to_left_reads_the_same_logical_order_from_the_right() {
+    let (mut t, _model, _root, _dock) = five_regions(None);
+    t.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+    settle_tab(&mut t);
+    let leading = t.find_by_label("Leading button").expect("leading");
+    let trailing = t.find_by_label("Trailing button").expect("trailing");
+    assert!(
+        t.bounds(leading).x > t.bounds(trailing).x,
+        "the leading side is on the right"
+    );
+    let title = t.find_by_label("Title").expect("the title button");
+    let walk = tab_walk(&mut t, title, false);
+    assert!(position(&walk, "Leading button") < position(&walk, "Centre button"));
+    assert!(position(&walk, "Centre button") < position(&walk, "Trailing button"));
+}
+
+#[test]
+fn a_tab_index_inside_a_dock_orders_only_within_its_region() {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let (mut t, _model, _root, _dock) = five_regions(Some(Box::new(|_| {
+        Box::new(crate::Button::new(lit!("Trailing button")).tab_index(1)) as Box<dyn Widget>
+    })));
+    let title = t.find_by_label("Title").expect("the title button");
+    let walk = tab_walk(&mut t, title, false);
+    assert!(position(&walk, "Title") < position(&walk, "Centre button"));
+    assert!(
+        position(&walk, "Centre button") < position(&walk, "Trailing button"),
+        "{walk:?}"
+    );
+}
+
+#[test]
+fn a_rebuild_keeps_the_centre_and_the_order() {
+    let (mut t, model, _root, _dock) = five_regions(None);
+    let centre = t.find_by_label("Centre button").expect("centre");
+    let version = model.version().get();
+    // A structural change: the bottom activity moves to the top side.
+    let tab = model
+        .tab_id_at(DockSide::Bottom, 0)
+        .expect("the bottom tab");
+    model.move_tab(tab, DockSide::Top, 1);
+    settle_tab(&mut t);
+    assert_ne!(model.version().get(), version, "the layout was rebuilt");
+    assert_eq!(
+        t.find_by_label("Centre button"),
+        Some(centre),
+        "the centre survives"
+    );
+    let title = t.find_by_label("Title").expect("the title button");
+    let walk = tab_walk(&mut t, title, false);
+    assert!(position(&walk, "Leading button") < position(&walk, "Centre button"));
+    assert!(position(&walk, "Centre button") < position(&walk, "Trailing button"));
+}
+
+#[test]
+fn a_collapsed_side_keeps_only_its_rail_and_a_hidden_band_nothing() {
+    let (mut t, model, _root, dock) = five_regions(None);
+    model.set_side_visible(DockSide::Leading, false);
+    model.set_side_visible(DockSide::Bottom, false);
+    settle_tab(&mut t);
+    let stops: Vec<String> = t
+        .tab_stops_within(dock)
+        .into_iter()
+        .map(|f| {
+            let n = t.accessibility_node(f);
+            n.name()
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("{:?}", n.role()))
+        })
+        .collect();
+    assert!(
+        stops.iter().any(|n| n == "LeadDock"),
+        "the rail stays: {stops:?}"
+    );
+    assert!(!stops.iter().any(|n| n == "Leading button"), "{stops:?}");
+    assert!(!stops.iter().any(|n| n == "Bottom button"), "{stops:?}");
+    let regions = t.children(dock);
+    let bottom_region = regions[1 + 3];
+    assert_eq!(
+        t.bounds(bottom_region).width * t.bounds(bottom_region).height,
+        0.0
+    );
+}
+
+#[test]
+fn the_landmarks_are_in_reading_order_and_the_regions_are_no_nodes() {
+    let (mut t, _model, _root, dock) = five_regions(None);
+    let update = t.sync_accessibility();
+    let nid = |w| widget_id_to_node_id(w);
+    // Depth-first reading order through the update.
+    let index: std::collections::HashMap<_, _> =
+        update.nodes.iter().map(|(id, n)| (*id, n)).collect();
+    let mut order = Vec::new();
+    let mut stack = vec![update.tree.as_ref().unwrap().root];
+    while let Some(id) = stack.pop() {
+        let Some(n) = index.get(&id) else { continue };
+        if n.role() == Role::Complementary {
+            order.push(id);
+        }
+        stack.extend(n.children().iter().rev().copied());
+    }
+    let side_of = |landmark: accesskit::NodeId| {
+        let names = [
+            "Top button",
+            "Leading button",
+            "Trailing button",
+            "Bottom button",
+        ];
+        names
+            .iter()
+            .position(|name| {
+                let b = t.find_by_label(name).unwrap();
+                let mut cur = Some(b);
+                while let Some(c) = cur {
+                    if nid(c) == landmark {
+                        return true;
+                    }
+                    cur = t.parent(c);
+                }
+                false
+            })
+            .unwrap()
+    };
+    let sides: Vec<usize> = order.iter().map(|&l| side_of(l)).collect();
+    assert_eq!(sides, vec![0, 1, 2, 3], "top, leading, trailing, bottom");
+    for region in t.children(dock) {
+        assert!(!index.contains_key(&nid(region)), "a region is no AT node");
+        assert!(!t.tab_stops_within(dock).contains(&region));
+    }
+    let first = t.first_focusable_descendant(dock).expect("a control");
+    let top_region = t.children(dock)[1 + 2];
+    let mut cur = Some(first);
+    let mut in_top = false;
+    while let Some(c) = cur {
+        if c == top_region {
+            in_top = true;
+        }
+        cur = t.parent(c);
+    }
+    assert!(in_top, "the dock's first control is now in the top panel");
+}
+
+// ── Side names: where the side is, translated, or the application's ──────
+
+fn named_sides(t: &mut WidgetTree, model: DockingModel, layout: DockingLayout) -> WidgetId {
+    let (a, dwa) = dock("Explorer");
+    let (b, dwb) = dock("Outline");
+    let dwa = dwa.show_header(true);
+    let root = t.add(layout.center(FixedLeaf(200.0, 200.0)).dock(dwa).dock(dwb));
+    model.set_side_rail(DockSide::Leading, 40.0);
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(b, DockOpenLocation::side(DockSide::Trailing));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    root
+}
+
+#[test]
+fn the_sides_are_named_in_french_for_where_they_are() {
+    use crate::common::locale_switch_test::speaking;
+    let (_mgr, mut t) = speaking("fr-FR");
+    let model = DockingModel::new();
+    let root = named_sides(&mut t, model.clone(), DockingLayout::new(model.clone()));
+    assert!(find_role_name(&t, root, Role::Complementary, "Panneau de gauche").is_some());
+    assert!(find_role_name(&t, root, Role::Complementary, "Panneau de droite").is_some());
+    assert!(find_role_name(&t, root, Role::TabList, "Barre d'activité de gauche").is_some());
+    let options = find_named(&t, root, "Plus d'actions : Explorer").expect("the options button");
+    assert_eq!(t.accessibility_node(options).role(), Role::Button);
+    assert!(
+        t.tab_stops_within(root).contains(&options),
+        "the named node is the focusable one"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn right_to_left_names_the_leading_side_right_and_draws_it_there() {
+    let model = DockingModel::new();
+    let mut t = tree();
+    let root = named_sides(&mut t, model.clone(), DockingLayout::new(model.clone()));
+    let _ = t.sync_accessibility();
+    assert!(find_role_name(&t, root, Role::Complementary, "Left panel").is_some());
+
+    // A direction switch alone, with no locale change, renames the sides.
+    t.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    let update = t.sync_accessibility();
+    let landmark = |name: &str| {
+        update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == Role::Complementary && n.label() == Some(name))
+            .and_then(|(_, n)| n.bounds())
+            .unwrap_or_else(|| panic!("no landmark named {name}"))
+    };
+    let right = landmark("Right panel");
+    let left = landmark("Left panel");
+    assert!(
+        right.x0 > left.x0,
+        "the side named right is drawn on the right"
+    );
+    let _ = root;
+}
+
+#[test]
+fn a_locale_switch_renames_the_sides() {
+    use crate::common::locale_switch_test::speaking;
+    let (mgr, mut t) = speaking("en-US");
+    let model = DockingModel::new();
+    // A dock title that is itself translated, as an application's `tr!` is.
+    let word = teksilo_core::signal::Signal::new("Explorer".to_string());
+    let title = {
+        let word = word.clone();
+        teksilo_i18n::localized(move || word.get())
+    };
+    let id = DockWidgetId::fresh();
+    let dw = DockWidget::new(id, title, |_| FixedLeaf(120.0, 120.0)).show_header(true);
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .dock(dw),
+    );
+    model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(find_role_name(&t, root, Role::Complementary, "Left panel").is_some());
+    assert!(find_named(&t, root, "More actions: Explorer").is_some());
+    word.set("Explorateur".to_string());
+    mgr.set_locale("fr-FR".parse().unwrap());
+    t.set_locale("fr-FR".to_string());
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    assert!(find_role_name(&t, root, Role::Complementary, "Panneau de gauche").is_some());
+    assert!(
+        find_named(&t, root, "Plus d'actions : Explorateur").is_some(),
+        "a name composed with the dock title follows the switch, title included"
+    );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn an_application_names_a_side() {
+    let model = DockingModel::new();
+    let mut t = tree();
+    let root = named_sides(
+        &mut t,
+        model.clone(),
+        DockingLayout::new(model.clone()).side_label(DockSide::Leading, lit!("Binder")),
+    );
+    assert!(find_role_name(&t, root, Role::Complementary, "Binder").is_some());
+    assert!(find_role_name(&t, root, Role::TabList, "Binder activity bar").is_some());
+    assert!(find_role_name(&t, root, Role::Complementary, "Right panel").is_some());
+    assert_eq!(
+        super::a11y::move_target_label(&model, DockSide::Leading),
+        "Binder",
+        "the Move to menus offer the side by the application's name"
+    );
+    assert_eq!(
+        super::a11y::move_target_label(&model, DockSide::Bottom),
+        "Bottom"
+    );
+}
+
+// ── focus_dock: the reviewed edges ───────────────────────────────────
+
+#[test]
+fn focus_dock_on_a_hidden_side_leaves_focus_within_true_above_the_layout() {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let within = teksilo_core::signal::Signal::new(false);
+    let mut t = tree();
+    let layout = t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    t.add(
+        crate::primitives::VStack::new()
+            .child(layout)
+            .focus_within(within.clone()),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.set_side_visible(DockSide::Leading, false);
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    assert!(within.get());
+
+    model.focus_dock(a);
+    settle(&mut t);
+    assert_eq!(focused_name(&t).as_deref(), Some("Explorer 1"));
+    assert!(
+        within.get(),
+        "focus is inside the layout, so focus_within holds above it"
+    );
+}
+
+#[test]
+fn a_bare_dock_with_a_header_and_no_control_lands_on_the_header_and_says_the_title() {
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Outline");
+    let dwa = dwa.show_header(true);
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    let mark = heard_mark(&t);
+    model.focus_dock(a);
+    settle(&mut t);
+    assert_ne!(t.focused(), Some(editor), "focus moved into the header");
+    assert_eq!(
+        heard_since(&t, mark),
+        vec!["Outline".to_string()],
+        "the header's control is not named by the title, so it is said"
+    );
+}
+
+#[test]
+fn with_a_rail_and_nothing_to_focus_focus_lands_on_the_rail() {
+    let model = DockingModel::new();
+    let (a, dwa) = dock("Outline");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.set_side_rail(DockSide::Leading, 40.0);
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    let mark = heard_mark(&t);
+    model.focus_dock(a);
+    settle(&mut t);
+    let f = t.focused().expect("focus");
+    assert_eq!(t.accessibility_node(f).role(), Role::Tab, "the rail item");
+    assert!(
+        heard_since(&t, mark).is_empty(),
+        "the rail item says the title"
+    );
+}
+
+#[test]
+fn a_remembered_control_that_is_now_disabled_is_skipped() {
+    let model = DockingModel::new();
+    let enabled = teksilo_core::signal::Signal::new(true);
+    let id = DockWidgetId::fresh();
+    let dw = DockWidget::new(id, lit!("Explorer"), {
+        let enabled = enabled.clone();
+        move |_| {
+            crate::primitives::VStack::new()
+                .child(crate::Button::new(lit!("First")))
+                .child(crate::Button::new(lit!("Second")).enabled(enabled.clone()))
+        }
+    });
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dw),
+    );
+    model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let second = t.find_by_label("Second").expect("second");
+    t.focus(second);
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    enabled.set(false);
+    settle(&mut t);
+    model.focus_dock(id);
+    settle(&mut t);
+    assert_eq!(focused_name(&t).as_deref(), Some("First"));
+}
+
+#[test]
+fn a_focusable_content_root_is_remembered_too() {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let model = DockingModel::new();
+    let id = DockWidgetId::fresh();
+    // A content root that takes focus itself (as a list view does), with a
+    // control inside it.
+    let dw = DockWidget::new(id, lit!("Explorer"), |_| {
+        crate::primitives::VStack::new()
+            .child(crate::Button::new(lit!("Inner")))
+            .focusable(true)
+            .access_label(lit!("Root"))
+    });
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dw),
+    );
+    model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let inner = t.find_by_label("Inner").expect("the inner control");
+    let root = t.find_by_label("Root").expect("the content root");
+    t.focus(inner);
+    settle(&mut t);
+    t.focus(root);
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    model.focus_dock(id);
+    settle(&mut t);
+    assert_eq!(
+        t.focused(),
+        Some(root),
+        "the root had focus last, not the inner control"
+    );
+}
+
+#[test]
+fn focus_dock_on_a_hidden_side_returns_to_the_control_the_dock_last_had() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let second = t.find_by_label("Explorer 2").expect("second");
+    t.focus(second);
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    // Hidden, then revealed by `focus_dock`: the reveal rebuilds the side,
+    // and the field focus had is a new widget.
+    model.set_side_visible(DockSide::Leading, false);
+    settle(&mut t);
+    let mark = heard_mark(&t);
+    model.focus_dock(a);
+    settle(&mut t);
+    assert_ne!(t.focused(), Some(second), "the side was rebuilt");
+    assert_eq!(focused_name(&t).as_deref(), Some("Explorer 2"));
+    assert_eq!(heard_since(&t, mark), vec!["Explorer".to_string()]);
+}
+
+#[test]
+fn after_a_structural_move_the_control_at_the_same_place_is_focused() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let second = t.find_by_label("Explorer 2").expect("second");
+    t.focus(second);
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    // A structural move destroys the remembered control.
+    let tab = model.activity_of(a).expect("its tab");
+    model.move_tab(tab, DockSide::Trailing, 0);
+    settle(&mut t);
+    model.focus_dock(a);
+    settle(&mut t);
+    assert_eq!(focused_name(&t).as_deref(), Some("Explorer 2"));
+}
+
+#[test]
+fn a_rebuilt_dock_with_fewer_controls_lands_on_its_first() {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let model = DockingModel::new();
+    let count = Rc::new(Cell::new(3usize));
+    let id = DockWidgetId::fresh();
+    let names = ["Field 1", "Field 2", "Field 3"];
+    let dw = DockWidget::new(id, lit!("Explorer"), {
+        let count = count.clone();
+        move |_| {
+            names[..count.get()]
+                .iter()
+                .fold(crate::primitives::VStack::new(), |stack, &name| {
+                    stack.child(FocusField(name).focusable(true))
+                })
+        }
+    });
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dw),
+    );
+    model.open_dock(id, DockOpenLocation::side(DockSide::Leading));
+    settle(&mut t);
+    let third = t.find_by_label("Field 3").expect("third");
+    t.focus(third);
+    settle(&mut t);
+    let editor = t.find_by_label("Editor").expect("the centre field");
+    t.focus(editor);
+    settle(&mut t);
+    count.set(1);
+    model.set_side_visible(DockSide::Leading, false);
+    settle(&mut t);
+    model.focus_dock(id);
+    settle(&mut t);
+    assert_eq!(focused_name(&t).as_deref(), Some("Field 1"));
+}
+
+#[test]
+fn a_request_made_before_the_layout_is_mounted_does_not_fire() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let layout = DockingLayout::new(model.clone())
+        .center(centre_field())
+        .dock(dwa);
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.focus_dock(a);
+    let mut t = tree();
+    t.add(layout);
+    settle(&mut t);
+    assert_ne!(focused_name(&t).as_deref(), Some("Explorer 1"));
+}
+
+#[test]
+fn a_dock_that_cannot_open_makes_no_request() {
+    let model = DockingModel::new();
+    let (b, dwb) = field_dock("Problems", "Problems 1", "Problems 2");
+    let dwb = dwb.default_location(DockOpenLocation::side(DockSide::Bottom));
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwb),
+    );
+    model.set_side_enabled(DockSide::Bottom, false);
+    settle(&mut t);
+    model.focus_dock(b);
+    assert!(!model.is_dock_open(b));
+    assert!(
+        model.pending_focus_request().is_none(),
+        "no request waits to fire at some later rebuild"
+    );
+}
+
+#[test]
+fn focus_dock_is_refused_while_a_modal_is_open() {
+    use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let mut t = tree();
+    let layout = t.add(
+        DockingLayout::new(model.clone())
+            .center(centre_field())
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.set_side_visible(DockSide::Leading, false);
+    settle(&mut t);
+    let ok = t.add(crate::Button::new(lit!("Dialog OK")));
+    let modal = t.add(crate::primitives::VStack::new().child(ok));
+    t.show_overlay(OverlayRequest::new(
+        modal,
+        layout,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    t.focus(ok);
+    settle(&mut t);
+    let mark = heard_mark(&t);
+    model.focus_dock(a);
+    settle(&mut t);
+    assert_eq!(t.focused(), Some(ok), "focus stays in the modal");
+    assert!(heard_since(&t, mark).is_empty());
+    // Only the focus move is refused: the dock is revealed behind the modal.
+    assert!(model.is_side_visible(DockSide::Leading));
+    assert!(t.find_by_label("Explorer 1").is_some());
+}
+
+#[test]
+fn focus_dock_from_a_button_handler_works() {
+    let model = DockingModel::new();
+    let (a, dwa) = field_dock("Explorer", "Explorer 1", "Explorer 2");
+    let m = model.clone();
+    let mut t = tree();
+    t.add(
+        DockingLayout::new(model.clone())
+            .center(
+                crate::Button::new(lit!("Show explorer")).on_activate_fn(move |_| m.focus_dock(a)),
+            )
+            .dock(dwa),
+    );
+    model.open_dock(a, DockOpenLocation::side(DockSide::Leading));
+    model.set_side_visible(DockSide::Leading, false);
+    settle(&mut t);
+    let button = t.find_by_label("Show explorer").expect("the button");
+    t.click(button);
+    settle(&mut t);
+    assert_eq!(focused_name(&t).as_deref(), Some("Explorer 1"));
+}
+
+// ── Tab order inside each side: the order the side is drawn in ───────────
+
+/// The parts of each side in the order Tab reaches them, from a full walk.
+fn side_part_orders(t: &mut WidgetTree, dock: WidgetId) -> Vec<(DockSide, Vec<&'static str>)> {
+    let title = t.find_by_label("Title").expect("the title button");
+    t.focus(title);
+    settle_tab(t);
+    let mut walk = Vec::new();
+    for _ in 0..64 {
+        let f = t.focused().expect("focus");
+        walk.push(f);
+        t.press_key(Key::Tab, Modifiers::NONE);
+        settle_tab(t);
+        if t.focused() == Some(title) {
+            break;
+        }
+    }
+    let regions = t.children(dock);
+    let sides = [
+        DockSide::Leading,
+        DockSide::Trailing,
+        DockSide::Top,
+        DockSide::Bottom,
+    ];
+    sides
+        .iter()
+        .enumerate()
+        .map(|(i, &side)| {
+            let parts = t.children(regions[1 + i]);
+            let names = ["rail", "content", "handle"];
+            let mut seen: Vec<&'static str> = Vec::new();
+            for &f in &walk {
+                if let Some(k) = parts.iter().position(|&p| t.is_descendant_of(f, p)) {
+                    if seen.last() != Some(&names[k]) {
+                        seen.push(names[k]);
+                    }
+                }
+            }
+            (side, seen)
+        })
+        .collect()
+}
+
+fn rails_everywhere() -> (WidgetTree, DockingModel, WidgetId) {
+    let (mut t, model, _root, dock) = five_regions(None);
+    for side in [
+        DockSide::Leading,
+        DockSide::Trailing,
+        DockSide::Top,
+        DockSide::Bottom,
+    ] {
+        model.set_side_rail(side, 40.0);
+    }
+    settle_tab(&mut t);
+    (t, model, dock)
+}
+
+fn expected_side_orders() -> Vec<(DockSide, Vec<&'static str>)> {
+    vec![
+        (DockSide::Leading, vec!["rail", "content", "handle"]),
+        (DockSide::Trailing, vec!["handle", "content", "rail"]),
+        (DockSide::Top, vec!["rail", "content", "handle"]),
+        (DockSide::Bottom, vec!["handle", "rail", "content"]),
+    ]
+}
+
+#[test]
+fn inside_each_side_tab_follows_the_drawing() {
+    let (mut t, _model, dock) = rails_everywhere();
+    assert_eq!(side_part_orders(&mut t, dock), expected_side_orders());
+}
+
+#[test]
+fn inside_each_side_tab_follows_the_drawing_right_to_left() {
+    let (mut t, _model, dock) = rails_everywhere();
+    t.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+    settle_tab(&mut t);
+    assert_eq!(side_part_orders(&mut t, dock), expected_side_orders());
+}
+
+#[test]
+fn a_disabled_side_takes_no_tab_stop_and_no_space() {
+    let (mut t, model, dock) = rails_everywhere();
+    model.set_side_enabled(DockSide::Trailing, false);
+    settle_tab(&mut t);
+    let regions = t.children(dock);
+    let trailing = regions[2];
+    let b = t.bounds(trailing);
+    assert_eq!(
+        b.width * b.height,
+        0.0,
+        "the disabled side's region has no area"
+    );
+    assert!(
+        !t.tab_stops_within(dock)
+            .iter()
+            .any(|&s| t.is_descendant_of(s, trailing)),
+        "nothing in the disabled side is a Tab stop"
+    );
+    assert!(
+        subtree_has_role(&t, dock, Role::TabList),
+        "the other sides' rails are still tab lists"
+    );
 }

@@ -427,3 +427,97 @@ shortcut-code-toggle-comment = Baskuligi komenton
 shortcut-code-duplicate = Duobligi
 shortcut-category-format = Formato
 shortcut-category-code = Kodo
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Maldekstra panelo
+dock-side-right = Dekstra panelo
+dock-side-top = Supra panelo
+dock-side-bottom = Malsupra panelo
+dock-rail-left = Maldekstra agadbreto
+dock-rail-right = Dekstra agadbreto
+dock-rail-top = Supra agadbreto
+dock-rail-bottom = Malsupra agadbreto
+dock-rail-actions-left =
+    { $placement ->
+        [start] Maldekstra agadbreto: agoj (supre)
+        [pinned] Maldekstra agadbreto: agoj (malsupre)
+       *[end] Maldekstra agadbreto: agoj
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Dekstra agadbreto: agoj (supre)
+        [pinned] Dekstra agadbreto: agoj (malsupre)
+       *[end] Dekstra agadbreto: agoj
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Supra agadbreto: agoj (supre)
+        [pinned] Supra agadbreto: agoj (malsupre)
+       *[end] Supra agadbreto: agoj
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Malsupra agadbreto: agoj (supre)
+        [pinned] Malsupra agadbreto: agoj (malsupre)
+       *[end] Malsupra agadbreto: agoj
+    }
+dock-rail-named = Agadbreto “{ $label }”
+dock-rail-actions-named =
+    { $placement ->
+        [start] Agadbreto “{ $label }”: agoj (supre)
+        [pinned] Agadbreto “{ $label }”: agoj (malsupre)
+       *[end] Agadbreto “{ $label }”: agoj
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Maldekstren
+dock-move-right = Dekstren
+dock-move-top = Supren
+dock-move-bottom = Malsupren
+dock-actions-name = Agoj: { $title }
+dock-more-actions-name = Pliaj agoj: { $title }
+dock-hide-activity = Kaŝi “{ $name }”
+dock-move-to = Movi al
+dock-move-to-new-activity = Movi al nova agado
+dock-move-to-side = Movi al flanko
+dock-activity-bar-size = Grando de agadbreto
+dock-tab-size = Grando de langetoj
+dock-size-default = Implicita
+dock-size-compact = Kompakta
+dock-size-icon-label = Piktogramo kaj etikedo
+dock-display-text = Teksto
+dock-display-icon = Piktogramo
+dock-display-icon-text = Piktogramo kaj teksto
+dock-fallback-title = Panelo
+dock-hidden-activities = Kaŝitaj agadoj
+dock-drop-here = Demetu panelon ĉi tie
+dock-missing-content = (enhavo mankas)
+dock-more-panels = Aliaj paneloj
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Montri la menuon
+tab-bar-scroll-left = Rulumi langetojn maldekstren
+tab-bar-scroll-right = Rulumi langetojn dekstren
+tab-bar-scroll-up = Rulumi langetojn supren
+tab-bar-scroll-down = Rulumi langetojn malsupren
+tab-bar-show-all = Montri ĉiujn langetojn
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Stangodiagramo, { $series ->
+        [one] { $series } serio
+       *[other] { $series } serioj
+    }, { $categories ->
+        [one] { $categories } kategorio
+       *[other] { $categories } kategorioj
+    }
+chart-line-summary =
+    Liniodiagramo, { $series ->
+        [one] { $series } serio
+       *[other] { $series } serioj
+    }
+chart-pie-summary =
+    Tortodiagramo, { $slices ->
+        [one] { $slices } sektoro
+       *[other] { $slices } sektoroj
+    }
+chart-legend-name = Legendo de la diagramo

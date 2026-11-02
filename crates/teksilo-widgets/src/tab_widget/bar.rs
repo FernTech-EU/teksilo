@@ -2738,16 +2738,16 @@ fn build_scroll_arrow(
     };
     let tooltip = match (orientation, kind) {
         (TabBarOrientation::Horizontal, ScrollArrowKind::Leading) => {
-            lit!("Scroll tabs left")
+            teksilo_i18n::tr_widget!(tab_bar_scroll_left())
         }
         (TabBarOrientation::Horizontal, ScrollArrowKind::Trailing) => {
-            lit!("Scroll tabs right")
+            teksilo_i18n::tr_widget!(tab_bar_scroll_right())
         }
         (TabBarOrientation::Vertical, ScrollArrowKind::Leading) => {
-            lit!("Scroll tabs up")
+            teksilo_i18n::tr_widget!(tab_bar_scroll_up())
         }
         (TabBarOrientation::Vertical, ScrollArrowKind::Trailing) => {
-            lit!("Scroll tabs down")
+            teksilo_i18n::tr_widget!(tab_bar_scroll_down())
         }
     };
     // Takes no focus from a click (Qt's tab bar scroll buttons take none
@@ -2834,7 +2834,7 @@ fn build_overflow_dropdown(
         .embedded()
         .size(IconButtonSize::Compact)
         .icon_role(icon_role)
-        .tooltip(lit!("Show all tabs"));
+        .tooltip(teksilo_i18n::tr_widget!(tab_bar_show_all()));
 
     // Cap each row at the dropdown height so a click still hits a
     // sensible-sized button regardless of `entries.len()`.

@@ -465,3 +465,97 @@ shortcut-code-toggle-comment = Vaihda kommentointi
 shortcut-code-duplicate = Monista
 shortcut-category-format = Muotoilu
 shortcut-category-code = Koodi
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Vasen paneeli
+dock-side-right = Oikea paneeli
+dock-side-top = Yläpaneeli
+dock-side-bottom = Alapaneeli
+dock-rail-left = Vasen toimintopalkki
+dock-rail-right = Oikea toimintopalkki
+dock-rail-top = Ylätoimintopalkki
+dock-rail-bottom = Alatoimintopalkki
+dock-rail-actions-left =
+    { $placement ->
+        [start] Vasen toimintopalkki: toiminnot (ylhäällä)
+        [pinned] Vasen toimintopalkki: toiminnot (alhaalla)
+       *[end] Vasen toimintopalkki: toiminnot
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Oikea toimintopalkki: toiminnot (ylhäällä)
+        [pinned] Oikea toimintopalkki: toiminnot (alhaalla)
+       *[end] Oikea toimintopalkki: toiminnot
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Ylätoimintopalkki: toiminnot (ylhäällä)
+        [pinned] Ylätoimintopalkki: toiminnot (alhaalla)
+       *[end] Ylätoimintopalkki: toiminnot
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Alatoimintopalkki: toiminnot (ylhäällä)
+        [pinned] Alatoimintopalkki: toiminnot (alhaalla)
+       *[end] Alatoimintopalkki: toiminnot
+    }
+dock-rail-named = Toimintopalkki ”{ $label }”
+dock-rail-actions-named =
+    { $placement ->
+        [start] Toimintopalkki ”{ $label }”: toiminnot (ylhäällä)
+        [pinned] Toimintopalkki ”{ $label }”: toiminnot (alhaalla)
+       *[end] Toimintopalkki ”{ $label }”: toiminnot
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Vasemmalle
+dock-move-right = Oikealle
+dock-move-top = Ylös
+dock-move-bottom = Alas
+dock-actions-name = Toiminnot: { $title }
+dock-more-actions-name = Lisää toimintoja: { $title }
+dock-hide-activity = Piilota ”{ $name }”
+dock-move-to = Siirrä
+dock-move-to-new-activity = Siirrä uuteen toimintoon
+dock-move-to-side = Siirrä toiselle puolelle
+dock-activity-bar-size = Toimintopalkin koko
+dock-tab-size = Välilehtien koko
+dock-size-default = Oletus
+dock-size-compact = Tiivis
+dock-size-icon-label = Kuvake ja nimi
+dock-display-text = Teksti
+dock-display-icon = Kuvake
+dock-display-icon-text = Kuvake ja teksti
+dock-fallback-title = Paneeli
+dock-hidden-activities = Piilotetut toiminnot
+dock-drop-here = Pudota paneeli tähän
+dock-missing-content = (sisältö puuttuu)
+dock-more-panels = Muut paneelit
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Näytä valikko
+tab-bar-scroll-left = Vieritä välilehtiä vasemmalle
+tab-bar-scroll-right = Vieritä välilehtiä oikealle
+tab-bar-scroll-up = Vieritä välilehtiä ylös
+tab-bar-scroll-down = Vieritä välilehtiä alas
+tab-bar-show-all = Näytä kaikki välilehdet
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Pylväskaavio, { $series ->
+        [one] { $series } sarja
+       *[other] { $series } sarjaa
+    }, { $categories ->
+        [one] { $categories } luokka
+       *[other] { $categories } luokkaa
+    }
+chart-line-summary =
+    Viivakaavio, { $series ->
+        [one] { $series } sarja
+       *[other] { $series } sarjaa
+    }
+chart-pie-summary =
+    Ympyräkaavio, { $slices ->
+        [one] { $slices } sektori
+       *[other] { $slices } sektoria
+    }
+chart-legend-name = Kaavion selite

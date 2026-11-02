@@ -463,3 +463,97 @@ shortcut-code-toggle-comment = Megjegyzés be/ki
 shortcut-code-duplicate = Kettőzés
 shortcut-category-format = Formátum
 shortcut-category-code = Kód
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Bal oldali panel
+dock-side-right = Jobb oldali panel
+dock-side-top = Felső panel
+dock-side-bottom = Alsó panel
+dock-rail-left = Bal oldali tevékenységsáv
+dock-rail-right = Jobb oldali tevékenységsáv
+dock-rail-top = Felső tevékenységsáv
+dock-rail-bottom = Alsó tevékenységsáv
+dock-rail-actions-left =
+    { $placement ->
+        [start] Bal oldali tevékenységsáv: műveletek (fent)
+        [pinned] Bal oldali tevékenységsáv: műveletek (lent)
+       *[end] Bal oldali tevékenységsáv: műveletek
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Jobb oldali tevékenységsáv: műveletek (fent)
+        [pinned] Jobb oldali tevékenységsáv: műveletek (lent)
+       *[end] Jobb oldali tevékenységsáv: műveletek
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Felső tevékenységsáv: műveletek (fent)
+        [pinned] Felső tevékenységsáv: műveletek (lent)
+       *[end] Felső tevékenységsáv: műveletek
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Alsó tevékenységsáv: műveletek (fent)
+        [pinned] Alsó tevékenységsáv: műveletek (lent)
+       *[end] Alsó tevékenységsáv: műveletek
+    }
+dock-rail-named = „{ $label }” tevékenységsáv
+dock-rail-actions-named =
+    { $placement ->
+        [start] „{ $label }” tevékenységsáv: műveletek (fent)
+        [pinned] „{ $label }” tevékenységsáv: műveletek (lent)
+       *[end] „{ $label }” tevékenységsáv: műveletek
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Balra
+dock-move-right = Jobbra
+dock-move-top = Fel
+dock-move-bottom = Le
+dock-actions-name = Műveletek: { $title }
+dock-more-actions-name = További műveletek: { $title }
+dock-hide-activity = „{ $name }” elrejtése
+dock-move-to = Áthelyezés ide
+dock-move-to-new-activity = Áthelyezés új tevékenységbe
+dock-move-to-side = Áthelyezés másik oldalra
+dock-activity-bar-size = Tevékenységsáv mérete
+dock-tab-size = Lapfülek mérete
+dock-size-default = Alapértelmezett
+dock-size-compact = Tömör
+dock-size-icon-label = Ikon és felirat
+dock-display-text = Szöveg
+dock-display-icon = Ikon
+dock-display-icon-text = Ikon és szöveg
+dock-fallback-title = Panel
+dock-hidden-activities = Rejtett tevékenységek
+dock-drop-here = Ejtsen ide egy panelt
+dock-missing-content = (hiányzó tartalom)
+dock-more-panels = Egyéb panelek
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Menü megjelenítése
+tab-bar-scroll-left = Lapfülek görgetése balra
+tab-bar-scroll-right = Lapfülek görgetése jobbra
+tab-bar-scroll-up = Lapfülek görgetése felfelé
+tab-bar-scroll-down = Lapfülek görgetése lefelé
+tab-bar-show-all = Összes lapfül megjelenítése
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Oszlopdiagram, { $series ->
+        [one] { $series } adatsor
+       *[other] { $series } adatsor
+    }, { $categories ->
+        [one] { $categories } kategória
+       *[other] { $categories } kategória
+    }
+chart-line-summary =
+    Vonaldiagram, { $series ->
+        [one] { $series } adatsor
+       *[other] { $series } adatsor
+    }
+chart-pie-summary =
+    Kördiagram, { $slices ->
+        [one] { $slices } körcikk
+       *[other] { $slices } körcikk
+    }
+chart-legend-name = Diagram jelmagyarázata

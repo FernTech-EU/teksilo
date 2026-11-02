@@ -459,3 +459,97 @@ shortcut-code-toggle-comment = Slå kommentar til/fra
 shortcut-code-duplicate = Dupliker
 shortcut-category-format = Formatering
 shortcut-category-code = Kode
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Venstre panel
+dock-side-right = Højre panel
+dock-side-top = Øverste panel
+dock-side-bottom = Nederste panel
+dock-rail-left = Venstre aktivitetslinje
+dock-rail-right = Højre aktivitetslinje
+dock-rail-top = Øverste aktivitetslinje
+dock-rail-bottom = Nederste aktivitetslinje
+dock-rail-actions-left =
+    { $placement ->
+        [start] Venstre aktivitetslinje: handlinger (øverst)
+        [pinned] Venstre aktivitetslinje: handlinger (nederst)
+       *[end] Venstre aktivitetslinje: handlinger
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Højre aktivitetslinje: handlinger (øverst)
+        [pinned] Højre aktivitetslinje: handlinger (nederst)
+       *[end] Højre aktivitetslinje: handlinger
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Øverste aktivitetslinje: handlinger (øverst)
+        [pinned] Øverste aktivitetslinje: handlinger (nederst)
+       *[end] Øverste aktivitetslinje: handlinger
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Nederste aktivitetslinje: handlinger (øverst)
+        [pinned] Nederste aktivitetslinje: handlinger (nederst)
+       *[end] Nederste aktivitetslinje: handlinger
+    }
+dock-rail-named = Aktivitetslinjen “{ $label }”
+dock-rail-actions-named =
+    { $placement ->
+        [start] Aktivitetslinjen “{ $label }”: handlinger (øverst)
+        [pinned] Aktivitetslinjen “{ $label }”: handlinger (nederst)
+       *[end] Aktivitetslinjen “{ $label }”: handlinger
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Venstre
+dock-move-right = Højre
+dock-move-top = Øverst
+dock-move-bottom = Nederst
+dock-actions-name = Handlinger: { $title }
+dock-more-actions-name = Flere handlinger: { $title }
+dock-hide-activity = Skjul “{ $name }”
+dock-move-to = Flyt til
+dock-move-to-new-activity = Flyt til ny aktivitet
+dock-move-to-side = Flyt til side
+dock-activity-bar-size = Aktivitetslinjens størrelse
+dock-tab-size = Fanernes størrelse
+dock-size-default = Standard
+dock-size-compact = Kompakt
+dock-size-icon-label = Ikon og etiket
+dock-display-text = Tekst
+dock-display-icon = Ikon
+dock-display-icon-text = Ikon og tekst
+dock-fallback-title = Panel
+dock-hidden-activities = Skjulte aktiviteter
+dock-drop-here = Slip et panel her
+dock-missing-content = (indhold mangler)
+dock-more-panels = Andre paneler
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Vis menuen
+tab-bar-scroll-left = Rul fanerne til venstre
+tab-bar-scroll-right = Rul fanerne til højre
+tab-bar-scroll-up = Rul fanerne op
+tab-bar-scroll-down = Rul fanerne ned
+tab-bar-show-all = Vis alle faner
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Søjlediagram, { $series ->
+        [one] { $series } serie
+       *[other] { $series } serier
+    }, { $categories ->
+        [one] { $categories } kategori
+       *[other] { $categories } kategorier
+    }
+chart-line-summary =
+    Kurvediagram, { $series ->
+        [one] { $series } serie
+       *[other] { $series } serier
+    }
+chart-pie-summary =
+    Cirkeldiagram, { $slices ->
+        [one] { $slices } sektor
+       *[other] { $slices } sektorer
+    }
+chart-legend-name = Diagramforklaring

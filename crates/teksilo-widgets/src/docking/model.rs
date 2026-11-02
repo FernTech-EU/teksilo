@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use teksilo_canvas::Size;
 use teksilo_core::signal::Signal;
-use teksilo_i18n::{LocalizedString, lit};
+use teksilo_i18n::LocalizedString;
 use teksilo_settings::Versioned;
 use teksilo_tokens::Orientation;
 
@@ -388,6 +388,18 @@ struct Inner {
     /// (and content teardown) for resize / show-hide / corner flips.
     geometry_version: Signal<u64>,
     animate_next: bool,
+    /// The dock [`DockingModel::focus_dock`] last asked for, with the
+    /// generation of the request. Applied by the mounted `DockingLayout`.
+    focus_request: Option<(DockWidgetId, u64)>,
+    /// The generation of the last focus request; set to it on every request,
+    /// so the layout's courier rebuilds even when nothing else changed.
+    focus_request_sig: Signal<u64>,
+    /// Whether the mounted layout last placed its sides right to left, as
+    /// `DockingLayout::place_children` saw it. Every side name reads it.
+    layout_rtl: bool,
+    /// The application's names for the sides (`DockingLayout::side_label`).
+    /// App-declared, not persisted.
+    app_side_labels: HashMap<DockSide, LocalizedString>,
 }
 
 /// A read-only view of one tab, handed to the widget layer for rendering.
@@ -445,6 +457,10 @@ impl DockingModel {
             version: Signal::new(0),
             geometry_version: Signal::new(0),
             animate_next: true,
+            focus_request: None,
+            focus_request_sig: Signal::new(0),
+            layout_rtl: false,
+            app_side_labels: HashMap::new(),
         })))
     }
 
@@ -1261,6 +1277,126 @@ impl DockingModel {
         }
     }
 
+    /// Reveal the dock and move keyboard focus into its content: the control
+    /// that last had focus inside it, else its first focusable control, else
+    /// its header, tab or rail item. When the dock's content was rebuilt
+    /// since (revealing a hidden side rebuilds it), "that control" is the one
+    /// at the same place among the content's controls in Tab order. A screen reader
+    /// hears the dock's title after the control focus lands on, unless that
+    /// control already says it.
+    ///
+    /// For a "focus this panel" command (View > Explorer). Unlike
+    /// [`reveal_dock`](Self::reveal_dock), which shows a dock and leaves focus
+    /// where it is, it also shows a hidden activity and expands the dock's
+    /// pane when it is collapsed.
+    ///
+    /// The mounted `DockingLayout` moves the focus after its next layout,
+    /// within its own window, which it does not raise. While a modal is open
+    /// in that window the dock is still revealed (its activity shown, its pane
+    /// expanded), but focus does not move and the title is not announced; the
+    /// request is dropped, not kept for when the modal closes. Nothing at all
+    /// happens for an unknown id or a dock on a disabled side, and a request
+    /// made before the layout is mounted reveals the dock and moves nothing.
+    /// Of two requests before the next layout, the later one wins.
+    pub fn focus_dock(&self, id: DockWidgetId) {
+        let (side, loc) = {
+            let inner = self.0.borrow();
+            let Some(meta) = inner.docks.get(&id) else {
+                return;
+            };
+            let loc = inner.locations.get(&id).copied();
+            (loc.map_or(meta.default.side, |l| l.side), loc)
+        };
+        if !self.is_side_enabled(side) {
+            return;
+        }
+        if let Some(loc) = loc {
+            if let Some(tab) = self.activity_of(id)
+                && self.is_tab_hidden(tab)
+            {
+                self.set_tab_hidden(tab, false);
+            }
+            // A collapsed split pane keeps its content live but clipped to its
+            // header, so focus would land on a field nobody can see.
+            let splitter = {
+                let inner = self.0.borrow();
+                inner
+                    .sides
+                    .get(&loc.side)
+                    .and_then(|st| st.tabs.get(loc.tab_idx))
+                    .map(|t| t.splitter.clone())
+            };
+            if let Some(splitter) = splitter
+                && splitter.pane_count() > 1
+                && splitter.is_collapsed(loc.pane_idx)
+            {
+                splitter.set_collapsed(loc.pane_idx, false);
+            }
+        }
+        // `reveal_dock` notifies only when something changed. A notify here
+        // would rebuild every side and lose each view's scroll and tree state;
+        // the request below rebuilds only the courier that applies it.
+        self.reveal_dock(id);
+        // A dock that could not be opened (its placement was refused) has
+        // nothing to take focus: no request, which would otherwise wait and
+        // fire at some later, unrelated rebuild.
+        if !self.is_dock_open(id) {
+            return;
+        }
+        let (sig, generation) = {
+            let mut inner = self.0.borrow_mut();
+            let generation = inner.focus_request_sig.get().wrapping_add(1);
+            inner.focus_request = Some((id, generation));
+            (inner.focus_request_sig.clone(), generation)
+        };
+        sig.set(generation);
+    }
+
+    /// Record the direction the layout places its sides in, which every side
+    /// name reads. Written by `DockingLayout::place_children`.
+    pub(crate) fn set_layout_rtl(&self, rtl: bool) {
+        let mut inner = self.0.borrow_mut();
+        if inner.layout_rtl != rtl {
+            inner.layout_rtl = rtl;
+        }
+    }
+
+    pub(crate) fn layout_rtl(&self) -> bool {
+        self.0.borrow().layout_rtl
+    }
+
+    /// The application's name for a side (`DockingLayout::side_label`).
+    pub(crate) fn set_app_side_label(&self, side: DockSide, label: LocalizedString) {
+        self.0.borrow_mut().app_side_labels.insert(side, label);
+    }
+
+    pub(crate) fn app_side_label(&self, side: DockSide) -> Option<LocalizedString> {
+        self.0.borrow().app_side_labels.get(&side).cloned()
+    }
+
+    /// The signal [`focus_dock`](Self::focus_dock) sets on every request.
+    pub(crate) fn focus_request_signal(&self) -> Signal<u64> {
+        self.0.borrow().focus_request_sig.clone()
+    }
+
+    /// The focus request not applied yet, with its generation.
+    pub(crate) fn pending_focus_request(&self) -> Option<(DockWidgetId, u64)> {
+        self.0.borrow().focus_request
+    }
+
+    /// Clear the request of generation `generation`, if it is still the
+    /// pending one: a newer request is never wiped by an older consumer.
+    pub(crate) fn take_focus_request(&self, generation: u64) -> Option<DockWidgetId> {
+        let mut inner = self.0.borrow_mut();
+        match inner.focus_request {
+            Some((id, g)) if g == generation => {
+                inner.focus_request = None;
+                Some(id)
+            }
+            _ => None,
+        }
+    }
+
     // ─── queries ───────────────────────────────────────────────────────
 
     pub fn is_dock_open(&self, id: DockWidgetId) -> bool {
@@ -1482,7 +1618,7 @@ impl DockingModel {
         view.title
             .clone()
             .or_else(|| Self::primary_dock_of(view).and_then(|d| self.dock_title(d)))
-            .unwrap_or_else(|| lit!("Panel"))
+            .unwrap_or_else(|| teksilo_i18n::tr_widget!(dock_fallback_title()))
     }
 
     /// The icon for an activity: an explicit tab icon, else the primary pane's

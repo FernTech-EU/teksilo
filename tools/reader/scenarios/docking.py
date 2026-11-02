@@ -8,7 +8,7 @@ The example (`examples/docking/src/main.rs`) opens a VS Code-style shell:
 * a toolbar of plain `Button`s (Toggle Sidebar / Toggle Panel / Toggle
   Inspector / Flip Corner / Lock Layout / Export / Restore) and a theme combo;
 * a **leading** side in Rail presentation: an activity rail
-  (`DockActivityBar`, a `Role::TabList` "Leading activity bar" holding one
+  (`DockActivityBar`, a `Role::TabList` "Left activity bar" holding one
   `Role::Tab` "Source", `activity_bar.rs` `DockRailItem::accessibility`) whose
   one activity holds two docks, Explorer and Search, each an `Accordion`
   (`accordion.rs`, `Role::Button` + `expanded`) in a `Splitter`;
@@ -18,17 +18,18 @@ The example (`examples/docking/src/main.rs`) opens a VS Code-style shell:
   Terminal + Problems as two accordion panes.
 
 Each side's content is a `DockSidePanel`, a `Role::Complementary` landmark
-named "Leading panel" / "Trailing panel" / "Bottom panel" (`panel.rs`,
+named for where it is on screen, "Left panel" / "Right panel" / "Bottom panel" (`panel.rs`,
 `a11y::side_label`); each side has a `DockResizeHandle`, a `Role::Splitter`
 with a percentage value and `expanded` (`resize_handle.rs`). Each dock header
-carries a `⋮` options menu (`PopoverIconButton`, `.access_label("More actions:
-<dock>")`, `panel.rs` `dock_header_trailing`) and the rail items and strip tabs
+carries a `⋮` options menu (an `IconButton` named "More actions: <dock>" through
+its tooltip, `panel.rs` `dock_header_trailing`) and the rail items and strip tabs
 carry a context menu (`context_menu.rs`) with Hide / Move to / the activity
 check list / a size submenu: the keyboard alternative to dragging a dock.
 
 Walk order of repeated nodes (the listener's `nth` counts matches in tree
-order): the focusable unnamed separators are the dock resize handles, Leading,
-Trailing, Top (zero-sized: the top side is empty) and Bottom; the "More
+order, which is reading order: top, leading, centre, trailing, bottom): the
+focusable unnamed separators are the dock resize handles, Top (zero-sized:
+the top side is empty), Leading, Trailing and Bottom; the "More
 actions" buttons are Explorer, Search, Properties, Terminal, Problems.
 
 No message in this example goes through the framework announcer
@@ -61,14 +62,12 @@ PROPERTIES_TAB = {"role": "page tab", "name": "Properties"}
 def handle(which: str) -> dict:
     """A dock resize handle, by side."""
     return {"role": "separator", "name": "", "state": "focusable",
-            "nth": {"leading": 0, "trailing": 1, "top": 2, "bottom": 3}[which]}
+            "nth": {"top": 0, "leading": 1, "trailing": 2, "bottom": 3}[which]}
 
 
 def more_actions(dock: str) -> dict:
     """A dock header's `⋮` options button, by dock."""
-    return {"role": "push button", "name": "More actions",
-            "nth": {"explorer": 0, "search": 1, "properties": 2, "terminal": 3,
-                    "problems": 4}[dock]}
+    return {"role": "push button", "name": f"More actions: {dock.capitalize()}"}
 
 
 # ---------------------------------------------------------------------------
@@ -153,18 +152,18 @@ def rail_toggle(run):
     focus_act(run, "the Source rail tab", RAIL_TAB,
               [focused(role="page tab", name="Source"), said("Source")])
     with run.act("Enter on the active rail tab",
-                 [not_in_tree(role="landmark", name="Leading panel"),
+                 [not_in_tree(role="landmark", name="Left panel"),
                   no_focus_change(), said_any("collapsed", "hidden")],
                  should="the leading side hides, focus stays on the rail tab, and the "
                         "reader hears that its panel collapsed"):
         run.key("Return")
     with run.act("Enter again",
-                 [in_tree(role="landmark", name="Leading panel"),
+                 [in_tree(role="landmark", name="Left panel"),
                   no_focus_change(), said_any("expanded", "shown")],
                  should="the leading side comes back and the reader hears it expanded"):
         run.key("Return")
     with run.act("Space on the active rail tab",
-                 [not_in_tree(role="landmark", name="Leading panel"),
+                 [not_in_tree(role="landmark", name="Left panel"),
                   said_any("collapsed", "hidden")],
                  should="Space does what Enter does"):
         run.key("space")
@@ -190,13 +189,13 @@ def handle_keys(run):
                  should="the side shrinks back and the reader hears the new size"):
         run.key("Left")
     with run.act("Home on the handle",
-                 [not_in_tree(role="landmark", name="Leading panel"),
+                 [not_in_tree(role="landmark", name="Left panel"),
                   focus_kept_or_moved_to_named(), said_any("collapsed", "hidden")],
                  should="Home hides the leading side; the reader hears it collapsed and "
                         "focus stays on a control they can use to bring it back"):
         run.key("Home")
     with run.act("End on the handle",
-                 [in_tree(role="landmark", name="Leading panel"),
+                 [in_tree(role="landmark", name="Left panel"),
                   said_any("expanded", "shown")],
                  should="End shows the side again (the handle's own documented key)"):
         run.key("End")
@@ -234,24 +233,27 @@ def reshown_content(run):
     run.wait_for(**RAIL_TAB)
     focus_act(run, "the Source rail tab", RAIL_TAB, [focused(role="page tab", name="Source")])
     with run.act("Enter: hide the leading side",
-                 [not_in_tree(role="landmark", name="Leading panel")], should="the side hides"):
+                 [not_in_tree(role="landmark", name="Left panel")], should="the side hides"):
         run.key("Return")
-    with run.act("Enter: show it again", [in_tree(role="landmark", name="Leading panel")],
+    with run.act("Enter: show it again", [in_tree(role="landmark", name="Left panel")],
                  should="the side comes back"):
         run.key("Return")
-    with run.act("Shift+Tab into the shown side",
-                 [focused(role="push button", name="More actions"), said("More actions")],
-                 should="focus moves back into the side's content (Search's options button) "
+    # The rail comes first in its side (the tab list before the panel it
+    # controls), so the side's content is after it.
+    with run.act("Tab into the shown side",
+                 [focused(role="push button", name="Explorer"), said("Explorer")],
+                 should="focus moves into the side's content (the Explorer dock header) "
                         "and the reader hears it"):
-        run.key("Shift+Tab")
-    with run.act("Shift+Tab again",
-                 [focused(role="push button", name="Search"), said("Search")],
-                 should="focus moves to the Search dock header and the reader hears it"):
-        run.key("Shift+Tab")
-    with run.act("Shift+Tab to the splitter divider",
+        run.key("Tab")
+    with run.act("Tab again",
+                 [focused(role="push button", name="More actions: Explorer"),
+                  said("More actions: Explorer")],
+                 should="focus moves to Explorer's options button and the reader hears it"):
+        run.key("Tab")
+    with run.act("Tab to the splitter divider",
                  [focused(role="separator"), said("splitter")],
                  should="focus moves to the divider between Explorer and Search"):
-        run.key("Shift+Tab")
+        run.key("Tab")
 
 
 def rail_menu(run):
@@ -320,9 +322,9 @@ def options_menu(run):
     close (`dock_options_menu`, multi-pane branch)."""
     run.wait_for(**more_actions("explorer"))
     focus_act(run, "Explorer's options button", more_actions("explorer"),
-              [focused(role="push button", name="More actions"), said_any("Explorer")],
-              should="the reader hears which dock these options are for (the button's "
-                     "access_label is 'More actions: Explorer')")
+              [focused(role="push button", name="More actions: Explorer"), said_any("Explorer")],
+              should="the reader hears which dock these options are for (the button "
+                     "is named 'More actions: Explorer' through its tooltip)")
     with run.act("Enter on the options button",
                  [in_tree(role="menu item", name="Move to new activity"),
                   said_any("Move to new activity", "menu")],
@@ -351,7 +353,7 @@ def promote_dock(run):
     whole layout (`DockingLayout::build`, `version()` bound at Rebuild)."""
     run.wait_for(**more_actions("explorer"))
     focus_act(run, "Explorer's options button", more_actions("explorer"),
-              [focused(role="push button", name="More actions")])
+              [focused(role="push button", name="More actions: Explorer")])
     with run.act("Enter on the options button",
                  [in_tree(role="menu item", name="Move to new activity")],
                  should="the options menu opens"):
@@ -368,7 +370,7 @@ def promote_dock(run):
 
 
 def move_tab_to_side(run):
-    """The Properties strip tab's context menu → Move to ▸ Leading: the
+    """The Properties strip tab's context menu → Move to ▸ Left (the leading side): the
     keyboard alternative to dragging a tab to another side."""
     run.wait_for(**PROPERTIES_TAB)
     focus_act(run, "the Properties tab", PROPERTIES_TAB,
@@ -381,8 +383,9 @@ def move_tab_to_side(run):
                  should="the reader hears Move to"):
         run.key("Down", "Down")
     with run.act("Right: the side submenu",
-                 [in_tree(role="menu item", name="Leading"), said_any("Leading")],
-                 should="the submenu opens, stays open, and the reader hears Leading"):
+                 [in_tree(role="menu item", name="Left"), said_any("Left")],
+                 should="the submenu opens, stays open, and the reader hears Left (the "
+                        "leading side, named for where it is)"):
         run.key("Right")
     with run.act("Escape", should="close whatever is open"):
         run.key("Escape")
@@ -412,7 +415,7 @@ def hide_side_with_focus_inside(run):
     focus_act(run, "the Explorer dock header", EXPLORER,
               [focused(role="push button", name="Explorer")])
     with run.act("AT-SPI click on Toggle Sidebar while Explorer has focus",
-                 [not_in_tree(role="landmark", name="Leading panel"),
+                 [not_in_tree(role="landmark", name="Left panel"),
                   focus_kept_or_moved_to_named(), spoke_anything()],
                  should="the side hides; focus, which was inside it, moves to a live named "
                         "control and the reader hears where it now is"):
@@ -428,7 +431,7 @@ def hide_dock_from_its_options(run):
     dock. Then the strip's "Hidden activities" button is the way back."""
     run.wait_for(**more_actions("properties"))
     focus_act(run, "Properties' options button", more_actions("properties"),
-              [focused(role="push button", name="More actions")])
+              [focused(role="push button", name="More actions: Properties")])
     with run.act("Enter on the options button",
                  [in_tree(role="menu item", name_contains="Hide")],
                  should="the options menu opens"):
@@ -583,28 +586,29 @@ def rail_arrows(run):
 
 def reshown_visited(run):
     """Orca meets the Explorer header, the leading side is hidden and shown
-    from its rail tab, then Shift+Tab walks back through the side: the nodes
-    Orca never met before the hide against the one it did."""
+    from its rail tab, then Tab walks on through the side: the nodes Orca
+    never met before the hide against the one it did."""
     run.wait_for(**EXPLORER)
     focus_act(run, "the Explorer dock header", EXPLORER,
               [focused(role="push button", name="Explorer"), said("Explorer")])
     focus_act(run, "the Source rail tab", RAIL_TAB, [focused(role="page tab", name="Source")])
     with run.act("Enter: hide the leading side",
-                 [not_in_tree(role="landmark", name="Leading panel")], should="the side hides"):
+                 [not_in_tree(role="landmark", name="Left panel")], should="the side hides"):
         run.key("Return")
-    with run.act("Enter: show it again", [in_tree(role="landmark", name="Leading panel")],
+    with run.act("Enter: show it again", [in_tree(role="landmark", name="Left panel")],
                  should="the side comes back"):
         run.key("Return")
-    walk = [("More actions", "Search's options button, which Orca never met"),
-            ("Search", "the Search header, never met"),
-            ("Splitter divider", "the pane divider, never met"),
-            ("More actions", "Explorer's options button, never met"),
+    # The rail comes first in its side, so the side's content is after it.
+    walk = [("Explorer", "the Explorer header, which Orca met before the hide"),
             ("New File", "Explorer's first header action, never met"),
-            ("Explorer", "the Explorer header, which Orca met before the hide")]
+            ("More actions: Explorer", "Explorer's options button, never met"),
+            ("Splitter divider", "the pane divider, never met"),
+            ("Search", "the Search header, never met"),
+            ("More actions: Search", "Search's options button, which Orca never met")]
     for name, what in walk:
-        with run.act(f"Shift+Tab to {name}", [focused(name=name), said(name), no_defunct_drop()],
+        with run.act(f"Tab to {name}", [focused(name=name), said(name), no_defunct_drop()],
                      should=f"focus moves to {what}, and the reader hears it"):
-            run.key("Shift+Tab")
+            run.key("Tab")
 
 
 SCENARIOS = [

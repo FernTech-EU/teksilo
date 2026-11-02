@@ -476,3 +476,101 @@ shortcut-code-toggle-comment = Comută comentariul
 shortcut-code-duplicate = Duplică
 shortcut-category-format = Formatare
 shortcut-category-code = Cod
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Panoul din stânga
+dock-side-right = Panoul din dreapta
+dock-side-top = Panoul de sus
+dock-side-bottom = Panoul de jos
+dock-rail-left = Bara de activitate din stânga
+dock-rail-right = Bara de activitate din dreapta
+dock-rail-top = Bara de activitate de sus
+dock-rail-bottom = Bara de activitate de jos
+dock-rail-actions-left =
+    { $placement ->
+        [start] Bara de activitate din stânga: acțiuni (sus)
+        [pinned] Bara de activitate din stânga: acțiuni (jos)
+       *[end] Bara de activitate din stânga: acțiuni
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Bara de activitate din dreapta: acțiuni (sus)
+        [pinned] Bara de activitate din dreapta: acțiuni (jos)
+       *[end] Bara de activitate din dreapta: acțiuni
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Bara de activitate de sus: acțiuni (sus)
+        [pinned] Bara de activitate de sus: acțiuni (jos)
+       *[end] Bara de activitate de sus: acțiuni
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Bara de activitate de jos: acțiuni (sus)
+        [pinned] Bara de activitate de jos: acțiuni (jos)
+       *[end] Bara de activitate de jos: acțiuni
+    }
+dock-rail-named = Bara de activitate „{ $label }”
+dock-rail-actions-named =
+    { $placement ->
+        [start] Bara de activitate „{ $label }”: acțiuni (sus)
+        [pinned] Bara de activitate „{ $label }”: acțiuni (jos)
+       *[end] Bara de activitate „{ $label }”: acțiuni
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Stânga
+dock-move-right = Dreapta
+dock-move-top = Sus
+dock-move-bottom = Jos
+dock-actions-name = Acțiuni: { $title }
+dock-more-actions-name = Mai multe acțiuni: { $title }
+dock-hide-activity = Ascunde „{ $name }”
+dock-move-to = Mută în
+dock-move-to-new-activity = Mută într-o activitate nouă
+dock-move-to-side = Mută pe o latură
+dock-activity-bar-size = Dimensiunea barei de activitate
+dock-tab-size = Dimensiunea filelor
+dock-size-default = Implicit
+dock-size-compact = Compact
+dock-size-icon-label = Pictogramă și etichetă
+dock-display-text = Text
+dock-display-icon = Pictogramă
+dock-display-icon-text = Pictogramă și text
+dock-fallback-title = Panou
+dock-hidden-activities = Activități ascunse
+dock-drop-here = Plasați un panou aici
+dock-missing-content = (conținut lipsă)
+dock-more-panels = Alte panouri
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Afișează meniul
+tab-bar-scroll-left = Derulează filele spre stânga
+tab-bar-scroll-right = Derulează filele spre dreapta
+tab-bar-scroll-up = Derulează filele în sus
+tab-bar-scroll-down = Derulează filele în jos
+tab-bar-show-all = Afișează toate filele
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Diagramă cu bare, { $series ->
+        [one] { $series } serie
+        [few] { $series } serii
+       *[other] { $series } de serii
+    }, { $categories ->
+        [one] { $categories } categorie
+        [few] { $categories } categorii
+       *[other] { $categories } de categorii
+    }
+chart-line-summary =
+    Diagramă cu linii, { $series ->
+        [one] { $series } serie
+        [few] { $series } serii
+       *[other] { $series } de serii
+    }
+chart-pie-summary =
+    Diagramă circulară, { $slices ->
+        [one] { $slices } sector
+        [few] { $slices } sectoare
+       *[other] { $slices } de sectoare
+    }
+chart-legend-name = Legenda diagramei

@@ -372,7 +372,7 @@ fn an_at_custom_action_closes_a_tab() {
         .filter(|(_, node)| {
             node.custom_actions()
                 .iter()
-                .any(|action| action.id == 2 && action.description == "Close")
+                .any(|action| action.id == 2 && action.description == "Close tab")
         })
         .count();
     assert_eq!(

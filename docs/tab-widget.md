@@ -868,7 +868,7 @@ for horizontal and vertical bars without re-mapping.
 - **Overflow dropdown**: `HasPopup::Menu`.
 - **Scroll arrows**: `IconButton`s named by their tooltips "Scroll tabs
   left" / "Scroll tabs right" ("Scroll tabs up" / "Scroll tabs down" on
-  a vertical bar).
+  a vertical bar), translated like the "Show all tabs" button.
 
 The full `TabList → Tab → TabPanel` hierarchy is what AT software
 expects from a tabbed container, and matches what Firefox and Chrome

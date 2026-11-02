@@ -465,3 +465,93 @@ shortcut-code-toggle-comment = コメントの切り替え
 shortcut-code-duplicate = 複製
 shortcut-category-format = 書式
 shortcut-category-code = コード
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = 左パネル
+dock-side-right = 右パネル
+dock-side-top = 上パネル
+dock-side-bottom = 下パネル
+dock-rail-left = 左アクティビティバー
+dock-rail-right = 右アクティビティバー
+dock-rail-top = 上アクティビティバー
+dock-rail-bottom = 下アクティビティバー
+dock-rail-actions-left =
+    { $placement ->
+        [start] 左アクティビティバー: 操作（上）
+        [pinned] 左アクティビティバー: 操作（下）
+       *[end] 左アクティビティバー: 操作
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] 右アクティビティバー: 操作（上）
+        [pinned] 右アクティビティバー: 操作（下）
+       *[end] 右アクティビティバー: 操作
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] 上アクティビティバー: 操作（上）
+        [pinned] 上アクティビティバー: 操作（下）
+       *[end] 上アクティビティバー: 操作
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] 下アクティビティバー: 操作（上）
+        [pinned] 下アクティビティバー: 操作（下）
+       *[end] 下アクティビティバー: 操作
+    }
+dock-rail-named = アクティビティバー「{ $label }」
+dock-rail-actions-named =
+    { $placement ->
+        [start] アクティビティバー「{ $label }」: 操作（上）
+        [pinned] アクティビティバー「{ $label }」: 操作（下）
+       *[end] アクティビティバー「{ $label }」: 操作
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = 左
+dock-move-right = 右
+dock-move-top = 上
+dock-move-bottom = 下
+dock-actions-name = 操作: { $title }
+dock-more-actions-name = その他の操作: { $title }
+dock-hide-activity = 「{ $name }」を非表示
+dock-move-to = 移動先
+dock-move-to-new-activity = 新しいアクティビティに移動
+dock-move-to-side = 別の側に移動
+dock-activity-bar-size = アクティビティバーのサイズ
+dock-tab-size = タブのサイズ
+dock-size-default = 標準
+dock-size-compact = コンパクト
+dock-size-icon-label = アイコンとラベル
+dock-display-text = テキスト
+dock-display-icon = アイコン
+dock-display-icon-text = アイコンとテキスト
+dock-fallback-title = パネル
+dock-hidden-activities = 非表示のアクティビティ
+dock-drop-here = ここにパネルをドロップ
+dock-missing-content = （内容がありません）
+dock-more-panels = その他のパネル
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = メニューを表示
+tab-bar-scroll-left = タブを左にスクロール
+tab-bar-scroll-right = タブを右にスクロール
+tab-bar-scroll-up = タブを上にスクロール
+tab-bar-scroll-down = タブを下にスクロール
+tab-bar-show-all = すべてのタブを表示
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    棒グラフ、{ $series ->
+       *[other] { $series } 系列
+    }、{ $categories ->
+       *[other] { $categories } カテゴリ
+    }
+chart-line-summary =
+    折れ線グラフ、{ $series ->
+       *[other] { $series } 系列
+    }
+chart-pie-summary =
+    円グラフ、{ $slices ->
+       *[other] { $slices } 項目
+    }
+chart-legend-name = グラフの凡例

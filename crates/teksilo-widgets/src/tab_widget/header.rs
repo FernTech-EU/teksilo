@@ -49,7 +49,6 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use teksilo_i18n::lit;
 
 use teksilo_canvas::{Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -1285,7 +1284,7 @@ impl Widget for TabHeader {
         if self.on_close.is_some() && self.initial_enabled {
             actions.push(teksilo_core::accesskit::CustomAction {
                 id: CLOSE_ACTION_ID,
-                description: lit!("Close").resolve_now(),
+                description: teksilo_i18n::tr_widget!(tab_close_tooltip()).resolve_now(),
             });
         }
 

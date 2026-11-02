@@ -469,3 +469,105 @@ shortcut-code-toggle-comment = Przełącz komentarz
 shortcut-code-duplicate = Duplikuj
 shortcut-category-format = Formatowanie
 shortcut-category-code = Kod
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Lewy panel
+dock-side-right = Prawy panel
+dock-side-top = Górny panel
+dock-side-bottom = Dolny panel
+dock-rail-left = Lewy pasek aktywności
+dock-rail-right = Prawy pasek aktywności
+dock-rail-top = Górny pasek aktywności
+dock-rail-bottom = Dolny pasek aktywności
+dock-rail-actions-left =
+    { $placement ->
+        [start] Lewy pasek aktywności: akcje (u góry)
+        [pinned] Lewy pasek aktywności: akcje (u dołu)
+       *[end] Lewy pasek aktywności: akcje
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Prawy pasek aktywności: akcje (u góry)
+        [pinned] Prawy pasek aktywności: akcje (u dołu)
+       *[end] Prawy pasek aktywności: akcje
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Górny pasek aktywności: akcje (u góry)
+        [pinned] Górny pasek aktywności: akcje (u dołu)
+       *[end] Górny pasek aktywności: akcje
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Dolny pasek aktywności: akcje (u góry)
+        [pinned] Dolny pasek aktywności: akcje (u dołu)
+       *[end] Dolny pasek aktywności: akcje
+    }
+dock-rail-named = Pasek aktywności „{ $label }”
+dock-rail-actions-named =
+    { $placement ->
+        [start] Pasek aktywności „{ $label }”: akcje (u góry)
+        [pinned] Pasek aktywności „{ $label }”: akcje (u dołu)
+       *[end] Pasek aktywności „{ $label }”: akcje
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = W lewo
+dock-move-right = W prawo
+dock-move-top = W górę
+dock-move-bottom = W dół
+dock-actions-name = Akcje: { $title }
+dock-more-actions-name = Więcej akcji: { $title }
+dock-hide-activity = Ukryj „{ $name }”
+dock-move-to = Przenieś do
+dock-move-to-new-activity = Przenieś do nowej aktywności
+dock-move-to-side = Przenieś na bok
+dock-activity-bar-size = Rozmiar paska aktywności
+dock-tab-size = Rozmiar kart
+dock-size-default = Domyślny
+dock-size-compact = Kompaktowy
+dock-size-icon-label = Ikona i etykieta
+dock-display-text = Tekst
+dock-display-icon = Ikona
+dock-display-icon-text = Ikona i tekst
+dock-fallback-title = Panel
+dock-hidden-activities = Ukryte aktywności
+dock-drop-here = Upuść tutaj panel
+dock-missing-content = (brak zawartości)
+dock-more-panels = Inne panele
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Pokaż menu
+tab-bar-scroll-left = Przewiń karty w lewo
+tab-bar-scroll-right = Przewiń karty w prawo
+tab-bar-scroll-up = Przewiń karty w górę
+tab-bar-scroll-down = Przewiń karty w dół
+tab-bar-show-all = Pokaż wszystkie karty
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Wykres słupkowy, { $series ->
+        [one] { $series } seria
+        [few] { $series } serie
+        [many] { $series } serii
+       *[other] { $series } serii
+    }, { $categories ->
+        [one] { $categories } kategoria
+        [few] { $categories } kategorie
+        [many] { $categories } kategorii
+       *[other] { $categories } kategorii
+    }
+chart-line-summary =
+    Wykres liniowy, { $series ->
+        [one] { $series } seria
+        [few] { $series } serie
+        [many] { $series } serii
+       *[other] { $series } serii
+    }
+chart-pie-summary =
+    Wykres kołowy, { $slices ->
+        [one] { $slices } wycinek
+        [few] { $slices } wycinki
+        [many] { $slices } wycinków
+       *[other] { $slices } wycinka
+    }
+chart-legend-name = Legenda wykresu

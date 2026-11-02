@@ -628,6 +628,7 @@ impl DockActivityBar {
         }
         Some(ctx.add(DockRailActionGroup::new(
             self.side,
+            self.model.clone(),
             placement,
             actions,
             self.effective_item_extent(),
@@ -639,6 +640,9 @@ impl DockActivityBar {
 
 impl Widget for DockActivityBar {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        // A Tab group, so the side's region orders the rail as one part
+        // against its panel and handle (`side_part_tab_index`).
+        ctx.set_traversal_scope(teksilo_core::focus::TraversalScopePolicy::Continue);
         // Rebuild when this side's rail-item size flips (context-menu "Activity
         // bar size").
         let self_id = ctx.self_id();
@@ -721,7 +725,12 @@ impl Widget for DockActivityBar {
         }
         let items_stack = ctx.add(items_stack);
         let shown_tabs = shown_rail_count(&self.item_ids, &self.visible_count);
-        let tab_list = ctx.add(DockRailTabList::new(self.side, items_stack, shown_tabs));
+        let tab_list = ctx.add(DockRailTabList::new(
+            self.side,
+            self.model.clone(),
+            items_stack,
+            shown_tabs,
+        ));
 
         // Item column (pushed to the top by a trailing Spacer).
         let mut column = VStack::new().spacing(RAIL_ITEM_SPACING);
@@ -738,7 +747,7 @@ impl Widget for DockActivityBar {
             let total = pos;
             let trigger = IconButton::new((of_icon)())
                 .size(self.effective_item_size())
-                .tooltip(lit!("More panels"));
+                .tooltip(teksilo_i18n::tr_widget!(dock_more_panels()));
             let overflow = ctx.add(
                 PopoverIconButton::new(trigger)
                     .content(DockOverflowMenu::new(
@@ -934,7 +943,7 @@ impl Widget for DockActivityBar {
         // overflow trigger and the action groups). This node must stay a bare
         // `GenericContainer` — setting a name or an orientation here would
         // stop the AT pass pruning it, and a screen reader would announce
-        // "Leading activity bar, group" immediately followed by "Leading
+        // "Left activity bar, group" immediately followed by "Left
         // activity bar, tab list".
         //
         // The one-line-looking alternative — keep `Role::TabList` here and
@@ -1171,6 +1180,7 @@ fn rail_insertion(
 #[derive(Debug)]
 pub(crate) struct DockRailTabList {
     side: DockSide,
+    model: DockingModel,
     stack: WidgetId,
     /// How many rail tabs are shown, for this node's `size_of_set`. Same value
     /// each `DockRailItem` used to write on itself, where no adapter read it.
@@ -1178,8 +1188,13 @@ pub(crate) struct DockRailTabList {
 }
 
 impl DockRailTabList {
-    fn new(side: DockSide, stack: WidgetId, shown: usize) -> Self {
-        Self { side, stack, shown }
+    fn new(side: DockSide, model: DockingModel, stack: WidgetId, shown: usize) -> Self {
+        Self {
+            side,
+            model,
+            stack,
+            shown,
+        }
     }
 }
 
@@ -1206,7 +1221,7 @@ impl Widget for DockRailTabList {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use teksilo_core::accesskit::{Orientation as A11yOrientation, Role};
         builder.set_role(Role::TabList);
-        builder.set_name(super::a11y::rail_label(self.side).resolve_now());
+        builder.set_name(super::a11y::rail_label(&self.model, self.side));
         builder.set_orientation(A11yOrientation::Vertical);
         // The set size belongs on this container, not on each item:
         // AccessKit's `size_of_set` differs from ARIA's per-item
@@ -1241,6 +1256,7 @@ impl Widget for DockRailTabList {
 /// list's. Tab / Shift+Tab crosses between the two composites; arrows never do.
 pub(crate) struct DockRailActionGroup {
     side: DockSide,
+    model: DockingModel,
     placement: DockActionPlacement,
     actions: Vec<DockAction>,
     extent: f32,
@@ -1267,6 +1283,7 @@ impl std::fmt::Debug for DockRailActionGroup {
 impl DockRailActionGroup {
     fn new(
         side: DockSide,
+        model: DockingModel,
         placement: DockActionPlacement,
         actions: Vec<DockAction>,
         extent: f32,
@@ -1275,6 +1292,7 @@ impl DockRailActionGroup {
     ) -> Self {
         Self {
             side,
+            model,
             placement,
             actions,
             extent,
@@ -1340,7 +1358,11 @@ impl Widget for DockRailActionGroup {
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         use teksilo_core::accesskit::{Orientation as A11yOrientation, Role};
         builder.set_role(Role::Toolbar);
-        builder.set_name(super::a11y::rail_actions_label(self.side, self.placement).resolve_now());
+        builder.set_name(super::a11y::rail_actions_label(
+            &self.model,
+            self.side,
+            self.placement,
+        ));
         builder.set_orientation(A11yOrientation::Vertical);
         // The set size belongs on this container, not on each action:
         // AccessKit's `size_of_set` differs from ARIA's per-item

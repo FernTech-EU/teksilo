@@ -33,7 +33,7 @@
 //! Every "Move to" surface lists only [enabled sides](DockingModel::enabled_move_targets);
 //! a disabled side is never offered (it would be silently rejected).
 
-use teksilo_i18n::{LocalizedString, lit};
+use teksilo_i18n::{LocalizedString, localized, tr_widget};
 
 use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
@@ -50,14 +50,16 @@ pub(crate) enum DockMenuKind {
     Strip,
 }
 
-/// Friendly side name for the "Move to" submenu.
-fn side_name(side: DockSide) -> LocalizedString {
-    match side {
-        DockSide::Leading => lit!("Leading"),
-        DockSide::Trailing => lit!("Trailing"),
-        DockSide::Top => lit!("Top"),
-        DockSide::Bottom => lit!("Bottom"),
-    }
+/// A side as the "Move to" submenus offer it: where it is on screen, or the
+/// application's name for it (see `a11y::move_target_label`).
+fn side_name(model: &DockingModel, side: DockSide) -> LocalizedString {
+    let m = model.clone();
+    localized(move || super::a11y::move_target_label(&m, side))
+}
+
+/// `Hide "<activity>"`, composed when read so it follows a locale switch.
+fn hide_label(name: LocalizedString) -> LocalizedString {
+    localized(move || tr_widget!(dock_hide_activity(name = name.resolve_now())).resolve_now())
 }
 
 /// The full per-activity context menu for a rail item or a dock tab.
@@ -72,7 +74,7 @@ pub(crate) fn activity_context_menu(
         .iter()
         .find(|v| v.id == tab_id)
         .map(|v| model.activity_label(v))
-        .unwrap_or_else(|| lit!("Panel"));
+        .unwrap_or_else(|| tr_widget!(dock_fallback_title()));
 
     // Policy gates the user affordances: hiding an activity (Hide item +
     // checklist) and relocating one (Move to). The size / display submenu is an
@@ -85,7 +87,7 @@ pub(crate) fn activity_context_menu(
     // Hide "<activity>".
     if policy.allow_activity_hide {
         let m = model.clone();
-        let hide_label = lit!(format!("Hide \"{}\"", this_label.resolve_now()));
+        let hide_label = hide_label(this_label);
         list = list.item(
             MenuItem::new(hide_label).on_activate_fn(move |_| m.set_tab_hidden(tab_id, true)),
         );
@@ -99,7 +101,7 @@ pub(crate) fn activity_context_menu(
             list = list.separator();
         }
         let m = model.clone();
-        list = list.item(MenuItem::submenu(lit!("Move to"), move || {
+        list = list.item(MenuItem::submenu(tr_widget!(dock_move_to()), move || {
             Box::new(move_to_submenu(&m, side, tab_id))
         }));
         has_items = true;
@@ -122,13 +124,14 @@ pub(crate) fn activity_context_menu(
     list = match kind {
         DockMenuKind::Rail => {
             let m = model.clone();
-            list.item(MenuItem::submenu(lit!("Activity bar size"), move || {
-                Box::new(rail_size_submenu(&m, side))
-            }))
+            list.item(MenuItem::submenu(
+                tr_widget!(dock_activity_bar_size()),
+                move || Box::new(rail_size_submenu(&m, side)),
+            ))
         }
         DockMenuKind::Strip => {
             let m = model.clone();
-            list.item(MenuItem::submenu(lit!("Tab size"), move || {
+            list.item(MenuItem::submenu(tr_widget!(dock_tab_size()), move || {
                 Box::new(tab_size_submenu(&m, side))
             }))
         }
@@ -164,18 +167,19 @@ pub(crate) fn dock_options_menu(
         if policy.allow_activity_drag {
             // Pull this dock out of the group into its own new activity.
             let m = model.clone();
-            list = list.item(MenuItem::new(lit!("Move to new activity")).on_activate_fn(
-                move |_| {
+            list = list.item(
+                MenuItem::new(tr_widget!(dock_move_to_new_activity())).on_activate_fn(move |_| {
                     let at = m.side_append_index(side);
                     m.promote_to_tab(dock_id, side, at);
-                },
-            ));
+                }),
+            );
             // Move just this dock to another side (as its own new activity).
             if has_targets {
                 let m = model.clone();
-                list = list.item(MenuItem::submenu(lit!("Move to side"), move || {
-                    Box::new(dock_move_to_submenu(&m, dock_id, side))
-                }));
+                list = list.item(MenuItem::submenu(
+                    tr_widget!(dock_move_to_side()),
+                    move || Box::new(dock_move_to_submenu(&m, dock_id, side)),
+                ));
             }
         }
     } else {
@@ -187,9 +191,9 @@ pub(crate) fn dock_options_menu(
                 .iter()
                 .find(|v| v.id == tab_id)
                 .map(|v| model.activity_label(v))
-                .unwrap_or_else(|| lit!("Panel"));
+                .unwrap_or_else(|| tr_widget!(dock_fallback_title()));
             let m = model.clone();
-            let hide_label = lit!(format!("Hide \"{}\"", this_label.resolve_now()));
+            let hide_label = hide_label(this_label);
             list = list.item(
                 MenuItem::new(hide_label).on_activate_fn(move |_| m.set_tab_hidden(tab_id, true)),
             );
@@ -200,7 +204,7 @@ pub(crate) fn dock_options_menu(
                 list = list.separator();
             }
             let m = model.clone();
-            list = list.item(MenuItem::submenu(lit!("Move to"), move || {
+            list = list.item(MenuItem::submenu(tr_widget!(dock_move_to()), move || {
                 Box::new(move_to_submenu(&m, side, tab_id))
             }));
         }
@@ -241,12 +245,14 @@ pub(crate) fn background_menu(
     }
     let m = model.clone();
     match kind {
-        DockMenuKind::Rail => list.item(MenuItem::submenu(lit!("Activity bar size"), move || {
-            Box::new(rail_size_submenu(&m, side))
-        })),
-        DockMenuKind::Strip => list.item(MenuItem::submenu(lit!("Tab size"), move || {
-            Box::new(tab_size_submenu(&m, side))
-        })),
+        DockMenuKind::Rail => list.item(MenuItem::submenu(
+            tr_widget!(dock_activity_bar_size()),
+            move || Box::new(rail_size_submenu(&m, side)),
+        )),
+        DockMenuKind::Strip => list
+            .item(MenuItem::submenu(tr_widget!(dock_tab_size()), move || {
+                Box::new(tab_size_submenu(&m, side))
+            })),
     }
 }
 
@@ -281,12 +287,14 @@ fn move_to_submenu(model: &DockingModel, from: DockSide, tab_id: DockTabId) -> M
     let mut list = MenuList::new();
     for target in model.enabled_move_targets(from) {
         let m = model.clone();
-        list = list.item(MenuItem::new(side_name(target)).on_activate_fn(move |_| {
-            let at = m.side_append_index(target);
-            m.move_tab(tab_id, target, at);
-            m.set_side_visible(target, true);
-            m.select_tab_by_id(target, tab_id);
-        }));
+        list = list.item(
+            MenuItem::new(side_name(model, target)).on_activate_fn(move |_| {
+                let at = m.side_append_index(target);
+                m.move_tab(tab_id, target, at);
+                m.set_side_visible(target, true);
+                m.select_tab_by_id(target, tab_id);
+            }),
+        );
     }
     list
 }
@@ -297,10 +305,12 @@ fn dock_move_to_submenu(model: &DockingModel, dock_id: DockWidgetId, from: DockS
     let mut list = MenuList::new();
     for target in model.enabled_move_targets(from) {
         let m = model.clone();
-        list = list.item(MenuItem::new(side_name(target)).on_activate_fn(move |_| {
-            m.move_dock(dock_id, DockOpenLocation::side(target).new_tab());
-            m.set_side_visible(target, true);
-        }));
+        list = list.item(
+            MenuItem::new(side_name(model, target)).on_activate_fn(move |_| {
+                m.move_dock(dock_id, DockOpenLocation::side(target).new_tab());
+                m.set_side_visible(target, true);
+            }),
+        );
     }
     list
 }
@@ -310,9 +320,9 @@ fn dock_move_to_submenu(model: &DockingModel, dock_id: DockWidgetId, from: DockS
 fn rail_size_submenu(model: &DockingModel, side: DockSide) -> MenuList {
     let sig = model.rail_size_signal(side);
     MenuList::new()
-        .item(MenuItem::new(lit!("Default")).radio(0, sig.clone()))
-        .item(MenuItem::new(lit!("Compact")).radio(1, sig.clone()))
-        .item(MenuItem::new(lit!("Icon + Label")).radio(2, sig))
+        .item(MenuItem::new(tr_widget!(dock_size_default())).radio(0, sig.clone()))
+        .item(MenuItem::new(tr_widget!(dock_size_compact())).radio(1, sig.clone()))
+        .item(MenuItem::new(tr_widget!(dock_size_icon_label())).radio(2, sig))
 }
 
 /// Tab-display radio submenu, bound straight to the side's reactive tab-display
@@ -320,9 +330,9 @@ fn rail_size_submenu(model: &DockingModel, side: DockSide) -> MenuList {
 fn tab_size_submenu(model: &DockingModel, side: DockSide) -> MenuList {
     let sig = model.tab_display_signal(side);
     MenuList::new()
-        .item(MenuItem::new(lit!("Text")).radio(0, sig.clone()))
-        .item(MenuItem::new(lit!("Icon")).radio(1, sig.clone()))
-        .item(MenuItem::new(lit!("Icon + Text")).radio(2, sig))
+        .item(MenuItem::new(tr_widget!(dock_display_text())).radio(0, sig.clone()))
+        .item(MenuItem::new(tr_widget!(dock_display_icon())).radio(1, sig.clone()))
+        .item(MenuItem::new(tr_widget!(dock_display_icon_text())).radio(2, sig))
 }
 
 #[cfg(test)]

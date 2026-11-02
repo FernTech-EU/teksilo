@@ -470,3 +470,105 @@ shortcut-code-toggle-comment = Přepnout komentář
 shortcut-code-duplicate = Duplikovat
 shortcut-category-format = Formát
 shortcut-category-code = Kód
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Levý panel
+dock-side-right = Pravý panel
+dock-side-top = Horní panel
+dock-side-bottom = Dolní panel
+dock-rail-left = Levý panel aktivit
+dock-rail-right = Pravý panel aktivit
+dock-rail-top = Horní panel aktivit
+dock-rail-bottom = Dolní panel aktivit
+dock-rail-actions-left =
+    { $placement ->
+        [start] Levý panel aktivit: akce (nahoře)
+        [pinned] Levý panel aktivit: akce (dole)
+       *[end] Levý panel aktivit: akce
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Pravý panel aktivit: akce (nahoře)
+        [pinned] Pravý panel aktivit: akce (dole)
+       *[end] Pravý panel aktivit: akce
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Horní panel aktivit: akce (nahoře)
+        [pinned] Horní panel aktivit: akce (dole)
+       *[end] Horní panel aktivit: akce
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Dolní panel aktivit: akce (nahoře)
+        [pinned] Dolní panel aktivit: akce (dole)
+       *[end] Dolní panel aktivit: akce
+    }
+dock-rail-named = Panel aktivit „{ $label }“
+dock-rail-actions-named =
+    { $placement ->
+        [start] Panel aktivit „{ $label }“: akce (nahoře)
+        [pinned] Panel aktivit „{ $label }“: akce (dole)
+       *[end] Panel aktivit „{ $label }“: akce
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Vlevo
+dock-move-right = Vpravo
+dock-move-top = Nahoru
+dock-move-bottom = Dolů
+dock-actions-name = Akce: { $title }
+dock-more-actions-name = Další akce: { $title }
+dock-hide-activity = Skrýt „{ $name }“
+dock-move-to = Přesunout do
+dock-move-to-new-activity = Přesunout do nové aktivity
+dock-move-to-side = Přesunout na stranu
+dock-activity-bar-size = Velikost panelu aktivit
+dock-tab-size = Velikost karet
+dock-size-default = Výchozí
+dock-size-compact = Kompaktní
+dock-size-icon-label = Ikona a popisek
+dock-display-text = Text
+dock-display-icon = Ikona
+dock-display-icon-text = Ikona a text
+dock-fallback-title = Panel
+dock-hidden-activities = Skryté aktivity
+dock-drop-here = Sem přetáhněte panel
+dock-missing-content = (chybí obsah)
+dock-more-panels = Další panely
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Zobrazit nabídku
+tab-bar-scroll-left = Posunout karty doleva
+tab-bar-scroll-right = Posunout karty doprava
+tab-bar-scroll-up = Posunout karty nahoru
+tab-bar-scroll-down = Posunout karty dolů
+tab-bar-show-all = Zobrazit všechny karty
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Sloupcový graf, { $series ->
+        [one] { $series } řada
+        [few] { $series } řady
+        [many] { $series } řady
+       *[other] { $series } řad
+    }, { $categories ->
+        [one] { $categories } kategorie
+        [few] { $categories } kategorie
+        [many] { $categories } kategorie
+       *[other] { $categories } kategorií
+    }
+chart-line-summary =
+    Spojnicový graf, { $series ->
+        [one] { $series } řada
+        [few] { $series } řady
+        [many] { $series } řady
+       *[other] { $series } řad
+    }
+chart-pie-summary =
+    Výsečový graf, { $slices ->
+        [one] { $slices } výseč
+        [few] { $slices } výseče
+        [many] { $slices } výseče
+       *[other] { $slices } výsečí
+    }
+chart-legend-name = Legenda grafu

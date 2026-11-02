@@ -1597,6 +1597,17 @@ pub fn run_settle(
         let proposal = tree.last_proposal();
         tree.layout_with_ops(proposal, ops);
     }
+    // The post-mount actions the app loop drains each iteration
+    // (`process_pending_mount_actions`): a widget that moves focus after its
+    // build (`DockingModel::focus_dock`) does it there, and a settled reply
+    // must already show it.
+    if tree.has_pending_mount_actions() {
+        tree.run_mount_actions(ops);
+        if settle.layout_after {
+            let proposal = tree.last_proposal();
+            tree.layout_with_ops(proposal, ops);
+        }
+    }
     tree.sync_accessibility();
     // `pub`, and called directly by the headless tree-thread and the live
     // bridge as well as from `execute`. Hand the clock back here too, so a

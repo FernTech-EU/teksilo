@@ -1067,6 +1067,29 @@ impl<'a> BuildContext<'a> {
         self.tree.focus(id);
     }
 
+    /// The window's focused widget, as a signal: any widget, not the one
+    /// being built (`None` while nothing in the window has focus). The
+    /// build-time door to
+    /// [`WidgetTree::focused_signal`](crate::widget_tree::WidgetTree::focused_signal).
+    ///
+    /// For a container that remembers where focus was inside it, to put it
+    /// back there later: observe it with [`effect`](Self::effect), and check
+    /// a remembered id with [`is_descendant_of`](Self::is_descendant_of) before
+    /// using it, since the widget may have been destroyed since.
+    pub fn focused_signal(&self) -> Signal<Option<WidgetId>> {
+        self.tree.focused_signal()
+    }
+
+    /// Whether `id` is `ancestor` or one of its descendants. `false` for an id
+    /// that is no longer in the tree (unless it is `ancestor` itself).
+    ///
+    /// A node added during the current `build()` is not linked to the widget
+    /// being built until that build returns, so ask about the subtree below an
+    /// id, which is complete, rather than about the chain above it.
+    pub fn is_descendant_of(&self, id: WidgetId, ancestor: WidgetId) -> bool {
+        self.tree.is_descendant_of(id, ancestor)
+    }
+
     /// Find the first focusable widget within the subtree rooted at
     /// `root` in depth-first order. Returns `None` when the subtree has
     /// no focusable descendant or `root` is not in the arena.

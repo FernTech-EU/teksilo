@@ -2599,6 +2599,33 @@ mod tests_scope {
         assert_ne!(tree.focused(), Some(outside1));
         assert_ne!(tree.focused(), Some(outside2));
     }
+    /// A handler or a post-mount action can tell whether a modal is open, so
+    /// it can refuse to move focus under the modal's scrim.
+    #[test]
+    fn an_event_context_says_whether_a_modal_is_open() {
+        let mut tree = WidgetTree::new();
+        let outside = tree.add(FillWidget::new().focusable());
+        let m1 = tree.add(FillWidget::new().focusable());
+        let content = tree.add(StackWidget::new().child(m1));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let ask = |tree: &mut WidgetTree| {
+            let seen = std::rc::Rc::new(std::cell::Cell::new(None));
+            let out = seen.clone();
+            tree.run_with_event_context(&mut crate::window::NoopWindowOps, move |ctx| {
+                out.set(Some(ctx.is_modal_open()));
+            });
+            seen.get()
+        };
+        assert_eq!(ask(&mut tree), Some(false));
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            content,
+            outside,
+            crate::overlay::OverlayPlacement::Centered,
+            crate::overlay::DismissBehavior::Manual,
+        ));
+        assert_eq!(ask(&mut tree), Some(true));
+    }
+
 }
 
 #[cfg(test)]

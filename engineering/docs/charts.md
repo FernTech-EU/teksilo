@@ -931,9 +931,14 @@ for donut fills.
 
 ## 12. Accessibility
 
-Each chart declares `Role::GraphicsDocument` with a name that
-describes the shape (`"Bar chart: 3 series, 4 categories"`,
-`"Line chart: 2 series, 12 points"`, `"Pie chart: 5 slices"`).
+Each chart declares `Role::GraphicsDocument` with no name of its own:
+an application names it with `.access_label`. Its description counts
+what it shows, translated (`chart-bar-summary`, `chart-line-summary`,
+`chart-pie-summary` in teksilo-widgets' catalogue), the kind first: "Bar
+chart, 3 series, 4 categories", "Line chart, 2 series" (a line chart does
+not count its points, which a live chart gains on every tick, and a
+changed description is read out again), "Pie chart, 5 slices". Hidden
+series are not counted.
 
 **Per-datum AT nodes.** Every visible bar / line point / pie slice is
 also its own synthetic child node — `Role::GraphicsObject`, name

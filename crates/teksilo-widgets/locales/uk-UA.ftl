@@ -469,3 +469,105 @@ shortcut-code-toggle-comment = Перемкнути коментар
 shortcut-code-duplicate = Дублювати
 shortcut-category-format = Формат
 shortcut-category-code = Код
+
+# DockingLayout side regions (crates/teksilo-widgets/src/docking/a11y.rs):
+# named for where the side is on screen, mirrored in right-to-left.
+dock-side-left = Ліва панель
+dock-side-right = Права панель
+dock-side-top = Верхня панель
+dock-side-bottom = Нижня панель
+dock-rail-left = Ліва панель дій
+dock-rail-right = Права панель дій
+dock-rail-top = Верхня панель дій
+dock-rail-bottom = Нижня панель дій
+dock-rail-actions-left =
+    { $placement ->
+        [start] Ліва панель дій: команди (угорі)
+        [pinned] Ліва панель дій: команди (унизу)
+       *[end] Ліва панель дій: команди
+    }
+dock-rail-actions-right =
+    { $placement ->
+        [start] Права панель дій: команди (угорі)
+        [pinned] Права панель дій: команди (унизу)
+       *[end] Права панель дій: команди
+    }
+dock-rail-actions-top =
+    { $placement ->
+        [start] Верхня панель дій: команди (угорі)
+        [pinned] Верхня панель дій: команди (унизу)
+       *[end] Верхня панель дій: команди
+    }
+dock-rail-actions-bottom =
+    { $placement ->
+        [start] Нижня панель дій: команди (угорі)
+        [pinned] Нижня панель дій: команди (унизу)
+       *[end] Нижня панель дій: команди
+    }
+dock-rail-named = Панель дій «{ $label }»
+dock-rail-actions-named =
+    { $placement ->
+        [start] Панель дій «{ $label }»: команди (угорі)
+        [pinned] Панель дій «{ $label }»: команди (унизу)
+       *[end] Панель дій «{ $label }»: команди
+    }
+# DockingLayout menus and dock headers (docking/context_menu.rs, panel.rs, activity_bar.rs).
+dock-move-left = Ліворуч
+dock-move-right = Праворуч
+dock-move-top = Угору
+dock-move-bottom = Донизу
+dock-actions-name = Команди: { $title }
+dock-more-actions-name = Інші команди: { $title }
+dock-hide-activity = Сховати «{ $name }»
+dock-move-to = Перемістити
+dock-move-to-new-activity = Перемістити в нову активність
+dock-move-to-side = Перемістити на бік
+dock-activity-bar-size = Розмір панелі дій
+dock-tab-size = Розмір вкладок
+dock-size-default = Типовий
+dock-size-compact = Компактний
+dock-size-icon-label = Значок і підпис
+dock-display-text = Текст
+dock-display-icon = Значок
+dock-display-icon-text = Значок і текст
+dock-fallback-title = Панель
+dock-hidden-activities = Приховані активності
+dock-drop-here = Перетягніть панель сюди
+dock-missing-content = (немає вмісту)
+dock-more-panels = Інші панелі
+# SplitButton and TabBar (split_button.rs, tab_widget/bar.rs).
+split-button-show-menu = Показати меню
+tab-bar-scroll-left = Прокрутити вкладки ліворуч
+tab-bar-scroll-right = Прокрутити вкладки праворуч
+tab-bar-scroll-up = Прокрутити вкладки вгору
+tab-bar-scroll-down = Прокрутити вкладки вниз
+tab-bar-show-all = Показати всі вкладки
+# teksilo-charts: BarChart, LineChart, PieChart, ChartLegend. These keys
+# are also in crates/teksilo-charts/locales/en-US.ftl, which must match.
+chart-bar-summary =
+    Стовпчикова діаграма, { $series ->
+        [one] { $series } ряд
+        [few] { $series } ряди
+        [many] { $series } рядів
+       *[other] { $series } ряду
+    }, { $categories ->
+        [one] { $categories } категорія
+        [few] { $categories } категорії
+        [many] { $categories } категорій
+       *[other] { $categories } категорії
+    }
+chart-line-summary =
+    Лінійний графік, { $series ->
+        [one] { $series } ряд
+        [few] { $series } ряди
+        [many] { $series } рядів
+       *[other] { $series } ряду
+    }
+chart-pie-summary =
+    Кругова діаграма, { $slices ->
+        [one] { $slices } сектор
+        [few] { $slices } сектори
+        [many] { $slices } секторів
+       *[other] { $slices } сектора
+    }
+chart-legend-name = Легенда діаграми

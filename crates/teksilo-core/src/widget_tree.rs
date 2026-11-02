@@ -3279,6 +3279,12 @@ impl WidgetTree {
 
     /// Set the layout direction (LTR/RTL). Marks all widgets as needing layout.
     pub fn set_layout_direction(&mut self, direction: crate::environment::LayoutDirection) {
+        // A name can depend on the direction (a docking side is "Left panel"
+        // or "Right panel" by where it is drawn), and a relayout alone does
+        // not re-walk the accessibility tree.
+        if self.layout_direction != direction {
+            self.a11y_dirty = true;
+        }
         self.layout_direction = direction;
         self.arena.mark_all_dirty();
     }

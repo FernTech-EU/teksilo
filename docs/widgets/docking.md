@@ -47,6 +47,7 @@ cloneable, serializable `DockingModel`.
 | `Self` | [`rail(rail: DockRail)`](#dockinglayout-rail) |
 | `Self` | [`rails(rails: impl IntoIterator<Item = DockRail>)`](#dockinglayout-rails) |
 | `Self` | [`center(widget: impl teksilo_core::IntoTeksiChild)`](#dockinglayout-center) |
+| `Self` | [`side_label(side: DockSide, label: impl Into<LocalizedString>)`](#dockinglayout-side_label) |
 | `Self` | [`policy(policy: DockPolicy)`](#dockinglayout-policy) |
 | `Self` | [`disable_side(side: DockSide)`](#dockinglayout-disable_side) |
 | `Self` | [`dock(dock: DockWidget)`](#dockinglayout-dock) |
@@ -214,6 +215,7 @@ cloneable, serializable `DockingModel`.
 |  | [`close_dock(id: DockWidgetId)`](#dockingmodel-close_dock) |
 |  | [`toggle_dock(id: DockWidgetId)`](#dockingmodel-toggle_dock) |
 |  | [`reveal_dock(id: DockWidgetId)`](#dockingmodel-reveal_dock) |
+|  | [`focus_dock(id: DockWidgetId)`](#dockingmodel-focus_dock) |
 | `bool` | [`is_dock_open(id: DockWidgetId)`](#dockingmodel-is_dock_open) |
 | `Option<DockLoc>` | [`dock_location(id: DockWidgetId)`](#dockingmodel-dock_location) |
 | `Signal<bool>` | [`dock_open_signal(id: DockWidgetId)`](#dockingmodel-dock_open_signal) |
@@ -270,6 +272,36 @@ flush with that edge keeps its whole ring. Content that overflows the
 centre can therefore paint up to that margin, about 6 dp, past it: into
 a side's resize-handle gutter, or past the layout's own edge where a side
 is hidden.
+
+### Keyboard order
+
+Tab moves through the dock in reading order: the top panel, the leading
+side, the centre, the trailing side, the bottom panel. Leading and
+trailing are logical sides, drawn mirrored in right-to-left, so the same
+order reads from the right there. Within a side Tab takes its activity
+bar, panel and resize handle in the order they are drawn: rail, panel,
+handle on the leading and top sides; handle, panel, rail on the trailing
+side; handle, rail, panel at the bottom. A screen reader's browse mode
+and landmark list meet the sides in the same order.
+
+The dock is one Tab group among the window's controls, and each region
+is a group inside it: a `tab_index` an application sets on a control in
+a dock orders it only within that dock's region. The dock's first
+control is the top or leading panel's, so a fallback that focuses the
+dock's first control (a modal window with no focus hint) lands there;
+give the editor an `initial_focus_hint` to start in the centre.
+
+### Revealing and focusing a dock
+
+`DockingModel::reveal_dock` shows a dock and leaves keyboard focus
+where it is: for "show me this result", where the user keeps typing.
+`DockingModel::focus_dock` is for a "focus this panel" command: it
+reveals the dock, shows its activity and expands its pane if needed,
+moves focus to the control that last had it inside the dock (the one at
+the same place, when the dock's content was rebuilt since; else the
+dock's first control), and a screen reader hears the dock's title. It
+acts within the layout's own window; while a modal is open there it still
+reveals the dock, but moves no focus and says nothing.
 
 ## Density
 
@@ -333,6 +365,18 @@ a later entry for a side already configured replaces it.
 #### `pub fn center(mut self, widget: impl teksilo_core::IntoTeksiChild) -> Self`
 
 Set the always-present centre content (the app's main area).
+
+<a id="dockinglayout-side_label"></a>
+
+#### `pub fn side_label(self, side: DockSide, label: impl Into<LocalizedString>) -> Self`
+
+Name a side region for assistive technology: its `Role::Complementary`
+landmark and, from it, its activity bar, its action groups and its
+entry in the "Move to" menus. Replaces the stock "Left panel", "Right
+panel", "Top panel" and "Bottom panel", which follow where the side is
+on screen (mirrored in right-to-left). A `tr!` label follows a locale
+switch like any other. Set at construction; not persisted, like
+`DockPolicy`.
 
 <a id="dockinglayout-policy"></a>
 
@@ -1231,6 +1275,32 @@ Toggle a dock: close it if open, else open it on its default location.
 #### `pub fn reveal_dock(&self, id: DockWidgetId)`
 
 Reveal a dock: ensure it is open, show + select its side / tab.
+
+<a id="dockingmodel-focus_dock"></a>
+
+#### `pub fn focus_dock(&self, id: DockWidgetId)`
+
+Reveal the dock and move keyboard focus into its content: the control
+that last had focus inside it, else its first focusable control, else
+its header, tab or rail item. When the dock's content was rebuilt
+since (revealing a hidden side rebuilds it), "that control" is the one
+at the same place among the content's controls in Tab order. A screen reader
+hears the dock's title after the control focus lands on, unless that
+control already says it.
+
+For a "focus this panel" command (View > Explorer). Unlike
+`reveal_dock`, which shows a dock and leaves focus
+where it is, it also shows a hidden activity and expands the dock's
+pane when it is collapsed.
+
+The mounted `DockingLayout` moves the focus after its next layout,
+within its own window, which it does not raise. While a modal is open
+in that window the dock is still revealed (its activity shown, its pane
+expanded), but focus does not move and the title is not announced; the
+request is dropped, not kept for when the modal closes. Nothing at all
+happens for an unknown id or a dock on a disabled side, and a request
+made before the layout is mounted reveals the dock and moves nothing.
+Of two requests before the next layout, the later one wins.
 
 <a id="dockingmodel-is_dock_open"></a>
 

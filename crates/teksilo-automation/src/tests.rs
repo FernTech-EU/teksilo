@@ -5608,3 +5608,56 @@ fn op_with(node: u64, origin: ImeOriginDto) -> AutomationOp {
         origin,
     }
 }
+
+/// A widget that moves focus after its build, from a post-mount action, as
+/// `DockingModel::focus_dock` does: each bump of `request` rebuilds it, and
+/// the rebuild asks for focus on `target`.
+#[derive(Debug)]
+struct FocusAfterMount {
+    request: Signal<u64>,
+    target: WidgetId,
+}
+
+impl Widget for FocusAfterMount {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        self.request
+            .bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
+        if self.request.get() > 0 {
+            let target = self.target;
+            ctx.run_after_mount(move |ectx| ectx.request_focus(target));
+        }
+        Vec::new()
+    }
+
+    fn layout_response(&self, _proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        teksilo_canvas::Size::ZERO.into()
+    }
+}
+
+/// The app loop drains post-mount actions each iteration; a settle must too,
+/// or a focus move made there (`focus_dock` through the MCP server or the
+/// probe harness) never happens in a headless tree, and a live bridge's reply
+/// is read before it.
+#[test]
+fn a_settle_runs_the_post_mount_actions() {
+    let mut tree = WidgetTree::new();
+    let target = tree.add(Probe::new(accesskit::Role::Button, "Target"));
+    let request = Signal::new(0_u64);
+    tree.add(FocusAfterMount {
+        request: request.clone(),
+        target,
+    });
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_ne!(tree.focused(), Some(target));
+    request.set(1);
+    let mut ops = RecordingWindowOps::new();
+    let reply = execute(
+        &mut tree,
+        &mut ops,
+        &AutomationOp::Settle,
+        &default_settle(),
+    );
+    assert!(reply.is_ok());
+    assert_eq!(tree.focused(), Some(target), "the queued focus move ran");
+    assert!(!tree.has_pending_mount_actions());
+}

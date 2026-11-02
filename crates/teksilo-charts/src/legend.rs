@@ -640,7 +640,7 @@ impl<T: Clone + 'static> Widget for ChartLegend<T> {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::List);
-        builder.set_name("Chart legend");
+        builder.set_name(teksilo_i18n::tr_widget!(chart_legend_name()).resolve_now());
     }
 
     fn children(&self) -> Vec<WidgetId> {
