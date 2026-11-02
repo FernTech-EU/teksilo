@@ -34,6 +34,7 @@ use std::rc::Rc;
 use teksilo::core::build_context::BuildContext;
 use teksilo::core::signal::Signal;
 use teksilo::core::widget::Widget;
+use teksilo::core::widget_builder::WidgetBuilder;
 use teksilo::core::widget_id::WidgetId;
 use teksilo::data::{DataChange, ListModel, SelectionMode, SelectionModel};
 use teksilo::i18n::lit;
@@ -171,7 +172,7 @@ pub fn list_row(ctx: &mut BuildContext, state: &PlaygroundState) -> WidgetId {
         "contenders: the scroller's pan claim · the row's reorder drag · the row's selection",
         "Finger: drag to scroll. Hold a row, then drag, to reorder it. Tap to select. \
          Mouse: drag reorders straight away; the wheel scrolls.",
-        MinSize::new(0.0, 200.0).child(view),
+        MinSize::new(0.0, 200.0).child(view.access_label(lit!("Reorderable list"))),
     )
 }
 
@@ -389,7 +390,7 @@ pub fn nested(ctx: &mut BuildContext, state: &PlaygroundState) -> WidgetId {
         VStack::new()
             .spacing(10.0)
             .children((1..=4).map(|i| TextWidget::new(lit!(format!("outer line {i}")))))
-            .child(MinSize::new(0.0, 150.0).child(inner))
+            .child(MinSize::new(0.0, 150.0).child(inner.access_label(lit!("Inner list"))))
             .children((5..=16).map(|i| TextWidget::new(lit!(format!("outer line {i}"))))),
     );
     {

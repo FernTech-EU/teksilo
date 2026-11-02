@@ -188,7 +188,8 @@ impl Root {
                     .exportable(DragTransferMode::Copy)
                     .export_external(|items| {
                         vec![("text/plain".to_string(), items.join("\n").into_bytes())]
-                    }),
+                    })
+                    .access_label(lit!("Library")),
                 ),
             )
     }
@@ -240,7 +241,8 @@ impl Root {
                         }
                     })
                     // … and let a playlist row be *moved* out (e.g. to Trash).
-                    .exportable(DragTransferMode::Move),
+                    .exportable(DragTransferMode::Move)
+                    .access_label(lit!("Playlist")),
                 ),
             )
             // Multi-zone drop target: a song dragged from the Library (a Copy
@@ -337,7 +339,8 @@ impl Root {
                                             .selected(selected),
                                     )
                                 })
-                                .item_height(28.0),
+                                .item_height(28.0)
+.access_label(lit!("Up next")),
                             ),
                         ),
                 ),
@@ -405,7 +408,8 @@ impl Root {
                     .item_height(28.0)
                     .selection(selection)
                     .reorderable(true)
-                    .row_click_expands(false),
+                    .row_click_expands(false)
+.access_label(lit!("Folders")),
                 ),
             )
     }

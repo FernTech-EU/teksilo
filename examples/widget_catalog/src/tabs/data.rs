@@ -59,7 +59,7 @@ fn repeater_widget() -> Repeater<String> {
     .spacing(2.0)
 }
 
-fn list_view_widget() -> ListView<String> {
+fn list_view_widget() -> impl Widget + 'static {
     // Wire a selection model + reflect `selected` in the row, like the
     // TreeView below — otherwise arrow-key navigation moves the focus index
     // but nothing highlights (only the container focus ring shows).
@@ -67,6 +67,7 @@ fn list_view_widget() -> ListView<String> {
         Box::new(StandardListItem::new(lit!(item.clone())).selected(selected))
     })
     .selection(SelectionModel::new(SelectionMode::Single))
+    .access_label(lit!("Items"))
 }
 
 // ── TreeView (data_collections) ───────────────────────────────────────
@@ -95,6 +96,7 @@ fn tree_view_widget() -> impl Widget + 'static {
     })
     .item_height(28.0)
     .selection(SelectionModel::new(SelectionMode::Single))
+    .access_label(lit!("Folders"))
 }
 
 // ── TableView (data_grid) ─────────────────────────────────────────────
@@ -133,6 +135,7 @@ fn table_view_widget() -> impl Widget + 'static {
             Box::new(move |row: &Person| row.name.to_lowercase().contains(&needle))
         });
     let table = TableView::from_source(proxy.clone())
+        .a11y_label(lit!("Employees"))
         .add_column(
             Column::<Person>::new("name", lit!("Name"), |row, _: &CellContext| {
                 Box::new(TextWidget::new(lit!(row.name.clone())))
@@ -213,6 +216,7 @@ fn tree_table_widget() -> impl Widget + 'static {
         .with_comparator("name", |a: &FsNode, b: &FsNode| a.name.cmp(&b.name))
         .with_comparator("size", |a, b| a.size.cmp(&b.size));
     let table = TreeTableView::from_projection(proxy.clone())
+        .a11y_label(lit!("File system"))
         .add_column(
             Column::<FsNode>::new("name", lit!("Name"), |row, _: &CellContext| {
                 Box::new(TextWidget::new(lit!(row.name.clone())))

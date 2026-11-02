@@ -399,7 +399,8 @@ impl Root {
                 // delegate's structure (even rows are two-line).
                 .item_height_fn(|i| if i % 2 == 0 { 64.0 } else { 40.0 })
                 .selection(selection)
-                .reorderable(true),
+                .reorderable(true)
+                .access_label(lit!("Exact height list")),
             )
     }
 
@@ -464,7 +465,8 @@ impl Root {
                 // come from measuring each realized row's content.
                 .auto_item_height(48.0)
                 .spacing(2.0)
-                .selection(selection),
+                .selection(selection)
+                .access_label(lit!("Variable height list")),
             )
     }
 
@@ -563,7 +565,8 @@ impl Root {
                         ),
                     )
                 })
-                .pinned_section_headers(true),
+                .pinned_section_headers(true)
+                .access_label(lit!("Songs by artist")),
             )
     }
 
@@ -655,7 +658,8 @@ impl Root {
                 .auto_item_height(28.0)
                 .selection(selection)
                 .reorderable(true)
-                .row_click_expands(false),
+                .row_click_expands(false)
+                .access_label(lit!("Tree")),
             )
     }
 }

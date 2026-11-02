@@ -261,3 +261,29 @@ fn a_row_of_a_list_in_a_disabled_container_takes_no_assistive_focus() {
     assert_eq!(handle.cursor(), None, "the cursor did not move");
     assert_eq!(tree.focused(), None, "the keyboard went nowhere");
 }
+
+/// `.access_label` on a list names the `Role::ListBox` node itself, not a
+/// wrapper around it.
+#[test]
+fn access_label_names_the_list_box_node() {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let model = ListModel::from_vec((0..3).collect::<Vec<usize>>());
+    let view = ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 20.0)))
+        .item_height(20.0)
+        .access_label("Songs");
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(view);
+    tree.layout(viewport());
+    let update = tree.sync_accessibility();
+    let named: Vec<_> = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.label() == Some("Songs"))
+        .collect();
+    assert_eq!(named.len(), 1);
+    assert_eq!(named[0].1.role(), teksilo_core::accesskit::Role::ListBox);
+    assert_eq!(
+        named[0].0,
+        teksilo_core::accessibility::widget_id_to_node_id(lv)
+    );
+}

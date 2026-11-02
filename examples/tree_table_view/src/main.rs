@@ -164,6 +164,7 @@ fn main() {
                 .root(move |tree, _| {
                     let proxy_for_table = proxy.clone();
                     let table = TreeTableView::from_projection(proxy_for_table.clone())
+                        .a11y_label(lit!("File system"))
                         .add_column(
                             Column::<FsNode>::new("name", lit!("Name"), |row, _: &CellContext| {
                                 // Name plus the optional multi-line

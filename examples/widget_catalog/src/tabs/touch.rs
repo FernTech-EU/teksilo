@@ -120,7 +120,8 @@ fn pan_and_reorder() -> MinSize {
         ListView::new(model, |_i, item: &String, _selected| {
             Box::new(StandardListItem::new(lit!(item.clone())))
         })
-        .reorderable(true),
+        .reorderable(true)
+        .access_label(lit!("Items")),
     )
 }
 

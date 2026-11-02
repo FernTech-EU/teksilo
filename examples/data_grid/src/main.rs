@@ -221,6 +221,7 @@ fn main() {
         .initial_window(WindowConfig::new().title("Data Grid").size(1100, 640).root(
             move |tree, _| {
                 let mut table = TableView::from_source(proxy.clone())
+                    .a11y_label(lit!("Employees"))
                     .add_column(id_column())
                     .add_column(name_column())
                     .add_column(email_column())
