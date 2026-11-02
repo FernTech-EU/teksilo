@@ -4384,3 +4384,22 @@ mod reveal_handle;
 
 /// The keyboard cursor through `GridViewHandle`.
 mod cursor_handle;
+
+#[test]
+fn export_os_handoff_reaches_the_row_export() {
+    let model = ListModel::from_vec(vec![1_u32, 2, 3]);
+    let grid = GridView::new(model, |_tc| Box::new(FixedLeaf(100.0, 50.0)));
+    assert_eq!(
+        grid.export.os_handoff,
+        teksilo_core::OsHandoff::AtWindowEdge
+    );
+    let grid = grid
+        .export_external(|items: &[u32]| {
+            vec![(
+                "text/plain".to_string(),
+                format!("{}", items.len()).into_bytes(),
+            )]
+        })
+        .export_os_handoff(teksilo_core::OsHandoff::Eager);
+    assert_eq!(grid.export.os_handoff, teksilo_core::OsHandoff::Eager);
+}

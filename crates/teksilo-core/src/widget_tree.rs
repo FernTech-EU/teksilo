@@ -746,6 +746,21 @@ pub struct WidgetTree {
     /// plain internal drag so leaving again re-stashes instead of starting a
     /// second OS drag, and dropping doesn't double-fire `on_drag_ended`.
     pub(crate) os_drag_reentered: bool,
+    /// True while the platform has been asked to start a native drag for the
+    /// in-app `active_drag` and answered
+    /// [`OsDragStart::Pending`](crate::OsDragStart::Pending): the in-app session
+    /// stays alive (preview, capture, hover) until the platform confirms the
+    /// start, and a release meanwhile ends the drag as `Cancelled`.
+    pub(crate) os_drag_pending: Option<crate::drag_payload::OsDragId>,
+    /// The id of the native drag this window started and handed its session
+    /// to after a confirmed [`OsDragStart::Pending`](crate::OsDragStart::Pending),
+    /// so a tagged end of another drag is not taken for this one's. `None`
+    /// for a drag the platform started at once (it posts untagged events).
+    pub(crate) outbound_drag_id: Option<crate::drag_payload::OsDragId>,
+    /// The in-app outcome of our own OS drag dropped back on the window that
+    /// started it, held until the platform's terminal `DragEnded` so the
+    /// source hears `InApp { accepted }` instead of the platform's `OsCopy`.
+    pub(crate) reentered_drop_outcome: Option<crate::drag_payload::DropOutcome>,
     /// The accept state last pushed to the platform for an inbound OS drag, so
     /// the same answer is not re-sent on every motion sample.
     ///
@@ -1178,6 +1193,9 @@ impl WidgetTree {
             active_drag: None,
             outbound_drag_source: None,
             os_drag_reentered: false,
+            os_drag_pending: None,
+            outbound_drag_id: None,
+            reentered_drop_outcome: None,
             os_drop_accepted: None,
             title_bar_host: None,
             app_context: Rc::new(crate::event_source::TreeAppContext::empty()),

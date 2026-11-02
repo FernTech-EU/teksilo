@@ -7027,3 +7027,21 @@ fn an_int_ui_table_follows_the_density_ladder() {
         );
     }
 }
+
+#[test]
+fn export_os_handoff_reaches_the_row_export() {
+    let view = TableView::new(rows(3));
+    assert_eq!(
+        view.export.os_handoff,
+        teksilo_core::OsHandoff::AtWindowEdge
+    );
+    let view = view
+        .export_external(|items: &[Row]| {
+            vec![(
+                "text/plain".to_string(),
+                format!("{}", items.len()).into_bytes(),
+            )]
+        })
+        .export_os_handoff(teksilo_core::OsHandoff::Eager);
+    assert_eq!(view.export.os_handoff, teksilo_core::OsHandoff::Eager);
+}

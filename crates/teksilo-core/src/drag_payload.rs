@@ -46,6 +46,106 @@ pub enum DropOutcome {
     Cancelled,
 }
 
+/// When an OS-exportable in-app drag is handed to the platform as a native
+/// drag. Set on the payload with [`DragPayload::with_os_handoff`], or on a data
+/// view with its `export_os_handoff` builder.
+///
+/// Has no effect on a payload that carries nothing an OS drag could export
+/// ([`DragPayload::is_os_exportable`] is `false`): such a drag stays in the
+/// application whatever this says.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OsHandoff {
+    /// Hand the drag to the platform when the pointer leaves the source
+    /// window. Until then it is an in-app drag, with its preview, and a drop
+    /// inside the window is an in-app drop. The default.
+    #[default]
+    AtWindowEdge,
+    /// Hand the drag to the platform on the first pointer move after the drag
+    /// starts, even while the pointer is still over the source window, so the
+    /// platform decides which window is under it.
+    ///
+    /// This is what a file export needs when the destination window can lie
+    /// wholly inside the source window's rectangle (a file manager in front
+    /// of a virtual machine's screen): the source window keeps receiving the
+    /// pointer while the drag is in-app, so it can never see the pointer leave,
+    /// and only the platform knows that another window is in front.
+    ///
+    /// What it costs:
+    ///
+    /// - No in-app drag preview once the platform has the drag: the platform
+    ///   draws its own drag image.
+    /// - A drop on the source window, or on another window of the
+    ///   application, goes through the platform and back, so in-app hover
+    ///   feedback during the drag depends on the platform delivering the
+    ///   application's own drag back to it.
+    /// - The handoff is asked for on the first real pointer move, and commits
+    ///   only once the platform has started the native drag. A release before
+    ///   that ends the drag as [`DropOutcome::Cancelled`], with no drop.
+    ///
+    /// A drop back on the source window reports [`DropOutcome::InApp`] to the
+    /// source, so a data view exporting with
+    /// `DragTransferMode::Move` still removes the rows it moved to another view
+    /// of the same window. A drop on another window of the application reports
+    /// the platform's outcome ([`DropOutcome::OsCopy`]).
+    ///
+    /// Verification status: headless tests cover the widget tree's side, with
+    /// a memory backend; the native paths have not been verified on any
+    /// desktop yet. The desktop passes are listed in `docs/drag-and-drop.md`
+    /// §11.5.
+    Eager,
+}
+
+/// Identifies one native drag a platform backend starts on its own loop, so
+/// that the events it posts about it later (its start, its end) are not
+/// credited to another drag: one released before its start, whose late
+/// events arrive while the next drag is waiting for its own.
+///
+/// A backend takes a fresh one with [`OsDragId::next`] when it answers
+/// [`OsDragStart::Pending`], and tags the drag's events with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OsDragId(u64);
+
+impl OsDragId {
+    /// A fresh id, unique in the process.
+    pub fn next() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        Self(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
+
+    /// The number behind the id, for logs.
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+/// What the platform did with a request to start a native OS drag
+/// ([`WindowOps::begin_os_drag`](crate::window::WindowOps::begin_os_drag)).
+///
+/// Some platforms start a native drag synchronously, inside the request
+/// (macOS); others start it a little later on their own loop (Wayland, X11, and
+/// Windows, whose drag loop is modal and cannot run inside the dispatch that
+/// asked for it). The in-app drag session must stay alive until the platform
+/// really has the pointer, or a release in between finds no session and the
+/// drop is lost; this is how a backend says which case it is in.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OsDragStart {
+    /// Nothing started. The in-app drag continues, and a later pointer move may
+    /// ask again.
+    Declined,
+    /// The native drag is running: the platform has the pointer now. The
+    /// framework hands the in-app session over at once.
+    Started,
+    /// The platform accepted the request and will start the native drag on its
+    /// own loop. The in-app session stays alive until the platform confirms the
+    /// start ([`WidgetTree::confirm_os_drag`](crate::WidgetTree::confirm_os_drag)),
+    /// or reports that the drag ended without starting
+    /// ([`WidgetTree::handle_os_drag_ended_for`](crate::WidgetTree::handle_os_drag_ended_for)),
+    /// each naming the drag by this id.
+    Pending(OsDragId),
+}
+
 /// Flattened, OS-exportable view of a [`DragPayload`], handed to the platform
 /// backend when an in-app drag escalates to an OS drag at the window boundary.
 ///
@@ -281,6 +381,8 @@ pub struct DragPayload {
     origin: DragOrigin,
     /// Structured external-drop data (only for `DragOrigin::External`).
     external: Option<ExternalDropData>,
+    /// When an exportable drag is handed to the platform.
+    os_handoff: OsHandoff,
 }
 
 impl DragPayload {
@@ -291,6 +393,7 @@ impl DragPayload {
             mime_data: HashMap::new(),
             origin: DragOrigin::Internal,
             external: None,
+            os_handoff: OsHandoff::AtWindowEdge,
         }
     }
 
@@ -301,6 +404,7 @@ impl DragPayload {
             mime_data: HashMap::new(),
             origin: DragOrigin::Internal,
             external: None,
+            os_handoff: OsHandoff::AtWindowEdge,
         }
     }
 
@@ -337,6 +441,7 @@ impl DragPayload {
             mime_data,
             origin: DragOrigin::External,
             external: Some(data),
+            os_handoff: OsHandoff::AtWindowEdge,
         }
     }
 
@@ -379,9 +484,26 @@ impl DragPayload {
     }
 
     /// Add a MIME-typed byte representation.
+    ///
+    /// A payload with one is OS-exportable ([`Self::is_os_exportable`]): an
+    /// in-app drag carrying it is handed to the platform as a native drag when
+    /// [`Self::with_os_handoff`] says so.
     pub fn with_mime(mut self, mime_type: &str, data: Vec<u8>) -> Self {
         self.mime_data.insert(mime_type.to_string(), data);
         self
+    }
+
+    /// Choose when this drag is handed to the platform as a native drag, if it
+    /// is OS-exportable. The default is [`OsHandoff::AtWindowEdge`]. No effect
+    /// on a payload [`Self::is_os_exportable`] rejects.
+    pub fn with_os_handoff(mut self, handoff: OsHandoff) -> Self {
+        self.os_handoff = handoff;
+        self
+    }
+
+    /// When this drag is handed to the platform. See [`OsHandoff`].
+    pub fn os_handoff(&self) -> OsHandoff {
+        self.os_handoff
     }
 
     /// Populate the structured external view (`files` / `text` / `uris`) from
@@ -468,6 +590,7 @@ impl DragPayload {
     /// Whether this payload carries anything an OS drag could export. A drag
     /// becomes OS-exportable simply by populating `mime_data` (via
     /// [`Self::with_mime`]) or by carrying external file / text / URI data.
+    /// When it is handed to the platform is [`Self::os_handoff`].
     pub fn is_os_exportable(&self) -> bool {
         !self.mime_data.is_empty()
             || self
@@ -476,8 +599,9 @@ impl DragPayload {
                 .is_some_and(|e| !e.files.is_empty() || e.text.is_some() || !e.uris.is_empty())
     }
 
-    /// Extract the flattened, OS-exportable view used when an in-app drag
-    /// escalates to an OS drag at the window boundary.
+    /// Extract the flattened, OS-exportable view used when an in-app drag is
+    /// handed to the platform as an OS drag (at the window boundary, or
+    /// earlier with [`OsHandoff::Eager`]).
     ///
     /// Internal drags populate only `mime_data` (via [`Self::with_mime`]); the
     /// `files` / `text` / `uris` fields come from [`ExternalDropData`] and are
@@ -523,6 +647,7 @@ impl std::fmt::Debug for DragPayload {
             .field("has_typed", &self.typed.is_some())
             .field("mime_types", &self.mime_types())
             .field("files", &self.files())
+            .field("os_handoff", &self.os_handoff)
             .finish()
     }
 }
@@ -539,6 +664,23 @@ pub trait DragData: Any + std::fmt::Debug + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_constructor_hands_off_at_the_window_edge() {
+        assert_eq!(
+            DragPayload::typed(1_u8).os_handoff(),
+            OsHandoff::AtWindowEdge
+        );
+        assert_eq!(DragPayload::empty().os_handoff(), OsHandoff::AtWindowEdge);
+        assert_eq!(
+            DragPayload::external(ExternalDropData::default()).os_handoff(),
+            OsHandoff::AtWindowEdge
+        );
+        let eager = DragPayload::typed(1_u8)
+            .with_mime("text/plain", b"x".to_vec())
+            .with_os_handoff(OsHandoff::Eager);
+        assert_eq!(eager.os_handoff(), OsHandoff::Eager);
+    }
 
     #[derive(Debug, Clone, PartialEq)]
     struct ChapterDrag {

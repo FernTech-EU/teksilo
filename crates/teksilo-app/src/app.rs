@@ -3727,7 +3727,7 @@ impl TeksiloAppHandler {
         event_loop: &ActiveEventLoop,
     ) -> Result<(), Box<dyn std::any::Any + Send>> {
         use teksilo_platform::external_dnd::{
-            ExternalDndEventPayload, ExternalDndHandle, ExternalDragEvent, OutboundOsDragRequest,
+            ExternalDndEventPayload, ExternalDndHandle, OutboundOsDragRequest,
         };
 
         // Deferred blocking outbound (app → OS) drag: run OLE DoDragDrop here,
@@ -3741,7 +3741,13 @@ impl TeksiloAppHandler {
                     .app_context_template()
                     .and_then(|t| t.app_state::<ExternalDndHandle>().cloned())
                 {
-                    handle.run_pending_outbound_drag(req.window_id);
+                    // The start is confirmed right before the modal loop runs:
+                    // the window's tree hands its in-app session over then,
+                    // which an event posted from inside the loop could not do.
+                    let window_id = req.window_id;
+                    handle.run_pending_outbound_drag(window_id, &mut |drag| {
+                        self.confirm_os_drag_in(window_id, drag, event_loop);
+                    });
                 }
                 return Ok(());
             }
@@ -3773,32 +3779,46 @@ impl TeksiloAppHandler {
                 current_id,
                 current_arc,
             );
-            match payload.event {
-                ExternalDragEvent::Entered { data, position } => {
-                    current.tree.begin_external_drag(position, data, &mut ops);
-                }
-                ExternalDragEvent::Moved { position } => {
-                    current.tree.update_external_drag(position, &mut ops);
-                }
-                ExternalDragEvent::Left => {
-                    current.tree.cancel_external_drag(&mut ops);
-                }
-                ExternalDragEvent::Cancelled => {
-                    current.tree.abort_external_drag(&mut ops);
-                }
-                ExternalDragEvent::Dropped { data, position } => {
-                    current.tree.end_external_drag(position, data, &mut ops);
-                }
-                ExternalDragEvent::DragEnded { outcome } => {
-                    current.tree.handle_os_drag_ended(outcome, &mut ops);
-                }
-            }
+            crate::input_routing::apply_external_drag_event(
+                &mut current.tree,
+                payload.event,
+                &mut ops,
+            );
         }
 
         // Repaint so hover feedback / drop results show promptly.
         current.request_redraw();
         self.wm.reinsert_managed(winit_id, current);
         Ok(())
+    }
+
+    /// Confirm a pending outbound OS drag in `window_id`'s tree: the platform
+    /// is about to run the native drag it asked for. See
+    /// `WidgetTree::confirm_os_drag`.
+    fn confirm_os_drag_in(
+        &mut self,
+        window_id: TeksiloWindowId,
+        drag: teksilo_core::OsDragId,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let Some(winit_id) = self.wm.teksilo_to_winit_map().get(&window_id).copied() else {
+            return;
+        };
+        let Some(mut current) = self.wm.take_managed(winit_id) else {
+            return;
+        };
+        let current_arc = Some(current.platform_window.window_arc());
+        {
+            let mut ops = crate::window_manager::WindowOpsImpl::new(
+                &mut self.wm,
+                event_loop,
+                window_id,
+                current_arc,
+            );
+            current.tree.confirm_os_drag(drag, &mut ops);
+        }
+        current.request_redraw();
+        self.wm.reinsert_managed(winit_id, current);
     }
 
     /// Try to route an `AppEvent::External` payload as an

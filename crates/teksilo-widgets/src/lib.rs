@@ -49,6 +49,8 @@ pub mod dialog;
 pub mod docking;
 pub mod editor_shortcuts;
 pub use data_views::{ActivateOn, DragTransferMode, RowDragData, ViewId};
+/// When an exporting drag is handed to the platform; see `export_os_handoff` on the data views.
+pub use teksilo_core::OsHandoff;
 pub(crate) mod drag_preview;
 pub mod drop_target;
 pub mod drop_zone;

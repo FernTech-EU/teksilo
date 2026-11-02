@@ -46,7 +46,8 @@ use teksilo_canvas::Point;
 use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::window::TeksiloWindowId;
 use teksilo_core::{
-    AppEventPoster, DragImageData, DropOutcome, ExternalDropData, OutboundDragData,
+    AppEventPoster, DragImageData, DropOutcome, ExternalDropData, OsDragId, OsDragStart,
+    OutboundDragData,
 };
 
 use wayland_backend::client::ObjectId;
@@ -80,9 +81,14 @@ enum Command {
         /// The device carrying the drag, which decides **which press serial**
         /// `start_drag` is given. See [`TouchSerialSource`].
         pointer: teksilo_tokens::PointerKind,
+        /// The id the framework waits for this start under.
+        drag: OsDragId,
     },
     /// Revise the accept state of the inbound offer from the widget verdict.
     SetDropAccepted(bool),
+    /// Abandon the outbound drag: a `Begin` still queued ahead of this has
+    /// already run (the channel is ordered), so this ends the drag it started.
+    Cancel,
 }
 
 /// Preferred drop MIME types, in order. `text/uri-list` carries file paths.
@@ -193,7 +199,11 @@ struct DndState {
     /// given a serial from the input event that opened the current implicit
     /// grab. A finger's grab was opened by a `wl_touch::down`, not a
     /// `wl_pointer::button`.
-    press_serials: TouchSerialSource,
+    /// Shared with the guard, which declines up front a drag from a device
+    /// class that never pressed.
+    press_serials: Arc<Mutex<TouchSerialSource>>,
+    /// The id of the in-flight outbound drag, for its terminal event.
+    outbound_drag: Option<OsDragId>,
     /// The in-flight outbound data source + the bytes it serves on `send`.
     outbound_source: Option<WlDataSource>,
     outbound_data: Option<OutboundDragData>,
@@ -248,8 +258,10 @@ impl DndState {
                     data,
                     image: _,
                     pointer,
-                } => self.begin_outbound(data, pointer),
+                    drag,
+                } => self.begin_outbound(data, pointer, drag),
                 Command::SetDropAccepted(accepted) => self.revise_accept(accepted),
+                Command::Cancel => self.cancel_outbound(),
             }
         }
     }
@@ -283,12 +295,18 @@ impl DndState {
         let _ = self.conn.flush();
     }
 
-    fn begin_outbound(&mut self, data: OutboundDragData, pointer: teksilo_tokens::PointerKind) {
+    fn begin_outbound(
+        &mut self,
+        data: OutboundDragData,
+        pointer: teksilo_tokens::PointerKind,
+        drag: OsDragId,
+    ) {
         let Some(origin) = self.origin_surface.clone() else {
-            // No surface proxy ⇒ can't start a drag; report cancellation so
-            // the source's on_drag_ended still fires.
+            // No surface proxy: the guard declines up front, so this is only a
+            // defensive report, so the waiting drag still ends.
             self.post(ExternalDragEvent::DragEnded {
                 outcome: DropOutcome::Cancelled,
+                drag: Some(drag),
             });
             return;
         };
@@ -296,13 +314,25 @@ impl DndState {
         // implicit grab — a `wl_pointer::button` for a mouse or pen, a
         // `wl_touch::down` for a finger. If we have not observed one for *this
         // device* (the press had not been dispatched on this thread yet, or the
-        // seat has no touch capability at all), the compositor would silently
-        // reject the request and never send a terminal event — leaving the
-        // in-app drag dead and the stash leaked. Report cancellation instead so
-        // the framework cleans up.
-        let Some(serial) = self.press_serials.serial_for(pointer) else {
+        // seat has no touch capability at all), or that press has already been
+        // released (the drag was let go before this thread got to the start),
+        // the compositor would silently reject the request and never send a
+        // terminal event. Report cancellation instead: the framework is still
+        // waiting for the start, and ends the in-app drag as cancelled.
+        //
+        // Taking the serial also stops counting its press as held: once
+        // `start_drag` converts the grab, the release goes to the compositor's
+        // drag grab and never reaches us, and a press counted as held forever
+        // would let the next drag start from a serial that names no grab.
+        let serial = self
+            .press_serials
+            .lock()
+            .ok()
+            .and_then(|mut serials| serials.take_for_drag(pointer));
+        let Some(serial) = serial else {
             self.post(ExternalDragEvent::DragEnded {
                 outcome: DropOutcome::Cancelled,
+                drag: Some(drag),
             });
             return;
         };
@@ -310,6 +340,14 @@ impl DndState {
         if let Some(src) = self.outbound_source.take() {
             src.destroy();
         }
+
+        // Confirm the start to the framework BEFORE the request leaves: the
+        // compositor answers `start_drag` with an `enter` on whichever of our
+        // surfaces is under the pointer, which another window's thread may
+        // post, and the framework must have handed its in-app session over by
+        // then. Posting first orders the two through the one event loop.
+        self.post(ExternalDragEvent::DragStarted { drag });
+        self.outbound_drag = Some(drag);
 
         let source = self.data_device_manager.create_data_source(&self.qh, ());
         for mime in outbound_mimes(&data) {
@@ -347,6 +385,15 @@ impl DndState {
         // Dropping `file` closes the write end so the reader sees EOF.
     }
 
+    /// End the outbound drag at the framework's request (a release before the
+    /// start was confirmed, or Escape). Destroying the source ends a drag the
+    /// compositor started; with no source there is nothing to end.
+    fn cancel_outbound(&mut self) {
+        if self.outbound_source.is_some() && !self.outbound_finished {
+            self.finish_outbound(DropOutcome::Cancelled);
+        }
+    }
+
     fn finish_outbound(&mut self, outcome: DropOutcome) {
         if let Some(src) = self.outbound_source.take() {
             src.destroy();
@@ -364,7 +411,8 @@ impl DndState {
             self.active_route = None;
             self.shared.release_claim(self.window_id);
         }
-        self.post(ExternalDragEvent::DragEnded { outcome });
+        let drag = self.outbound_drag.take();
+        self.post(ExternalDragEvent::DragEnded { outcome, drag });
     }
 }
 
@@ -476,12 +524,25 @@ impl Dispatch<WlPointer, ()> for DndState {
         // Capture the serial of the most recent button *press*. `start_drag`
         // requires a serial from a button-down event in the current implicit
         // grab; the most recent press is the one that began the drag.
-        if let PointerEvent::Button {
-            serial, state: btn, ..
-        } = event
-            && btn == WEnum::Value(ButtonState::Pressed)
-        {
-            state.press_serials.record_pointer(serial);
+        let Ok(mut serials) = state.press_serials.lock() else {
+            return;
+        };
+        match event {
+            PointerEvent::Button {
+                serial, state: btn, ..
+            } => {
+                if btn == WEnum::Value(ButtonState::Pressed) {
+                    serials.record_pointer(serial);
+                } else {
+                    serials.record_pointer_release();
+                }
+            }
+            // A button held across a leave (a drag grab took it) is released
+            // where we cannot see it.
+            PointerEvent::Enter { .. } | PointerEvent::Leave { .. } => {
+                serials.record_pointer_focus_change();
+            }
+            _ => {}
         }
     }
 }
@@ -499,8 +560,15 @@ impl Dispatch<WlTouch, ()> for DndState {
         // implicit grab is opened by `down`, and `start_drag` will only accept a
         // serial from the grab it is asked to convert — so without this a finger
         // cannot export a drag at all, whatever the framework does.
-        if let TouchEvent::Down { serial, .. } = event {
-            state.press_serials.record_touch(serial);
+        let Ok(mut serials) = state.press_serials.lock() else {
+            return;
+        };
+        match event {
+            TouchEvent::Down { serial, .. } => serials.record_touch(serial),
+            TouchEvent::Up { .. } => serials.record_touch_up(),
+            // The compositor took every touch point away: none is held.
+            TouchEvent::Cancel => serials.record_touch_cancel(),
+            _ => {}
         }
     }
 }
@@ -781,6 +849,12 @@ pub struct WaylandDndGuard {
     /// Protocol id of the surface this window published, if any.
     route_key: Option<u32>,
     window_id: TeksiloWindowId,
+    /// Whether this window has a surface to drag from. Known at attach, so a
+    /// drag without one is declined up front instead of failing later.
+    has_origin: bool,
+    /// The dispatch thread's press serials, read to decline up front a drag
+    /// from a device class that never pressed (a seat with no touch).
+    press_serials: Arc<Mutex<TouchSerialSource>>,
 }
 
 /// Withdraw the window's surface from the shared routing table. A stale entry
@@ -804,20 +878,42 @@ impl ExternalDndGuard for WaylandDndGuard {
         data: &OutboundDragData,
         image: Option<&DragImageData>,
         pointer: teksilo_tokens::PointerKind,
-    ) -> bool {
+    ) -> OsDragStart {
         let Some(tx) = &self.cmd_tx else {
-            return false;
+            return OsDragStart::Declined;
         };
+        // What is known now is declined now, so the in-app drag carries on:
+        // no surface to drag from, or no press ever seen from this device class
+        // (also the case of a press this thread has not dispatched yet, which
+        // the next pointer move asks about again).
+        let pressed = self
+            .press_serials
+            .lock()
+            .is_ok_and(|serials| serials.has_press_for(pointer));
+        if !self.has_origin || !pressed {
+            return OsDragStart::Declined;
+        }
         // The dispatch thread performs create_data_source + start_drag on its
         // next tick (≤ 8 ms) using the most recent press serial **of the device
-        // carrying the drag**, which is still valid because that press is held
-        // throughout the drag.
-        tx.send(Command::Begin {
+        // carrying the drag**, if that press is still held, and posts
+        // `DragStarted` (or `DragEnded` when it cannot start). Until then the
+        // framework keeps the in-app drag.
+        let drag = OsDragId::next();
+        match tx.send(Command::Begin {
             data: data.clone(),
             image: image.cloned(),
             pointer,
-        })
-        .is_ok()
+            drag,
+        }) {
+            Ok(()) => OsDragStart::Pending(drag),
+            Err(_) => OsDragStart::Declined,
+        }
+    }
+
+    fn cancel_drag(&self) {
+        if let Some(tx) = &self.cmd_tx {
+            let _ = tx.send(Command::Cancel);
+        }
     }
 
     fn set_drop_accepted(&self, accepted: bool) {
@@ -906,6 +1002,8 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
         }
 
         let (cmd_tx, cmd_rx) = channel::<Command>();
+        let press_serials = Arc::new(Mutex::new(TouchSerialSource::default()));
+        let has_origin = origin_surface.is_some();
 
         let mut state = DndState {
             window_id,
@@ -922,7 +1020,8 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             data_device_manager: ddm,
             data_device,
             origin_surface,
-            press_serials: TouchSerialSource::default(),
+            press_serials: press_serials.clone(),
+            outbound_drag: None,
             outbound_source: None,
             outbound_data: None,
             outbound_action: DndAction::empty(),
@@ -959,6 +1058,8 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             shared: self.shared.clone(),
             route_key,
             window_id,
+            has_origin,
+            press_serials,
         })
     }
 }

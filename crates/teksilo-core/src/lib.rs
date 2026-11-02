@@ -78,8 +78,8 @@ pub use binding::{BindingLevel, BindingRegistry};
 pub use build_context::BuildContext;
 pub use color_prop::{ColorProp, TextStyleProp};
 pub use drag_payload::{
-    DragData, DragImageData, DragOrigin, DragPayload, DropOutcome, ExternalDropData,
-    OutboundDragData,
+    DragData, DragImageData, DragOrigin, DragPayload, DropOutcome, ExternalDropData, OsDragId,
+    OsDragStart, OsHandoff, OutboundDragData,
 };
 pub use drag_state::DropFeedback;
 pub use environment::{Environment, ExploreByTouch, LayoutDirection, ScreenReaderState};

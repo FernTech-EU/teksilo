@@ -118,22 +118,42 @@ pub trait WindowOps {
         None
     }
 
-    /// Hand an OS-level drag to the platform when an in-app drag escalates at
-    /// the window boundary (the pointer left the window carrying an
-    /// OS-exportable payload). The platform backend
-    /// (`teksilo_platform::external_dnd`) starts a native drag session
-    /// (`NSDraggingSource` / `wl_data_source` / OLE `IDropSource`) using
-    /// `data`, optionally drawing `image` as the drag cursor.
+    /// Ask the platform to start a native OS drag for an in-app drag carrying
+    /// an OS-exportable payload. The framework asks when the pointer leaves the
+    /// window, or, for a payload with
+    /// [`OsHandoff::Eager`](crate::OsHandoff::Eager), on the first pointer
+    /// move. The platform backend (`teksilo_platform::external_dnd`) starts a
+    /// native drag session (`NSDraggingSource` / `wl_data_source` / OLE
+    /// `IDropSource` / XDND) using `data`, optionally drawing `image` as the
+    /// drag cursor.
     ///
-    /// Returns `true` if a native drag session actually started. The default
-    /// (standalone / test sink, and platforms without an outbound backend,
-    /// a headless build, or a target with no drop-target implementation)
-    /// returns `false`, in which case the framework cancels the drag
-    /// — the pre-existing "pointer left the window ⇒ drag cancels" behavior.
+    /// The answer decides what happens to the in-app session:
+    ///
+    /// - [`OsDragStart::Declined`](crate::OsDragStart::Declined): nothing
+    ///   started, and the in-app drag continues; a later pointer move may ask
+    ///   again. This is the default, for the standalone / test sink and for a
+    ///   platform without an outbound backend.
+    /// - [`OsDragStart::Started`](crate::OsDragStart::Started): the native drag
+    ///   is running (macOS starts it inside the request). The in-app session is
+    ///   handed over at once.
+    /// - [`OsDragStart::Pending`](crate::OsDragStart::Pending): the platform
+    ///   starts the drag on its own loop (Wayland, X11, Windows), under the
+    ///   [`OsDragId`](crate::OsDragId) it carries. The in-app session stays
+    ///   alive until the platform confirms that drag's start through
+    ///   [`WidgetTree::confirm_os_drag`](crate::WidgetTree::confirm_os_drag). A
+    ///   release before that ends the drag as `Cancelled` and calls
+    ///   [`Self::cancel_os_drag`]; a start that fails ends it through
+    ///   [`WidgetTree::handle_os_drag_ended_for`](crate::WidgetTree::handle_os_drag_ended_for).
+    ///   Events naming another drag's id change nothing.
+    ///
+    /// A failure known now (nothing to drag from, nothing to export) is a
+    /// `Declined`, never a `Pending` that fails later: a decline keeps the
+    /// in-app drag, a failure ends it.
+    ///
     /// `pointer` is the device carrying the drag. It is not decoration: on
     /// Wayland `wl_data_device::start_drag` must be given the serial of the
     /// input event that began the implicit grab, and a finger's grab was opened
-    /// by a `wl_touch::down`, not a `wl_pointer::button` — hand the wrong
+    /// by a `wl_touch::down`, not a `wl_pointer::button`; hand the wrong
     /// serial over and the compositor rejects the request silently and sends no
     /// terminal event at all.
     fn begin_os_drag(
@@ -141,8 +161,8 @@ pub trait WindowOps {
         _data: crate::drag_payload::OutboundDragData,
         _image: Option<crate::drag_payload::DragImageData>,
         _pointer: teksilo_tokens::PointerKind,
-    ) -> bool {
-        false
+    ) -> crate::drag_payload::OsDragStart {
+        crate::drag_payload::OsDragStart::Declined
     }
 
     /// Tell the platform whether the widget under an **inbound** OS drag
@@ -166,15 +186,19 @@ pub trait WindowOps {
     /// inbound backend.
     fn set_drop_accepted(&mut self, _accepted: bool) {}
 
-    /// Abandon an OS drag started by [`Self::begin_os_drag`] (the user pressed
-    /// Escape).
+    /// Abandon an OS drag requested with [`Self::begin_os_drag`]: the user
+    /// pressed Escape, or released the pointer before a pending start was
+    /// confirmed.
     ///
-    /// Only backends that drive the drag themselves can honour this. macOS and
-    /// Windows hand the drag to a modal OS loop that owns Escape already, and
-    /// Wayland's compositor does the same; X11 tracks the pointer on its own
-    /// connection, so without this its drags could only end by releasing the
-    /// button. The backend still reports the terminal `DropOutcome` either way,
-    /// so the source widget's `on_drag_ended` fires exactly once regardless.
+    /// A start that is still pending must not happen after this: the backend
+    /// drops it, or, if the native drag has already started, ends it. Once the
+    /// drag runs, macOS and Windows hand it to a modal OS loop that owns Escape
+    /// already, and this does nothing there; Wayland ends it by destroying its
+    /// data source (an Escape this window still receives, over one of its own
+    /// surfaces); X11 tracks the pointer on its own connection, so without this
+    /// its drags could only end by releasing the button. A backend that ends a running drag still reports the
+    /// terminal `DropOutcome`, so the source widget's `on_drag_ended` fires
+    /// exactly once regardless.
     ///
     /// Default: no-op.
     fn cancel_os_drag(&mut self) {}

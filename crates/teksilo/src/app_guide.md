@@ -1019,6 +1019,12 @@ In-app and OS-level drops share one pipeline. Attach `.on_drag_hover` / `.on_dra
 (wraps any child, keeps it visible). External-OS DnD needs
 `TeksiloAppBuilder::install_external_dnd()`. An OS drop arrives as a `DragPayload` with
 `origin() == DragOrigin::External` carrying `files()` / `text()` / `uris()`.
+A drag whose payload carries MIME data (`DragPayload::with_mime`, or `.export_external(..)` on a
+data view) becomes a native OS drag when the pointer leaves the window. For a file export whose
+destination window can lie inside the source (a file manager in front of it), hand it over on
+the first move instead: `.with_os_handoff(OsHandoff::Eager)` on the payload, or
+`.export_os_handoff(OsHandoff::Eager)` on the view (no in-app preview then; a release before the
+platform starts the drag cancels it).
 
 ## The `teksu!` DSL
 

@@ -15,7 +15,7 @@ Three distinct user stories share the same mechanics in Teksilo:
 1. **Intra-widget reordering**, drag a row inside a list or a node inside a tree. No serialisation; the payload is a typed Rust value.
 2. **Inter-widget transfer**, drag a row from one list into another, or drop a file shortcut onto a bookmarks bar. Also a typed payload, possibly with a MIME-annotated byte representation for adapter layers.
 3. **External (OS) drops**, accept files / text / URLs dragged in from a file manager or another app. Built on the same primitives plus a per-OS `ExternalDndBackend`. **Inbound is shipped** on every desktop target (macOS verified; Windows OLE, Wayland `wl_data_device` and X11 XDND cfg-gated), see [§11](#11-external-os-drag-and-drop-across-the-app-boundary) and the `DropZone` widget.
-4. **External (OS) export**, drag a file / text / URL *out* of a Teksilo window into another application. **Shipped** on every desktop target (macOS and Wayland verified; Windows OLE and X11 XDND cfg-gated), the source needs no new API: a normal `start_drag` whose payload carries MIME data auto-escalates to a native OS drag when the pointer leaves the window. See [§11.5](#115-outbound-export-app--os).
+4. **External (OS) export**, drag a file / text / URL *out* of a Teksilo window into another application. **Shipped** on every desktop target (macOS and Wayland verified; Windows OLE and X11 XDND cfg-gated), a normal `start_drag` whose payload carries MIME data auto-escalates to a native OS drag when the pointer leaves the window, or on its first move with `OsHandoff::Eager`. See [§11.5](#115-outbound-export-app--os).
 
 All flows reuse the same payload type, the same handler set, and the same gesture recognizer. Only the source of the events differs (in-app gesture vs. OS backend).
 
@@ -387,8 +387,9 @@ fn on_drop(payload: DragPayload, _pos, ctx) -> bool {
 [`ExternalDndBackend`](../crates/teksilo-platform/src/external_dnd.rs) registers
 the app as the OS drop target for a window and, for each phase
 (`Entered { data, position }` / `Moved` / `Left` / `Cancelled` /
-`Dropped { data, position }`, plus `DragEnded { outcome }` when an outbound
-drag this window started finishes), posts an `ExternalDndEventPayload` through
+`Dropped { data, position }`, plus `DragStarted` when an outbound drag this
+window asked for has started and `DragEnded { outcome }` when it finishes),
+posts an `ExternalDndEventPayload` through
 `AppEventPoster::post_external`, the same channel file dialogs use.
 `teksilo-app` routes it to the window's tree and drives
 `WidgetTree::{begin,update,end,cancel,abort}_external_drag`, which construct a
@@ -533,8 +534,9 @@ Dragging a file / text / URL **out** of a Teksilo window into another
 application. The model is **unified, escalate-at-boundary**: a drag is not
 pre-committed to "internal" or "external", the destination decides. `DragPayload`
 already carries both representations (a typed `Box<dyn Any>` fast-path *and*
-`mime_data`), so **the source side needs no new API**, a drag becomes
-OS-exportable simply by populating `mime_data` (via `DragPayload::with_mime`):
+`mime_data`), so a drag becomes OS-exportable simply by populating `mime_data`
+(via `DragPayload::with_mime`); the one source-side choice is *when* it is
+handed to the platform (`DragPayload::with_os_handoff`, below):
 
 ```rust
 row.on_drag(|phase, ctx| {
@@ -552,7 +554,73 @@ Teksilo runs its normal in-app drag (preview overlay, `on_drag_hover` feedback).
 **When the pointer leaves the window** carrying an OS-exportable payload, the
 framework escalates to a native OS drag (`WidgetTree::try_escalate_to_os_drag` →
 `WindowOps::begin_os_drag` → the backend's `ExternalDndGuard::begin_drag`). Drops
-that never leave the window keep the typed fast-path untouched.
+that never leave the window keep the typed fast-path untouched. "Leaves" is
+measured against the window's content size from its last layout proposal; a
+window laid out with a proposal that is not exact on both axes never escalates
+at its edge.
+
+**`OsHandoff`: when the platform gets the drag.** The edge is the default
+(`OsHandoff::AtWindowEdge`). It cannot serve a destination window that lies
+wholly inside the source window's rectangle, such as a file manager in front of
+a window showing a virtual machine's screen: while the drag is in-app the source
+window keeps receiving the pointer, sees it stay inside its own rectangle, and
+never hands off, and only the platform knows that another window is in front
+(on Wayland only the compositor knows the stacking order, and it applies it only
+once a native drag is running). `DragPayload::with_os_handoff(OsHandoff::Eager)`,
+or `.export_os_handoff(OsHandoff::Eager)` on a data view, asks for the native
+drag on the first real pointer move after the drag starts, wherever the pointer
+is. What it costs:
+
+- no in-app drag preview once the platform has the drag (the platform draws its
+  own image);
+- every drop, a drop back on the source window included, goes through the
+  platform and back, so in-app hover feedback depends on the platform
+  delivering the app's own drag back to it (the typed re-entry below);
+- a release before the platform has started the drag ends it as `Cancelled`,
+  with no drop.
+
+`Eager` is a no-op on a payload with nothing to export. The handoff is asked for
+on a pointer *sample* only, never from a drag tick: macOS needs the live drag
+event (`NSApp.currentEvent`) to start a session.
+
+**Two-phase start.** `WindowOps::begin_os_drag` answers an `OsDragStart`:
+`Declined` (nothing started; the in-app drag continues and the next move may ask
+again, there is no latch), `Started` (macOS: AppKit starts the session inside the
+call, and the in-app session is handed over at once), or `Pending` (Wayland, X11
+and Windows start the drag on their own loop), which carries an `OsDragId`.
+While a start is pending the in-app session stays alive, with its preview,
+capture and hover, and asks nothing further. The backend then confirms: Wayland
+and X11 post `ExternalDragEvent::DragStarted { drag }` before anything else
+about the drag, and `teksilo-app` routes it to `WidgetTree::confirm_os_drag`;
+the Windows backend confirms through the `on_start` of
+`run_pending_outbound_drag`, right before `DoDragDrop`'s modal loop, which would
+hold back a posted event until the drag was over (the handle runs it on a shared
+handle to the guard, without holding its map's borrow, so the handlers this runs
+may open or close a window). The
+start and the end name the drag by its id, and those of another drag (one
+released before its start, whose late events arrive while the next drag waits)
+change nothing. A failure a backend can see at once answers `Declined` instead
+(Wayland with no surface to drag from, or no press ever seen from the dragging
+device class; X11 with nothing to advertise), so the in-app drag carries on. Only the confirmation tears the in-app session down. A release or an
+Escape before it ends the drag as `Cancelled` and calls
+`WindowOps::cancel_os_drag`, which drops the start (Wayland: a queued `Begin` is
+followed by a `Cancel` that destroys the source it created; X11 the same;
+Windows: the stashed payload is dropped, so the queued request starts nothing).
+A start that fails on the platform (Wayland when the dragging press was
+already released; X11 failing to own `XdndSelection`) posts
+`DragEnded { Cancelled, drag }`, which ends the waiting in-app drag as
+`Cancelled`. On Wayland a press handed to a drag no longer counts as held: the
+compositor's drag grab takes its release, which the window never sees, and the
+next drag must not start from it. Once the drag runs, Wayland's `Cancel` (an
+Escape the window still receives) ends it by destroying the data source.
+
+**X11 keeps the press.** The X11 backend drives its drag by polling the pointer
+and leaves winit its implicit grab, so the window that handed its drag over
+still receives that press's moves and release. While the drag is re-entered over
+that window, the router keeps them away from the session (the XDND events drive
+it) and swallows the release as the `Up` of a press the handover cancelled, so
+the drop lands once, from `XdndDrop`, and the source hears `InApp`. An inbound `Entered` on the source window while its start is
+pending can only be the drag itself, and is treated as its confirmation.
 
 **Completion, `on_drag_ended`.** A single source-side hook fires once per drag,
 with a `DropOutcome`:
@@ -577,9 +645,14 @@ window *or another one*, that window recovers the typed payload and presents it
 as a normal internal drag (so `get_typed::<T>()` works), while also exposing the
 `files()` / `text()` / `uris()` view derived from the MIME (so `DropZone`-style
 targets accept it too). This is what enables drag-and-drop **between two windows
-of the same app**. Limitation: an in-app drop that crossed the window boundary
-reports `OsCopy` (the OS's view), not `InApp`, drops that never left report
-`InApp`.
+of the same app**. A drop back on the **source window** reports
+`InApp { accepted }` to the source, whatever the platform says (it reports a
+copy): the window holds the in-app outcome until the platform's `DragEnded` and
+delivers it then, once. Limitation: a drop accepted in **another window** of the
+app reports `OsCopy` (the OS's view). On Wayland with several windows, the drop
+on the source window may be posted by another window's thread, unordered with
+the source thread's `DragEnded`; when the end arrives first, the source hears
+`OsCopy` for an in-app drop, as before this rule.
 
 **Per-platform:** macOS uses `NSDraggingSource` + `beginDraggingSessionWithItems:event:source:`
 (triggering event from `NSApp.currentEvent`); Windows runs OLE `DoDragDrop` on the
@@ -589,10 +662,20 @@ dispatch that armed the escalation); Wayland uses `wl_data_source` +
 below; the `Drop` handler skips the pipe-read for a self-drag to avoid a
 single-thread deadlock); X11 owns `XdndSelection` from its proxy window
 and polls the pointer rather than grabbing it (§11.3.1). A backend that cannot
-start the drag (nothing exportable, or on Wayland no press serial for the
-dragging device) declines (`begin_drag` returns `false`) and the framework keeps
-the in-app drag alive. Demo: the "Drag OUT" rows
-and "Internal drop target" in `cargo run -p file-drop`.
+start the drag at all (nothing exportable, no outbound support) answers
+`Declined` and the framework keeps the in-app drag alive; one whose start fails
+later (on Wayland no press serial for the dragging device) reports a
+started-then-cancelled drag, `DragEnded { Cancelled }`. Demo: the "Drag OUT"
+rows, one of them `OsHandoff::Eager`, and "Internal drop target" in
+`cargo run -p file-drop`.
+
+**Verification status of `Eager`** (headless tests cover the tree's side and
+the memory backend; the native paths need a desktop pass each): KDE Wayland,
+a file manager wholly inside the source window, a drop back on an in-app
+`DropTarget` and a Move onto a sibling view; Windows, a drop on Explorer and
+one back on an in-app `DropTarget` (whether `IDropTarget` posts are serviced
+inside `DoDragDrop`'s modal loop decides the in-app hover); macOS, the same two
+drops with a window overlapping the source.
 
 **Which press opened the grab, the one thing the platform must be told.**
 `WindowOps::begin_os_drag` carries the dragging device's `PointerKind` down to the
@@ -604,8 +687,11 @@ request **silently**, no drag starts and no terminal event ever arrives, so the
 framework is left waiting for a drag that never existed. The DnD thread therefore
 binds `wl_touch` beside `wl_pointer` and keeps the latest press serial per device
 class (`TouchSerialSource`); a device with no press of its own yields *no* serial
-rather than the other device's, so the backend declines cleanly and the framework
-tears its bookkeeping down. Before this a finger could not export a drag at all.
+rather than the other device's, so the backend reports the start as cancelled
+and the framework tears its bookkeeping down. Before this a finger could not
+export a drag at all. A press already released when the DnD thread gets to the
+start yields no serial either: an `Eager` drag asks on its first move, and a
+quick release can beat the thread by a few milliseconds.
 
 ### 11.6 The `DropTarget` widget
 
@@ -758,6 +844,7 @@ reorder-only view is never accidentally consumed elsewhere, a receiver gates on
 |---|---|
 | `.exportable(DragTransferMode)` (`where T: Clone`) | Carry `items` clones so a foreign target gets typed rows; also makes rows a drag source **without** `reorderable`. `Move` removes the origin rows once a foreign target accepts them; `Copy` keeps them. |
 | `.export_external(\|&[T]\| -> Vec<(String, Vec<u8>)>)` (`where T: Clone`) | Additionally advertise MIME (`text/plain`, `text/uri-list`, an app `application/x-…`) so a `DropZone` / the OS can take the drag. Implies `.exportable`. |
+| `.export_os_handoff(OsHandoff)` | When an `export_external` drag is handed to the platform: `AtWindowEdge` (default) or `Eager`, the first pointer move, for a destination window that can lie inside this one (§11.5). |
 | `.on_rows_transferred_out(\|&[usize], ctx\|)` | Override the `Move` removal (rows are delivered **descending** so index-by-index removal stays valid). Default: the source's `on_drag_out`. |
 
 The dragged set is **selection-aware**: pressing an already-selected row keeps
@@ -791,7 +878,9 @@ The framework delivers the outcome to the source's `on_drag_ended`. The view set
 a `self_reorder_flag` when *it* handled a same-view reorder, so a `Move` only
 removes rows that a **foreign** target accepted, never double-removing after an
 own reorder. **Move caveats:** removal fires for an in-app drop *in the same
-window* (`DropOutcome::InApp { accepted: true }`) or a genuine OS move; shipped
+window* (`DropOutcome::InApp { accepted: true }`, which also holds for an
+`OsHandoff::Eager` drag that went through the platform and came back to this
+window) or a genuine OS move; shipped
 OS backends advertise **copy only**, so a drag exported to another application or
 another window is a *copy* (the origin row is kept, see §13). For a
 `ListModel`-backed view (key == index) the move-out removes by drag-start

@@ -17,6 +17,9 @@ by crate for clarity, not because crates version independently.
 
 #### Platform
 
+- **`MemoryExternalDndBackend::defer_starts`, `pending_drags` and
+  `cancelled_drags`** let a test drive a start that the platform confirms
+  later.
 - **The rows AppKit adds to a Mac app's Edit menu work in Teksilo text
   fields.** Emoji & Symbols, Start Dictation, the press-and-hold accent popup
   and Writing Tools (in its panel) insert into the focused `TextInput`,
@@ -41,6 +44,17 @@ by crate for clarity, not because crates version independently.
   at dispatch. It is read again when a window takes the focus,
   and a detaching accessibility client sets it to inactive. See
   [docs/a11y/explore-by-touch.md](docs/a11y/explore-by-touch.md).
+- **`OsHandoff`** (`AtWindowEdge`, the default, and `Eager`;
+  `#[non_exhaustive]`) and **`DragPayload::with_os_handoff`** choose when an
+  OS-exportable drag is handed to the platform. `Eager` hands it over on the
+  first pointer move, so a file dragged out of a window reaches a destination
+  window lying wholly inside it (a file manager in front of a virtual
+  machine's screen). An existing payload keeps the window-edge handoff.
+- **`OsDragStart`** (`Declined`, `Started`, `Pending(OsDragId)`),
+  **`OsDragId`**, **`WidgetTree::confirm_os_drag`** and
+  **`WidgetTree::handle_os_drag_ended_for`**: a platform that starts a native
+  drag on its own loop keeps the in-app drag alive until it confirms that
+  drag's start, and an event naming another drag changes nothing.
 - **`ImeOrigin`** (`Composition`, `Dictation`, `WritingTools`, `Insertion`;
   `#[non_exhaustive]`) says which part of the input system committed a text.
 - **`WidgetEvent::ime_commit(text)`** and
@@ -81,6 +95,9 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **`export_os_handoff(OsHandoff)`** on `ListView`, `TreeView`, `TableView`,
+  `TreeTableView` and `GridView`: when a drag carrying the `export_external`
+  MIME data is handed to the platform.
 - **`EditSource::Dictation` and `EditSource::WritingTools`.** A
   `RichTextEditor` and a `TextInputField` report dictation, Writing Tools and
   emoji insertions under `Dictation`, `WritingTools` and `Ime`.
@@ -116,6 +133,17 @@ by crate for clarity, not because crates version independently.
 
 #### Platform
 
+- **Breaking.** `ExternalDndGuard::begin_drag` and
+  `ExternalDndHandle::begin_drag` return an `OsDragStart` where they returned
+  a `bool`; `run_pending_outbound_drag` takes an `on_start` callback, given the
+  drag's id and run right before a blocking drag loop; `ExternalDragEvent` has
+  a `DragStarted { drag }` variant, posted by a backend that starts its drag
+  later, and `DragEnded` carries the drag's id (`drag: Option<OsDragId>`). A
+  backend answering `Pending` must honour `cancel_drag` before its start (the
+  start must then not happen), and must answer `Declined` for a failure it can
+  see at once.
+- **On Wayland, `cancel_drag` ends a running outbound drag** (an Escape the
+  window still receives) by destroying its data source; it did nothing there.
 - **On Windows, input methods, the emoji panel, voice typing and the touch
   keyboard write into text fields through Teksilo's TSF text store**, as in
   a native edit control, where they went through IMM32. They read the
@@ -138,6 +166,17 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **Breaking.** `WindowOps::begin_os_drag` returns an `OsDragStart` where it
+  returned a `bool`. `WidgetTree::confirm_os_drag` takes the drag's id.
+- **A drag that went out through the platform and was dropped back on the
+  window that started it reports `DropOutcome::InApp { accepted }`** to its
+  source, where it reported `OsCopy`. A data view exporting with
+  `DragTransferMode::Move` therefore removes the rows a sibling view of that
+  window accepted. A drop on another window of the application still reports
+  `OsCopy`.
+- **A drag handed to the platform on Wayland, X11 and Windows stays an in-app
+  drag until the platform has started it.** A release before that ends the
+  drag as `Cancelled`, with no drop.
 - **Breaking.** `WidgetEvent::ImeCommit` is `{ text, origin, replacement }`
   where it was `{ text }`: `origin` is an `ImeOrigin` and `replacement` an
   optional character range of the field's text to replace. A `match` on it
@@ -207,6 +246,14 @@ by crate for clarity, not because crates version independently.
 
 #### Platform
 
+- **On Wayland, a drag released before its native start ends as cancelled**,
+  where the compositor ignored the start and the drag never ended.
+- **The documentation of `WindowOps::begin_os_drag`** said a refused start
+  cancels the drag; the in-app drag continues, as it always did.
+- **On X11, our own drag dropped back on the window that started it lands
+  once, from the XDND drop**, and the source hears the in-app outcome. winit
+  keeps the press's implicit grab through the drag, and the window's own
+  release was taken as the drop.
 - **On macOS, a key the input method swallows no longer types.** With the
   press-and-hold accent popup open, the held letter's repeats and the key
   that picked an accent typed their text as well ("eeê" for "ê").

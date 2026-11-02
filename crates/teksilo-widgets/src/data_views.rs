@@ -926,6 +926,8 @@ pub(crate) struct RowExport<T: 'static> {
     /// Set by the view's own `on_drop` when it applied a same-view reorder, so
     /// the completion skips the move-out (already applied). The TabBar pattern.
     pub(crate) self_reorder_flag: Rc<Cell<bool>>,
+    /// When an exporting drag is handed to the platform (`.export_os_handoff`).
+    pub(crate) os_handoff: teksilo_core::OsHandoff,
     /// The rows carried by the in-flight drag (for the app move-out callback).
     dragged_rows: Rc<RefCell<Vec<usize>>>,
     /// Stable-key removal thunk for the default move-out, resolved at drag-start.
@@ -946,6 +948,7 @@ impl<T: 'static> Clone for RowExport<T> {
             accept_foreign_rows: self.accept_foreign_rows,
             on_rows_received: self.on_rows_received.clone(),
             self_reorder_flag: self.self_reorder_flag.clone(),
+            os_handoff: self.os_handoff,
             dragged_rows: self.dragged_rows.clone(),
             removal: self.removal.clone(),
         }
@@ -962,6 +965,7 @@ impl<T: 'static> Default for RowExport<T> {
             accept_foreign_rows: false,
             on_rows_received: None,
             self_reorder_flag: Rc::new(Cell::new(false)),
+            os_handoff: teksilo_core::OsHandoff::AtWindowEdge,
             dragged_rows: Rc::new(RefCell::new(Vec::new())),
             removal: Rc::new(RefCell::new(None)),
         }
@@ -994,6 +998,11 @@ impl<T: 'static> RowExport<T> {
             self.mode = Some(DragTransferMode::default());
         }
         self.export_mime_fn = Some(Rc::new(f));
+    }
+
+    /// `.export_os_handoff(h)`: when an exporting drag goes to the platform.
+    pub(crate) fn set_os_handoff(&mut self, handoff: teksilo_core::OsHandoff) {
+        self.os_handoff = handoff;
     }
 
     pub(crate) fn set_on_rows_transferred_out(
@@ -1072,6 +1081,7 @@ impl<T: 'static> RowExport<T> {
         }
         if has_mime {
             payload.enrich_external_from_mime();
+            payload = payload.with_os_handoff(self.os_handoff);
         }
         *self.removal.borrow_mut() = Some((snapshot_out)(&rows));
         *self.dragged_rows.borrow_mut() = rows;
@@ -1520,6 +1530,39 @@ mod payload_tests {
             &noop_snapshot(),
         );
         assert!(payload.is_none());
+    }
+
+    #[test]
+    fn the_os_handoff_rides_on_an_exporting_payload_only() {
+        let read = |i: usize, f: &mut dyn FnMut(&u64)| {
+            f(&(i as u64));
+            true
+        };
+        let mut export = RowExport::<u64>::default();
+        export.set_exportable(DragTransferMode::Copy);
+        export.set_os_handoff(teksilo_core::OsHandoff::Eager);
+        // No MIME: nothing for the platform, so the handoff stays the default.
+        let payload = export
+            .build_payload(
+                ViewId::next(ViewKind::List),
+                vec![0],
+                &read,
+                &noop_snapshot(),
+            )
+            .unwrap();
+        assert_eq!(payload.os_handoff(), teksilo_core::OsHandoff::AtWindowEdge);
+
+        export.set_export_external(|_: &[u64]| vec![("text/plain".into(), b"x".to_vec())]);
+        let payload = export
+            .build_payload(
+                ViewId::next(ViewKind::List),
+                vec![0],
+                &read,
+                &noop_snapshot(),
+            )
+            .unwrap();
+        assert_eq!(payload.os_handoff(), teksilo_core::OsHandoff::Eager);
+        assert!(payload.is_os_exportable());
     }
 
     #[test]

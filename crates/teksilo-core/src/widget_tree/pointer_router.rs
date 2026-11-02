@@ -926,10 +926,36 @@ impl WidgetTree {
         }
 
         // --- Active drag session handling ---
-        if self.active_drag.is_some() {
+        //
+        // Our own OS drag re-entered into this window is driven by the OS drag
+        // events (`update_external_drag`, `end_external_drag`), never by this
+        // window's pointer samples. On X11 winit keeps its implicit grab
+        // through the XDND drag, so the press that handed the drag over still
+        // sends this window its moves and its release; taking that release as
+        // the drop would land it here, lose its in-app outcome (the session has
+        // no source) and leave the XDND drop with nothing to complete. A move
+        // is dropped, and the release goes on to the router below, which
+        // swallows it as the `Up` of a press cancelled by the handover. Only
+        // the dragging pointer's: another pointer (a pen hovering, a second
+        // finger) goes on to the router as it would with no drag at all.
+        if self.os_drag_reentered
+            && matches!(
+                event,
+                WidgetEvent::PointerMove { .. } | WidgetEvent::PointerUp { .. }
+            )
+        {
+            let dragging = self.current_pointer_id();
+            let own = self
+                .active_drag
+                .as_ref()
+                .is_some_and(|d| d.pointer.id == dragging);
+            if own && matches!(event, WidgetEvent::PointerMove { .. }) {
+                return;
+            }
+        } else if self.active_drag.is_some() {
             match &event {
                 WidgetEvent::PointerMove { position, .. } => {
-                    self.handle_drag_move(*position, &mut *ops);
+                    self.handle_drag_sample(*position, &mut *ops);
                     return;
                 }
                 WidgetEvent::PointerUp { position, .. } => {

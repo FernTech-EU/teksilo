@@ -43,7 +43,7 @@ use raw_window_handle::RawWindowHandle;
 use super::{
     ExternalDndBackend, ExternalDndEventPayload, ExternalDndGuard, ExternalDragEvent, NoopDndGuard,
 };
-use teksilo_core::{DragImageData, DropOutcome, ExternalDropData, OutboundDragData};
+use teksilo_core::{DragImageData, DropOutcome, ExternalDropData, OsDragStart, OutboundDragData};
 
 /// Per-view state for the overlay drop target.
 struct DropViewIvars {
@@ -148,7 +148,12 @@ define_class!(
             } else {
                 DropOutcome::OsCopy
             };
-            self.post(ExternalDragEvent::DragEnded { outcome });
+            // AppKit started the session inside `begin_drag` (`Started`), so
+            // the event names no drag.
+            self.post(ExternalDragEvent::DragEnded {
+                outcome,
+                drag: None,
+            });
         }
     }
 );
@@ -309,13 +314,20 @@ impl ExternalDndGuard for MacOsDndGuard {
     /// `pointer` is unused here: `beginDraggingSessionWithItems:event:source:`
     /// takes the live `NSApp.currentEvent`, which is already the press of
     /// whichever device is carrying the drag.
+    ///
+    /// AppKit starts the session inside the call, so the answer is `Started`
+    /// at once and no `DragStarted` is ever posted.
     fn begin_drag(
         &self,
         data: &OutboundDragData,
         image: Option<&DragImageData>,
         _pointer: teksilo_tokens::PointerKind,
-    ) -> bool {
-        self.overlay.begin_drag(data, image)
+    ) -> OsDragStart {
+        if self.overlay.begin_drag(data, image) {
+            OsDragStart::Started
+        } else {
+            OsDragStart::Declined
+        }
     }
 }
 

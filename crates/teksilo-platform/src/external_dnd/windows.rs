@@ -31,7 +31,9 @@ use teksilo_canvas::Point;
 use teksilo_core::AppEventPoster;
 use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::window::TeksiloWindowId;
-use teksilo_core::{DragImageData, DropOutcome, ExternalDropData, OutboundDragData};
+use teksilo_core::{
+    DragImageData, DropOutcome, ExternalDropData, OsDragId, OsDragStart, OutboundDragData,
+};
 
 use windows::Win32::Foundation::{
     DRAGDROP_S_CANCEL, DRAGDROP_S_DROP, DRAGDROP_S_USEDEFAULTCURSORS, DV_E_FORMATETC, E_NOTIMPL,
@@ -247,7 +249,7 @@ pub struct WindowsDndGuard {
     poster: Arc<dyn AppEventPoster>,
     /// Outbound payload parked by `begin_drag`, consumed once by
     /// `run_pending_outbound_drag`.
-    pending: RefCell<Option<OutboundDragData>>,
+    pending: RefCell<Option<(OutboundDragData, OsDragId)>>,
     // Held only to keep the inbound drop-target COM object alive while registered.
     _target: IDropTarget,
 }
@@ -269,24 +271,41 @@ impl ExternalDndGuard for WindowsDndGuard {
         data: &OutboundDragData,
         _image: Option<&DragImageData>,
         _pointer: teksilo_tokens::PointerKind,
-    ) -> bool {
+    ) -> OsDragStart {
         // `DoDragDrop` runs its own modal message loop, so it must NOT run
         // re-entrantly inside the in-app dispatch that armed the escalation.
         // Stash the payload and post a request; `teksilo-app` calls
         // `run_pending_outbound_drag` on the next loop turn (no window borrowed).
-        // The drag image is ignored for v1 (as on macOS).
-        *self.pending.borrow_mut() = Some(data.clone());
+        // The drag image is ignored for v1 (as on macOS). The start is
+        // confirmed from there, right before the modal loop; until then the
+        // framework keeps the in-app drag.
+        if data.is_empty() {
+            return OsDragStart::Declined;
+        }
+        let drag = OsDragId::next();
+        *self.pending.borrow_mut() = Some((data.clone(), drag));
         self.poster.post_external(Box::new(OutboundOsDragRequest {
             window_id: self.window_id,
         }));
-        true
+        OsDragStart::Pending(drag)
     }
 
-    fn run_pending_outbound_drag(&self) {
-        let data = match self.pending.borrow_mut().take() {
-            Some(d) if !d.is_empty() => d,
+    /// A release (or Escape) before the deferred drag ran: drop the stashed
+    /// payload so the request that is still queued starts nothing. Once
+    /// `DoDragDrop` runs, its modal loop owns Escape and this has nothing left
+    /// to do.
+    fn cancel_drag(&self) {
+        self.pending.borrow_mut().take();
+    }
+
+    fn run_pending_outbound_drag(&self, on_start: &mut dyn FnMut(OsDragId)) {
+        let (data, drag) = match self.pending.borrow_mut().take() {
+            Some((d, drag)) if !d.is_empty() => (d, drag),
             _ => return,
         };
+        // The start's confirmation: the framework hands its in-app session
+        // over now. An event posted from here would wait behind the modal loop.
+        on_start(drag);
 
         // Source-owned COM objects: a data object carrying the exportable
         // formats, and a drop source driving the button/escape policy.
@@ -315,7 +334,10 @@ impl ExternalDndGuard for WindowsDndGuard {
             DropOutcome::Cancelled
         };
 
-        self.post(ExternalDragEvent::DragEnded { outcome });
+        self.post(ExternalDragEvent::DragEnded {
+            outcome,
+            drag: Some(drag),
+        });
     }
 }
 

@@ -158,19 +158,21 @@ impl WidgetTree {
         position: teksilo_canvas::Point,
         which: DragDrive,
         ops: &mut dyn crate::window::WindowOps,
-    ) {
-        let Some(pointer) = self.active_drag.as_ref().map(|d| d.pointer) else {
-            return;
-        };
+    ) -> Option<crate::drag_payload::DropOutcome> {
+        let pointer = self.active_drag.as_ref().map(|d| d.pointer)?;
         let saved = std::mem::replace(
             &mut self.current_input,
             crate::pointer::InputSnapshot::for_drag_session(pointer),
         );
-        match which {
-            DragDrive::Move => self.handle_drag_move(position, ops),
+        let outcome = match which {
+            DragDrive::Move => {
+                self.handle_drag_move(position, ops);
+                None
+            }
             DragDrive::Drop => self.handle_drag_drop(position, ops),
-        }
+        };
         self.current_input = saved;
+        outcome
     }
 
     /// Clean up drag preview overlay (if any).
@@ -200,6 +202,11 @@ impl WidgetTree {
     /// release pointer capture. Used by Escape, explicit cancel requests,
     /// and the source-destroyed salvage in `revalidate_interaction_state`.
     pub(super) fn cancel_active_drag(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        // A native start asked for and not yet confirmed must not happen after
+        // the drag it was for has ended here.
+        if self.os_drag_pending.take().is_some() {
+            ops.cancel_os_drag();
+        }
         let prev_target = self.active_drag.as_ref().and_then(|d| d.current_target);
         // The source widget, so a cancelled in-app drag still notifies its
         // originator via `on_drag_ended(Cancelled)`. External drags carry no
@@ -271,6 +278,14 @@ impl WidgetTree {
         data: crate::drag_payload::ExternalDropData,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        // An inbound drag over the window that asked for a native start is that
+        // native drag: while the pointer is held for our drag, no other
+        // application's drag can reach us. The platform has the pointer, so
+        // hand the in-app session over first, as its confirmation would have.
+        if let Some(pending) = self.os_drag_pending {
+            self.confirm_os_drag(pending, &mut *ops);
+        }
+
         // Defensively clear any stale session (e.g. a re-entered drag that
         // never delivered a matching leave). cancel_active_drag fires
         // on_drag_leave on the previous target first.
@@ -363,7 +378,17 @@ impl WidgetTree {
         // stash so that trailing event treats the drag as finished.
         if self.os_drag_reentered {
             self.os_drag_reentered = false;
-            self.drive_drag_session(position, DragDrive::Drop, &mut *ops);
+            let outcome = self.drive_drag_session(position, DragDrive::Drop, &mut *ops);
+            // Dropped back on the window that started the drag: what the source
+            // must hear is the in-app outcome, which the platform cannot know
+            // (it reports a copy). Held until the platform's `DragEnded`, which
+            // is what fires the source's `on_drag_ended`. A drop on another
+            // window of the app keeps the platform's outcome.
+            if self.outbound_drag_source.is_some()
+                && let Some(in_app @ crate::drag_payload::DropOutcome::InApp { .. }) = outcome
+            {
+                self.reentered_drop_outcome = Some(in_app);
+            }
             outbound_end();
             return;
         }
@@ -601,14 +626,17 @@ impl WidgetTree {
         }
     }
 
-    /// When an **internal** drag whose payload is OS-exportable leaves the
-    /// window bounds, hand it to the platform as a native OS drag. Returns
-    /// `true` if it consumed the move (escalated, or re-exited a re-entered
-    /// drag); `false` when escalation does not apply, leaving the caller to
-    /// continue the normal in-app flow.
+    /// Hand an **internal** drag whose payload is OS-exportable to the platform
+    /// as a native OS drag: when it leaves the window bounds, or, with
+    /// [`OsHandoff::Eager`](crate::drag_payload::OsHandoff::Eager), on a real
+    /// pointer sample (`sample`) anywhere. Returns `true` if it consumed the
+    /// move (handed over, or re-exited a re-entered drag); `false` when the
+    /// in-app flow continues, which includes a start the platform answered
+    /// [`OsDragStart::Pending`](crate::drag_payload::OsDragStart::Pending).
     fn try_escalate_to_os_drag(
         &mut self,
         position: teksilo_canvas::Point,
+        sample: bool,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
         // Already handed off to the OS and currently re-entered into this
@@ -623,30 +651,91 @@ impl WidgetTree {
             return false;
         }
 
+        // A start is already in flight: the in-app drag carries on until the
+        // platform confirms it, and must not ask a second time.
+        if self.os_drag_pending.is_some() {
+            return false;
+        }
+
         // Only a plain internal drag with an exportable payload escalates.
-        let data = match self.active_drag.as_ref() {
+        let (data, handoff, dragging) = match self.active_drag.as_ref() {
             Some(d)
                 if !d.is_external && d.source_widget.is_some() && d.payload.is_os_exportable() =>
             {
-                d.payload.to_outbound()
+                (d.payload.to_outbound(), d.payload.os_handoff(), d.pointer)
             }
             _ => return false,
         };
-        if !self.is_outside_window(position) {
+        // `Eager` asks only from a real pointer sample: macOS needs the live
+        // drag event to start a native drag, and a drag tick runs outside any
+        // sample. A tick leaves the next sample to ask.
+        let eager = handoff == crate::drag_payload::OsHandoff::Eager && sample;
+        if !eager && !self.is_outside_window(position) {
             return false;
         }
 
-        // Ask the platform to start a native OS drag. If it can't (no backend
-        // / test sink), leave the in-app session intact — current
-        // behavior: the drag can still come back into the window.
-        let dragging = match self.active_drag.as_ref() {
-            Some(d) => d.pointer,
-            None => return false,
+        // Ask the platform to start a native OS drag. A refusal (no backend /
+        // test sink, a stale event on macOS) keeps the in-app session intact,
+        // and the next move asks again.
+        match ops.begin_os_drag(data, None, dragging.kind) {
+            crate::drag_payload::OsDragStart::Declined => false,
+            crate::drag_payload::OsDragStart::Pending(drag) => {
+                self.os_drag_pending = Some(drag);
+                false
+            }
+            crate::drag_payload::OsDragStart::Started => {
+                self.hand_session_to_os(None, &mut *ops);
+                true
+            }
+        }
+    }
+
+    /// The platform has started the native drag `drag` this window asked for
+    /// and answered [`OsDragStart::Pending`](crate::drag_payload::OsDragStart::Pending)
+    /// about: hand the in-app session over to it. Routed here by `teksilo-app`
+    /// when a backend reports the start (`ExternalDragEvent::DragStarted`, or,
+    /// for the Windows modal drag loop, just before the loop runs).
+    ///
+    /// A confirmation for any other drag is stale: its in-app drag already
+    /// ended (a release, Escape) and asked the platform to drop the start.
+    /// When nothing else is waiting or running here, the platform is asked
+    /// again to end a native drag that nothing here owns; otherwise the newer
+    /// drag's start replaces it on the platform's side.
+    pub fn confirm_os_drag(
+        &mut self,
+        drag: crate::drag_payload::OsDragId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        if self.os_drag_pending == Some(drag) {
+            self.os_drag_pending = None;
+            if self.active_drag.is_none() {
+                ops.cancel_os_drag();
+                return;
+            }
+            self.hand_session_to_os(Some(drag), &mut *ops);
+            return;
+        }
+        if self.os_drag_pending.is_none()
+            && self.outbound_drag_source.is_none()
+            && !self.os_drag_reentered
+        {
+            ops.cancel_os_drag();
+        }
+    }
+
+    /// The platform has the pointer: take the in-app session, park its typed
+    /// payload for the OS drag's lifetime and revoke what the press had going.
+    fn hand_session_to_os(
+        &mut self,
+        drag: Option<crate::drag_payload::OsDragId>,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let Some(dragging) = self.active_drag.as_ref().map(|d| d.pointer) else {
+            return;
         };
-        if !ops.begin_os_drag(data, None, dragging.kind) {
-            return false;
-        }
-
+        self.os_drag_pending = None;
+        self.outbound_drag_id = drag;
+        self.reentered_drop_outcome = None;
         // Escalated: the OS owns the drag now. Take the in-app session and park
         // its full (typed) payload in the app-global stash for the OS drag's
         // lifetime, so any window the drag re-enters can recover it. Remember
@@ -656,7 +745,7 @@ impl WidgetTree {
         let drag = self
             .active_drag
             .take()
-            .expect("active_drag present (matched above)");
+            .expect("active_drag present (checked above)");
         self.os_drop_accepted = None;
         self.release_drag_capture(drag.source_widget);
         self.current_cursor = crate::widget::CursorIcon::Default;
@@ -665,25 +754,28 @@ impl WidgetTree {
         if let Some(prev) = prev_target {
             self.fire_on_drag_leave(prev, &mut *ops);
         }
-        // The OS owns the pointer from here: this window will see no further
-        // move and no `Up` for it, because the release happens over whatever
-        // the drag was dropped on. The source is told through
+        // The OS owns the drag from here. On Wayland, macOS and Windows this
+        // window sees no further move and no `Up` for it, because the release
+        // happens over whatever the drag was dropped on; on X11 winit keeps its
+        // implicit grab and this window still gets them, and the router keeps
+        // them away from a re-entered session (the XDND events drive it) and
+        // swallows the `Up` of the press cancelled below. The source is told through
         // `on_drag_ended(OsCopy | OsMove | Cancelled)` when the OS reports back,
-        // but anything *else* this press had going — a recognizer mid-drag, an
-        // ancestor still competing — has to be revoked now.
+        // but anything *else* this press had going (a recognizer mid-drag, an
+        // ancestor still competing) has to be revoked now.
         //
         // The pointer to revoke is the **session's**, not `current_pointer_id`:
-        // escalation can also be reached from a drag tick (a tick that scrolls
-        // can move the reported position outside the window), and a tick runs
-        // outside any sample, where the singular accessor names the mouse.
-        // Cancelling the mouse there would leave the real contact armed.
+        // the handover can be reached from a drag tick (a tick that scrolls can
+        // move the reported position outside the window) or from a platform
+        // confirmation, both outside any sample, where the singular accessor
+        // names the mouse. Cancelling the mouse there would leave the real
+        // contact armed.
         self.cancel_pointer_to(
             dragging.id,
             crate::pointer::CancelReason::OsDragStarted,
             self.outbound_drag_source,
             &mut *ops,
         );
-        true
     }
 
     /// A re-entered OS drag left this window again: return the typed payload to
@@ -697,6 +789,7 @@ impl WidgetTree {
             outbound_restash(drag.payload);
         }
         self.os_drag_reentered = false;
+        self.reentered_drop_outcome = None;
         self.os_drop_accepted = None;
         self.release_drag_capture(source);
         self.current_cursor = crate::widget::CursorIcon::Default;
@@ -705,19 +798,62 @@ impl WidgetTree {
         }
     }
 
-    /// Resolve an OS (outbound) drag at its terminal event. Clears the global
-    /// typed-payload stash and fires `on_drag_ended(outcome)` once on the
-    /// source widget (set only on the window that started the drag). Routed
-    /// here by `teksilo-app` when the platform backend reports `DragEnded`.
+    /// Resolve an OS (outbound) drag at its terminal event, for a backend
+    /// whose events name no drag (macOS, which starts at once). See
+    /// [`Self::handle_os_drag_ended_for`].
     pub fn handle_os_drag_ended(
         &mut self,
         outcome: crate::drag_payload::DropOutcome,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        self.handle_os_drag_ended_for(None, outcome, ops);
+    }
+
+    /// Resolve an OS (outbound) drag at its terminal event. Clears the global
+    /// typed-payload stash and fires `on_drag_ended(outcome)` once on the
+    /// source widget (set only on the window that started the drag). Routed
+    /// here by `teksilo-app` when the platform backend reports `DragEnded`.
+    ///
+    /// `drag` names the drag the event is about, for a backend that answered
+    /// [`OsDragStart::Pending`](crate::drag_payload::OsDragStart::Pending). The
+    /// end of a start this window is still waiting for (no press serial, no
+    /// selection ownership) ends the in-app drag as the platform says. The
+    /// end of a drag that is neither waiting nor running here is stale and
+    /// changes nothing: it belongs to a drag released before its start,
+    /// whose late event must not end the next one.
+    pub fn handle_os_drag_ended_for(
+        &mut self,
+        drag: Option<crate::drag_payload::OsDragId>,
+        outcome: crate::drag_payload::DropOutcome,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let waiting = match drag {
+            Some(id) if self.os_drag_pending == Some(id) => true,
+            Some(id) if self.outbound_drag_id == Some(id) => false,
+            Some(id) => {
+                crate::trace_input!(Gestures, "a stale end of OS drag {} is ignored", id.raw());
+                return;
+            }
+            None => self.os_drag_pending.is_some(),
+        };
+        // A start this window was waiting for ended without starting: the drag
+        // ends as the platform says, and the in-app session with it, as it
+        // would have if the start had been answered at once. Nothing of it was
+        // parked, so the stash (perhaps an earlier drag's, still ending) stays.
+        if waiting {
+            self.os_drag_pending = None;
+            self.reentered_drop_outcome = None;
+            self.cancel_active_drag(&mut *ops);
+            return;
+        }
         // The OS guarantees this terminal event; end the stash so a later drag
         // from another app can't be mistaken for ours.
         outbound_end();
         self.os_drag_reentered = false;
+        self.outbound_drag_id = None;
+        // A drop back on this window was an in-app drop, whatever the platform
+        // reports.
+        let outcome = self.reentered_drop_outcome.take().unwrap_or(outcome);
         if let Some(source) = self.outbound_drag_source.take() {
             self.fire_on_drag_ended(source, outcome, &mut *ops);
         }
@@ -739,14 +875,39 @@ impl WidgetTree {
             outbound_restash(drag.payload);
         }
         self.os_drag_reentered = false;
+        self.os_drag_pending = None;
+        self.outbound_drag_id = None;
+        self.reentered_drop_outcome = None;
         self.os_drop_accepted = None;
     }
 
     /// Update the drag session on pointer move: find the drop target under the
-    /// pointer and call its `on_drag_hover` handler.
+    /// pointer and call its `on_drag_hover` handler. For a move that is not a
+    /// pointer sample (a drag tick, a scroll, an OS drag phase); a real sample
+    /// goes through [`Self::handle_drag_sample`].
     pub(super) fn handle_drag_move(
         &mut self,
         position: teksilo_canvas::Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        self.drag_move(position, false, ops);
+    }
+
+    /// [`Self::handle_drag_move`] for a real pointer sample, the only move that
+    /// may hand an [`OsHandoff::Eager`](crate::drag_payload::OsHandoff::Eager)
+    /// drag to the platform while the pointer is inside the window.
+    pub(super) fn handle_drag_sample(
+        &mut self,
+        position: teksilo_canvas::Point,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        self.drag_move(position, true, ops);
+    }
+
+    fn drag_move(
+        &mut self,
+        position: teksilo_canvas::Point,
+        sample: bool,
         ops: &mut dyn crate::window::WindowOps,
     ) {
         // Update position on the session
@@ -754,9 +915,9 @@ impl WidgetTree {
             drag.current_position = position;
         }
 
-        // If an internal, OS-exportable drag has left the window, hand it to
-        // the OS as a native drag and stop the in-app pipeline.
-        if self.try_escalate_to_os_drag(position, &mut *ops) {
+        // If an internal, OS-exportable drag is due for the platform, hand it
+        // over as a native drag and stop the in-app pipeline.
+        if self.try_escalate_to_os_drag(position, sample, &mut *ops) {
             return;
         }
 
@@ -944,18 +1105,26 @@ impl WidgetTree {
         self.find_drop_target_at_or_above(parent)
     }
 
-    /// Complete the drag: fire `on_drop` on the target widget and end the session.
+    /// Complete the drag: fire `on_drop` on the target widget and end the
+    /// session. Returns how the drag ended, `None` when there was no session.
     pub(super) fn handle_drag_drop(
         &mut self,
         position: teksilo_canvas::Point,
         ops: &mut dyn crate::window::WindowOps,
-    ) {
+    ) -> Option<crate::drag_payload::DropOutcome> {
+        // Released while the platform was still starting the native drag the
+        // in-app drag asked for: the drag ends as `Cancelled`, with no drop.
+        // The drop belongs to whatever the native drag would have been dropped
+        // on, which nothing knows yet, so landing it in-app could be wrong.
+        if self.os_drag_pending.is_some() && self.active_drag.is_some() {
+            self.cancel_active_drag(&mut *ops);
+            return Some(crate::drag_payload::DropOutcome::Cancelled);
+        }
+
         // Clean up preview overlay
         self.cleanup_drag_preview();
 
-        if self.active_drag.is_none() {
-            return;
-        }
+        self.active_drag.as_ref()?;
 
         // Determine the drop target while the session is still live. Normally
         // it's the target the last hover ENGAGED (drop-target bubbling already
@@ -992,10 +1161,7 @@ impl WidgetTree {
         }
 
         // Take the drag session
-        let drag = match self.active_drag.take() {
-            Some(d) => d,
-            None => return,
-        };
+        let drag = self.active_drag.take()?;
         self.os_drop_accepted = None;
         self.release_drag_capture(drag.source_widget);
         self.current_cursor = crate::widget::CursorIcon::Default;
@@ -1061,6 +1227,7 @@ impl WidgetTree {
         if let Some(src) = source {
             self.fire_on_drag_ended(src, outcome, &mut *ops);
         }
+        Some(outcome)
     }
 
     /// Walk up from a widget to find the nearest ancestor (or self) with a
@@ -2585,7 +2752,10 @@ mod tests {
         started: std::rc::Rc<std::cell::RefCell<Vec<crate::drag_payload::OutboundDragData>>>,
         /// The pointer kind each `begin_os_drag` was told about, in order.
         started_kinds: std::rc::Rc<std::cell::RefCell<Vec<teksilo_tokens::PointerKind>>>,
-        succeed: bool,
+        /// What every `begin_os_drag` answers. A `Pending` answer carries a
+        /// fresh id each time, recorded in `pending_ids`.
+        start: crate::drag_payload::OsDragStart,
+        pending_ids: std::rc::Rc<std::cell::RefCell<Vec<crate::drag_payload::OsDragId>>>,
         cancels: std::rc::Rc<std::cell::Cell<usize>>,
         /// Every `set_drop_accepted` the tree pushed, in order.
         accepts: std::rc::Rc<std::cell::RefCell<Vec<bool>>>,
@@ -2593,10 +2763,19 @@ mod tests {
 
     impl RecordingWindowOps {
         fn new(succeed: bool) -> Self {
+            Self::answering(if succeed {
+                crate::drag_payload::OsDragStart::Started
+            } else {
+                crate::drag_payload::OsDragStart::Declined
+            })
+        }
+
+        fn answering(start: crate::drag_payload::OsDragStart) -> Self {
             Self {
                 started: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-                succeed,
+                start,
+                pending_ids: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
                 cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
                 accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             }
@@ -2628,10 +2807,17 @@ mod tests {
             data: crate::drag_payload::OutboundDragData,
             _image: Option<crate::drag_payload::DragImageData>,
             pointer: teksilo_tokens::PointerKind,
-        ) -> bool {
+        ) -> crate::drag_payload::OsDragStart {
             self.started.borrow_mut().push(data);
             self.started_kinds.borrow_mut().push(pointer);
-            self.succeed
+            match self.start {
+                crate::drag_payload::OsDragStart::Pending(_) => {
+                    let id = crate::drag_payload::OsDragId::next();
+                    self.pending_ids.borrow_mut().push(id);
+                    crate::drag_payload::OsDragStart::Pending(id)
+                }
+                other => other,
+            }
         }
         fn cancel_os_drag(&mut self) {
             self.cancels.set(self.cancels.get() + 1);
@@ -2651,7 +2837,8 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started: started.clone(),
             started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            succeed: true,
+            start: crate::drag_payload::OsDragStart::Started,
+            pending_ids: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
             accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
@@ -2694,7 +2881,8 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started,
             started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            succeed: true,
+            start: crate::drag_payload::OsDragStart::Started,
+            pending_ids: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
             accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
@@ -2782,7 +2970,8 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started: started.clone(),
             started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            succeed: false,
+            start: crate::drag_payload::OsDragStart::Declined,
+            pending_ids: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
             accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
@@ -2807,7 +2996,8 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started: started.clone(),
             started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            succeed: true,
+            start: crate::drag_payload::OsDragStart::Started,
+            pending_ids: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
             accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
@@ -2879,7 +3069,7 @@ mod tests {
     /// Drag out (escalate to OS), then the OS drag re-enters the same window
     /// and drops on an in-app target: the original *typed* payload is
     /// recovered (not lost to the file/text round-trip), and the source's
-    /// `on_drag_ended` fires exactly once with the OS outcome.
+    /// `on_drag_ended` fires exactly once, with the in-app outcome.
     #[test]
     fn os_drag_reentry_recovers_typed_payload_for_in_app_drop() {
         use crate::drag_payload::{DragPayload, DropOutcome};
@@ -2890,7 +3080,8 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started,
             started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            succeed: true,
+            start: crate::drag_payload::OsDragStart::Started,
+            pending_ids: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
             accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
@@ -2966,10 +3157,15 @@ mod tests {
         );
 
         // OS posts the terminal event on the source window → exactly one
-        // on_drag_ended with the OS outcome.
+        // on_drag_ended, and since the drop landed back on the window that
+        // started the drag, with the in-app outcome rather than the
+        // platform's copy.
         tree.handle_os_drag_ended(DropOutcome::OsCopy, &mut ops);
         assert_eq!(ended.get(), 1, "on_drag_ended fired exactly once");
-        assert_eq!(last_outcome.get(), Some(DropOutcome::OsCopy));
+        assert_eq!(
+            last_outcome.get(),
+            Some(DropOutcome::InApp { accepted: true })
+        );
     }
 
     /// The same recovery works across two windows of the same app: window A
@@ -2985,7 +3181,8 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started,
             started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            succeed: true,
+            start: crate::drag_payload::OsDragStart::Started,
+            pending_ids: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
             accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
@@ -3059,7 +3256,8 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started: started.clone(),
             started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            succeed: true,
+            start: crate::drag_payload::OsDragStart::Started,
+            pending_ids: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
             accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
@@ -3108,7 +3306,8 @@ mod tests {
         let mut ops = RecordingWindowOps {
             started,
             started_kinds: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
-            succeed: true,
+            start: crate::drag_payload::OsDragStart::Started,
+            pending_ids: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
             cancels: std::rc::Rc::new(std::cell::Cell::new(0)),
             accepts: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())),
         };
@@ -3782,5 +3981,618 @@ mod tests {
         );
         // And a take after end yields nothing.
         assert!(super::outbound_take_if_live().is_none());
+    }
+
+    // ---------------------------------------------------------------
+    // OsHandoff::Eager and the two-phase native start
+    // ---------------------------------------------------------------
+
+    fn pending() -> crate::drag_payload::OsDragStart {
+        crate::drag_payload::OsDragStart::Pending(crate::drag_payload::OsDragId::next())
+    }
+
+    /// The id of the last start `ops` answered `Pending`.
+    fn last_pending(ops: &RecordingWindowOps) -> crate::drag_payload::OsDragId {
+        *ops.pending_ids.borrow().last().expect("a pending start")
+    }
+
+    fn eager_payload() -> crate::drag_payload::DragPayload {
+        exportable_payload().with_os_handoff(crate::drag_payload::OsHandoff::Eager)
+    }
+
+    /// A tree with an exportable drag in flight from `source`, which records
+    /// every `on_drag_ended` outcome in `ended`.
+    fn tree_dragging(
+        payload: crate::drag_payload::DragPayload,
+    ) -> (
+        WidgetTree,
+        WidgetId,
+        Rc<RefCell<Vec<crate::drag_payload::DropOutcome>>>,
+    ) {
+        let ended: Rc<RefCell<Vec<crate::drag_payload::DropOutcome>>> =
+            Rc::new(RefCell::new(Vec::new()));
+        let e = ended.clone();
+        let mut tree = WidgetTree::new();
+        let source =
+            tree.add(FillWidget::new().on_drag_ended(move |o, _ctx| e.borrow_mut().push(o)));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, payload);
+        tree.collect_from_ctx(ctx, source);
+        assert!(tree.active_drag.is_some());
+        (tree, source, ended)
+    }
+
+    #[test]
+    fn an_eager_drag_hands_off_on_the_first_pointer_move_inside_the_window() {
+        let mut ops = RecordingWindowOps::new(true);
+        let started = ops.started.clone();
+        let (mut tree, source, ended) = tree_dragging(eager_payload());
+
+        // A real pointer sample, through the router, well inside the window.
+        tree.dispatch_event_with_ops(WidgetEvent::pointer_move(Point::new(100.0, 50.0)), &mut ops);
+        assert_eq!(started.borrow().len(), 1, "begin_os_drag asked once");
+        assert!(tree.active_drag.is_none(), "in-app session handed over");
+        assert_eq!(tree.outbound_drag_source, Some(source));
+        assert!(super::has_outbound_typed(), "typed payload parked");
+
+        // Further moves are the OS's; nothing asks again.
+        tree.dispatch_event_with_ops(WidgetEvent::pointer_move(Point::new(120.0, 50.0)), &mut ops);
+        assert_eq!(started.borrow().len(), 1);
+        tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::OsCopy, &mut ops);
+        assert_eq!(
+            *ended.borrow(),
+            vec![crate::drag_payload::DropOutcome::OsCopy]
+        );
+    }
+
+    #[test]
+    fn an_at_window_edge_drag_stays_in_app_while_the_pointer_is_inside() {
+        let mut ops = RecordingWindowOps::new(true);
+        let started = ops.started.clone();
+        let (mut tree, source, _ended) = tree_dragging(exportable_payload());
+        tree.dispatch_event_with_ops(WidgetEvent::pointer_move(Point::new(100.0, 50.0)), &mut ops);
+        assert!(started.borrow().is_empty());
+        assert!(tree.active_drag.is_some());
+        tree.handle_drag_sample(Point::new(-5.0, 50.0), &mut ops);
+        assert_eq!(started.borrow().len(), 1, "the window edge still hands off");
+        assert_eq!(tree.outbound_drag_source, Some(source));
+        tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::Cancelled, &mut ops);
+    }
+
+    #[test]
+    fn an_eager_drag_waits_for_a_pointer_sample_rather_than_a_drag_tick() {
+        let mut ops = RecordingWindowOps::new(true);
+        let started = ops.started.clone();
+        let (mut tree, _source, _ended) = tree_dragging(eager_payload());
+
+        // A drag tick (and every other move that is not a sample) runs outside
+        // any input event; macOS cannot start a drag there.
+        tree.handle_drag_move(Point::new(100.0, 50.0), &mut ops);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        assert!(started.borrow().is_empty(), "no handoff from a tick");
+        assert!(tree.active_drag.is_some());
+
+        tree.handle_drag_sample(Point::new(101.0, 50.0), &mut ops);
+        assert_eq!(started.borrow().len(), 1, "the next sample hands off");
+        tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::Cancelled, &mut ops);
+    }
+
+    #[test]
+    fn a_refused_eager_handoff_is_asked_again_on_the_next_sample() {
+        let mut ops = RecordingWindowOps::new(false);
+        let started = ops.started.clone();
+        let (mut tree, source, _ended) = tree_dragging(eager_payload());
+
+        tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+        assert_eq!(started.borrow().len(), 1);
+        assert!(
+            tree.active_drag.is_some(),
+            "a refusal keeps the in-app drag"
+        );
+        tree.handle_drag_sample(Point::new(101.0, 50.0), &mut ops);
+        assert_eq!(
+            started.borrow().len(),
+            2,
+            "no latch: the next move asks again"
+        );
+
+        ops.start = crate::drag_payload::OsDragStart::Started;
+        tree.handle_drag_sample(Point::new(102.0, 50.0), &mut ops);
+        assert_eq!(started.borrow().len(), 3);
+        assert_eq!(tree.outbound_drag_source, Some(source), "handed off once");
+        tree.handle_drag_sample(Point::new(103.0, 50.0), &mut ops);
+        assert_eq!(started.borrow().len(), 3);
+        tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::Cancelled, &mut ops);
+    }
+
+    #[test]
+    fn eager_without_anything_to_export_never_hands_off() {
+        let mut ops = RecordingWindowOps::new(true);
+        let started = ops.started.clone();
+        let (mut tree, _source, _ended) = tree_dragging(
+            crate::drag_payload::DragPayload::typed(1_u32)
+                .with_os_handoff(crate::drag_payload::OsHandoff::Eager),
+        );
+        tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+        tree.handle_drag_sample(Point::new(-5.0, 50.0), &mut ops);
+        assert!(started.borrow().is_empty());
+        assert!(tree.active_drag.is_some());
+
+        // An inbound drag from another application never escalates either.
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().on_drop(|_, _, _| true));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let data = crate::drag_payload::ExternalDropData {
+            text: Some("x".into()),
+            ..Default::default()
+        };
+        tree.begin_external_drag(Point::new(10.0, 10.0), data, &mut ops);
+        tree.update_external_drag(Point::new(-5.0, 10.0), &mut ops);
+        assert!(started.borrow().is_empty());
+    }
+
+    #[test]
+    fn a_pending_start_keeps_the_in_app_drag_until_the_platform_confirms_it() {
+        let mut ops = RecordingWindowOps::answering(pending());
+        let started = ops.started.clone();
+        let (mut tree, source, ended) = tree_dragging(eager_payload());
+
+        tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+        assert_eq!(started.borrow().len(), 1);
+        assert!(
+            tree.active_drag.is_some(),
+            "the session waits for the platform"
+        );
+        assert!(tree.outbound_drag_source.is_none());
+        assert!(
+            !super::has_outbound_typed(),
+            "nothing parked before the start"
+        );
+
+        // A start is in flight: more moves keep the in-app drag going and do not
+        // ask a second time.
+        tree.handle_drag_sample(Point::new(110.0, 50.0), &mut ops);
+        tree.handle_drag_sample(Point::new(-5.0, 50.0), &mut ops);
+        assert_eq!(started.borrow().len(), 1, "one request per start");
+        assert!(tree.active_drag.is_some());
+
+        tree.confirm_os_drag(last_pending(&ops), &mut ops);
+        assert!(
+            tree.active_drag.is_none(),
+            "handed over at the confirmation"
+        );
+        assert_eq!(tree.outbound_drag_source, Some(source));
+        assert!(super::has_outbound_typed());
+        assert!(ended.borrow().is_empty());
+        tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::OsCopy, &mut ops);
+        assert_eq!(
+            *ended.borrow(),
+            vec![crate::drag_payload::DropOutcome::OsCopy]
+        );
+    }
+
+    #[test]
+    fn a_release_before_the_native_drag_starts_ends_the_drag_as_cancelled() {
+        use crate::drag_payload::DropOutcome;
+        let mut ops = RecordingWindowOps::answering(pending());
+        let cancels = ops.cancels.clone();
+        let dropped = Rc::new(Cell::new(0_u32));
+        let d = dropped.clone();
+        let (mut tree, _source, ended) = tree_dragging(eager_payload());
+        tree.add(FillWidget::new().on_drop(move |_, _, _| {
+            d.set(d.get() + 1);
+            true
+        }));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        tree.handle_drag_sample(Point::new(150.0, 50.0), &mut ops);
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_up(
+                Point::new(150.0, 50.0),
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ),
+            &mut ops,
+        );
+        assert!(tree.active_drag.is_none());
+        assert_eq!(dropped.get(), 0, "no drop is delivered");
+        assert_eq!(*ended.borrow(), vec![DropOutcome::Cancelled]);
+        assert_eq!(cancels.get(), 1, "the platform is told to drop the start");
+
+        // The platform's late confirmation finds nothing waiting and asks it to
+        // end the native drag nothing owns; its terminal event is silent.
+        tree.confirm_os_drag(last_pending(&ops), &mut ops);
+        assert_eq!(cancels.get(), 2);
+        assert!(tree.outbound_drag_source.is_none());
+        tree.handle_os_drag_ended(DropOutcome::Cancelled, &mut ops);
+        assert_eq!(ended.borrow().len(), 1, "on_drag_ended fired once");
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn escape_before_the_native_drag_starts_abandons_the_start() {
+        use crate::drag_payload::DropOutcome;
+        let mut ops = RecordingWindowOps::answering(pending());
+        let cancels = ops.cancels.clone();
+        let (mut tree, _source, ended) = tree_dragging(eager_payload());
+        tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+        tree.dispatch_event_with_ops(
+            WidgetEvent::KeyDown {
+                key: Key::Escape,
+                modifiers: Modifiers::NONE,
+                text: None,
+            },
+            &mut ops,
+        );
+        assert_eq!(cancels.get(), 1);
+        assert!(tree.os_drag_pending.is_none());
+        assert_eq!(*ended.borrow(), vec![DropOutcome::Cancelled]);
+    }
+
+    #[test]
+    fn a_start_that_fails_on_the_platform_ends_the_drag_once() {
+        use crate::drag_payload::DropOutcome;
+        let mut ops = RecordingWindowOps::answering(pending());
+        let cancels = ops.cancels.clone();
+        let (mut tree, _source, ended) = tree_dragging(eager_payload());
+        tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+
+        // No press serial, no selection ownership: the backend reports the
+        // drag ended without starting it.
+        tree.handle_os_drag_ended(DropOutcome::Cancelled, &mut ops);
+        assert!(tree.active_drag.is_none());
+        assert!(tree.os_drag_pending.is_none());
+        assert_eq!(*ended.borrow(), vec![DropOutcome::Cancelled]);
+        assert_eq!(cancels.get(), 0, "the backend ended it already");
+    }
+
+    #[test]
+    fn closing_the_window_drops_a_pending_start() {
+        let mut ops = RecordingWindowOps::answering(pending());
+        let (mut tree, _source, _ended) = tree_dragging(eager_payload());
+        tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+        assert!(tree.os_drag_pending.is_some());
+        tree.abort_outbound_drag();
+        assert!(tree.os_drag_pending.is_none());
+        assert!(!super::outbound_is_live());
+    }
+
+    #[test]
+    fn an_inbound_drag_before_the_confirmation_is_the_native_drag_itself() {
+        let mut ops = RecordingWindowOps::answering(pending());
+        let (mut tree, source, _ended) = tree_dragging(eager_payload());
+        tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+
+        tree.begin_external_drag(
+            Point::new(100.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert_eq!(tree.outbound_drag_source, Some(source), "handed over first");
+        assert!(tree.os_drag_reentered, "then re-entered as our own drag");
+        assert!(
+            tree.active_drag
+                .as_ref()
+                .is_some_and(|d| d.payload.has_typed::<u32>()),
+            "with the typed payload recovered"
+        );
+        tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::Cancelled, &mut ops);
+    }
+
+    /// The reported case: a file manager lying wholly inside the source window.
+    /// The compositor sends this window `leave` while the pointer is still
+    /// inside its rectangle, and that `Left` must park the payload again
+    /// rather than end the drag, so the destination's drop completes it.
+    #[test]
+    fn a_leave_while_the_pointer_is_inside_the_window_keeps_the_os_drag_alive() {
+        use crate::drag_payload::DropOutcome;
+        let mut ops = RecordingWindowOps::new(true);
+        let (mut tree, _source, ended) = tree_dragging(eager_payload());
+        tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+        tree.begin_external_drag(
+            Point::new(100.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert!(tree.os_drag_reentered);
+
+        tree.update_external_drag(Point::new(110.0, 50.0), &mut ops);
+        tree.cancel_external_drag(&mut ops);
+        assert!(!tree.os_drag_reentered);
+        assert!(tree.active_drag.is_none());
+        assert!(super::has_outbound_typed(), "payload parked again");
+        assert!(ended.borrow().is_empty(), "the drag is not over");
+
+        tree.handle_os_drag_ended(DropOutcome::OsCopy, &mut ops);
+        assert_eq!(*ended.borrow(), vec![DropOutcome::OsCopy]);
+    }
+
+    #[test]
+    fn an_eager_drag_dropped_back_on_its_own_window_reports_the_in_app_outcome() {
+        use crate::drag_payload::DropOutcome;
+        for accepts in [true, false] {
+            let mut ops = RecordingWindowOps::new(true);
+            let (mut tree, _source, ended) = tree_dragging(eager_payload());
+            tree.add(FillWidget::new().on_drop(move |_, _, _| accepts));
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+
+            tree.handle_drag_sample(Point::new(150.0, 50.0), &mut ops);
+            tree.begin_external_drag(
+                Point::new(150.0, 50.0),
+                crate::drag_payload::ExternalDropData::default(),
+                &mut ops,
+            );
+            tree.end_external_drag(
+                Point::new(150.0, 50.0),
+                crate::drag_payload::ExternalDropData::default(),
+                &mut ops,
+            );
+            assert!(
+                ended.borrow().is_empty(),
+                "the platform still has to end it"
+            );
+            // Every backend advertises copy only, so the platform says copy.
+            tree.handle_os_drag_ended(DropOutcome::OsCopy, &mut ops);
+            assert_eq!(
+                *ended.borrow(),
+                vec![DropOutcome::InApp { accepted: accepts }]
+            );
+        }
+
+        // A drag that came back and left again was not dropped here: the
+        // platform's outcome stands.
+        let mut ops = RecordingWindowOps::new(true);
+        let (mut tree, _source, ended) = tree_dragging(eager_payload());
+        tree.handle_drag_sample(Point::new(150.0, 50.0), &mut ops);
+        tree.begin_external_drag(
+            Point::new(150.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        tree.cancel_external_drag(&mut ops);
+        tree.handle_os_drag_ended(DropOutcome::OsCopy, &mut ops);
+        assert_eq!(*ended.borrow(), vec![DropOutcome::OsCopy]);
+    }
+
+    #[test]
+    fn an_eager_drag_asks_the_platform_once_however_often_it_comes_back() {
+        let mut ops = RecordingWindowOps::new(true);
+        let started = ops.started.clone();
+        for round in 1..=2 {
+            let (mut tree, _source, _ended) = tree_dragging(eager_payload());
+            tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+            for _ in 0..2 {
+                tree.begin_external_drag(
+                    Point::new(100.0, 50.0),
+                    crate::drag_payload::ExternalDropData::default(),
+                    &mut ops,
+                );
+                tree.update_external_drag(Point::new(-5.0, 50.0), &mut ops);
+                assert!(!tree.os_drag_reentered, "re-exited");
+            }
+            assert_eq!(started.borrow().len(), round, "one start per drag");
+            tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::Cancelled, &mut ops);
+        }
+    }
+
+    #[test]
+    fn an_eager_finger_drag_tells_the_platform_it_is_a_finger_and_revokes_it() {
+        let cancelled: Rc<RefCell<Vec<(crate::pointer::PointerId, crate::pointer::CancelReason)>>> =
+            Rc::new(RefCell::new(Vec::new()));
+        let c = cancelled.clone();
+        let mut ops = RecordingWindowOps::answering(pending());
+        let kinds = ops.started_kinds.clone();
+
+        let mut tree = WidgetTree::new();
+        let slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let source = tree.add(
+            drag_arming_leaf(slot.clone(), eager_payload).on_pointer_cancel(
+                move |pointer, reason, _ctx| {
+                    c.borrow_mut().push((pointer.id, reason));
+                },
+            ),
+        );
+        slot.set(Some(source));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let contact = touch_press(&mut tree, Point::new(20.0, 50.0), &mut ops);
+        assert!(tree.active_drag.is_some());
+
+        tree.dispatch_pointer_with_ops(
+            crate::pointer::PointerSample {
+                pointer: crate::pointer::PointerInfo::touch(
+                    contact,
+                    crate::pointer::EventTime::from_millis(30),
+                ),
+                phase: crate::pointer::PointerPhase::Move,
+                position: Point::new(40.0, 50.0),
+                button: None,
+                modifiers: Modifiers::NONE,
+                coalesced: Vec::new(),
+            },
+            &mut ops,
+        );
+        assert_eq!(*kinds.borrow(), vec![teksilo_tokens::PointerKind::Touch]);
+        assert!(
+            cancelled.borrow().is_empty(),
+            "nothing revoked before the start"
+        );
+
+        // The confirmation arrives from the platform, outside any sample.
+        tree.confirm_os_drag(last_pending(&ops), &mut ops);
+        assert_eq!(
+            *cancelled.borrow(),
+            vec![(contact, crate::pointer::CancelReason::OsDragStarted)]
+        );
+        tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::Cancelled, &mut ops);
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// A late start or end of a drag released before its start is not
+    /// credited to the next drag, which is waiting for its own start.
+    #[test]
+    fn a_late_event_of_an_earlier_drag_does_not_touch_the_next_one() {
+        use crate::drag_payload::DropOutcome;
+        let mut ops = RecordingWindowOps::answering(pending());
+        let cancels = ops.cancels.clone();
+        let (mut tree, source, ended) = tree_dragging(eager_payload());
+
+        // Drag 1 asks, and is released before its start.
+        tree.handle_drag_sample(Point::new(100.0, 50.0), &mut ops);
+        let first = last_pending(&ops);
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_up(
+                Point::new(100.0, 50.0),
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ),
+            &mut ops,
+        );
+        assert_eq!(*ended.borrow(), vec![DropOutcome::Cancelled]);
+        assert_eq!(cancels.get(), 1);
+
+        // Drag 2 asks.
+        let mut ctx = crate::widget::EventContext::new();
+        ctx.start_drag(source, eager_payload());
+        tree.collect_from_ctx(ctx, source);
+        tree.handle_drag_sample(Point::new(110.0, 50.0), &mut ops);
+        let second = last_pending(&ops);
+        assert_ne!(first, second);
+
+        // Drag 1's late events change nothing for drag 2.
+        tree.confirm_os_drag(first, &mut ops);
+        tree.handle_os_drag_ended_for(Some(first), DropOutcome::Cancelled, &mut ops);
+        assert_eq!(tree.os_drag_pending, Some(second), "drag 2 still waits");
+        assert!(tree.active_drag.is_some(), "with its in-app session");
+        assert_eq!(cancels.get(), 1, "and its start is not cancelled");
+        assert_eq!(ended.borrow().len(), 1);
+
+        // Drag 2's own events do.
+        tree.confirm_os_drag(second, &mut ops);
+        assert_eq!(tree.outbound_drag_source, Some(source));
+        tree.handle_os_drag_ended_for(Some(first), DropOutcome::OsCopy, &mut ops);
+        assert_eq!(ended.borrow().len(), 1, "a stale end does not end drag 2");
+        tree.handle_os_drag_ended_for(Some(second), DropOutcome::OsCopy, &mut ops);
+        assert_eq!(
+            *ended.borrow(),
+            vec![DropOutcome::Cancelled, DropOutcome::OsCopy]
+        );
+    }
+
+    /// X11: winit keeps its implicit grab through the XDND drag, so the
+    /// window that handed its drag to the platform still gets the press's
+    /// moves and release while the drag is re-entered over it. Those must not
+    /// drive the re-entered session: the XDND drop does, once, and the source
+    /// hears the in-app outcome.
+    #[test]
+    fn a_reentered_drag_ignores_the_windows_own_pointer_samples() {
+        use crate::drag_payload::DropOutcome;
+        let mut ops = RecordingWindowOps::new(true);
+        let dropped = Rc::new(Cell::new(0_u32));
+        let d = dropped.clone();
+        let ended: Rc<RefCell<Vec<DropOutcome>>> = Rc::new(RefCell::new(Vec::new()));
+        let e = ended.clone();
+        let mut tree = WidgetTree::new();
+        let slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let row = tree.add(
+            drag_arming_leaf(slot.clone(), eager_payload)
+                .on_drop(move |_, _, _| {
+                    d.set(d.get() + 1);
+                    true
+                })
+                .on_drag_ended(move |o, _| e.borrow_mut().push(o)),
+        );
+        slot.set(Some(row));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let at = Point::new(50.0, 50.0);
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_down(at, PointerButton::Primary, Modifiers::NONE),
+            &mut ops,
+        );
+        tree.dispatch_event_with_ops(WidgetEvent::pointer_move(Point::new(60.0, 50.0)), &mut ops);
+        assert_eq!(
+            tree.outbound_drag_source,
+            Some(row),
+            "handed to the platform"
+        );
+
+        // XDND brings the drag back over this window.
+        tree.begin_external_drag(
+            at,
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert!(tree.os_drag_reentered);
+
+        // winit's own samples of the grabbed press.
+        tree.dispatch_event_with_ops(WidgetEvent::pointer_move(Point::new(70.0, 50.0)), &mut ops);
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_up(
+                Point::new(70.0, 50.0),
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ),
+            &mut ops,
+        );
+        assert_eq!(dropped.get(), 0, "the window's release is not the drop");
+        assert!(
+            tree.os_drag_reentered,
+            "the re-entered session is still there"
+        );
+
+        // The XDND drop completes it.
+        tree.end_external_drag(
+            Point::new(70.0, 50.0),
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert_eq!(dropped.get(), 1);
+        tree.handle_os_drag_ended(DropOutcome::OsCopy, &mut ops);
+        assert_eq!(*ended.borrow(), vec![DropOutcome::InApp { accepted: true }]);
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    /// The window's own samples are kept from a re-entered session for the
+    /// dragging pointer only: another pointer (a pen hovering) still reaches
+    /// the widgets under it.
+    #[test]
+    fn a_reentered_drag_leaves_other_pointers_alone() {
+        let mut ops = RecordingWindowOps::new(true);
+        let hovered = Rc::new(Cell::new(0_u32));
+        let h = hovered.clone();
+        let mut tree = WidgetTree::new();
+        let slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let row = tree.add(drag_arming_leaf(slot.clone(), eager_payload).on_hover(
+            move |entered, _| {
+                if entered {
+                    h.set(h.get() + 1);
+                }
+            },
+        ));
+        slot.set(Some(row));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let at = Point::new(50.0, 50.0);
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_down(at, PointerButton::Primary, Modifiers::NONE),
+            &mut ops,
+        );
+        tree.dispatch_event_with_ops(WidgetEvent::pointer_move(Point::new(60.0, 50.0)), &mut ops);
+        tree.begin_external_drag(
+            at,
+            crate::drag_payload::ExternalDropData::default(),
+            &mut ops,
+        );
+        assert!(tree.os_drag_reentered);
+        let before = hovered.get();
+
+        tree.pen_hover(Point::new(70.0, 50.0));
+        assert!(
+            hovered.get() > before,
+            "the pen's hover reaches the widget under it"
+        );
+        assert!(tree.os_drag_reentered, "and leaves the session alone");
+        tree.handle_os_drag_ended(crate::drag_payload::DropOutcome::Cancelled, &mut ops);
     }
 }

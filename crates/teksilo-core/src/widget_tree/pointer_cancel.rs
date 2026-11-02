@@ -1315,9 +1315,9 @@ mod tests {
                 _data: crate::drag_payload::OutboundDragData,
                 _image: Option<crate::drag_payload::DragImageData>,
                 _pointer: teksilo_tokens::PointerKind,
-            ) -> bool {
+            ) -> crate::drag_payload::OsDragStart {
                 self.began.set(true);
-                true
+                crate::drag_payload::OsDragStart::Started
             }
         }
 

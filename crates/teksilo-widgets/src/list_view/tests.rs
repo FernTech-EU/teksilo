@@ -4438,3 +4438,157 @@ fn the_outer_scroll_area_follows_a_row_below_the_headers() {
         outer_y.get()
     );
 }
+
+/// `.export_os_handoff(Eager)` reaches the payload a drop target receives, and
+/// a view without it keeps the default. With no platform backend (the test
+/// tree declines every native start), an `Eager` Move drag onto a sibling
+/// target is still an in-app drop, and the moved row goes.
+#[test]
+fn export_os_handoff_reaches_the_payload() {
+    use crate::primitives::{FixedSize, VStack};
+    use teksilo_core::widget_builder::WidgetBuilder as _;
+    for handoff in [None, Some(teksilo_core::OsHandoff::Eager)] {
+        let model = ListModel::from_vec(vec![10_usize, 20, 30]);
+        let seen: Rc<Cell<Option<teksilo_core::OsHandoff>>> = Rc::new(Cell::new(None));
+        let s = seen.clone();
+        let mut lv = ListView::new(model.clone(), |_i, _item, _s| {
+            Box::new(FixedLeaf(180.0, 30.0))
+        })
+        .item_height(30.0)
+        .selection(SelectionModel::new(teksilo_data::SelectionMode::Single))
+        .exportable(DragTransferMode::Move)
+        .export_external(|items: &[usize]| {
+            vec![(
+                "text/plain".to_string(),
+                format!("{}", items.len()).into_bytes(),
+            )]
+        });
+        if let Some(h) = handoff {
+            lv = lv.export_os_handoff(h);
+        }
+        let sink = FixedLeaf(180.0, 80.0).on_drop(move |payload, _pos, _ctx| {
+            s.set(Some(payload.os_handoff()));
+            payload.has_typed::<RowDragData<usize>>()
+        });
+        let mut tree = WidgetTree::new();
+        tree.add(
+            VStack::new()
+                .spacing(0.0)
+                .child(FixedSize::new().height(120.0).child(lv))
+                .child(sink),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+        drag_item(&mut tree, Point::new(50.0, 15.0), Point::new(50.0, 160.0));
+        assert_eq!(
+            seen.get(),
+            Some(handoff.unwrap_or(teksilo_core::OsHandoff::AtWindowEdge))
+        );
+        assert_eq!(model.len(), 2, "the Move removed the dropped row");
+    }
+}
+
+/// A sink whose native starts all start at once, as macOS's do.
+struct StartingOps;
+impl teksilo_core::WindowOps for StartingOps {
+    fn open_window(&mut self, _c: teksilo_core::WindowConfig) -> teksilo_core::TeksiloWindowId {
+        panic!("not used")
+    }
+    fn find_window(&self, _s: &str) -> Option<teksilo_core::TeksiloWindowId> {
+        None
+    }
+    fn window_state(
+        &self,
+        _id: teksilo_core::TeksiloWindowId,
+    ) -> Option<teksilo_core::WindowState> {
+        None
+    }
+    fn windows(&self) -> Vec<teksilo_core::WindowState> {
+        Vec::new()
+    }
+    fn focus_window(&mut self, _id: teksilo_core::TeksiloWindowId) {}
+    fn close_window_by_id(&mut self, _id: teksilo_core::TeksiloWindowId) {}
+    fn begin_os_drag(
+        &mut self,
+        _data: teksilo_core::OutboundDragData,
+        _image: Option<teksilo_core::DragImageData>,
+        _pointer: teksilo_tokens::PointerKind,
+    ) -> teksilo_core::OsDragStart {
+        teksilo_core::OsDragStart::Started
+    }
+}
+
+/// Under `OsHandoff::Eager` a Move between two views of one window goes
+/// through the platform and back: the source still removes the rows the
+/// sibling accepted (the drop on its own window reports `InApp`), and keeps
+/// them when the drag left without an in-app drop (the platform says copy).
+#[test]
+fn an_eager_move_onto_a_sibling_view_removes_the_rows() {
+    use crate::primitives::{FixedSize, VStack};
+    use teksilo_core::drag_payload::{DropOutcome, ExternalDropData};
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    for dropped_in_app in [true, false] {
+        let a = ListModel::from_vec(vec![10, 20, 30]);
+        let b = ListModel::from_vec(vec![100, 200]);
+        let b_recv = b.clone();
+        let lv_a = ListView::new(a.clone(), |_i, _it, _s| Box::new(FixedLeaf(180.0, 30.0)))
+            .item_height(30.0)
+            .exportable(DragTransferMode::Move)
+            .export_external(|items: &[i32]| {
+                vec![(
+                    "text/plain".to_string(),
+                    format!("{}", items.len()).into_bytes(),
+                )]
+            })
+            .export_os_handoff(teksilo_core::OsHandoff::Eager);
+        let lv_b = ListView::new(b.clone(), |_i, _it, _s| Box::new(FixedLeaf(180.0, 30.0)))
+            .item_height(30.0)
+            .accept_foreign_rows(true)
+            .on_rows_received(move |items, at, _ctx| {
+                for (k, v) in items.into_iter().enumerate() {
+                    b_recv.insert(at + k, v);
+                }
+            });
+        let mut tree = WidgetTree::new();
+        tree.add(
+            VStack::new()
+                .spacing(0.0)
+                .child(FixedSize::new().height(90.0).child(lv_a))
+                .child(FixedSize::new().height(150.0).child(lv_b))
+                .child(FixedLeaf(180.0, 10.0)),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+
+        let mut ops = StartingOps;
+        let from = Point::new(50.0, 15.0);
+        let to = Point::new(50.0, 105.0);
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_down(from, PointerButton::Primary, Modifiers::NONE),
+            &mut ops,
+        );
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_move(Point::new(from.x + 10.0, from.y)),
+            &mut ops,
+        );
+        tree.dispatch_event_with_ops(WidgetEvent::pointer_move(to), &mut ops);
+        // The platform has the drag and brings it back over this window.
+        tree.begin_external_drag(to, ExternalDropData::default(), &mut ops);
+        if dropped_in_app {
+            tree.end_external_drag(to, ExternalDropData::default(), &mut ops);
+        } else {
+            tree.cancel_external_drag(&mut ops);
+        }
+        tree.handle_os_drag_ended(DropOutcome::OsCopy, &mut ops);
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_up(to, PointerButton::Primary, Modifiers::NONE),
+            &mut ops,
+        );
+
+        if dropped_in_app {
+            assert_eq!(b.len(), 3, "the sibling received the row");
+            assert_eq!(a.len(), 2, "and the source removed it");
+        } else {
+            assert_eq!(b.len(), 2);
+            assert_eq!(a.len(), 3, "a copy out of the app keeps the row");
+        }
+    }
+}

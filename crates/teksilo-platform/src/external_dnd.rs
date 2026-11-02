@@ -53,7 +53,9 @@ use teksilo_canvas::Point;
 use teksilo_core::AppEventPoster;
 use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::window::TeksiloWindowId;
-use teksilo_core::{DragImageData, DropOutcome, ExternalDropData, OutboundDragData};
+use teksilo_core::{
+    DragImageData, DropOutcome, ExternalDropData, OsDragId, OsDragStart, OutboundDragData,
+};
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -118,12 +120,29 @@ pub enum ExternalDragEvent {
         /// Drop position in window-logical coordinates.
         position: Point,
     },
-    /// An **outbound** (app → OS) drag this window started has finished. Posted
-    /// by the platform backend's drag-source callback so the framework can
-    /// notify the source widget's `on_drag_ended`.
+    /// An **outbound** (app → OS) drag this window asked for has started: the
+    /// platform has the pointer now.
+    ///
+    /// Posted by a backend whose [`ExternalDndGuard::begin_drag`] answered
+    /// [`OsDragStart::Pending`], once its own loop has started the native drag,
+    /// and before anything it posts about that drag (an `Entered` over one of
+    /// this app's windows). `teksilo-app` routes it to the window's
+    /// `WidgetTree::confirm_os_drag`, which hands the in-app session over. A
+    /// backend whose pending start fails posts [`Self::DragEnded`] instead.
+    DragStarted {
+        /// The id `begin_drag` answered `Pending` with, so a late start of an
+        /// earlier drag is not credited to the drag waiting now.
+        drag: OsDragId,
+    },
+    /// An **outbound** (app → OS) drag this window started has finished, or a
+    /// pending start of one has failed. Posted by the platform backend so the
+    /// framework can notify the source widget's `on_drag_ended`.
     DragEnded {
         /// How the OS drag resolved (copy / move into another app, or cancel).
         outcome: DropOutcome,
+        /// The id `begin_drag` answered `Pending` with; `None` for a drag the
+        /// backend started at once (`Started`).
+        drag: Option<OsDragId>,
     },
 }
 
@@ -146,7 +165,8 @@ pub struct ExternalDndEventPayload {
 /// Posted by a backend whose outbound (app → OS) drag is **blocking** (Windows
 /// OLE `DoDragDrop` runs its own modal message loop) so it can be run OUTSIDE
 /// the in-app event dispatch that started it. [`ExternalDndGuard::begin_drag`]
-/// stashes the payload, posts this, and returns `true`; `teksilo-app`'s
+/// stashes the payload, posts this, and answers [`OsDragStart::Pending`];
+/// `teksilo-app`'s
 /// `AppEvent::External` arm downcasts it and calls
 /// [`ExternalDndHandle::run_pending_outbound_drag`] on the next loop turn — a
 /// point where no window is borrowed out of the manager, mirroring how inbound
@@ -244,6 +264,10 @@ pub(crate) struct TouchSerialSource {
     pointer: u32,
     /// Serial of the last `wl_touch::down`, or 0 if none.
     touch: u32,
+    /// Pointer buttons pressed and not yet released.
+    pointer_held: u32,
+    /// Touch points down and not yet up.
+    touch_held: u32,
 }
 
 #[cfg_attr(
@@ -257,15 +281,72 @@ impl TouchSerialSource {
     /// Record a pointer-button press.
     pub(crate) fn record_pointer(&mut self, serial: u32) {
         self.pointer = serial;
+        self.pointer_held = self.pointer_held.saturating_add(1);
+    }
+
+    /// Record a pointer-button release.
+    pub(crate) fn record_pointer_release(&mut self) {
+        self.pointer_held = self.pointer_held.saturating_sub(1);
     }
 
     /// Record a touch-down.
     pub(crate) fn record_touch(&mut self, serial: u32) {
         self.touch = serial;
+        self.touch_held = self.touch_held.saturating_add(1);
+    }
+
+    /// Record a touch-up.
+    pub(crate) fn record_touch_up(&mut self) {
+        self.touch_held = self.touch_held.saturating_sub(1);
+    }
+
+    /// Record a touch cancel: the compositor took every touch point away.
+    pub(crate) fn record_touch_cancel(&mut self) {
+        self.touch_held = 0;
+    }
+
+    /// Record that the pointer left or entered one of our surfaces. A button
+    /// held across a leave is released where we cannot see it (a drag grab
+    /// took it), so nothing is held any more as far as we know.
+    pub(crate) fn record_pointer_focus_change(&mut self) {
+        self.pointer_held = 0;
+    }
+
+    /// Whether a press of `kind`'s device class has ever been seen, held or
+    /// not: a device with none can never start a drag (a seat with no touch,
+    /// say), which is known before asking the backend thread.
+    pub(crate) fn has_press_for(&self, kind: teksilo_tokens::PointerKind) -> bool {
+        if kind.is_coarse() {
+            self.touch != 0
+        } else {
+            self.pointer != 0
+        }
+    }
+
+    /// The serial to start a drag carried by `kind` with ([`Self::serial_for`]),
+    /// marking the press as handed to the drag: once `start_drag` converts the
+    /// implicit grab into the compositor's drag grab, that press's release
+    /// goes to the drag grab and never reaches us, so counting it as still
+    /// held would let a later drag start from a press that is long over. A
+    /// refused `start_drag` leaves the release to come, which then finds the
+    /// count already at zero.
+    pub(crate) fn take_for_drag(&mut self, kind: teksilo_tokens::PointerKind) -> Option<u32> {
+        let serial = self.serial_for(kind)?;
+        if kind.is_coarse() {
+            self.touch_held = 0;
+        } else {
+            self.pointer_held = 0;
+        }
+        Some(serial)
     }
 
     /// The serial to start a drag carried by `kind` with, or `None` when no
-    /// usable press has been seen.
+    /// usable press has been seen, or when that press has been released.
+    ///
+    /// A released press names no grab any more: the drag was released before
+    /// the native start could happen (the start is asked for on a pointer move
+    /// and runs on the backend's own thread a few milliseconds later), and a
+    /// `start_drag` now would be refused by the compositor without a word.
     ///
     /// A coarse pointer takes the touch serial and a precise one the pointer
     /// serial. Neither falls back to the other: a serial from the wrong device
@@ -274,12 +355,12 @@ impl TouchSerialSource {
     /// cancellation, and which the framework cleans up after — for a silent
     /// compositor refusal that ends nothing.
     pub(crate) fn serial_for(&self, kind: teksilo_tokens::PointerKind) -> Option<u32> {
-        let serial = if kind.is_coarse() {
-            self.touch
+        let (serial, held) = if kind.is_coarse() {
+            (self.touch, self.touch_held)
         } else {
-            self.pointer
+            (self.pointer, self.pointer_held)
         };
-        (serial != 0).then_some(serial)
+        (serial != 0 && held > 0).then_some(serial)
     }
 }
 
@@ -296,15 +377,31 @@ impl TouchSerialSource {
 pub trait ExternalDndGuard {
     /// Start a native OS drag session (app → OS, "outbound") for this window,
     /// exporting `data` and optionally drawing `image` as the drag cursor.
-    /// Called when an in-app drag escalates past the window boundary carrying
-    /// an OS-exportable payload.
+    /// Called when an in-app drag carrying an OS-exportable payload is handed
+    /// to the platform (at the window boundary, or on the first pointer move
+    /// for `OsHandoff::Eager`).
     ///
-    /// Returns `true` if a native session actually started. The default is a
-    /// no-op returning `false`, for a backend with no outbound implementation
-    /// at all; the framework then keeps the in-app drag alive (it can come
-    /// back into the window).
+    /// The answer says when the native drag runs:
     ///
-    /// When the OS drag ends, the backend MUST post an
+    /// - [`OsDragStart::Declined`]: nothing started. The default, for a
+    ///   backend with no outbound implementation at all; the framework keeps
+    ///   the in-app drag alive (it can come back into the window).
+    /// - [`OsDragStart::Started`]: the native drag is running now (macOS).
+    /// - [`OsDragStart::Pending`]: the backend starts it on its own loop
+    ///   (Wayland, X11, Windows), under a fresh [`OsDragId`]. It MUST then
+    ///   either post [`ExternalDragEvent::DragStarted`] with that id once the
+    ///   drag runs, before anything else it posts about the drag, or, for a
+    ///   blocking drag loop, call the `on_start` of
+    ///   [`Self::run_pending_outbound_drag`] with it before entering the loop;
+    ///   or post [`ExternalDragEvent::DragEnded`] with it if the start fails.
+    ///   A [`Self::cancel_drag`] that arrives first means the start must not
+    ///   happen (or, if it already has, that the drag ends).
+    ///
+    /// A failure the backend can see now (no surface to drag from, nothing to
+    /// advertise) answers `Declined`, never `Pending` followed by a failure:
+    /// a decline keeps the in-app drag, a failure ends it.
+    ///
+    /// When a started OS drag ends, the backend MUST post an
     /// [`ExternalDragEvent::DragEnded`] through the poster captured at
     /// [`ExternalDndBackend::attach`].
     /// `pointer` is the device carrying the drag, and a backend cannot infer it:
@@ -318,8 +415,8 @@ pub trait ExternalDndGuard {
         _data: &OutboundDragData,
         _image: Option<&DragImageData>,
         _pointer: teksilo_tokens::PointerKind,
-    ) -> bool {
-        false
+    ) -> OsDragStart {
+        OsDragStart::Declined
     }
 
     /// Revise the OS's accept state for an **inbound** drag over this window
@@ -353,27 +450,36 @@ pub trait ExternalDndGuard {
     /// Default no-op: every other backend gets the scale from the OS.
     fn set_scale_factor(&self, _scale: f64) {}
 
-    /// Cancel an in-flight outbound OS drag (the user pressed Escape).
+    /// Cancel an outbound OS drag: the user pressed Escape, or released the
+    /// pointer before a pending start ([`OsDragStart::Pending`]) was confirmed.
     ///
-    /// Only meaningful for backends that drive the drag themselves rather than
-    /// handing it to a modal OS loop. X11 does — it tracks the pointer on its
-    /// own connection — so it has no OS-level Escape handling to inherit, and
-    /// without this the drag could only end by releasing the button.
+    /// A start still pending must not happen after this. Once a drag runs,
+    /// this is only meaningful for backends that drive it themselves rather
+    /// than handing it to a modal OS loop. X11 does (it tracks the pointer on
+    /// its own connection), so it has no OS-level Escape handling to inherit,
+    /// and without this the drag could only end by releasing the button.
     ///
-    /// The backend MUST still post the terminal
+    /// A backend that ends a running drag MUST still post the terminal
     /// [`ExternalDragEvent::DragEnded`] exactly as it would for any other
     /// ending, so the source widget's `on_drag_ended` fires once either way.
     fn cancel_drag(&self) {}
 
     /// Run a previously-requested **blocking** outbound drag for this window,
     /// synchronously. Called by [`ExternalDndHandle::run_pending_outbound_drag`]
-    /// from a `teksilo-app` event-loop turn AFTER [`Self::begin_drag`] returned
-    /// `true` and stashed the payload — so a blocking platform drag loop (Windows
-    /// OLE `DoDragDrop`) runs outside the dispatch that started it. When it
-    /// finishes, this MUST post [`ExternalDragEvent::DragEnded`] through the
-    /// captured poster. Default no-op: non-blocking backends (macOS / Wayland)
-    /// start the session directly in `begin_drag` and never stash.
-    fn run_pending_outbound_drag(&self) {}
+    /// from a `teksilo-app` event-loop turn AFTER [`Self::begin_drag`] answered
+    /// [`OsDragStart::Pending`] and stashed the payload, so a blocking platform
+    /// drag loop (Windows OLE `DoDragDrop`) runs outside the dispatch that
+    /// started it.
+    ///
+    /// `on_start` MUST be called right before the loop is entered, and not at
+    /// all when nothing is left to run (the start was cancelled): it is the
+    /// start's confirmation, and it hands the in-app session over before the
+    /// loop, which an event posted from here could not do, since the loop
+    /// blocks the event loop that would deliver it. When the loop finishes,
+    /// this MUST post [`ExternalDragEvent::DragEnded`] through the captured
+    /// poster. Default no-op: non-blocking backends start the session from
+    /// their own loop and never stash.
+    fn run_pending_outbound_drag(&self, _on_start: &mut dyn FnMut(OsDragId)) {}
 }
 
 /// A guard that does nothing on drop. Used by [`NoopExternalDndBackend`] and
@@ -418,7 +524,10 @@ impl ExternalDndBackend for Box<dyn ExternalDndBackend> {
 
 struct ExternalDndState {
     backend: RefCell<Box<dyn ExternalDndBackend>>,
-    guards: RefCell<HashMap<TeksiloWindowId, Box<dyn ExternalDndGuard>>>,
+    /// Shared, so a guard can be used without holding this map's borrow: the
+    /// blocking drag loop runs app code (its start's confirmation) that may
+    /// open or close a window, which attaches or detaches a guard.
+    guards: RefCell<HashMap<TeksiloWindowId, Rc<dyn ExternalDndGuard>>>,
 }
 
 /// Per-app external-drag service. Registered in app-state by
@@ -459,7 +568,10 @@ impl ExternalDndHandle {
             .backend
             .borrow_mut()
             .attach(parent, window_id, poster);
-        self.inner.guards.borrow_mut().insert(window_id, guard);
+        self.inner
+            .guards
+            .borrow_mut()
+            .insert(window_id, Rc::from(guard));
     }
 
     /// Revoke the window's OS drop-target registration (dropping its guard).
@@ -492,22 +604,24 @@ impl ExternalDndHandle {
     }
 
     /// Start a native OS (outbound) drag for `window_id`, delegating to that
-    /// window's guard. Returns `true` if a native session started, `false` if
-    /// the window isn't attached or the backend declines (no outbound
-    /// support). Called from `teksilo-app`'s `WindowOps::begin_os_drag`.
+    /// window's guard. [`OsDragStart::Declined`] if the window isn't attached
+    /// or the backend declines (no outbound support). Called from
+    /// `teksilo-app`'s `WindowOps::begin_os_drag`. See
+    /// [`ExternalDndGuard::begin_drag`].
     pub fn begin_drag(
         &self,
         window_id: TeksiloWindowId,
         data: &OutboundDragData,
         image: Option<&DragImageData>,
         pointer: teksilo_tokens::PointerKind,
-    ) -> bool {
+    ) -> OsDragStart {
         self.inner
             .guards
             .borrow()
             .get(&window_id)
-            .map(|g| g.begin_drag(data, image, pointer))
-            .unwrap_or(false)
+            .map_or(OsDragStart::Declined, |g| {
+                g.begin_drag(data, image, pointer)
+            })
     }
 
     /// Push the widget tree's accept verdict for an inbound OS drag over
@@ -521,15 +635,23 @@ impl ExternalDndHandle {
 
     /// Run the deferred blocking outbound OS drag for `window_id` (Windows OLE
     /// `DoDragDrop`), if its guard stashed one via `begin_drag`. Called from
-    /// `teksilo-app` when it receives an [`OutboundOsDragRequest`]. No-op if the
-    /// window isn't attached.
+    /// `teksilo-app` when it receives an [`OutboundOsDragRequest`]; `on_start`
+    /// runs right before the blocking loop (see
+    /// [`ExternalDndGuard::run_pending_outbound_drag`]). No-op if the window
+    /// isn't attached.
     ///
-    /// The `guards` borrow is deliberately held across the (blocking) drag loop:
-    /// the only re-entrant `guards` mutation is attach / detach (window create /
-    /// close), which cannot happen while the user is mid-drag on this window.
-    pub fn run_pending_outbound_drag(&self, window_id: TeksiloWindowId) {
-        if let Some(guard) = self.inner.guards.borrow().get(&window_id) {
-            guard.run_pending_outbound_drag();
+    /// The (blocking) drag loop runs on a shared handle to the guard, used
+    /// without holding the `guards` map's borrow, so `on_start`, which runs app
+    /// handlers, may open or close a window (attach or detach a guard) without
+    /// a borrow conflict.
+    pub fn run_pending_outbound_drag(
+        &self,
+        window_id: TeksiloWindowId,
+        on_start: &mut dyn FnMut(OsDragId),
+    ) {
+        let guard = self.inner.guards.borrow().get(&window_id).cloned();
+        if let Some(guard) = guard {
+            guard.run_pending_outbound_drag(on_start);
         }
     }
 }
@@ -589,6 +711,12 @@ pub struct MemoryExternalDndBackend {
     outbound: Arc<std::sync::Mutex<Vec<OutboundDragData>>>,
     outbound_pointers: Arc<std::sync::Mutex<Vec<teksilo_tokens::PointerKind>>>,
     accepts: Arc<std::sync::Mutex<Vec<bool>>>,
+    /// Whether `begin_drag` answers `Pending` rather than `Started`.
+    defer_starts: Arc<std::sync::atomic::AtomicBool>,
+    /// How many `cancel_drag` calls the guards received.
+    cancels: Arc<std::sync::atomic::AtomicUsize>,
+    /// The id of every start answered `Pending`, in order.
+    pending: Arc<std::sync::Mutex<Vec<OsDragId>>>,
 }
 
 /// Guard that removes the window's attachment record on drop, so
@@ -600,6 +728,9 @@ pub struct MemoryDndGuard {
     outbound: Arc<std::sync::Mutex<Vec<OutboundDragData>>>,
     outbound_pointers: Arc<std::sync::Mutex<Vec<teksilo_tokens::PointerKind>>>,
     accepts: Arc<std::sync::Mutex<Vec<bool>>>,
+    defer_starts: Arc<std::sync::atomic::AtomicBool>,
+    cancels: Arc<std::sync::atomic::AtomicUsize>,
+    pending: Arc<std::sync::Mutex<Vec<OsDragId>>>,
 }
 
 impl ExternalDndGuard for MemoryDndGuard {
@@ -608,18 +739,30 @@ impl ExternalDndGuard for MemoryDndGuard {
         data: &OutboundDragData,
         _image: Option<&DragImageData>,
         pointer: teksilo_tokens::PointerKind,
-    ) -> bool {
+    ) -> OsDragStart {
         // Record the outbound request and report success so tests can assert
         // escalation reached the backend. Test code drives the matching
-        // `DragEnded` via [`MemoryExternalDndBackend::emit`].
+        // `DragStarted` (when deferred) and `DragEnded` via
+        // [`MemoryExternalDndBackend::emit`].
         self.outbound.lock().unwrap().push(data.clone());
         self.outbound_pointers.lock().unwrap().push(pointer);
         let _ = self.window_id;
-        true
+        if self.defer_starts.load(std::sync::atomic::Ordering::Relaxed) {
+            let drag = OsDragId::next();
+            self.pending.lock().unwrap().push(drag);
+            OsDragStart::Pending(drag)
+        } else {
+            OsDragStart::Started
+        }
     }
 
     fn set_drop_accepted(&self, accepted: bool) {
         self.accepts.lock().unwrap().push(accepted);
+    }
+
+    fn cancel_drag(&self) {
+        self.cancels
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -684,6 +827,25 @@ impl MemoryExternalDndBackend {
     pub fn drop_accepts(&self) -> Vec<bool> {
         self.accepts.lock().unwrap().clone()
     }
+
+    /// Make `begin_drag` answer [`OsDragStart::Pending`], as the Wayland, X11
+    /// and Windows backends do, instead of [`OsDragStart::Started`]. A test
+    /// then confirms the start with [`ExternalDragEvent::DragStarted`] through
+    /// [`Self::emit`], naming the drag by its id from [`Self::pending_drags`].
+    pub fn defer_starts(&self, defer: bool) {
+        self.defer_starts
+            .store(defer, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The id of every start answered `Pending`, in order.
+    pub fn pending_drags(&self) -> Vec<OsDragId> {
+        self.pending.lock().unwrap().clone()
+    }
+
+    /// How many times a guard was asked to cancel an outbound drag.
+    pub fn cancelled_drags(&self) -> usize {
+        self.cancels.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 impl ExternalDndBackend for MemoryExternalDndBackend {
@@ -700,6 +862,9 @@ impl ExternalDndBackend for MemoryExternalDndBackend {
             outbound: self.outbound.clone(),
             outbound_pointers: self.outbound_pointers.clone(),
             accepts: self.accepts.clone(),
+            defer_starts: self.defer_starts.clone(),
+            cancels: self.cancels.clone(),
+            pending: self.pending.clone(),
         })
     }
 }
@@ -994,6 +1159,97 @@ mod tests {
         );
     }
 
+    /// A press released before the backend thread runs the start yields no
+    /// serial, so the start is reported as cancelled instead of being refused
+    /// by the compositor in silence. An `OsHandoff::Eager` drag asks for the
+    /// start on its first move, so a quick release can beat the thread.
+    #[test]
+    fn a_released_press_yields_no_serial() {
+        use teksilo_tokens::PointerKind;
+
+        let mut serials = TouchSerialSource::default();
+        serials.record_pointer(5);
+        serials.record_pointer_release();
+        assert_eq!(serials.serial_for(PointerKind::Mouse), None);
+        serials.record_pointer(6);
+        assert_eq!(serials.serial_for(PointerKind::Mouse), Some(6));
+
+        // Two fingers down, one lifted: the other still holds a grab.
+        serials.record_touch(8);
+        serials.record_touch(9);
+        serials.record_touch_up();
+        assert_eq!(serials.serial_for(PointerKind::Touch), Some(9));
+        serials.record_touch_up();
+        assert_eq!(serials.serial_for(PointerKind::Touch), None);
+        // A stray release never underflows into a held state.
+        serials.record_touch_up();
+        serials.record_touch(10);
+        assert_eq!(serials.serial_for(PointerKind::Touch), Some(10));
+    }
+
+    /// Two exports in a row on Wayland: the first `start_drag` succeeds, so
+    /// the compositor's drag grab takes its press's release and we never see
+    /// it. The second press is then released before the backend thread gets to
+    /// its start, and that must still yield no serial (the start is reported
+    /// cancelled), not the first press's stale one.
+    #[test]
+    fn a_press_handed_to_a_drag_is_no_longer_held() {
+        use teksilo_tokens::PointerKind;
+
+        let mut serials = TouchSerialSource::default();
+        serials.record_pointer(1);
+        assert_eq!(serials.take_for_drag(PointerKind::Mouse), Some(1));
+        // The first drag's release goes to the drag grab: never recorded.
+        serials.record_pointer(2);
+        serials.record_pointer_release();
+        assert_eq!(
+            serials.take_for_drag(PointerKind::Mouse),
+            None,
+            "the second press is over"
+        );
+
+        // The same for a finger.
+        serials.record_touch(3);
+        assert_eq!(serials.take_for_drag(PointerKind::Touch), Some(3));
+        serials.record_touch(4);
+        serials.record_touch_up();
+        assert_eq!(serials.take_for_drag(PointerKind::Touch), None);
+
+        // A pointer leave also drops a press we will not see released.
+        serials.record_pointer(5);
+        serials.record_pointer_focus_change();
+        assert_eq!(serials.serial_for(PointerKind::Mouse), None);
+        // Yet a press was seen, so the guard does not decline up front.
+        assert!(serials.has_press_for(PointerKind::Mouse));
+        assert!(!TouchSerialSource::default().has_press_for(PointerKind::Touch));
+    }
+
+    /// A deferred memory backend answers `Pending` under a fresh id each time
+    /// and counts cancels, for tests of the two-phase start.
+    #[test]
+    fn the_memory_backend_can_defer_its_starts() {
+        use teksilo_tokens::PointerKind;
+
+        let backend = MemoryExternalDndBackend::new();
+        let handle = ExternalDndHandle::new(backend.clone());
+        let cap = CapturingPoster::new();
+        let poster: Arc<dyn AppEventPoster> = cap.clone();
+        handle.attach(win(4), fake_parent(), poster);
+        let data = OutboundDragData {
+            text: Some("hi".to_string()),
+            ..Default::default()
+        };
+        backend.defer_starts(true);
+        let first = handle.begin_drag(win(4), &data, None, PointerKind::Mouse);
+        let second = handle.begin_drag(win(4), &data, None, PointerKind::Mouse);
+        let ids = backend.pending_drags();
+        assert_eq!(first, OsDragStart::Pending(ids[0]));
+        assert_eq!(second, OsDragStart::Pending(ids[1]));
+        assert_ne!(ids[0], ids[1], "each start has its own id");
+        handle.cancel_drag(win(4));
+        assert_eq!(backend.cancelled_drags(), 1);
+    }
+
     /// The handle forwards the dragging device to the window's guard, and the
     /// widget tree's accept verdict with it.
     #[test]
@@ -1010,7 +1266,10 @@ mod tests {
             text: Some("hi".to_string()),
             ..Default::default()
         };
-        assert!(handle.begin_drag(win(4), &data, None, PointerKind::Touch));
+        assert_eq!(
+            handle.begin_drag(win(4), &data, None, PointerKind::Touch),
+            OsDragStart::Started
+        );
         assert_eq!(backend.outbound_pointers(), vec![PointerKind::Touch]);
 
         handle.set_drop_accepted(win(4), false);
@@ -1019,7 +1278,10 @@ mod tests {
 
         // An unattached window swallows both without panicking.
         handle.set_drop_accepted(win(99), true);
-        assert!(!handle.begin_drag(win(99), &data, None, PointerKind::Mouse));
+        assert_eq!(
+            handle.begin_drag(win(99), &data, None, PointerKind::Mouse),
+            OsDragStart::Declined
+        );
         assert_eq!(backend.drop_accepts(), vec![false, true]);
     }
 

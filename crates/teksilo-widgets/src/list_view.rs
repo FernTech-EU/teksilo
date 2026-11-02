@@ -1034,6 +1034,25 @@ impl<T: 'static> ListView<T> {
         self
     }
 
+    /// When a drag carrying the MIME data from
+    /// [`export_external`](Self::export_external) is handed to the platform as
+    /// a native drag. [`OsHandoff::AtWindowEdge`](teksilo_core::OsHandoff::AtWindowEdge)
+    /// (the default) hands it over when the pointer leaves the window;
+    /// [`OsHandoff::Eager`](teksilo_core::OsHandoff::Eager) on the first pointer
+    /// move, so a destination window lying wholly inside this one (a file
+    /// manager in front of it) receives the drop.
+    ///
+    /// Under `Eager` every exporting drag goes through the platform, a reorder
+    /// inside this view included: the in-app drag preview is replaced by the
+    /// platform's drag image, a drop back on this window still reports
+    /// `DropOutcome::InApp` (so [`DragTransferMode::Move`] removes the rows a
+    /// sibling view accepted), and a release before the platform has started
+    /// the drag ends it as cancelled. No effect without `export_external`.
+    pub fn export_os_handoff(mut self, handoff: teksilo_core::OsHandoff) -> Self {
+        self.export.set_os_handoff(handoff);
+        self
+    }
+
     /// Override how rows moved out to a foreign target are removed from this
     /// view. Receives the dragged rows' indices (descending-safe) and the live
     /// context. Without this, an [`exportable`](Self::exportable)

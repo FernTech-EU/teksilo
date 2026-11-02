@@ -61,7 +61,8 @@ use teksilo_canvas::Point;
 use teksilo_core::raw_handle::ParentHandle;
 use teksilo_core::window::TeksiloWindowId;
 use teksilo_core::{
-    AppEventPoster, DragImageData, DropOutcome, ExternalDropData, OutboundDragData,
+    AppEventPoster, DragImageData, DropOutcome, ExternalDropData, OsDragId, OsDragStart,
+    OutboundDragData,
 };
 use x11rb::connection::Connection as _;
 use x11rb::protocol::Event;
@@ -192,20 +193,30 @@ impl ExternalDndGuard for X11DndGuard {
         data: &OutboundDragData,
         _image: Option<&DragImageData>,
         _pointer: teksilo_tokens::PointerKind,
-    ) -> bool {
-        if data.is_empty() {
-            return false;
+    ) -> OsDragStart {
+        // Nothing to advertise is known now, not on the thread: decline, so
+        // the in-app drag carries on rather than ending as cancelled.
+        if data.is_empty() || super::outbound_mimes(data).is_empty() {
+            return OsDragStart::Declined;
         }
+        let drag = OsDragId::next();
         // No drag icon window: XDND has no icon in the wire protocol, and the
         // client-side override-redirect window GTK/Qt use for one needs an
         // ARGB visual and a running compositor to avoid drawing a black
         // rectangle. The cursor still changes, which works over other apps'
         // windows because winit's implicit grab is in force.
-        if self.commands.send(Command::Begin(data.clone())).is_err() {
-            return false;
+        if self
+            .commands
+            .send(Command::Begin(data.clone(), drag))
+            .is_err()
+        {
+            return OsDragStart::Declined;
         }
         self.waker.wake();
-        true
+        // The DnD thread takes `XdndSelection` and posts `DragStarted`, or
+        // `DragEnded` if it cannot; the framework keeps the in-app drag until
+        // then.
+        OsDragStart::Pending(drag)
     }
 
     fn cancel_drag(&self) {
@@ -285,7 +296,7 @@ fn x11_window_id(parent: &ParentHandle) -> Option<Window> {
 /// Work handed from the guard (UI thread) to the DnD thread.
 enum Command {
     /// Start exporting this payload as a native OS drag.
-    Begin(OutboundDragData),
+    Begin(OutboundDragData, OsDragId),
     /// The user pressed Escape — abandon the outbound drag.
     Cancel,
     /// Re-answer the in-flight inbound drag with the widget tree's verdict.
@@ -350,7 +361,7 @@ fn pump_until_shutdown(
 
         while let Ok(command) = commands.try_recv() {
             match command {
-                Command::Begin(data) => state.begin_outbound(data),
+                Command::Begin(data, drag) => state.begin_outbound(data, drag),
                 Command::Cancel => state.cancel_outbound(),
                 Command::SetDropAccepted(accepted) => state.revise_inbound_accept(accepted),
             }
@@ -474,6 +485,8 @@ struct Outbound {
     /// Which root-child the cached `target` / `send_to` / `version` were
     /// resolved for. See the cache note in `pump_outbound`.
     resolved_for: Option<Window>,
+    /// The id the framework knows this drag by, on its start and its end.
+    drag: OsDragId,
 }
 
 /// One `INCR` transfer we are serving to a requestor.
@@ -912,21 +925,30 @@ impl DndThread {
 
     // ---------- outbound (we are the source) ----------
 
-    fn begin_outbound(&mut self, data: OutboundDragData) {
-        match self.try_begin_outbound(data) {
-            Ok(()) => {}
+    fn begin_outbound(&mut self, data: OutboundDragData, drag: OsDragId) {
+        match self.try_begin_outbound(data, drag) {
+            // The drag runs from the next pump. Confirmed before it sends
+            // anything: the first `XdndEnter` may well go to one of our own
+            // windows, and the framework must have handed its in-app session
+            // over by then.
+            Ok(()) => self.post(ExternalDragEvent::DragStarted { drag }),
             Err(_) => {
                 // Report the failure rather than leaving the source widget's
                 // `on_drag_ended` unfired and its payload stashed forever.
                 self.outbound = None;
                 self.post(ExternalDragEvent::DragEnded {
                     outcome: DropOutcome::Cancelled,
+                    drag: Some(drag),
                 });
             }
         }
     }
 
-    fn try_begin_outbound(&mut self, data: OutboundDragData) -> Result<(), X11Error> {
+    fn try_begin_outbound(
+        &mut self,
+        data: OutboundDragData,
+        drag: OsDragId,
+    ) -> Result<(), X11Error> {
         let mimes = outbound_mimes(&data);
         let mut types = Vec::with_capacity(mimes.len());
         for mime in mimes {
@@ -996,6 +1018,7 @@ impl DndThread {
             accepted: false,
             dropped_at: None,
             resolved_for: None,
+            drag,
         });
         Ok(())
     }
@@ -1209,9 +1232,9 @@ impl DndThread {
 
     /// End the outbound session and report the outcome exactly once.
     fn finish_outbound(&mut self, outcome: DropOutcome) {
-        if self.outbound.take().is_none() {
+        let Some(outbound) = self.outbound.take() else {
             return;
-        }
+        };
         // Release the selection so a later drag (ours or anyone's) starts clean.
         let selection = self.conn.atoms().xdnd_selection;
         ignore_errors(self.conn.conn().set_selection_owner(
@@ -1236,7 +1259,10 @@ impl DndThread {
             self.inbound = None;
             self.post(ExternalDragEvent::Cancelled);
         }
-        self.post(ExternalDragEvent::DragEnded { outcome });
+        self.post(ExternalDragEvent::DragEnded {
+            outcome,
+            drag: Some(outbound.drag),
+        });
     }
 
     /// Send a source→target message.

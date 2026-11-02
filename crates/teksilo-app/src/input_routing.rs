@@ -201,6 +201,33 @@ pub(crate) fn key_widget_event(
     })
 }
 
+/// Drive a window's tree with one phase of an external (OS) drag a platform
+/// backend posted for it: inbound phases to the `*_external_drag` methods, and
+/// the outbound start and end of a drag this window started to
+/// `confirm_os_drag` and `handle_os_drag_ended_for`, by the drag's id.
+pub(crate) fn apply_external_drag_event(
+    tree: &mut teksilo_core::WidgetTree,
+    event: teksilo_platform::external_dnd::ExternalDragEvent,
+    ops: &mut dyn teksilo_core::WindowOps,
+) {
+    use teksilo_platform::external_dnd::ExternalDragEvent;
+    match event {
+        ExternalDragEvent::Entered { data, position } => {
+            tree.begin_external_drag(position, data, ops);
+        }
+        ExternalDragEvent::Moved { position } => tree.update_external_drag(position, ops),
+        ExternalDragEvent::Left => tree.cancel_external_drag(ops),
+        ExternalDragEvent::Cancelled => tree.abort_external_drag(ops),
+        ExternalDragEvent::Dropped { data, position } => {
+            tree.end_external_drag(position, data, ops);
+        }
+        ExternalDragEvent::DragStarted { drag } => tree.confirm_os_drag(drag, ops),
+        ExternalDragEvent::DragEnded { outcome, drag } => {
+            tree.handle_os_drag_ended_for(drag, outcome, ops);
+        }
+    }
+}
+
 /// Whether the held modifiers make a press a command rather than typing:
 /// Super, or Control without Alt (with Alt it may be AltGr).
 fn is_command_chord(modifiers: teksilo_core::event::Modifiers) -> bool {
@@ -1352,6 +1379,141 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(*activated.borrow(), 1);
+    }
+
+    // --- The outbound drag's platform events -----------------------------
+
+    /// A zero-content leaf that fills what it is given.
+    #[derive(Debug)]
+    struct Pad;
+    impl Widget for Pad {
+        fn layout_response(&self, p: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            p.resolve(0.0, 0.0).into()
+        }
+    }
+
+    /// A sink whose native starts are all pending, recording their ids and
+    /// the cancels it is asked for.
+    #[derive(Default)]
+    struct PendingOps {
+        ids: Vec<teksilo_core::OsDragId>,
+        cancels: usize,
+    }
+    impl teksilo_core::WindowOps for PendingOps {
+        fn open_window(&mut self, _c: teksilo_core::WindowConfig) -> teksilo_core::TeksiloWindowId {
+            panic!("not used")
+        }
+        fn find_window(&self, _s: &str) -> Option<teksilo_core::TeksiloWindowId> {
+            None
+        }
+        fn window_state(
+            &self,
+            _id: teksilo_core::TeksiloWindowId,
+        ) -> Option<teksilo_core::WindowState> {
+            None
+        }
+        fn windows(&self) -> Vec<teksilo_core::WindowState> {
+            Vec::new()
+        }
+        fn focus_window(&mut self, _id: teksilo_core::TeksiloWindowId) {}
+        fn close_window_by_id(&mut self, _id: teksilo_core::TeksiloWindowId) {}
+        fn begin_os_drag(
+            &mut self,
+            _data: teksilo_core::OutboundDragData,
+            _image: Option<teksilo_core::DragImageData>,
+            _pointer: PointerKind,
+        ) -> teksilo_core::OsDragStart {
+            let id = teksilo_core::OsDragId::next();
+            self.ids.push(id);
+            teksilo_core::OsDragStart::Pending(id)
+        }
+        fn cancel_os_drag(&mut self) {
+            self.cancels += 1;
+        }
+    }
+
+    /// The platform's start and end of an outbound drag reach the tree by the
+    /// drag's id: those of another drag change nothing.
+    #[test]
+    fn an_outbound_drags_platform_events_reach_the_tree_by_its_id() {
+        use teksilo_core::drag_payload::{DragPayload, DropOutcome, OsHandoff};
+        use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+        use teksilo_platform::external_dnd::ExternalDragEvent;
+
+        let ended: Rc<RefCell<Vec<DropOutcome>>> = Rc::new(RefCell::new(Vec::new()));
+        let revoked = Rc::new(RefCell::new(0_u32));
+        let slot: Rc<std::cell::Cell<Option<teksilo_core::widget_id::WidgetId>>> =
+            Rc::new(std::cell::Cell::new(None));
+        let (e, r, sl) = (ended.clone(), revoked.clone(), slot.clone());
+        let mut tree = WidgetTree::new();
+        let source = tree.add(
+            Pad.on_pointer_event(move |event, ctx| {
+                if matches!(event, WidgetEvent::PointerDown { .. })
+                    && let Some(id) = sl.get()
+                {
+                    ctx.start_drag(
+                        id,
+                        DragPayload::typed(1_u8)
+                            .with_mime("text/plain", b"x".to_vec())
+                            .with_os_handoff(OsHandoff::Eager),
+                    );
+                }
+                teksilo_core::event::EventResponse::Ignored
+            })
+            .on_drag_ended(move |o, _| e.borrow_mut().push(o))
+            .on_pointer_cancel(move |_, _, _| *r.borrow_mut() += 1),
+        );
+        slot.set(Some(source));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+
+        let mut ops = PendingOps::default();
+        let at = teksilo_canvas::Point::new(50.0, 50.0);
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_down(at, PointerButton::Primary, Modifiers::NONE),
+            &mut ops,
+        );
+        tree.dispatch_event_with_ops(
+            WidgetEvent::pointer_move(teksilo_canvas::Point::new(60.0, 50.0)),
+            &mut ops,
+        );
+        assert_eq!(ops.ids.len(), 1, "the drag asked for its native start");
+        let ours = ops.ids[0];
+        let other = teksilo_core::OsDragId::next();
+
+        // Another drag's events: nothing happens.
+        apply_external_drag_event(
+            &mut tree,
+            ExternalDragEvent::DragStarted { drag: other },
+            &mut ops,
+        );
+        apply_external_drag_event(
+            &mut tree,
+            ExternalDragEvent::DragEnded {
+                outcome: DropOutcome::Cancelled,
+                drag: Some(other),
+            },
+            &mut ops,
+        );
+        assert_eq!(*revoked.borrow(), 0, "not handed over");
+        assert!(ended.borrow().is_empty(), "not ended");
+        assert_eq!(ops.cancels, 0);
+
+        // Ours: handed over, then ended once.
+        apply_external_drag_event(
+            &mut tree,
+            ExternalDragEvent::DragStarted { drag: ours },
+            &mut ops,
+        );
+        assert_eq!(*revoked.borrow(), 1, "the press is revoked at the handover");
+        apply_external_drag_event(
+            &mut tree,
+            ExternalDragEvent::DragEnded {
+                outcome: DropOutcome::OsCopy,
+                drag: Some(ours),
+            },
+            &mut ops,
+        );
+        assert_eq!(*ended.borrow(), vec![DropOutcome::OsCopy]);
     }
 
     /// A focused text field holding `text`, its caret at the end, laid out

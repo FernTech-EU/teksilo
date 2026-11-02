@@ -6604,3 +6604,21 @@ fn an_int_ui_tree_table_follows_the_density_ladder() {
         );
     }
 }
+
+#[test]
+fn export_os_handoff_reaches_the_row_export() {
+    let view = TreeTableView::new(sample_tree());
+    assert_eq!(
+        view.export.os_handoff,
+        teksilo_core::OsHandoff::AtWindowEdge
+    );
+    let view = view
+        .export_external(|items: &[&'static str]| {
+            vec![(
+                "text/plain".to_string(),
+                format!("{}", items.len()).into_bytes(),
+            )]
+        })
+        .export_os_handoff(teksilo_core::OsHandoff::Eager);
+    assert_eq!(view.export.os_handoff, teksilo_core::OsHandoff::Eager);
+}

@@ -4024,3 +4024,23 @@ fn a_tree_is_one_tab_stop_and_space_checks_the_focused_row() {
         "a second press unchecks; Space never sets Indeterminate"
     );
 }
+
+#[test]
+fn export_os_handoff_reaches_the_row_export() {
+    let view = TreeView::new(sample_tree(), |_item, _entry, _sel| {
+        Box::new(FixedLeaf(120.0, 20.0))
+    });
+    assert_eq!(
+        view.export.os_handoff,
+        teksilo_core::OsHandoff::AtWindowEdge
+    );
+    let view = view
+        .export_external(|items: &[&'static str]| {
+            vec![(
+                "text/plain".to_string(),
+                format!("{}", items.len()).into_bytes(),
+            )]
+        })
+        .export_os_handoff(teksilo_core::OsHandoff::Eager);
+    assert_eq!(view.export.os_handoff, teksilo_core::OsHandoff::Eager);
+}

@@ -28,7 +28,7 @@
 //! `wl_data_device` on Wayland, XDND on X11. The Browse button stays as the
 //! keyboard route.)
 
-use teksilo::core::drag_payload::{DragPayload, DropOutcome};
+use teksilo::core::drag_payload::{DragPayload, DropOutcome, OsHandoff};
 use teksilo::core::gesture::DragPhase;
 use teksilo::core::widget_id::WidgetId;
 use teksilo::prelude::*;
@@ -117,6 +117,34 @@ fn main() {
                         added
                     };
 
+                    // The same file, handed to the OS on the first move
+                    // (`OsHandoff::Eager`) instead of at the window edge: drop
+                    // it on a file manager window lying wholly inside this one,
+                    // which an edge handoff can never reach.
+                    let eager_row = {
+                        let id = Signal::new(WidgetId::default());
+                        let id_for_drag = id.clone();
+                        let log = log.clone();
+                        let row = Panel::new()
+                            .child(Padding::uniform(10.0).child(TextWidget::new(lit!("⠿  Drag this file out at once (OsHandoff::Eager)  (main.rs)"),
+                            )))
+                            .on_drag(move |phase, ctx| {
+                                if let DragPhase::Started { .. } = phase {
+                                    let uri_list = format!("file://{this_file}\r\n");
+                                    let payload = DragPayload::typed(this_file.to_string())
+                                        .with_mime("text/uri-list", uri_list.into_bytes())
+                                        .with_os_handoff(OsHandoff::Eager);
+                                    ctx.start_drag(id_for_drag.get(), payload);
+                                }
+                            })
+                            .on_drag_ended(move |outcome, _ctx| {
+                                prepend(&log, &format!("↗  eager file drag ended: {}", describe(outcome)));
+                            });
+                        let added = tree.add(row);
+                        id.set(added);
+                        added
+                    };
+
                     let text_row = {
                         let id = Signal::new(WidgetId::default());
                         let id_for_drag = id.clone();
@@ -146,6 +174,7 @@ fn main() {
                                 .spacing(10.0)
                                 .child(TextWidget::new(lit!("Drag OUT (app → OS)")))
                                 .child(file_row)
+                                .child(eager_row)
                                 .child(text_row),
                         ),
                     );

@@ -5547,7 +5547,7 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
         data: teksilo_core::OutboundDragData,
         image: Option<teksilo_core::DragImageData>,
         pointer: teksilo_tokens::PointerKind,
-    ) -> bool {
+    ) -> teksilo_core::OsDragStart {
         use teksilo_platform::external_dnd::ExternalDndHandle;
         // Outbound drag is wired only if the app installed the external-DnD
         // service. Without it, decline so the framework keeps the in-app drag
@@ -5557,10 +5557,10 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
             .app_context_template()
             .and_then(|t| t.app_state::<ExternalDndHandle>().cloned())
         else {
-            return false;
+            return teksilo_core::OsDragStart::Declined;
         };
         let Some(current_id) = self.current_id else {
-            return false;
+            return teksilo_core::OsDragStart::Declined;
         };
         handle.begin_drag(current_id, &data, image.as_ref(), pointer)
     }

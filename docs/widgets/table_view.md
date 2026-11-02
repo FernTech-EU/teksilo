@@ -63,6 +63,7 @@
 | `Self` | [`reorderable_rows(enabled: bool)`](#tableview-reorderable_rows) |
 | `Self` | [`exportable(mode: DragTransferMode)`](#tableview-exportable) |
 | `Self` | [`export_external(f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static)`](#tableview-export_external) |
+| `Self` | [`export_os_handoff(handoff: teksilo_core::OsHandoff)`](#tableview-export_os_handoff) |
 | `Self` | [`on_rows_transferred_out(f: impl Fn(&[usize], &mut teksilo_core::widget::EventContext) + 'static)`](#tableview-on_rows_transferred_out) |
 | `Self` | [`accept_foreign_rows(accept: bool)`](#tableview-accept_foreign_rows) |
 | `Self` | [`on_rows_received(f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static)`](#tableview-on_rows_received) |
@@ -627,6 +628,25 @@ application / window via the OS. `f` maps the dragged items to
 app-specific `application/x-…`). Implies `exportable`
 (defaulting to `DragTransferMode::Move` if not already set). Requires
 `T: Clone`.
+
+<a id="tableview-export_os_handoff"></a>
+
+#### `pub fn export_os_handoff(mut self, handoff: teksilo_core::OsHandoff) -> Self`
+
+When a drag carrying the MIME data from
+`export_external` is handed to the platform as
+a native drag. `OsHandoff::AtWindowEdge`
+(the default) hands it over when the pointer leaves the window;
+`OsHandoff::Eager` on the first pointer
+move, so a destination window lying wholly inside this one (a file
+manager in front of it) receives the drop.
+
+Under `Eager` every exporting drag goes through the platform, a reorder
+inside this view included: the in-app drag preview is replaced by the
+platform's drag image, a drop back on this window still reports
+`DropOutcome::InApp` (so `DragTransferMode::Move` removes the rows a
+sibling view accepted), and a release before the platform has started
+the drag ends it as cancelled. No effect without `export_external`.
 
 <a id="tableview-on_rows_transferred_out"></a>
 
