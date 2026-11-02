@@ -174,6 +174,9 @@ fn a_modified_letter_chord_falls_through_instead_of_running_type_ahead() {
     assert_eq!(highlight.get().as_deref(), Some("Cherry"));
 }
 
+// macOS has no AltGr: Control with Option is a command there (see
+// `range_nav::is_text_entry_chord_for`).
+#[cfg(not(target_os = "macos"))]
 #[test]
 fn an_alt_gr_character_is_type_ahead_not_an_accelerator() {
     // `AltGr` is the third-level shift on every non-US layout and reaches the
@@ -553,6 +556,34 @@ fn type_ahead_highlights_in_open_dropdown() {
     let frame_after = tree.render();
 
     assert_ne!(frame_before.shapes, frame_after.shapes);
+}
+
+/// An Alt press does not run the open list's type-ahead. On macOS Option+B
+/// types "∫" and arrives as `Key::B`, so taking it would search the wrong
+/// character; elsewhere Alt+B is an accelerator. The rule for both is
+/// `range_nav::is_text_entry_chord_for` (its macOS twin, which also refuses
+/// Control with Option, is pinned there); this pins that the open list asks it.
+#[test]
+fn an_alt_press_does_not_type_ahead_in_the_open_list() {
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let (cb, highlight) = add_combo(&mut tree, ComboBox::new(fruits(), selected.clone()));
+    tree.layout(SizeProposal::exact(300.0, 300.0));
+    tree.focus(cb);
+    tree.click(cb);
+    tree.layout(SizeProposal::exact(300.0, 300.0));
+    assert_eq!(tree.active_overlays().len(), 1);
+    let before = highlight.get();
+
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::KeyDown {
+        key: Key::B,
+        modifiers: teksilo_core::event::Modifiers::ALT,
+        text: Some("∫".to_string()),
+    });
+    assert_eq!(highlight.get(), before, "Alt+B moved nothing");
+
+    tree.press_key(Key::B, teksilo_core::event::Modifiers::NONE);
+    assert_eq!(highlight.get().as_deref(), Some("Banana"));
 }
 
 #[test]

@@ -210,6 +210,31 @@ fn keyboard_connect_flow_forms_connection() {
     assert_eq!(*pair.borrow(), Some((am, bm)));
 }
 
+/// The connect key does not toggle with Alt held: on macOS Option+M types
+/// "µ" and arrives as the `M` key.
+#[test]
+fn an_alt_press_of_the_connect_key_does_not_enter_connect_mode() {
+    use teksilo_core::event::{Modifiers, WidgetEvent};
+    let (scene, _a, _am, _b, _bm) = two_node_scene();
+    let (cfg, (count, _pair)) = recording_config(source_to_target);
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene).magnetism(cfg));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    tree.focus(view_id);
+
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Character('m'),
+        modifiers: Modifiers::ALT,
+        text: Some("µ".into()),
+    });
+    // Were connect mode on, Enter would activate the source, the arrow move to
+    // the target and Enter connect them.
+    key(&mut tree, Key::Enter);
+    key(&mut tree, Key::ArrowRight);
+    key(&mut tree, Key::Enter);
+    assert_eq!(count.get(), 0, "Alt+M did not enter connect mode");
+}
+
 #[test]
 fn keyboard_escape_cancels_pending_then_exits() {
     let (scene, _a, _am, _b, _bm) = two_node_scene();

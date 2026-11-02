@@ -49,6 +49,9 @@ pub mod dialog;
 pub mod docking;
 pub mod editor_shortcuts;
 pub use data_views::{ActivateOn, DragTransferMode, RowDragData, ViewId};
+// The Option rule for single-key commands, for the sibling widget crates.
+#[doc(hidden)]
+pub use common::range_nav::option_blocks_key;
 /// When an exporting drag is handed to the platform; see `export_os_handoff` on the data views.
 pub use teksilo_core::OsHandoff;
 pub(crate) mod drag_preview;

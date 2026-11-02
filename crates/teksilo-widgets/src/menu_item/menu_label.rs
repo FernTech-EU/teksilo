@@ -13,10 +13,11 @@
 //!
 //! The macOS exclusion is intentional and matches the
 //! [`MenuBarDispatcher`](teksilo_core::window::menubar_dispatcher::MenubarDispatcher)
-//! contract: on macOS, the OS rewrites Option+letter for accented
-//! character composition before the app sees the keystroke
-//! (Option+E → ´, Option+F → ƒ, …), so Alt+letter mnemonics cannot
-//! function and drawing the underline would mislead the user. F10,
+//! contract: on macOS the dispatcher has no Alt+letter branch, since
+//! Option+letter is also how a Mac user types accented characters
+//! and symbols (Option+E starts an accent, Option+F types ƒ) and the
+//! branch would swallow that typing, so Alt+letter mnemonics do not
+//! fire there and drawing the underline would mislead the user. F10,
 //! bare-Alt-tap, and in-menu bare-letter activation continue to
 //! work on macOS.
 //!
@@ -238,9 +239,8 @@ impl Widget for MenuLabel {
         }
 
         // Underline. Skip if Alt is up, no marker was parsed, OR if
-        // we're on macOS — Option+letter is rewritten by the OS for
-        // accented character input before reaching the dispatcher,
-        // so Alt+letter mnemonics don't function (see
+        // we're on macOS, where the dispatcher has no Alt+letter
+        // branch (Option+letter is typing there; see
         // `MenuBarDispatcher::try_handle`). Drawing the underline
         // anyway would mislead users into thinking the chord works.
         let alt_held = self.alt_down.get() && !cfg!(target_os = "macos");

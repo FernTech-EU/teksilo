@@ -94,7 +94,9 @@ The framework decides what "target" means per event type:
   it walks that press's frozen claimant list and nothing else, which is what
   stops a boundary pan reaching a `SpinBox`'s wheel handler. See §4.3.
 - **KeyDown / KeyUp / IME**, routed to the focused widget. Preview from root
-  down, bubble focused-widget up.
+  down, bubble focused-widget up. A key event's `key` is the key the chord
+  names and `text` what the press typed: on macOS Option+A is `Key::A` with
+  the text "å".
 - **AccessKit actions**, routed to the target node directly. No pointer, no
   focus, the platform's AccessKit request carries a `NodeId`. No preview pass;
   handler runs on the target only, then bubbles.

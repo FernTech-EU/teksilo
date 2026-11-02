@@ -162,6 +162,14 @@ pub(crate) fn bounces_to_modal(event: &WindowEvent) -> bool {
 /// character for them (on macOS Ctrl+D has the text "d", the key without its
 /// modifiers), and a text widget whose "command" test is ⌘ alone typed it.
 /// Control with Alt is how Windows reports AltGr, whose characters are text.
+///
+/// The event's `key` is the key the chord names and its `text` what the press
+/// typed. On macOS a press with Option (and neither Control nor Command) has
+/// for its logical key the character Option composed ("å" for Option+A), so
+/// the caller passes `macos_base_key`, the key without its modifiers, and the
+/// event names that key (`Key::A`) while its text keeps "å": an `Alt+A`
+/// shortcut then fires on macOS as it does on Windows and Linux. See
+/// [`chord_key`] for when the base is taken. `None` off macOS.
 pub(crate) fn key_widget_event(
     logical_key: &winit::keyboard::Key,
     text: Option<&str>,
@@ -169,13 +177,15 @@ pub(crate) fn key_widget_event(
     is_synthetic: bool,
     modifiers: teksilo_core::event::Modifiers,
     taken: Option<teksilo_platform::text_input_hook::TakenKey>,
+    macos_base_key: Option<&winit::keyboard::Key>,
 ) -> Option<teksilo_core::event::WidgetEvent> {
     use teksilo_core::event::WidgetEvent;
     use teksilo_platform::text_input_hook::TakenKey;
     if is_synthetic && state.is_pressed() {
         return None;
     }
-    let key = teksilo_platform::event_translation::translate_key(logical_key)?;
+    let named = chord_key(logical_key, macos_base_key, modifiers);
+    let key = teksilo_platform::event_translation::translate_key(named)?;
     Some(match state {
         winit::event::ElementState::Pressed => match taken {
             Some(TakenKey::Committed) => return None,
@@ -199,6 +209,53 @@ pub(crate) fn key_widget_event(
         },
         winit::event::ElementState::Released => WidgetEvent::KeyUp { key, modifiers },
     })
+}
+
+/// The key a chord names, for a press macOS composed with Option.
+///
+/// `macos_base_key` (the key without its modifiers, passed on macOS only)
+/// stands in for `logical` when all of these hold:
+///
+/// - Alt is held, and neither Control nor Super: with either of those, winit
+///   already reports the key Option did not compose, with Shift applied;
+/// - `logical` is a character, not a dead key, a named key or an unidentified
+///   one;
+/// - the base is a character (not a dead key), and either an ASCII letter
+///   (case-free: Shift stays in the modifiers, as on Linux, where Alt+Shift+A
+///   arrives as `Key::A` with Shift) or Shift is not held. With Shift and any
+///   other base (a digit, punctuation, a non-ASCII letter such as Cyrillic
+///   "ф"), the base would name the unshifted key ("2" for Option+Shift+2)
+///   where every other path names the shifted one ("@"), so the press keeps
+///   its composed key.
+///
+/// Read from the same `modifiers` the event carries, so the key and the
+/// modifiers of one event cannot disagree.
+fn chord_key<'a>(
+    logical: &'a winit::keyboard::Key,
+    macos_base_key: Option<&'a winit::keyboard::Key>,
+    modifiers: teksilo_core::event::Modifiers,
+) -> &'a winit::keyboard::Key {
+    use winit::keyboard::Key as WKey;
+    let Some(base) = macos_base_key else {
+        return logical;
+    };
+    if !modifiers.alt() || modifiers.ctrl() || modifiers.super_key() {
+        return logical;
+    }
+    if !matches!(logical, WKey::Character(_)) {
+        return logical;
+    }
+    let WKey::Character(base_text) = base else {
+        return logical;
+    };
+    let Some(first) = base_text.chars().next() else {
+        return logical;
+    };
+    if first.is_ascii_alphabetic() || !modifiers.shift() {
+        base
+    } else {
+        logical
+    }
 }
 
 /// Drive a window's tree with one phase of an external (OS) drag a platform
@@ -1232,6 +1289,7 @@ pub(crate) mod tests {
             false,
             modifiers,
             None,
+            None,
         ) {
             Some(WidgetEvent::KeyDown {
                 key: Key::D, text, ..
@@ -1262,6 +1320,7 @@ pub(crate) mod tests {
             false,
             Modifiers::NONE,
             None,
+            None,
         );
         assert!(
             matches!(
@@ -1276,6 +1335,7 @@ pub(crate) mod tests {
             ElementState::Released,
             false,
             Modifiers::NONE,
+            None,
             None,
         );
         assert!(
@@ -1304,6 +1364,7 @@ pub(crate) mod tests {
             true,
             Modifiers::NONE,
             None,
+            None,
         );
         assert!(down.is_none(), "{down:?}");
         let up = key_widget_event(
@@ -1312,6 +1373,7 @@ pub(crate) mod tests {
             ElementState::Released,
             true,
             Modifiers::NONE,
+            None,
             None,
         );
         assert!(
@@ -1363,6 +1425,7 @@ pub(crate) mod tests {
                 is_synthetic,
                 Modifiers::NONE,
                 None,
+                None,
             ) {
                 tree.dispatch_event(event);
             }
@@ -1372,9 +1435,15 @@ pub(crate) mod tests {
         // And the same widget does open one for a press the user makes here,
         // or the zero above would prove nothing.
         for state in [ElementState::Pressed, ElementState::Released] {
-            if let Some(event) =
-                key_widget_event(&enter(), Some("\r"), state, false, Modifiers::NONE, None)
-            {
+            if let Some(event) = key_widget_event(
+                &enter(),
+                Some("\r"),
+                state,
+                false,
+                Modifiers::NONE,
+                None,
+                None,
+            ) {
                 tree.dispatch_event(event);
             }
         }
@@ -1516,6 +1585,239 @@ pub(crate) mod tests {
         assert_eq!(*ended.borrow(), vec![DropOutcome::OsCopy]);
     }
 
+    // --- Option chords on macOS -----------------------------------------
+
+    fn ch(c: &str) -> winit::keyboard::Key {
+        winit::keyboard::Key::Character(c.into())
+    }
+
+    /// The table of [`chord_key`]: which presses take the base key.
+    #[test]
+    fn an_option_chord_names_the_key_without_option() {
+        use teksilo_core::event::Modifiers as M;
+        let dead = winit::keyboard::Key::Dead(Some('´'));
+        let arrow = winit::keyboard::Key::Named(winit::keyboard::NamedKey::ArrowLeft);
+        let cases: [(winit::keyboard::Key, &str, M, bool); 13] = [
+            (ch("å"), "a", M::ALT, true),
+            (ch("Å"), "a", M::ALT | M::SHIFT, true),
+            (ch("™"), "2", M::ALT, true),
+            (ch("÷"), "/", M::ALT, true),
+            // Shift with a digit: the base would be the unshifted key.
+            (ch("€"), "2", M::ALT | M::SHIFT, false),
+            // With Control or Command winit already ignores Option.
+            (ch("a"), "a", M::ALT | M::CTRL, false),
+            (ch("a"), "a", M::ALT | M::SUPER, false),
+            (ch("a"), "a", M::NONE, false),
+            (dead.clone(), "e", M::ALT, false),
+            (arrow.clone(), "a", M::ALT, false),
+            // A Russian layout: the base is the layout's own letter, as on
+            // Linux. Without Shift it is taken; with Shift (a non-ASCII
+            // letter) the composed key stays.
+            (ch("ƒ"), "ф", M::ALT, true),
+            (ch("Ƒ"), "ф", M::ALT | M::SHIFT, false),
+            // Greek, the same.
+            (ch("å"), "α", M::ALT, true),
+        ];
+        // A dead base (a layout whose plain key is itself a dead key) is not a
+        // character: the composed key stays.
+        let dead_base = winit::keyboard::Key::Dead(Some('^'));
+        assert_eq!(chord_key(&ch("î"), Some(&dead_base), M::ALT), &ch("î"));
+        for (logical, base, modifiers, takes_base) in cases {
+            let base = ch(base);
+            let named = chord_key(&logical, Some(&base), modifiers);
+            if takes_base {
+                assert_eq!(named, &base, "{logical:?} with {modifiers:?}");
+            } else {
+                assert_eq!(named, &logical, "{logical:?} with {modifiers:?}");
+            }
+            // Off macOS there is no base: always the logical key.
+            assert_eq!(chord_key(&logical, None, modifiers), &logical);
+        }
+    }
+
+    #[test]
+    fn an_option_press_names_its_key_and_keeps_its_text() {
+        use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+        use teksilo_platform::text_input_hook::TakenKey;
+        let base = ch("a");
+        let down = key_widget_event(
+            &ch("å"),
+            Some("å"),
+            ElementState::Pressed,
+            false,
+            Modifiers::ALT,
+            None,
+            Some(&base),
+        );
+        assert!(
+            matches!(
+                &down,
+                Some(WidgetEvent::KeyDown {
+                key: Key::A,
+                modifiers: Modifiers::ALT,
+                text: Some(t),
+            }) if t == "å"
+            ),
+            "{down:?}"
+        );
+        let up = key_widget_event(
+            &ch("å"),
+            None,
+            ElementState::Released,
+            false,
+            Modifiers::ALT,
+            None,
+            Some(&base),
+        );
+        assert!(
+            matches!(
+                &up,
+                Some(WidgetEvent::KeyUp {
+                    key: Key::A,
+                    modifiers: Modifiers::ALT,
+                })
+            ),
+            "{up:?}"
+        );
+        let swallowed = key_widget_event(
+            &ch("å"),
+            Some("å"),
+            ElementState::Pressed,
+            false,
+            Modifiers::ALT,
+            Some(TakenKey::Swallowed),
+            Some(&base),
+        );
+        assert!(
+            matches!(
+                &swallowed,
+                Some(WidgetEvent::KeyDown {
+                    key: Key::A,
+                    modifiers: Modifiers::ALT,
+                    text: None,
+                })
+            ),
+            "{swallowed:?}"
+        );
+        // Off macOS (no base) the press is what it always was.
+        let linux = key_widget_event(
+            &ch("å"),
+            Some("å"),
+            ElementState::Pressed,
+            false,
+            Modifiers::ALT,
+            None,
+            None,
+        );
+        assert!(
+            matches!(
+                &linux,
+                Some(WidgetEvent::KeyDown {
+                key: Key::Character('å'),
+                modifiers: Modifiers::ALT,
+                text: Some(t),
+            }) if t == "å"
+            ),
+            "{linux:?}"
+        );
+    }
+
+    /// A zero-size root that registers global `Alt` shortcuts, each with an
+    /// action counting its invocations.
+    #[derive(Debug)]
+    struct AltShortcuts {
+        strokes: Vec<teksilo_core::shortcut::KeyStroke>,
+        fired: Rc<RefCell<Vec<usize>>>,
+    }
+
+    impl Widget for AltShortcuts {
+        fn build(
+            &mut self,
+            ctx: &mut teksilo_core::BuildContext,
+        ) -> Vec<teksilo_core::widget_id::WidgetId> {
+            const IDS: [&str; 2] = ["test.alt_first", "test.alt_second"];
+            for (i, stroke) in self.strokes.iter().enumerate() {
+                ctx.register_shortcut_global(
+                    teksilo_core::shortcut::Shortcut::new(IDS[i])
+                        .primary(*stroke)
+                        .build(),
+                );
+                let fired = self.fired.clone();
+                ctx.register_action_global(teksilo_core::Action::new(IDS[i]).on_invoke(
+                    move |_, _| {
+                        fired.borrow_mut().push(i);
+                    },
+                ));
+            }
+            Vec::new()
+        }
+
+        fn layout_response(&self, _p: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+            Size::ZERO.into()
+        }
+    }
+
+    /// One Option press and its release, as the event loop builds them on
+    /// macOS (logical key and text composed, `base` the key without
+    /// modifiers).
+    fn option_press(
+        tree: &mut WidgetTree,
+        composed: &str,
+        base: &str,
+        modifiers: teksilo_core::event::Modifiers,
+    ) {
+        let base = ch(base);
+        for (state, text) in [
+            (ElementState::Pressed, Some(composed)),
+            (ElementState::Released, None),
+        ] {
+            if let Some(event) = key_widget_event(
+                &ch(composed),
+                text,
+                state,
+                false,
+                modifiers,
+                None,
+                Some(&base),
+            ) {
+                tree.dispatch_event(event);
+            }
+        }
+        settle_frames(tree);
+    }
+
+    /// The reported case: an `Alt+A` shortcut fires on Option+A with a text
+    /// field focused, and the field types nothing; without the shortcut the
+    /// field types the composed character.
+    #[test]
+    fn an_alt_letter_shortcut_fires_on_option_and_types_nothing() {
+        use teksilo_core::event::{Key, Modifiers};
+        use teksilo_core::shortcut::KeyStroke;
+        let fired = Rc::new(RefCell::new(Vec::new()));
+        let (mut tree, value) = focused_field("x");
+        tree.add(AltShortcuts {
+            strokes: vec![
+                KeyStroke::alt(Key::A),
+                KeyStroke::new(Key::A, Modifiers::ALT | Modifiers::SHIFT),
+            ],
+            fired: fired.clone(),
+        });
+        settle_frames(&mut tree);
+
+        option_press(&mut tree, "å", "a", Modifiers::ALT);
+        assert_eq!(*fired.borrow(), vec![0], "Alt+A fired once");
+        assert_eq!(value.get(), "x", "and typed nothing");
+
+        option_press(&mut tree, "Å", "a", Modifiers::ALT | Modifiers::SHIFT);
+        assert_eq!(*fired.borrow(), vec![0, 1], "Alt+Shift+A fired");
+        assert_eq!(value.get(), "x");
+
+        // No shortcut on Option+O: the field types what Option composed.
+        option_press(&mut tree, "ø", "o", Modifiers::ALT);
+        assert_eq!(value.get(), "xø");
+        assert_eq!(fired.borrow().len(), 2);
+    }
+
     /// A focused text field holding `text`, its caret at the end, laid out
     /// and settled as a window's first frames would.
     fn focused_field(text: &str) -> (WidgetTree, teksilo_core::signal::Signal<String>) {
@@ -1578,9 +1880,15 @@ pub(crate) mod tests {
             (ElementState::Pressed, Some(" ")),
             (ElementState::Released, None),
         ] {
-            if let Some(event) =
-                key_widget_event(&space(), text, state, false, Modifiers::NONE, taken.clone())
-            {
+            if let Some(event) = key_widget_event(
+                &space(),
+                text,
+                state,
+                false,
+                Modifiers::NONE,
+                taken.clone(),
+                None,
+            ) {
                 tree.dispatch_event(event);
             }
         }
@@ -1603,7 +1911,9 @@ pub(crate) mod tests {
             (ElementState::Pressed, Some(text), taken),
             (ElementState::Released, None, None),
         ] {
-            if let Some(event) = key_widget_event(key, text, state, false, Modifiers::NONE, taken) {
+            if let Some(event) =
+                key_widget_event(key, text, state, false, Modifiers::NONE, taken, None)
+            {
                 tree.dispatch_event(event);
             }
         }
@@ -1681,6 +1991,7 @@ pub(crate) mod tests {
             false,
             Modifiers::NONE,
             Some(TakenKey::Swallowed),
+            None,
         );
         assert!(
             matches!(
@@ -1700,6 +2011,7 @@ pub(crate) mod tests {
             false,
             Modifiers::NONE,
             Some(TakenKey::Committed),
+            None,
         );
         assert!(committed.is_none(), "{committed:?}");
         // Its release is the end of a press like any other: winit reports
@@ -1711,6 +2023,7 @@ pub(crate) mod tests {
             false,
             Modifiers::NONE,
             Some(TakenKey::Committed),
+            None,
         );
         assert!(
             matches!(
@@ -1796,8 +2109,9 @@ pub(crate) mod tests {
 
     /// What the window's menubar dispatcher answers to Alt+`letter`.
     ///
-    /// Not on macOS, where the dispatcher has no Alt+letter branch: the OS
-    /// composes Option+letter into an accented character first.
+    /// Not on macOS, where the dispatcher has no Alt+letter branch: there an
+    /// Option+letter press is also typing (it composes a character), and the
+    /// branch intercepts on a miss, which would swallow that typing.
     #[cfg(not(target_os = "macos"))]
     pub(crate) fn alt_letter(tree: &WidgetTree, letter: char) -> MenubarAction {
         use teksilo_core::event::{Key, Modifiers};

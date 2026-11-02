@@ -208,6 +208,14 @@ by crate for clarity, not because crates version independently.
   meanwhile leaves the stored sizes as they were. Asked with a bounded width
   (or height), a `Splitter` now reports that size rather than the sum of its
   minimums, and it clips its children.
+- **Single-key commands ignore a press with Alt (Option on macOS) held**: the
+  `Calendar`'s `T` (today) and the `SceneView` zoom keys (`+`, `-`, `0`) and
+  magnet connect key (`M`). Alt+T and Alt+0 no longer act there on Windows and
+  Linux; AltGr still does. An Option press now names the key it was pressed on
+  (see App), and these keys must not take an Option character for a command.
+- **On macOS, Control with Option no longer runs the type-ahead of a
+  `ComboBox` or a `MenuList`**: macOS has no AltGr, and that chord is a
+  command there.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.
@@ -235,6 +243,14 @@ by crate for clarity, not because crates version independently.
   macOS the input method stays, told that the field is a password (on
   Wayland the on-screen keyboard and the input method's direct mode follow
   it); macOS secure event input is not done yet.
+
+#### App
+
+- **On macOS, a key pressed with Option (and neither Control nor Command)
+  reports the key the chord names** in `KeyDown.key` and `KeyUp.key`
+  (`Key::A` for Option+A); `text` still carries the character Option composed
+  ("å"). A shortcut recorded on macOS by an earlier release with Option held
+  (stored as Alt+å) no longer matches and has to be recorded again.
 
 #### Workspace
 
@@ -503,9 +519,17 @@ by crate for clarity, not because crates version independently.
   instead of a cell of a table that is gone.
 - **The `password-field` example's Username field has an accessible name.**
   A screen reader announced it as an unnamed edit field.
+- **The terminal sends ESC and the key's own character for Option+key on
+  macOS** with `alt_sends_escape`, where it sent ESC and the composed
+  character.
 
 #### App
 
+- **On macOS, `Alt+<letter>`, `Alt+<digit>` and `Alt+<punctuation>`
+  shortcuts and key handlers fire on Option chords**, which named the
+  composed character and so matched nothing. Not covered: a letter Option
+  makes a dead key (Option+E on a US layout) while a text field has focus,
+  and Option with Shift and a key that is not an ASCII letter.
 - **Only Alt pressed and released on its own opens the menu bar.** An input
   method's on/off key pressed with Alt (Alt+`, the Japanese IME toggle on a
   US layout) and chords such as Ctrl+Alt+Shift+U moved the focus to the

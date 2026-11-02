@@ -1439,7 +1439,11 @@ fn build_keyboard_handler(
         // arrow moved its cursor in silence and Enter wrote that day into the
         // selection. `T` alone means the same in every view.
         let view = mode.get();
-        if view != CalendarMode::Days && !matches!(key, Key::Character('t' | 'T')) {
+        // `T` is today, unless Alt is held: on macOS Option+T types "†" and
+        // arrives as `Key::T`, and elsewhere Alt+T is an accelerator.
+        let is_today = matches!(key, Key::Character('t' | 'T'))
+            && !crate::common::range_nav::option_blocks_key(*modifiers);
+        if view != CalendarMode::Days && !is_today {
             let zoom = zoom_grid::Zoom {
                 visible_month: visible_month.clone(),
                 focused_date: focused_date.clone(),
@@ -1509,7 +1513,7 @@ fn build_keyboard_handler(
                 }
                 return EventResponse::Ignored;
             }
-            Key::Character(c) if (*c == 't' || *c == 'T') => {
+            Key::Character('t' | 'T') if is_today => {
                 let today = today_local();
                 let ym = YearMonth::from_date(today);
                 if visible_month.get() != ym {

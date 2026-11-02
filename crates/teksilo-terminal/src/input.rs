@@ -276,10 +276,7 @@ pub fn encode_key(
             } else {
                 // Prefer winit's resolved text (handles Shift casing), else the
                 // key's own lowercase char.
-                let s = text
-                    .filter(|t| !t.is_empty())
-                    .map(|t| t.to_string())
-                    .or_else(|| key.to_char().map(|c| c.to_string()))?;
+                let s = printable(key, mods, text, alt && cfg.alt_sends_escape)?;
                 Some(meta(s.into_bytes()))
             }
         }
@@ -302,14 +299,48 @@ pub fn encode_key(
                         .map(|t| meta(t.as_bytes().to_vec()))
                 }
             } else {
-                let s = text
-                    .filter(|t| !t.is_empty())
-                    .map(|t| t.to_string())
-                    .unwrap_or_else(|| ch.to_string());
+                let s = printable(key, mods, text, alt && cfg.alt_sends_escape)?;
                 Some(meta(s.into_bytes()))
             }
         }
     }
+}
+
+/// The characters a printable key sends: the press's `text` (Shift, Caps Lock
+/// and layout already applied), else the key's own character.
+///
+/// When Alt is Meta (`metafy`), the character after ESC must be the key's: on
+/// macOS a press with Option names its key (`Key::A`) while its text is what
+/// Option composed ("å"), and Meta+a is ESC a, not ESC å. So the text is used
+/// only while it names the same key (letters compared case-free, so Linux's
+/// Caps Lock casing survives); otherwise the key's own character, uppercased
+/// for a letter with Shift.
+fn printable(key: Key, mods: Modifiers, text: Option<&str>, metafy: bool) -> Option<String> {
+    let text = text.filter(|t| !t.is_empty());
+    let own = match key {
+        Key::Character(ch) => Some(ch),
+        _ => key.to_char(),
+    };
+    if metafy
+        && let Some(own) = own
+        && !text
+            .and_then(|t| t.chars().next())
+            .is_some_and(|first| names_key(first, own))
+    {
+        let c = if mods.shift() && own.is_ascii_alphabetic() {
+            own.to_ascii_uppercase()
+        } else {
+            own
+        };
+        return Some(c.to_string());
+    }
+    text.map(str::to_string)
+        .or_else(|| own.map(|c| c.to_string()))
+}
+
+/// Whether a typed character is the key's own (letters case-free).
+fn names_key(typed: char, own: char) -> bool {
+    typed == own || (own.is_ascii_alphabetic() && typed.eq_ignore_ascii_case(&own))
 }
 
 /// Wrap pasted text in bracketed-paste markers when the child enabled the mode
@@ -352,6 +383,28 @@ mod tests {
 
     fn enc(key: Key, mods: Modifiers, text: Option<&str>, mode: TermMode) -> Vec<u8> {
         encode_key(key, mods, text, mode, InputConfig::default()).unwrap()
+    }
+
+    /// macOS: a press with Option names its key (`Key::A`) and carries what
+    /// Option composed ("å"). Meta sends ESC and the key's own character, as
+    /// on Linux; without Meta the composed character is typed.
+    #[test]
+    fn meta_sends_the_keys_own_character_under_option() {
+        let alt = Modifiers::ALT;
+        let alt_shift = Modifiers::ALT | Modifiers::SHIFT;
+        assert_eq!(enc(Key::A, alt, Some("å"), m()), b"\x1ba");
+        assert_eq!(enc(Key::A, alt_shift, Some("Å"), m()), b"\x1bA");
+        assert_eq!(enc(Key::Character('2'), alt, Some("™"), m()), b"\x1b2");
+        // Linux with Caps Lock: the text names the key, its casing survives.
+        assert_eq!(enc(Key::A, alt, Some("A"), m()), b"\x1bA");
+        assert_eq!(enc(Key::Character('2'), alt, Some("2"), m()), b"\x1b2");
+        let no_meta = InputConfig {
+            alt_sends_escape: false,
+        };
+        assert_eq!(
+            encode_key(Key::A, alt, Some("å"), m(), no_meta).unwrap(),
+            "å".as_bytes()
+        );
     }
 
     #[test]

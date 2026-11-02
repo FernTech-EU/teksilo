@@ -32,12 +32,14 @@
 //!
 //! **Keyboard.** F10 and bare-Alt-tap focus the first trigger without opening
 //! a menu; Alt+letter opens the menu whose label carries a matching mnemonic
-//! marker (`&File` → Alt+F). On macOS the Alt+letter branch is suppressed
-//! because the OS rewrites Option+letter for accented character composition;
-//! F10 and bare-Alt-tap continue to work. Once a dropdown is open, ArrowLeft
-//! and ArrowRight cycle between top-level menus, and Escape closes the active
-//! one and leaves focus on its trigger, as Windows menu bars do; Escape on a
-//! trigger gives focus back to the widget focused before the bar took it.
+//! marker (`&File` → Alt+F). On macOS the Alt+letter branch is suppressed:
+//! there Option+letter is also typing (Option+E starts an accent, Option+F
+//! types ƒ), and the branch takes every Alt+letter even when nothing matches,
+//! which would swallow that typing; F10 and bare-Alt-tap continue to work.
+//! Once a dropdown is open, ArrowLeft and ArrowRight cycle between top-level
+//! menus, and Escape closes the active one and leaves focus on its trigger, as
+//! Windows menu bars do; Escape on a trigger gives focus back to the widget
+//! focused before the bar took it.
 //! Choosing a command, or clicking the menu away, gives it back too, before
 //! the command is sent, so it acts on that widget. The triggers stay Tab
 //! stops.
@@ -555,16 +557,13 @@ impl MenubarDispatcher for MenuBarDispatcher {
                     reveal: None,
                 });
         }
-        // Alt+<letter> mnemonics. On macOS, Option+letter is
-        // intercepted by the OS to compose accented characters
-        // (Option+E -> ´, Option+F -> ƒ, …) *before* winit sees the
-        // keystroke. The app receives the post-composition character
-        // (`ƒ`), not the typed letter (`F`), so the mnemonic table
-        // can never match. Worse, returning `Intercept` here would
-        // silently swallow legitimate accented text input. Skip the
-        // entire branch on macOS — F10 + Alt-tap + in-menu
-        // bare-letter activation cover the macOS menu-keyboard
-        // story instead.
+        // Alt+<letter> mnemonics. Not on macOS: the press arrives as the
+        // key the chord names (Option+F is `Key::F`, its text "ƒ"), so
+        // the table could match, but Option+letter is also how a Mac user
+        // types accented characters and symbols, and this branch
+        // intercepts every Alt+letter even when no mnemonic matches,
+        // which would swallow that typing. F10, Alt-tap and in-menu
+        // bare-letter activation cover the macOS menu keyboard instead.
         #[cfg(not(target_os = "macos"))]
         if event.modifiers == Modifiers::ALT {
             // Strict per-OS contract — `Alt+letter` is reserved for

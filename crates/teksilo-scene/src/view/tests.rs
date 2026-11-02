@@ -1115,6 +1115,53 @@ fn keyboard_plus_minus_animate_zoom() {
     );
 }
 
+/// The zoom keys ignore Alt: on macOS Option+0 types "º" and arrives as
+/// `Key::Character('0')` (the rule's macOS twin is pinned in
+/// `gestures_impl::option_tests`).
+#[test]
+fn an_alt_press_of_a_zoom_key_does_not_zoom() {
+    use teksilo_core::event::{Key, Modifiers, WidgetEvent};
+
+    let mut scene = Scene::new();
+    scene.add_widget(FillWidget::new(), Rect::new(0.0, 0.0, 10.0, 10.0));
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    tree.focus(view_id);
+    let zoom_before = view_handle(&tree, view_id).zoom();
+
+    for (ch, typed) in [('+', "±"), ('-', "\u{2013}"), ('0', "º")] {
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: Key::Character(ch),
+            modifiers: Modifiers::ALT,
+            text: Some(typed.into()),
+        });
+        let target = view_handle(&tree, view_id)
+            .zoom_animation_target()
+            .unwrap_or(zoom_before);
+        assert_eq!(target, zoom_before, "Alt+{ch} must not zoom");
+    }
+    // Command (Super) alone still zooms; Option on top of it does not.
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Character('+'),
+        modifiers: Modifiers::SUPER | Modifiers::ALT,
+        text: None,
+    });
+    let target = view_handle(&tree, view_id)
+        .zoom_animation_target()
+        .unwrap_or(zoom_before);
+    assert_eq!(target, zoom_before, "Cmd+Option+ must not zoom");
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Character('+'),
+        modifiers: Modifiers::SUPER,
+        text: None,
+    });
+    let target = view_handle(&tree, view_id)
+        .zoom_animation_target()
+        .unwrap_or(zoom_before);
+    assert!(target > zoom_before, "Cmd+ alone still zooms");
+}
+
 #[test]
 fn a11y_off_screen_mode_viewport_only_excludes_grown_items() {
     // With ViewportOnly, an item just past the viewport edge

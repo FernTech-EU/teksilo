@@ -17,6 +17,7 @@ use teksilo_core::event::ScrollMotion;
 use teksilo_core::pointer::ScrollPhase;
 
 use super::magnetism::{PortDragState, build_connection, handle_connect_key};
+
 use super::*;
 
 /// Everything the pointer handlers need to drive the view's item tooltip.
@@ -1092,6 +1093,7 @@ impl SceneView {
                 if let Some(cfg) = magnetism_for_keys.as_ref().filter(|c| c.enabled.get())
                     && handle_connect_key(
                         key,
+                        *modifiers,
                         cfg,
                         &model_for_keys,
                         &connect_mode_keys,
@@ -1203,6 +1205,12 @@ impl SceneView {
                 let vp = viewport_size.get();
                 let pan_step = (vp.width.min(vp.height) * 0.25).max(64.0);
                 let mut handled = true;
+                // The zoom keys answer a character whatever else is held, but
+                // not with Alt: on macOS Option+0 types "º" and arrives as
+                // `Key::Character('0')`, and elsewhere Alt is an accelerator.
+                // ⌘0 alone still resets the zoom; ⌘⌥0 (Option on top) is
+                // ignored on purpose, as every Option chord is here.
+                let option = teksilo_widgets::option_blocks_key(*modifiers);
                 let recenter_zoom = |z_new: f32| {
                     // Adjust pan so the viewport center stays fixed
                     // when zoom changes. Same anchor logic as pinch
@@ -1246,18 +1254,19 @@ impl SceneView {
                     Key::ArrowDown if allow_pan_y => pan_axis(0.0, -pan_step),
                     other
                         if zoomable_keys
+                            && !option
                             && (other.to_char() == Some('+') || other.to_char() == Some('=')) =>
                     {
                         let z_new = clamp_to_zoom(zoom.get() * 1.25);
                         zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
                         recenter_zoom(z_new);
                     }
-                    other if zoomable_keys && other.to_char() == Some('-') => {
+                    other if zoomable_keys && !option && other.to_char() == Some('-') => {
                         let z_new = clamp_to_zoom(zoom.get() * 0.8);
                         zoom.animate_to(z_new, zoom_dur, Easing::EaseOut);
                         recenter_zoom(z_new);
                     }
-                    other if other.to_char() == Some('0') => {
+                    other if !option && other.to_char() == Some('0') => {
                         zoom.animate_to(1.0, zoom_dur, Easing::EaseOut);
                         recenter_zoom(1.0);
                     }

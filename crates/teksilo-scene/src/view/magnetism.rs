@@ -171,6 +171,7 @@ fn reveal_focus(
 #[allow(clippy::too_many_arguments)] // cohesive keyboard-connect state, threaded from the on_key closure
 pub(super) fn handle_connect_key(
     key: &Key,
+    modifiers: teksilo_core::event::Modifiers,
     cfg: &MagnetismConfig,
     model: &SceneModel,
     connect_mode: &Rc<Cell<bool>>,
@@ -179,8 +180,9 @@ pub(super) fn handle_connect_key(
     self_id: Option<WidgetId>,
     ctx: &mut EventContext,
 ) -> bool {
-    // Toggle connect mode on the configured key, from any state.
-    if key_matches(key, &cfg.connect_key) {
+    // Toggle connect mode on the configured key, from any state, but not with
+    // Alt held: on macOS Option+M types "µ" and arrives as the `M` key.
+    if key_matches(key, &cfg.connect_key) && !teksilo_widgets::option_blocks_key(modifiers) {
         let now = !connect_mode.get();
         connect_mode.set(now);
         if now {

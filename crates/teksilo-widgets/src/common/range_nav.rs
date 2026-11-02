@@ -60,6 +60,7 @@
 //! same reason — three drop-downs hand-rolled the platform `Alt+↓` / `Alt+↑` /
 //! `F4` table and disagreed about `F4`.
 
+use super::text_nav::TextNavConvention;
 use teksilo_core::event::{Key, Modifiers};
 
 /// The topology of the control asking — which is what decides whether the page
@@ -165,12 +166,12 @@ pub(crate) fn is_accelerator_chord(modifiers: Modifiers) -> bool {
     modifiers.ctrl() || modifiers.alt() || modifiers.super_key()
 }
 
-/// Whether this chord can have produced a character the user meant to type —
-/// the question a type-ahead or mnemonic arm asks, and the one place
+/// Whether the press's `key` is the character the user meant to type: the
+/// question a type-ahead or mnemonic arm asks, and the one place
 /// [`is_accelerator_chord`] is the wrong test.
 ///
 /// **`AltGr` is text.** The third-level shift on every non-US layout reaches an
-/// application as `Ctrl+Alt` on Windows, X11 and Wayland alike — it is how a
+/// application as `Ctrl+Alt` on Windows, X11 and Wayland alike: it is how a
 /// German keyboard types `@`, a French one `€`, a Polish one `ą`. Refusing the
 /// union of `Ctrl` / `Alt` / `Super` therefore made every character behind
 /// `AltGr` dead for type-ahead while the unshifted ones kept working, so the
@@ -178,20 +179,54 @@ pub(crate) fn is_accelerator_chord(modifiers: Modifiers) -> bool {
 /// and `Alt` alone stay refused: those are accelerators, and a bare
 /// `Alt+letter` is the menu mnemonic.
 ///
-/// macOS has no `AltGr`; it composes with `Option` (`⌥E` → `´`) and the OS
-/// rewrites the keystroke before it reaches the application, exactly as
-/// `MenuBarDispatcher` documents. Nothing here needs a platform branch for it:
-/// a rewritten `⌥` chord arrives as `Alt` alone, which this refuses on every
-/// host, and a Mac user reaches a type-ahead by typing the character itself.
+/// macOS has no `AltGr`; it composes with Option (Option+A types "å"). Such a
+/// press reaches the application as the key the chord names (`Key::A`, the
+/// "å" in its `text`), so its key is not what the user typed, and Control with
+/// Option is a command there, not a third-level shift. On macOS every chord
+/// with Control, Option or Command is refused, and a Mac user reaches a
+/// type-ahead by typing the character itself. See
+/// [`is_text_entry_chord_for`].
 pub(crate) fn is_text_entry_chord(modifiers: Modifiers) -> bool {
+    is_text_entry_chord_for(TextNavConvention::CURRENT, modifiers)
+}
+
+/// [`is_text_entry_chord`] under an explicit platform convention, so the macOS
+/// rule is testable from any host.
+pub(crate) fn is_text_entry_chord_for(convention: TextNavConvention, modifiers: Modifiers) -> bool {
     if modifiers.super_key() {
         return false;
     }
-    // `AltGr` — both, and only both.
-    if modifiers.ctrl() && modifiers.alt() {
-        return true;
+    match convention {
+        TextNavConvention::Mac => !modifiers.ctrl() && !modifiers.alt(),
+        // `AltGr`: both, and only both.
+        TextNavConvention::PcStyle => modifiers.ctrl() == modifiers.alt(),
     }
-    !modifiers.ctrl() && !modifiers.alt()
+}
+
+/// Whether Alt (Option on macOS) keeps a single-key command from acting: a
+/// widget that answers a character key whatever the other modifiers (a
+/// calendar's `T`, a zoom key) must not answer it with Alt held.
+///
+/// Alt with a key is an accelerator on Windows and Linux. On macOS it is
+/// typing: Option+T types "†", and the press arrives as `Key::T` with that
+/// text, so a widget matching on the key alone would take the user's
+/// character for its command. `AltGr` (`Ctrl+Alt`, Windows and Linux only)
+/// types the key's character itself, so it does not block there. See
+/// [`option_blocks_key_for`].
+///
+/// Public, hidden, for the sibling widget crates (`teksilo-scene`), so the
+/// rule has one definition; not part of the documented API.
+#[doc(hidden)]
+pub fn option_blocks_key(modifiers: Modifiers) -> bool {
+    option_blocks_key_for(TextNavConvention::CURRENT, modifiers)
+}
+
+/// [`option_blocks_key`] under an explicit platform convention.
+pub(crate) fn option_blocks_key_for(convention: TextNavConvention, modifiers: Modifiers) -> bool {
+    match convention {
+        TextNavConvention::Mac => modifiers.alt(),
+        TextNavConvention::PcStyle => modifiers.alt() && !modifiers.ctrl(),
+    }
 }
 
 /// The platform chords that show and hide a drop-down attached to a control.
@@ -370,23 +405,58 @@ mod tests {
         // The two predicates are deliberately not each other's negation: this
         // is the one chord they disagree about, and it is the reason the pair
         // exists rather than a single test.
+        let pc = |m| is_text_entry_chord_for(TextNavConvention::PcStyle, m);
         let alt_gr = Modifiers::CTRL | Modifiers::ALT;
         assert!(is_accelerator_chord(alt_gr), "an arrow key is not text");
-        assert!(
-            is_text_entry_chord(alt_gr),
-            "AltGr is how a German keyboard types `@`"
-        );
+        assert!(pc(alt_gr), "AltGr is how a German keyboard types `@`");
 
-        assert!(is_text_entry_chord(NONE));
-        assert!(is_text_entry_chord(SHIFT));
+        assert!(pc(NONE));
+        assert!(pc(SHIFT));
         for mods in [CTRL, ALT, SUPER] {
-            assert!(!is_text_entry_chord(mods), "{mods:?} is an accelerator");
+            assert!(!pc(mods), "{mods:?} is an accelerator");
         }
         // `Super` poisons the chord even alongside AltGr's pair.
-        assert!(!is_text_entry_chord(alt_gr | Modifiers::SUPER));
+        assert!(!pc(alt_gr | Modifiers::SUPER));
         // …and `Shift+AltGr` is still text: it is the fourth level on the same
         // layouts.
-        assert!(is_text_entry_chord(alt_gr | SHIFT));
+        assert!(pc(alt_gr | SHIFT));
+    }
+
+    /// On macOS an Option press names the key Option was pressed on
+    /// (`Key::A` for the "å" it typed), so its key is never the typed
+    /// character, and Control with Option is a command: no AltGr there.
+    #[test]
+    fn on_macos_no_option_or_control_chord_is_text_entry() {
+        let mac = |m| is_text_entry_chord_for(TextNavConvention::Mac, m);
+        assert!(mac(NONE));
+        assert!(mac(SHIFT));
+        for mods in [
+            CTRL,
+            ALT,
+            SUPER,
+            CTRL | ALT,
+            ALT | SHIFT,
+            CTRL | ALT | SHIFT,
+        ] {
+            assert!(!mac(mods), "{mods:?} is not typing its key on macOS");
+        }
+    }
+
+    /// Alt blocks a single-key command on every platform, Option included;
+    /// AltGr (`Ctrl+Alt`) does not off macOS, where it types the key's own
+    /// character, and does on macOS, where Control with Option is a command.
+    #[test]
+    fn option_blocks_a_single_key_command() {
+        use TextNavConvention::{Mac, PcStyle};
+        for convention in [Mac, PcStyle] {
+            assert!(!option_blocks_key_for(convention, NONE));
+            assert!(!option_blocks_key_for(convention, SHIFT));
+            assert!(!option_blocks_key_for(convention, CTRL));
+            assert!(option_blocks_key_for(convention, ALT));
+            assert!(option_blocks_key_for(convention, ALT | SHIFT));
+        }
+        assert!(option_blocks_key_for(Mac, CTRL | ALT));
+        assert!(!option_blocks_key_for(PcStyle, CTRL | ALT));
     }
 
     #[test]

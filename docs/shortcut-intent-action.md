@@ -111,6 +111,29 @@ Shortcut::new("view.next_tab")
     .build()
 ```
 
+### Option chords on macOS
+
+On macOS Option is how a user types accented characters and symbols: Option+A
+types "å", Option+2 types "™". Such a press reaches the widget tree as the key
+the chord names, `KeyDown { key: Key::A, modifiers: ALT, text: Some("å") }`,
+so a shortcut declared on `KeyStroke::alt(Key::A)` fires on Option+A as it does
+on Alt+A elsewhere, and a text field with no such shortcut types the "å". What
+follows from it:
+
+- **An app that declares an Alt+letter shortcut takes that Option character
+  away from its users** while the shortcut is live: the shortcut fires and the
+  field types nothing. The framework's own widgets declare none.
+- **Option and Shift with a digit, punctuation or a non-ASCII letter (Cyrillic,
+  Greek) keep the composed character as their key** (Option+Shift+2 is `Key::Character('€')`), because
+  the key without modifiers would name the unshifted key where every other path
+  names the shifted one; no Alt+Shift+digit shortcut fires on macOS. Option and
+  Shift with a letter name the letter (Alt+Shift+A fires).
+- **A letter Option makes a dead key** (Option+E, U, I, N and \` on a US
+  layout) **cannot fire a shortcut while a text field has focus**: the input
+  method takes the press as the start of an accent and no key event is sent.
+- **A shortcut recorded on macOS by an earlier release** (stored as Alt+å) no
+  longer matches and has to be recorded again.
+
 ### Caret motion is a separate question
 
 Inside a text surface the accelerator is not the whole story. macOS lays the

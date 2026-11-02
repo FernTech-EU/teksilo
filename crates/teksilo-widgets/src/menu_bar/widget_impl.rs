@@ -346,10 +346,10 @@ impl Widget for MenuBar {
         // accelerators regardless of host OS.
         //
         // **macOS**: the dispatcher's `Alt+letter` branch is compiled
-        // out (see `MenuBarDispatcher::try_handle`) because the OS
-        // rewrites Option+letter for accented character composition
-        // before the app sees the keystroke. F10 and bare-Alt-tap
-        // continue to fire on macOS through this same dispatcher.
+        // out (see `MenuBarDispatcher::try_handle`): Option+letter is
+        // also typing there, and the branch intercepts on a miss, which
+        // would swallow it. F10 and bare-Alt-tap continue to fire on
+        // macOS through this same dispatcher.
         //
         // Drop the previous guard BEFORE installing the new one so
         // the slot is empty when `install_menubar_dispatcher` runs

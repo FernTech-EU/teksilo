@@ -748,13 +748,28 @@ pub enum WidgetEvent {
         /// Which pointer was revoked.
         pointer: PointerInfo,
     },
+    /// A key press.
     KeyDown {
+        /// The key the chord names, on every platform: Alt+A is `Key::A`. On
+        /// macOS a press with Option (and neither Control nor Command) names
+        /// the key without Option too, though Option composed a character
+        /// from it, so an `Alt+A` shortcut fires there as elsewhere. One
+        /// exception: Option and Shift with any key but an ASCII letter (a
+        /// digit, punctuation, a Cyrillic or Greek letter) keep the composed
+        /// character as their key.
         key: Key,
+        /// The modifiers held.
         modifiers: Modifiers,
+        /// What the press typed, if anything: on macOS the character Option
+        /// composed ("å" for Option+A). `None` for a command chord (Control
+        /// without Alt, Super) and for a key that types nothing.
         text: Option<String>,
     },
+    /// A key release.
     KeyUp {
+        /// The key the chord names, as for [`WidgetEvent::KeyDown`].
         key: Key,
+        /// The modifiers held.
         modifiers: Modifiers,
     },
     /// One update of the platform input method's composition (preedit).

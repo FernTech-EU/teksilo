@@ -609,9 +609,9 @@ fn dispatcher_f10_with_modifier_ignored() {
     assert!(action.is_none());
 }
 
-// Alt+letter is intentionally unwired on macOS — the OS rewrites
-// Option+letter for accented input before the app sees the
-// keystroke, so the dispatcher's Alt branch is compiled out
+// Alt+letter is intentionally unwired on macOS: Option+letter is also
+// how a Mac user types accented characters and symbols, and the
+// dispatcher's Alt branch intercepts on a miss, so it is compiled out
 // there. These tests assert the Win32 / GTK semantic.
 #[cfg(not(target_os = "macos"))]
 #[test]
@@ -672,9 +672,10 @@ fn dispatcher_case_insensitive_alt_letter() {
 #[cfg(target_os = "macos")]
 #[test]
 fn dispatcher_alt_letter_does_not_intercept_on_macos() {
-    // macOS-specific: the dispatcher must NOT intercept Alt+letter
-    // because the OS rewrites it for accented character input;
-    // intercepting would silently break text input.
+    // macOS-specific: the dispatcher must NOT intercept Alt+letter.
+    // Option+F arrives as `Key::F` (its text "ƒ"), which the mnemonic
+    // table would match, but Option+letter is typing on a Mac, and
+    // intercepting it would break accented and symbol input.
     let d = make_dispatcher();
     let action = d.try_handle(&MenubarKeyEvent {
         key: Key::F,
@@ -683,7 +684,7 @@ fn dispatcher_alt_letter_does_not_intercept_on_macos() {
     assert!(
         action.is_none(),
         "macOS: Alt+letter must fall through to focus dispatch \
-         so accented character input still works in text fields"
+         so Option characters still type in text fields"
     );
 }
 

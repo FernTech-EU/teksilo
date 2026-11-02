@@ -55,6 +55,11 @@ layer nor a VT parser.
 | Behaviour | `.scrollback_lines(n)`, `.scroll_on_output(bool)`, `.bell(BellStyle)`, `.read_only(bool)`, `.mouse_reporting(bool)`, `.touch_mouse_reporting(TouchReporting)`, `.alt_sends_escape(bool)`, `.label(name)` |
 | Events | `.on_title_changed(Fn(&str))` (OSC 0/2), `.on_child_exited(Fn(TerminalExit))`, `.on_bell(Fn())`, `.on_cwd_changed(Fn(&str))` (OSC 7) |
 
+`.alt_sends_escape(true)` (the default) sends Alt+key as ESC and the key's own
+character. On macOS that is Option too: Option+A sends ESC a, not the "å" Option
+composes, and with Caps Lock on still ESC a (Linux sends ESC A there). Turn it
+off to type Option characters into the terminal.
+
 ### `TerminalController`: drive it from anywhere
 
 `terminal.controller()` returns a cloneable handle (the `ListModel`/`SceneModel`

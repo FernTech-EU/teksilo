@@ -70,12 +70,14 @@ however it closes. A command chosen there, sent from focus, acts on it.
 
 **Keyboard.** F10 and bare-Alt-tap focus the first trigger without opening
 a menu; Alt+letter opens the menu whose label carries a matching mnemonic
-marker (`&File` → Alt+F). On macOS the Alt+letter branch is suppressed
-because the OS rewrites Option+letter for accented character composition;
-F10 and bare-Alt-tap continue to work. Once a dropdown is open, ArrowLeft
-and ArrowRight cycle between top-level menus, and Escape closes the active
-one and leaves focus on its trigger, as Windows menu bars do; Escape on a
-trigger gives focus back to the widget focused before the bar took it.
+marker (`&File` → Alt+F). On macOS the Alt+letter branch is suppressed:
+there Option+letter is also typing (Option+E starts an accent, Option+F
+types ƒ), and the branch takes every Alt+letter even when nothing matches,
+which would swallow that typing; F10 and bare-Alt-tap continue to work.
+Once a dropdown is open, ArrowLeft and ArrowRight cycle between top-level
+menus, and Escape closes the active one and leaves focus on its trigger, as
+Windows menu bars do; Escape on a trigger gives focus back to the widget
+focused before the bar took it.
 Choosing a command, or clicking the menu away, gives it back too, before
 the command is sent, so it acts on that widget. The triggers stay Tab
 stops.

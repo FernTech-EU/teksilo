@@ -39,18 +39,17 @@
 //! The dispatcher is installed on every platform, but its
 //! `Alt+<letter>` branch is **compiled out on macOS** (see the
 //! `#[cfg(not(target_os = "macos"))]` gate inside the impl). The
-//! reason: macOS rewrites Option+letter for accented character
-//! composition (Option+E → ´, Option+F → ƒ, …) *before* winit hands
-//! the keystroke to the app. The post-rewrite character can never
-//! match the mnemonic table, and silently intercepting the chord
-//! would break accented text input system-wide. **F10** and
-//! **bare-Alt-tap** continue to work on macOS (neither involves a
-//! transformed letter), and **bare-letter activation inside an open
-//! menu** is unaffected (the rewriting is Option+letter, not
-//! letter-alone). The `MenuLabel` widget hides the visual
-//! underline on macOS to match. macOS-native users typically
-//! prefer F10 + arrows + Enter, plus the existing `Shortcut`
-//! system for Cmd+? accelerators (which the OS does not rewrite).
+//! reason: on macOS Option+letter is typing (Option+E starts an
+//! accent, Option+F types ƒ). The press reaches the app as the key
+//! the chord names (`Key::F`, its text "ƒ"), so the mnemonic table
+//! could match, but the branch intercepts every Alt+letter even when
+//! nothing matches, which would break accented and symbol input
+//! system-wide. **F10** and **bare-Alt-tap** continue to work on
+//! macOS, and **bare-letter activation inside an open menu** is
+//! unaffected (no Option is held). The `MenuLabel` widget hides the
+//! visual underline on macOS to match. macOS-native users typically
+//! prefer F10 + arrows + Enter, plus the `Shortcut` system for
+//! ⌘ and Option accelerators.
 
 use std::cell::RefCell;
 use std::rc::Rc;

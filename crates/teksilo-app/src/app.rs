@@ -4737,6 +4737,16 @@ impl TeksiloAppHandler {
                     .and_then(teksilo_platform::text_input_hook::key_taken_by_input_method);
                 // A synthetic press becomes nothing, here and for the
                 // menubar below: see `key_widget_event`.
+                // On macOS a press with Option names the key Option composed
+                // ("å"); the key without modifiers lets the event name the key
+                // the chord names (`Key::A`) while its text stays "å".
+                #[cfg(target_os = "macos")]
+                let base_key = {
+                    use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
+                    Some(key_event.key_without_modifiers())
+                };
+                #[cfg(not(target_os = "macos"))]
+                let base_key: Option<winit::keyboard::Key> = None;
                 let maybe_evt = self.wm.get_by_winit_mut(window_id).and_then(|managed| {
                     crate::input_routing::key_widget_event(
                         &key_event.logical_key,
@@ -4745,6 +4755,7 @@ impl TeksiloAppHandler {
                         is_synthetic,
                         event_translation::translate_modifiers(managed.current_modifiers),
                         taken,
+                        base_key.as_ref(),
                     )
                 });
                 if let Some(evt) = maybe_evt {

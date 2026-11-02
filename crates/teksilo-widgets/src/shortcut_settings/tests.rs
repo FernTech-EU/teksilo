@@ -332,6 +332,36 @@ fn a_recorded_chord_is_assigned_and_focus_comes_back() {
     );
 }
 
+/// The recorder keys on the event's key, not its text: fed the event a macOS
+/// Option+A becomes (`Key::A`, the composed "å" as text) it records Alt+A
+/// (shown "⌥A" on a Mac), never Alt+å. This pins the recorder's side only; the
+/// substitution that builds that event is pinned in `teksilo-app`'s
+/// `input_routing` tests.
+#[test]
+fn an_option_chord_records_the_key_it_names() {
+    use teksilo_core::event::WidgetEvent;
+    let mut h = Harness::new(three(), ShortcutSettings::new());
+    h.activate(primary("app.save"));
+    h.tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::A,
+        modifiers: Modifiers::ALT,
+        text: Some("å".to_string()),
+    });
+    h.tree.dispatch_event(WidgetEvent::KeyUp {
+        key: Key::A,
+        modifiers: Modifiers::ALT,
+    });
+    h.layout();
+    let recorded = KeyStroke::alt(Key::A);
+    assert_eq!(h.effective("app.save").0, Some(recorded));
+    let label = format_keystroke(recorded);
+    if cfg!(target_os = "macos") {
+        assert_eq!(label, "⌥A");
+    } else {
+        assert_eq!(label, "Alt+A");
+    }
+}
+
 #[test]
 fn a_refused_chord_keeps_recording_until_escape() {
     let mut h = Harness::new(three(), ShortcutSettings::new());

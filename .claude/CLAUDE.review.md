@@ -257,8 +257,9 @@ skip scrutiny.
   shrink. Excess toolbar actions are meant to overflow into a trailing menu (`Toolbar`).
 - **macOS mnemonics:** the Alt+letter menu-mnemonic branch is compiled out on macOS
   (`#[cfg(not(target_os = "macos"))]` in `MenuBarDispatcher::try_handle`) and the underline visual
-  is hidden, because macOS rewrites Option+letter for accented input before the app sees it. F10
-  and bare-Alt continue to work. Confirm the cfg gates and that no equivalent path is lost.
+  is hidden, because Option+letter is typing on a Mac (accents, symbols) and the branch intercepts
+  every Alt+letter on a miss. The press itself reaches the app as the key the chord names
+  (`Key::F`, text "ƒ"), so `Alt+letter` shortcuts do fire there. F10 and bare-Alt continue to work. Confirm the cfg gates and that no equivalent path is lost.
 - **X11 window decorations:** custom title bar is supported on Wayland/macOS/Windows; X11 falls
   back to native decorations.
 - **Async executor:** `teksilo-async` is opt-in and off by default; `teksilo-app` stays
