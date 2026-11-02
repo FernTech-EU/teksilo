@@ -26,7 +26,6 @@ a11y-splitter-pane = Bereich
 a11y-splitter-collapsed = Eingeklappt
 a11y-splitter-expanded = Ausgeklappt
 a11y-breadcrumb-current-page-value = aktuelle Seite
-a11y-toolbar-name = Symbolleiste
 toolbar-more = Mehr
 segmented-control-more = Weitere Optionen
 breadcrumb-overflow = Ausgeblendeten Pfad anzeigen

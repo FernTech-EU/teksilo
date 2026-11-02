@@ -23,7 +23,6 @@ a11y-splitter-pane = 창
 a11y-splitter-collapsed = 축소됨
 a11y-splitter-expanded = 확장됨
 a11y-breadcrumb-current-page-value = 현재 페이지
-a11y-toolbar-name = 도구 모음
 toolbar-more = 더 보기
 segmented-control-more = 추가 옵션
 breadcrumb-overflow = 숨겨진 경로 표시

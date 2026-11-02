@@ -25,7 +25,6 @@ a11y-splitter-pane = Rute
 a11y-splitter-collapsed = Skjult
 a11y-splitter-expanded = Utvidet
 a11y-breadcrumb-current-page-value = gjeldende side
-a11y-toolbar-name = Verktøylinje
 toolbar-more = Mer
 segmented-control-more = Flere alternativer
 breadcrumb-overflow = Vis skjult bane

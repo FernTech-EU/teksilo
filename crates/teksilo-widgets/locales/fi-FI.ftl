@@ -24,7 +24,6 @@ a11y-splitter-pane = Ruutu
 a11y-splitter-collapsed = Kutistettu
 a11y-splitter-expanded = Laajennettu
 a11y-breadcrumb-current-page-value = nykyinen sivu
-a11y-toolbar-name = Työkalurivi
 toolbar-more = Lisää toimintoja
 segmented-control-more = Lisää vaihtoehtoja
 breadcrumb-overflow = Näytä piilotettu polku

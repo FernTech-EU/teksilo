@@ -25,7 +25,6 @@ a11y-splitter-pane = ペイン
 a11y-splitter-collapsed = 折りたたみ済み
 a11y-splitter-expanded = 展開済み
 a11y-breadcrumb-current-page-value = 現在のページ
-a11y-toolbar-name = ツールバー
 toolbar-more = その他
 segmented-control-more = その他のオプション
 breadcrumb-overflow = 非表示のパスを表示

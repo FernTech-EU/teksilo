@@ -295,6 +295,9 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A `Toolbar` with no `.label(..)` has no accessible name.** It used to be
+  named "Toolbar", which a screen reader read twice after the role and which
+  Accessibility Insights fails. `.label(..)` still names it.
 - **A `WebView`'s mirrored page nodes (Servo) no longer offer `Focus` to
   assistive technology.** The mirror is read-only and nothing could focus the
   element in the engine; a `Focus` on one entered the page, whose own focused

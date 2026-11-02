@@ -577,7 +577,8 @@ density's `toolbar_spacing` (`TOOLBAR_SPACING` at Compact).
 
 #### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
 
-Override the accessible name (default: the localized "Toolbar").
+Set the accessible name. Without it the toolbar has no name: its role
+already announces "toolbar", so a default name would only repeat it.
 
 <a id="toolbar-compact"></a>
 

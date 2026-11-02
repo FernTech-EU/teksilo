@@ -256,6 +256,19 @@ fn toolbar_has_toolbar_role_orientation_and_name() {
 }
 
 #[test]
+fn an_unlabelled_toolbar_has_no_accessible_name() {
+    let tb = Toolbar::new().action(
+        ToolbarAction::new(lit!("Bold"), || IconWidget::checkmark(16.0)).on_activate(|_| {}),
+    );
+    let mut tree = themed_tree();
+    let id = tree.add(tb);
+    tree.layout(SizeProposal::exact(400.0, 50.0));
+    let info = tree.accessibility_node(id);
+    assert_eq!(info.role(), teksilo_core::accesskit::Role::Toolbar);
+    assert_eq!(info.name(), None);
+}
+
+#[test]
 fn vertical_orientation_is_announced() {
     let tb = Toolbar::new()
         .orientation(ToolbarOrientation::Vertical)

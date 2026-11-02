@@ -25,7 +25,6 @@ a11y-splitter-pane = Deelvenster
 a11y-splitter-collapsed = Samengevouwen
 a11y-splitter-expanded = Uitgevouwen
 a11y-breadcrumb-current-page-value = huidige pagina
-a11y-toolbar-name = Werkbalk
 toolbar-more = Meer
 segmented-control-more = Meer opties
 breadcrumb-overflow = Verborgen pad tonen

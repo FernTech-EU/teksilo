@@ -25,7 +25,6 @@ a11y-splitter-pane = Panou
 a11y-splitter-collapsed = Restrâns
 a11y-splitter-expanded = Extins
 a11y-breadcrumb-current-page-value = pagina curentă
-a11y-toolbar-name = Bară de instrumente
 toolbar-more = Mai multe
 segmented-control-more = Mai multe opțiuni
 breadcrumb-overflow = Afișare cale ascunsă

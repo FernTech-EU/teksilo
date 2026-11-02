@@ -24,7 +24,6 @@ a11y-splitter-pane = Panel
 a11y-splitter-collapsed = Zwinięty
 a11y-splitter-expanded = Rozwinięty
 a11y-breadcrumb-current-page-value = bieżąca strona
-a11y-toolbar-name = Pasek narzędzi
 toolbar-more = Więcej
 segmented-control-more = Więcej opcji
 breadcrumb-overflow = Pokaż ukrytą ścieżkę

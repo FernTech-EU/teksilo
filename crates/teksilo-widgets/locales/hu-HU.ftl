@@ -25,7 +25,6 @@ a11y-splitter-pane = Ablaktábla
 a11y-splitter-collapsed = Összecsukva
 a11y-splitter-expanded = Kibontva
 a11y-breadcrumb-current-page-value = aktuális oldal
-a11y-toolbar-name = Eszköztár
 toolbar-more = Továbbiak
 segmented-control-more = További lehetőségek
 breadcrumb-overflow = Rejtett útvonal megjelenítése

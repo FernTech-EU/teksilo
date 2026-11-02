@@ -706,7 +706,8 @@ impl Toolbar {
         self
     }
 
-    /// Override the accessible name (default: the localized "Toolbar").
+    /// Set the accessible name. Without it the toolbar has no name: its role
+    /// already announces "toolbar", so a default name would only repeat it.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.label = Some(label.into());
         self
@@ -1165,12 +1166,11 @@ impl Widget for Toolbar {
         } else {
             teksilo_core::accesskit::Orientation::Vertical
         });
-        let name = self
-            .label
-            .as_ref()
-            .map(|l| l.resolve_now())
-            .unwrap_or_else(|| teksilo_i18n::tr_widget!(a11y_toolbar_name()).resolve_now());
-        builder.set_name(name);
+        // No default name: the role already says "toolbar", and a name that
+        // repeats it is read twice and fails the UIA name rules.
+        if let Some(label) = &self.label {
+            builder.set_name(label.resolve_now());
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -25,7 +25,6 @@ a11y-splitter-pane = Riquadro
 a11y-splitter-collapsed = Compresso
 a11y-splitter-expanded = Espanso
 a11y-breadcrumb-current-page-value = pagina corrente
-a11y-toolbar-name = Barra degli strumenti
 toolbar-more = Altro
 segmented-control-more = Altre opzioni
 breadcrumb-overflow = Mostra il percorso nascosto

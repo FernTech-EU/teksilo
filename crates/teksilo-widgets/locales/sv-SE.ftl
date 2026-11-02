@@ -25,7 +25,6 @@ a11y-splitter-pane = Ruta
 a11y-splitter-collapsed = Komprimerad
 a11y-splitter-expanded = Expanderad
 a11y-breadcrumb-current-page-value = aktuell sida
-a11y-toolbar-name = Verktygsfält
 toolbar-more = Mer
 segmented-control-more = Fler alternativ
 breadcrumb-overflow = Visa dold sökväg

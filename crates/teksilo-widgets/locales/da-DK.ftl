@@ -25,7 +25,6 @@ a11y-splitter-pane = Rude
 a11y-splitter-collapsed = Sammenfoldet
 a11y-splitter-expanded = Udvidet
 a11y-breadcrumb-current-page-value = aktuel side
-a11y-toolbar-name = Værktøjslinje
 toolbar-more = Mere
 segmented-control-more = Flere valgmuligheder
 breadcrumb-overflow = Vis skjult sti

@@ -24,7 +24,6 @@ a11y-splitter-pane = חלונית
 a11y-splitter-collapsed = מכווץ
 a11y-splitter-expanded = מורחב
 a11y-breadcrumb-current-page-value = העמוד הנוכחי
-a11y-toolbar-name = סרגל כלים
 toolbar-more = עוד
 segmented-control-more = אפשרויות נוספות
 breadcrumb-overflow = הצגת הנתיב המוסתר

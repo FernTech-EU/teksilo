@@ -38,7 +38,6 @@ a11y-splitter-pane = Pane
 a11y-splitter-collapsed = Collapsed
 a11y-splitter-expanded = Expanded
 a11y-breadcrumb-current-page-value = current page
-a11y-toolbar-name = Toolbar
 toolbar-more = More
 segmented-control-more = More options
 breadcrumb-overflow = Show hidden path

@@ -24,7 +24,6 @@ a11y-splitter-pane = جزء
 a11y-splitter-collapsed = مطوي
 a11y-splitter-expanded = موسّع
 a11y-breadcrumb-current-page-value = الصفحة الحالية
-a11y-toolbar-name = شريط الأدوات
 toolbar-more = المزيد
 segmented-control-more = مزيد من الخيارات
 breadcrumb-overflow = إظهار المسار المخفي

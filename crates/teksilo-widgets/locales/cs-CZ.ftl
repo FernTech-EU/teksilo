@@ -25,7 +25,6 @@ a11y-splitter-pane = Podokno
 a11y-splitter-collapsed = Sbaleno
 a11y-splitter-expanded = Rozbaleno
 a11y-breadcrumb-current-page-value = aktuální stránka
-a11y-toolbar-name = Panel nástrojů
 toolbar-more = Více
 segmented-control-more = Další možnosti
 breadcrumb-overflow = Zobrazit skrytou cestu

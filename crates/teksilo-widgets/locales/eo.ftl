@@ -14,7 +14,6 @@ a11y-splitter-pane = Panelo
 a11y-splitter-collapsed = Faldita
 a11y-splitter-expanded = Malfaldita
 a11y-breadcrumb-current-page-value = nuna paĝo
-a11y-toolbar-name = Ilobreto
 toolbar-more = Pli
 segmented-control-more = Pliaj opcioj
 breadcrumb-overflow = Montri kaŝitan vojon

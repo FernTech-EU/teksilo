@@ -26,7 +26,6 @@ a11y-splitter-pane = Τμήμα
 a11y-splitter-collapsed = Συμπτυγμένο
 a11y-splitter-expanded = Αναπτυγμένο
 a11y-breadcrumb-current-page-value = τρέχουσα σελίδα
-a11y-toolbar-name = Γραμμή εργαλείων
 toolbar-more = Περισσότερα
 segmented-control-more = Περισσότερες επιλογές
 breadcrumb-overflow = Εμφάνιση κρυφής διαδρομής

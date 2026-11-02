@@ -25,7 +25,6 @@ a11y-splitter-pane = Bölme
 a11y-splitter-collapsed = Daraltılmış
 a11y-splitter-expanded = Genişletilmiş
 a11y-breadcrumb-current-page-value = geçerli sayfa
-a11y-toolbar-name = Araç çubuğu
 toolbar-more = Daha fazla
 segmented-control-more = Diğer seçenekler
 breadcrumb-overflow = Gizli yolu göster
