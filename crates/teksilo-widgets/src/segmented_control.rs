@@ -1193,15 +1193,23 @@ impl Widget for SegmentedControl {
 
         // The selected segment is the control's active descendant and
         // advertises `Focus` (see `SegmentCell::accessibility`); an assistive
-        // `Focus` on it gives the control keyboard focus. Only the selected
-        // one: the arrows move the selection with the cursor, so another
-        // segment cannot be the focus without being chosen.
+        // `Focus` on it gives the control keyboard focus and reveals the
+        // segment in an enclosing scroll area, as an arrow landing on it
+        // does: the framework's focus-driven follow reveals only the control.
+        // Only the selected one: the arrows move the selection with the
+        // cursor, so another segment cannot be the focus without being chosen.
         {
             let index = index.clone();
             let cell_ids = self.cell_ids.clone();
             handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
                 self_id,
-                move |item, _ctx| cell_ids.get(index.get()) == Some(&item),
+                move |item, ctx| {
+                    if cell_ids.get(index.get()) != Some(&item) {
+                        return false;
+                    }
+                    ctx.ensure_widget_visible(item);
+                    true
+                },
             ));
         }
 

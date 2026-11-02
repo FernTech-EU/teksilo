@@ -287,3 +287,71 @@ fn access_label_names_the_list_box_node() {
         teksilo_core::accessibility::widget_id_to_node_id(lv)
     );
 }
+
+/// Whether row `index` is realized and lies wholly inside the list's
+/// viewport, after the layout pass the next frame would run.
+fn row_in_view(tree: &mut WidgetTree, lv: WidgetId, index: usize) -> bool {
+    tree.layout(viewport());
+    let Some(row) = tree
+        .widget_as_any(lv)
+        .and_then(|any| any.downcast_ref::<ListView<usize>>())
+        .and_then(|view| {
+            view.realized_row_ids()
+                .borrow()
+                .iter()
+                .find(|&&(i, _)| i == index)
+                .map(|&(_, id)| id)
+        })
+    else {
+        return false;
+    };
+    let (view, row) = (tree.bounds(lv), tree.bounds(row));
+    row.y >= view.y - 0.01 && row.y + row.height <= view.y + view.height + 0.01
+}
+
+/// An assistive `Focus` on a realized row below the viewport shows it, as
+/// Ctrl+ArrowDown onto it would: a screen reader user moved there, and a
+/// sighted helper must see where. Windows found the row read out and left
+/// off screen.
+#[test]
+fn an_assistive_focus_on_a_row_below_the_viewport_scrolls_it_into_view() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    let (mut tree, lv, sel, handle) = list(60, SelectionMode::Multi);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    let below = tree
+        .widget_as_any(lv)
+        .and_then(|any| any.downcast_ref::<ListView<usize>>())
+        .and_then(|view| {
+            view.realized_row_ids()
+                .borrow()
+                .iter()
+                .map(|&(index, _)| index)
+                .max()
+        })
+        .expect("rows are realized");
+    assert!(
+        !row_in_view(&mut tree, lv, below),
+        "row {below} is realized below the viewport"
+    );
+    let node = teksilo_core::accessibility::widget_id_to_node_id(
+        tree.widget_as_any(lv)
+            .and_then(|any| any.downcast_ref::<ListView<usize>>())
+            .and_then(|view| {
+                view.realized_row_ids()
+                    .borrow()
+                    .iter()
+                    .find(|&&(i, _)| i == below)
+                    .map(|&(_, id)| id)
+            })
+            .unwrap(),
+    );
+
+    assert_eq!(tree.focused(), Some(lv), "the list already has the keys");
+    assert!(assistive_focus(&mut tree, node), "the list took it");
+    assert_eq!(handle.cursor(), Some(below));
+    assert!(
+        row_in_view(&mut tree, lv, below),
+        "row {below} was scrolled into view"
+    );
+    assert_eq!(sel.selected_indices(), vec![0], "the selection stayed");
+}

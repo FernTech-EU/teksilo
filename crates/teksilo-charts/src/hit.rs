@@ -763,6 +763,9 @@ pub(crate) fn handle_mark_action(
                 selection.select_point(key.0, key.1);
             }
         }
+        // No reveal: the arrows do not scroll an enclosing area to the
+        // datum either, and this matches them. Revealing belongs to both or
+        // neither.
         accesskit::Action::Focus => ctx.request_focus(owner),
         _ => {
             if let Some(m) = mark_index_of(marks, key).and_then(|i| marks.get(i)) {

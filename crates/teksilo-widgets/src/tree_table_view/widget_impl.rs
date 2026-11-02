@@ -485,6 +485,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 move || off_grid_row.get() || keyboard::select_all_declines(&cfg_row),
             );
         }
+        let reveal_cfg = key_cfg.clone();
         let mut shared_key = keyboard::build_key_handler(key_cfg);
         let reorder_key = reorder_perform.clone();
         let reparent_key = reparent_perform.clone();
@@ -838,8 +839,9 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // descendant of another dragged node is safely skipped).
         handlers = self.export.install_completion(handlers);
 
-        // An assistive `Focus` on a realized cell makes it the focused cell,
-        // as Ctrl+arrow would, and gives the view keyboard focus (see
+        // An assistive `Focus` on a realized cell makes it the focused cell
+        // and shows it, as Ctrl+arrow would, and gives the view keyboard
+        // focus (see
         // `TableView`'s build).
         {
             let cells = self.cell_map.clone();
@@ -847,7 +849,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let editing = self.editing_cell.clone();
             handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
                 self_id,
-                move |item, _ctx| {
+                move |item, ctx| {
                     // An open cell editor keeps the keyboard, as it does
                     // against Ctrl+arrow.
                     if editing.get().is_some() {
@@ -858,7 +860,23 @@ impl<T: 'static> Widget for TreeTableView<T> {
                         .iter()
                         .find(|&&(_, cell)| cell == item)
                         .map(|&(pos, _)| pos);
-                    found.inspect(|&pos| focused.set(Some(pos))).is_some()
+                    let Some((row, col)) = found else {
+                        return false;
+                    };
+                    // A full-width band is one cell in every column, so the
+                    // match says nothing about the column. The keys keep the
+                    // cursor's column on a band, and reveal that one: so does
+                    // this, rather than scroll to the first column.
+                    let col = if reveal_cfg.navigator.spans_all_columns(row) {
+                        focused
+                            .get()
+                            .map_or(col, |(_, c)| c.min(reveal_cfg.col_count.saturating_sub(1)))
+                    } else {
+                        col
+                    };
+                    focused.set(Some((row, col)));
+                    keyboard::reveal_cell(&reveal_cfg, row, col, ctx);
+                    true
                 },
             ));
         }

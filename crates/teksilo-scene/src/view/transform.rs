@@ -183,7 +183,9 @@ impl SceneView {
                     if node == target && driver.access_action(action, data.as_ref(), handle, ctx) {
                         // A handle is the view's active descendant in the
                         // keyboard mode the action entered, so the view takes
-                        // keyboard focus, as the mode key would leave it.
+                        // keyboard focus, as the mode key would leave it. No
+                        // pan: Tab between handles does not pan either, and
+                        // this matches it.
                         if action == accesskit::Action::Focus {
                             ctx.request_focus(self_id);
                         }

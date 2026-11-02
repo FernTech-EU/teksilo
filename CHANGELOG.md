@@ -899,7 +899,12 @@ by crate for clarity, not because crates version independently.
   false, and Accessibility Insights labelled it "Not Focusable". A screen
   reader's or an automation client's focus request on such an item now
   moves the widget's cursor to it, as the arrow keys do, with the keyboard
-  on the widget. Before, it left the cursor where it was.
+  on the widget, and shows it as those keys do: a row, cell, tile, link
+  (whole when it fits), menu row, list option, segment, radio tile or
+  magnet is scrolled into view, in the widget and in an enclosing scroll
+  area. A calendar's cell, a chart's datum and a transform handle are not,
+  since their keys do not scroll either. Before, it left the cursor where it
+  was.
 
 #### Automation
 

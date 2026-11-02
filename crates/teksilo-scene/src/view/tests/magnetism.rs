@@ -367,6 +367,50 @@ fn an_assistive_focus_on_a_magnet_moves_the_connect_flow_there() {
     assert_eq!(view.active_descendant(), Some(target));
 }
 
+/// An assistive `Focus` on a magnet outside the view pans to it, as the
+/// connect flow's arrows reaching it do: the keyboard stays on the view.
+#[test]
+fn an_assistive_focus_on_a_magnet_off_screen_pans_to_it() {
+    use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id};
+    use teksilo_core::accesskit::Action;
+
+    let (scene, _a, _am, _b, bm) = two_node_scene();
+    let (cfg, _rec) = recording_config(source_to_target);
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene).magnetism(cfg));
+    // B's target magnet, at x 200, is right of this viewport.
+    tree.layout(SizeProposal::exact(120.0, 300.0));
+    tree.focus(view_id);
+    key(&mut tree, Key::Character('m'));
+    tree.layout(SizeProposal::exact(120.0, 300.0));
+    let pan_x = |tree: &WidgetTree| {
+        let view = view_handle(tree, view_id);
+        view.pan_x_animation_target().unwrap_or(view.pan().x)
+    };
+    assert!(pan_x(&tree).abs() < 1e-6, "precondition: no pan yet");
+
+    let target = synthetic_node_id(view_id, bm.as_u64(), SyntheticKind::SceneMagnet);
+    let offers_focus = tree
+        .sync_accessibility()
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == target)
+        .is_some_and(|(_, node)| node.supports_action(Action::Focus));
+    assert!(offers_focus, "the arrows could reach it");
+    let handled = tree.dispatch_access_action(
+        target,
+        Action::Focus,
+        None,
+        &mut teksilo_core::window::NoopWindowOps,
+    );
+    assert!(handled, "the view took it");
+    assert!(
+        pan_x(&tree) < 0.0,
+        "the view pans left to show the magnet, got {}",
+        pan_x(&tree)
+    );
+}
+
 #[test]
 fn multi_view_magnet_at_nodes_are_per_view() {
     use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id};

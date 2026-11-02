@@ -610,8 +610,7 @@ pub(crate) fn build_key_handler(
                 {
                     cfg.focused_cell.set(Some((nr, col)));
                     apply_selection_extension(&cfg, nr, col, false);
-                    ensure_row_visible(&cfg, nr, row_count, ctx);
-                    ensure_col_visible(&cfg, col);
+                    reveal_cell(&cfg, nr, col, ctx);
                     return EventResponse::Handled;
                 }
                 return EventResponse::Ignored;
@@ -684,13 +683,27 @@ pub(crate) fn build_key_handler(
                 list_nav::SelectionOp::ExtendAdditive => apply_additive_extension(&cfg, nr, nc),
                 list_nav::SelectionOp::Replace => apply_selection_extension(&cfg, nr, nc, false),
             }
-            ensure_row_visible(&cfg, nr, row_count, ctx);
-            ensure_col_visible(&cfg, nc);
+            reveal_cell(&cfg, nr, nc, ctx);
             return EventResponse::Handled;
         }
 
         EventResponse::Ignored
     }
+}
+
+/// Show the cell at `(row, display_col)` as the keyboard does once it has
+/// moved the cursor there: the row in the view's own viewport and in any
+/// enclosing scroll area, the column in the Middle pane. Shared by the keys
+/// and an assistive `Focus` on a cell, so a cell reached either way ends up
+/// in the same place.
+pub(crate) fn reveal_cell(
+    cfg: &KeyHandlerConfig,
+    row: usize,
+    display_col: usize,
+    ctx: &mut EventContext,
+) {
+    ensure_row_visible(cfg, row, cfg.navigator.row_count(), ctx);
+    ensure_col_visible(cfg, display_col);
 }
 
 /// Scroll the viewport so `row` is fully visible — a no-op when it

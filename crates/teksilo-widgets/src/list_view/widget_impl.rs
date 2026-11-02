@@ -276,12 +276,7 @@ impl<T: 'static> Widget for ListView<T> {
                 });
                 let sel = self.row_selection.clone();
                 let fi = self.focused_index.clone();
-                let geometry = self.geometry();
-                let len = self.source.len_fn.clone();
-                let scroll = self.scroll_y.clone();
-                let vh = self.viewport_height.clone();
-                let vb = self.viewport_bounds.clone();
-                let max = self.max_scroll_y.clone();
+                let reveal = self.row_reveal();
                 std::rc::Rc::new(
                     move |mv: crate::common::ordered_move::OrderedMove,
                           from: usize,
@@ -294,20 +289,8 @@ impl<T: 'static> Widget for ListView<T> {
                         }
                         fi.set(Some(dest));
                         // Reveal the moved row (own viewport first, then chain
-                        // to any enclosing scroll area).
-                        let current = scroll.get();
-                        let count = len();
-                        let new_scroll = geometry.scroll_for_ensure_visible(
-                            dest,
-                            current,
-                            vh.get(),
-                            max.get(),
-                            count,
-                        );
-                        if (new_scroll - current).abs() > f32::EPSILON {
-                            scroll.set(new_scroll);
-                        }
-                        geometry.chase_into_outer_view(ctx, vb.get(), dest, new_scroll, count);
+                        // to any enclosing scroll area), as the keys do.
+                        reveal(dest, ctx);
                         ctx.announce(utterance);
                     },
                 ) as crate::common::ordered_move::MoveRow
@@ -352,11 +335,9 @@ impl<T: 'static> Widget for ListView<T> {
             let activate_key = self.on_activate.clone();
             let fi = self.focused_index.clone();
             let reorder_key = reorder_perform.clone();
-            let scroll_for_nav = self.scroll_y.clone();
             let geometry_for_nav = self.geometry();
-            let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
-            let vb_for_nav = self.viewport_bounds.clone();
+            let reveal_for_nav = self.row_reveal();
             // Type-ahead state + label resolver (reads row text via the
             // source's string accessor, so lazy/unloaded rows are skipped).
             let ta_state = self.type_ahead.clone();
@@ -507,24 +488,7 @@ impl<T: 'static> Widget for ListView<T> {
                             if let Some(ref sel) = sel_for_key {
                                 sel.select(idx);
                             }
-                            let scroll = scroll_for_nav.get();
-                            let new_scroll = geometry_for_nav.scroll_for_ensure_visible(
-                                idx,
-                                scroll,
-                                vh_for_nav.get(),
-                                max_for_nav.get(),
-                                count,
-                            );
-                            if (new_scroll - scroll).abs() > f32::EPSILON {
-                                scroll_for_nav.set(new_scroll);
-                            }
-                            geometry_for_nav.chase_into_outer_view(
-                                ctx,
-                                vb_for_nav.get(),
-                                idx,
-                                new_scroll,
-                                count,
-                            );
+                            reveal_for_nav(idx, ctx);
                             return teksilo_core::event::EventResponse::Handled;
                         }
                         return teksilo_core::event::EventResponse::Ignored;
@@ -752,24 +716,7 @@ impl<T: 'static> Widget for ListView<T> {
                         }
                         // Scroll into view — the ListView's own viewport first,
                         // then chain to any enclosing scroll area.
-                        let scroll = scroll_for_nav.get();
-                        let new_scroll = geometry_for_nav.scroll_for_ensure_visible(
-                            idx,
-                            scroll,
-                            vh_for_nav.get(),
-                            max_for_nav.get(),
-                            count,
-                        );
-                        if (new_scroll - scroll).abs() > f32::EPSILON {
-                            scroll_for_nav.set(new_scroll);
-                        }
-                        geometry_for_nav.chase_into_outer_view(
-                            ctx,
-                            vb_for_nav.get(),
-                            idx,
-                            new_scroll,
-                            count,
-                        );
+                        reveal_for_nav(idx, ctx);
                         return teksilo_core::event::EventResponse::Handled;
                     }
                 }
@@ -940,23 +887,28 @@ impl<T: 'static> Widget for ListView<T> {
         }
 
         // An assistive `Focus` on a realized row (each one advertises it, see
-        // `list_item_a11y`) makes it the current row, as Ctrl+arrow would,
-        // and gives the view keyboard focus. Not in a presentational list:
-        // its rows are no options and the view takes no focus.
+        // `list_item_a11y`) makes it the current row and shows it, as
+        // Ctrl+arrow would, and gives the view keyboard focus. Not in a
+        // presentational list: its rows are no options and the view takes no
+        // focus.
         if !self.presentational {
             let rows = self.row_map.clone();
             let handle = self.handle();
+            let reveal = self.row_reveal();
             handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
                 self_id,
-                move |item, _ctx| {
+                move |item, ctx| {
                     let found = rows
                         .borrow()
                         .iter()
                         .find(|&&(_, row)| row == item)
                         .map(|&(index, _)| index);
-                    found
-                        .inspect(|&index| handle.set_cursor(Some(index)))
-                        .is_some()
+                    let Some(index) = found else {
+                        return false;
+                    };
+                    handle.set_cursor(Some(index));
+                    reveal(index, ctx);
+                    true
                 },
             ));
         }

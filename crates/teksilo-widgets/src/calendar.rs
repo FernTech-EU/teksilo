@@ -885,6 +885,9 @@ impl Widget for Calendar {
             let visible_month = self.visible_month.clone();
             let on_month_changed = self.on_month_changed.clone();
             let (min_date, max_date) = (self.min_date, self.max_date);
+            // No reveal here: the arrows do not scroll an enclosing area to
+            // the cell either, and this matches them. Revealing the cell
+            // belongs to both or neither.
             crate::common::item_focus::on_item_focus(self_id, move |item, ctx| {
                 let find = |cells: &zoom_grid::ZoomCells| {
                     cells

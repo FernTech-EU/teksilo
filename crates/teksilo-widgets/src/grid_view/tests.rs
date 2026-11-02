@@ -1029,6 +1029,60 @@ fn a_selection_change_keeps_the_readers_tile_and_changes_its_state() {
     teksilo_i18n::thread_local::clear();
 }
 
+/// An assistive `Focus` on a realized tile below the viewport shows it, as
+/// Ctrl+ArrowDown onto it would. Windows found a TableView row read out and
+/// left off screen; the grid had the same gap.
+#[test]
+fn an_assistive_focus_on_a_tile_below_the_viewport_scrolls_it_into_view() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    use teksilo_core::accessibility::widget_id_to_node_id;
+    use teksilo_core::event::{Key, Modifiers};
+    let viewport = SizeProposal::exact(400.0, 200.0);
+    let (mut tree, id, _model) = make_grid(300);
+    tree.layout(viewport);
+    tree.focus(id);
+    press(&mut tree, Key::ArrowRight, Modifiers::CTRL);
+    tree.layout(viewport);
+    let tile_of = |tree: &WidgetTree, index: usize| {
+        let any = tree.widget_as_any(id).unwrap();
+        let grid = any.downcast_ref::<GridView<usize>>().unwrap();
+        grid.tile_map
+            .borrow()
+            .iter()
+            .find(|&&(i, _)| i == index)
+            .map(|&(_, tile)| tile)
+    };
+    let in_view = |tree: &mut WidgetTree, index: usize| {
+        tree.layout(viewport);
+        tile_of(tree, index).is_some_and(|tile| {
+            let (view, tile) = (tree.bounds(id), tree.bounds(tile));
+            tile.y >= view.y - 0.01 && tile.y + tile.height <= view.y + view.height + 0.01
+        })
+    };
+    let below = {
+        let any = tree.widget_as_any(id).unwrap();
+        let grid = any.downcast_ref::<GridView<usize>>().unwrap();
+        grid.tile_map
+            .borrow()
+            .iter()
+            .map(|&(index, _)| index)
+            .max()
+            .expect("tiles are realized")
+    };
+    assert!(
+        !in_view(&mut tree, below),
+        "tile {below} is realized below the viewport"
+    );
+    let node = widget_id_to_node_id(tile_of(&tree, below).unwrap());
+
+    assert_eq!(tree.focused(), Some(id), "the grid already has the keys");
+    assert!(assistive_focus(&mut tree, node), "the grid took it");
+    assert!(
+        in_view(&mut tree, below),
+        "tile {below} was scrolled into view"
+    );
+}
+
 /// A tile is the grid's active descendant and takes no keys of its own, but it
 /// is where the platform's focus is, so it must read as focusable (UIA
 /// `IsKeyboardFocusable`). An assistive `Focus` on it (a UIA `SetFocus`, an

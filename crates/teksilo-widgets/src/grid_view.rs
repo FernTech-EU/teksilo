@@ -2587,22 +2587,41 @@ impl<T: 'static> Widget for GridView<T> {
                 false
             });
         }
-        // An assistive `Focus` on a realized tile makes it the grid's cursor,
-        // as Ctrl+arrow would, and gives the grid keyboard focus.
+        // An assistive `Focus` on a realized tile makes it the grid's cursor
+        // and shows it, as Ctrl+arrow would, and gives the grid keyboard
+        // focus.
         {
             let tiles = self.tile_map.clone();
             let handle = self.handle();
+            let strategy = strategy.clone();
+            let scroll_y = self.scroll_y.clone();
+            let max_scroll_y = self.max_scroll_y.clone();
+            let viewport_height = self.viewport_height.clone();
+            let viewport_width = self.viewport_width.clone();
+            let viewport_origin = self.viewport_origin.clone();
             handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
                 self_id,
-                move |item, _ctx| {
+                move |item, ctx| {
                     let found = tiles
                         .borrow()
                         .iter()
                         .find(|&&(_, tile)| tile == item)
                         .map(|&(index, _)| index);
-                    found
-                        .inspect(|&index| handle.set_cursor(Some(index)))
-                        .is_some()
+                    let Some(index) = found else {
+                        return false;
+                    };
+                    handle.set_cursor(Some(index));
+                    keyboard::reveal_tile(
+                        &strategy,
+                        &scroll_y,
+                        &max_scroll_y,
+                        &viewport_height,
+                        &viewport_width,
+                        &viewport_origin,
+                        index,
+                        ctx,
+                    );
+                    true
                 },
             ));
         }

@@ -776,6 +776,35 @@ impl<T: 'static> ListView<T> {
         self
     }
 
+    /// What the keyboard does to show the row it moved the cursor to: scroll
+    /// the list's own viewport the least that shows row `index`, then chase
+    /// the row into any enclosing scroll area. Shared by the navigation keys,
+    /// find-as-you-type, the reorder chords and an assistive `Focus` on a
+    /// row, so a row reached any of these ways ends up in the same place.
+    fn row_reveal(&self) -> Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)> {
+        let geometry = self.geometry();
+        let len = self.source.len_fn.clone();
+        let scroll_y = self.scroll_y.clone();
+        let viewport_height = self.viewport_height.clone();
+        let max_scroll_y = self.max_scroll_y.clone();
+        let viewport_bounds = self.viewport_bounds.clone();
+        Rc::new(move |index, ctx| {
+            let count = len();
+            let scroll = scroll_y.get();
+            let new_scroll = geometry.scroll_for_ensure_visible(
+                index,
+                scroll,
+                viewport_height.get(),
+                max_scroll_y.get(),
+                count,
+            );
+            if (new_scroll - scroll).abs() > f32::EPSILON {
+                scroll_y.set(new_scroll);
+            }
+            geometry.chase_into_outer_view(ctx, viewport_bounds.get(), index, new_scroll, count);
+        })
+    }
+
     /// The geometry every query of the view goes through: the row metrics,
     /// with the section headers between the rows when there are any.
     fn geometry(&self) -> sections::ListGeometry {

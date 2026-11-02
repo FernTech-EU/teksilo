@@ -549,15 +549,24 @@ impl Widget for RadioTileGroup {
 
         // The selected tile is the group's active descendant and advertises
         // `Focus` (see `RadioTile::accessibility`); an assistive `Focus` on it
-        // gives the group keyboard focus. Only the selected one: here the
-        // arrows move the selection with the cursor, so another tile cannot be
-        // the focus without being chosen, and a focus request is no choice.
+        // gives the group keyboard focus and reveals the tile in an enclosing
+        // scroll area, as an arrow landing on it does: the framework's
+        // focus-driven follow reveals only the group. Only the selected one:
+        // here the arrows move the selection with the cursor, so another tile
+        // cannot be the focus without being chosen, and a focus request is no
+        // choice.
         {
             let selected = self.selected.clone();
             let tile_ids = self.tile_ids.clone();
             handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
                 self_id,
-                move |item, _ctx| tile_ids.get(selected.get()) == Some(&item),
+                move |item, ctx| {
+                    if tile_ids.get(selected.get()) != Some(&item) {
+                        return false;
+                    }
+                    ctx.ensure_widget_visible(item);
+                    true
+                },
             ));
         }
 
@@ -1067,6 +1076,51 @@ mod tests {
         assert!(
             outer_y.get() > 0.01,
             "AT-driven selection below the fold must scroll the enclosing \
+             ScrollArea (got {})",
+            outer_y.get()
+        );
+    }
+
+    #[test]
+    fn an_assistive_focus_on_the_selected_tile_chases_outer_scroll_area() {
+        // The selected tile is the group's active descendant; an assistive
+        // `Focus` on it, with the group already focused, must reveal it in an
+        // enclosing scroll area as an arrow landing on it does. The focus
+        // follow cannot: focus does not move.
+        use crate::ScrollArea;
+        use crate::common::item_focus::test_support::assistive_focus;
+        use teksilo_core::accessibility::widget_id_to_node_id;
+
+        let selected = Signal::new(0_usize);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let g = tree.add(group_with(
+            selected.clone(),
+            TileLayout::Vertical,
+            &["a", "b", "c", "d", "e", "f"],
+        ));
+        let outer = ScrollArea::from_id(g).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        let _outer = tree.add(outer);
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        tree.focus(g);
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        // The last tile chosen from outside, the view back at the top.
+        selected.set(5);
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        outer_y.set(0.0);
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        assert!(outer_y.get().abs() < 0.01, "reset outer to top");
+
+        let tile = tile_ids(&tree, 6)[5];
+        assert!(
+            assistive_focus(&mut tree, widget_id_to_node_id(tile)),
+            "the group took it"
+        );
+        tree.layout(SizeProposal::exact(320.0, 90.0));
+        assert_eq!(tree.focused(), Some(g));
+        assert!(
+            outer_y.get() > 0.01,
+            "a Focus on a tile below the fold must scroll the enclosing \
              ScrollArea (got {})",
             outer_y.get()
         );

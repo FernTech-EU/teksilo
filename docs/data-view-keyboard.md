@@ -361,7 +361,8 @@ type-to-edit on bare letters, and the editor wins; the WinForms default
   `IsKeyboardFocusable`) from that action alone, not from the active
   descendant, so without it the focused cell read "not focusable". The view
   answers it as Ctrl+arrow does: the cursor moves to the item, the selection
-  stays, and the keyboard is on the view.
+  stays, the keyboard is on the view, and the item is scrolled into view in
+  the view and in any enclosing scroll area.
 
 **Known upstream limitations.** A selected *row* does not report `IsSelected`
 on Windows: `Role::Row` is absent from `accesskit_windows`' selection-item list,

@@ -277,3 +277,58 @@ fn an_assistive_focus_on_a_row_moves_the_cursor_there() {
     assert_eq!(announced_row(&mut tree, tv), Some(3), "row 3 is announced");
     assert_eq!(sel.selected_indices(), vec![0], "the selection stayed");
 }
+
+/// The id of realized flat row `index`, if it is realized.
+fn realized_row(tree: &WidgetTree, tv: WidgetId, index: usize) -> Option<WidgetId> {
+    the_view(tree, tv)
+        .row_map
+        .borrow()
+        .iter()
+        .find(|&&(i, _)| i == index)
+        .map(|&(_, id)| id)
+}
+
+/// Whether flat row `index` is realized and lies wholly inside the tree's
+/// viewport, after the layout pass the next frame would run.
+fn row_in_view(tree: &mut WidgetTree, tv: WidgetId, index: usize) -> bool {
+    tree.layout(viewport());
+    let Some(row) = realized_row(tree, tv, index) else {
+        return false;
+    };
+    let (view, row) = (tree.bounds(tv), tree.bounds(row));
+    row.y >= view.y - 0.01 && row.y + row.height <= view.y + view.height + 0.01
+}
+
+/// An assistive `Focus` on a realized row below the viewport shows it, as
+/// Ctrl+ArrowDown onto it would. Windows found a row read out and left off
+/// screen.
+#[test]
+fn an_assistive_focus_on_a_row_below_the_viewport_scrolls_it_into_view() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    let (view, _first, sel) = make(60, SelectionMode::Multi);
+    let handle = view.handle();
+    let (mut tree, tv) = mount(view);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    let below = the_view(&tree, tv)
+        .row_map
+        .borrow()
+        .iter()
+        .map(|&(index, _)| index)
+        .max()
+        .expect("rows are realized");
+    assert!(
+        !row_in_view(&mut tree, tv, below),
+        "row {below} is realized below the viewport"
+    );
+    let node =
+        teksilo_core::accessibility::widget_id_to_node_id(realized_row(&tree, tv, below).unwrap());
+
+    assert_eq!(tree.focused(), Some(tv), "the tree already has the keys");
+    assert!(assistive_focus(&mut tree, node), "the tree took it");
+    assert_eq!(handle.cursor(), Some(below));
+    assert!(
+        row_in_view(&mut tree, tv, below),
+        "row {below} was scrolled into view"
+    );
+    assert_eq!(sel.selected_indices(), vec![0], "the selection stayed");
+}

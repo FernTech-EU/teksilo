@@ -1973,6 +1973,71 @@ fn an_assistive_focus_on_a_cell_makes_it_the_focused_cell() {
     assert_eq!(platform_focus(&mut tree), Some(node));
 }
 
+/// An assistive `Focus` on a realized cell below the viewport shows it, as
+/// Ctrl+ArrowDown onto it would. Windows found a TableView row read out and
+/// left below the grid; this view shares the reveal.
+#[test]
+fn an_assistive_focus_on_a_cell_below_the_viewport_scrolls_it_into_view() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    let viewport = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    let proxy = SortFilterTreeModel::new(wide_tree(100));
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        TreeTableView::from_projection(proxy)
+            .add_column(name_col())
+            .row_height(20.0),
+    );
+    tree.layout(viewport);
+    tree.focus(id);
+    {
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        tt.set_focused_cell(0, 0);
+    }
+    tree.layout(viewport);
+    let cell_of = |tree: &WidgetTree, row: usize| {
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        tt.cell_map
+            .borrow()
+            .iter()
+            .find(|&&(pos, _)| pos == (row, 0))
+            .map(|&(_, cell)| cell)
+    };
+    let in_view = |tree: &mut WidgetTree, row: usize| {
+        tree.layout(viewport);
+        cell_of(tree, row).is_some_and(|cell| {
+            let (view, cell) = (tree.bounds(id), tree.bounds(cell));
+            cell.y >= view.y - 0.01 && cell.y + cell.height <= view.y + view.height + 0.01
+        })
+    };
+    let below = {
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        tt.cell_map
+            .borrow()
+            .iter()
+            .map(|&((row, _), _)| row)
+            .max()
+            .expect("cells are realized")
+    };
+    assert!(
+        !in_view(&mut tree, below),
+        "row {below} is realized below the viewport"
+    );
+    let node = widget_id_to_node_id(cell_of(&tree, below).unwrap());
+
+    assert_eq!(tree.focused(), Some(id), "the view already has the keys");
+    assert!(assistive_focus(&mut tree, node), "the view took it");
+    assert!(
+        in_view(&mut tree, below),
+        "row {below} was scrolled into view"
+    );
+}
+
 #[test]
 fn active_descendant_clears_after_the_focused_cell_scrolls_out_of_realization() {
     let proxy = SortFilterTreeModel::new(wide_tree(1000));
@@ -5967,6 +6032,50 @@ mod full_width_and_pinned {
         assert!(song[0] != song[1] && song[1] != song[2]);
         let widths: Vec<f32> = song.iter().map(|&c| tree.bounds(c).width).collect();
         assert_eq!(widths, vec![160.0, 120.0, 80.0]);
+    }
+
+    /// An assistive `Focus` on a band keeps the cursor's column, as the keys
+    /// do, and so does not scroll the columns back to the first: the band is
+    /// one cell in every column. A `Focus` on an ordinary cell right of the
+    /// view scrolls the columns to it.
+    #[test]
+    fn an_assistive_focus_on_a_band_keeps_the_column_and_the_horizontal_scroll() {
+        use crate::common::item_focus::test_support::assistive_focus;
+        let proxy = library(5);
+        let (mut tree, id) = mount(grouped(&proxy), 200.0, 400.0);
+        let scroll_x = |tree: &WidgetTree| with_view(tree, id, |v| v.scroll_x_signal().get());
+        let focused = |tree: &WidgetTree| with_view(tree, id, |v| v.focused_cell_signal().get());
+        assert!(scroll_x(&tree).abs() < 0.01);
+
+        // Row 2 is a song: its Time cell is right of the 200 dp view.
+        let time = cells_of(&tree, id, 2)[2];
+        assert!(assistive_focus(&mut tree, widget_id_to_node_id(time)));
+        settle(&mut tree, 200.0, 400.0);
+        assert_eq!(focused(&tree), Some((2, 2)));
+        let scrolled = scroll_x(&tree);
+        assert!(scrolled > 0.0, "the columns scrolled to Time");
+
+        // Row 7 is the "#A2" band.
+        let band = cells_of(&tree, id, 7)[0];
+        assert!(assistive_focus(&mut tree, widget_id_to_node_id(band)));
+        settle(&mut tree, 200.0, 400.0);
+        assert_eq!(focused(&tree), Some((7, 2)), "the column is kept");
+        assert!(
+            (scroll_x(&tree) - scrolled).abs() < 0.01,
+            "the columns stay where they were: {} then {}",
+            scrolled,
+            scroll_x(&tree)
+        );
+
+        // The keys onto the same band from the same place agree.
+        assert!(assistive_focus(&mut tree, widget_id_to_node_id(time)));
+        settle(&mut tree, 200.0, 400.0);
+        for _ in 0..5 {
+            tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        }
+        settle(&mut tree, 200.0, 400.0);
+        assert_eq!(focused(&tree), Some((7, 2)));
+        assert!((scroll_x(&tree) - scrolled).abs() < 0.01);
     }
 
     #[test]

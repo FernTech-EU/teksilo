@@ -602,27 +602,13 @@ pub(super) fn handle_key(
             // first) the key leaves the editor. `TabKey::MoveFocus` turns the
             // stops off. The filter question agrees with Enter's (above) for
             // every shipped filter.
-            Key::Tab if !tab_escape && st.links_are_stops() => {
-                match link_tab_stop(&st, shift) {
-                    Some((start, end)) => {
-                        st.cursor.set_position(start, MoveMode::MoveAnchor);
-                        st.cursor.set_position(end, MoveMode::KeepAnchor);
-                        let (a, b) = st.shown_selection();
-                        st.link_stop = Some((a.min(b), a.max(b)));
-                        // The caret is at the link's end, which the key's
-                        // epilogue scrolls into view. Show its start first,
-                        // so a link that wraps is seen whole when it fits:
-                        // Shift+Tab up to one showed only its last line.
-                        ensure_position_visible_locked(
-                            &mut st,
-                            a.min(b),
-                            CursorAffinity::Downstream,
-                        );
-                        KeyAction::ClearPreferredX
-                    }
-                    None => KeyAction::Unhandled,
+            Key::Tab if !tab_escape && st.links_are_stops() => match link_tab_stop(&st, shift) {
+                Some((start, end)) => {
+                    select_link_stop_locked(&mut st, start, end);
+                    KeyAction::ClearPreferredX
                 }
-            }
+                None => KeyAction::Unhandled,
+            },
             Key::Tab if !tab_escape && !shift && tab_consumed => {
                 // Tab (no Ctrl, no Shift):
                 //  * Inside a table cell → next cell (wraps to next row;
@@ -929,6 +915,27 @@ pub(super) fn run_format_shortcut(
     };
     finish_key_action(state, ctx, action);
     true
+}
+
+/// Make the link over `[start, end)` (document positions) the link stop, as
+/// Tab does, and show its start in the editor's own viewport. The caret is at
+/// the link's end, which [`finish_link_stop`] then scrolls into view, so a
+/// link that wraps is seen whole when it fits: showing only the caret's line,
+/// Shift+Tab up to one showed only its last line.
+pub(super) fn select_link_stop_locked(st: &mut EditorState, start: usize, end: usize) {
+    st.cursor.set_position(start, MoveMode::MoveAnchor);
+    st.cursor.set_position(end, MoveMode::KeepAnchor);
+    let (a, b) = st.shown_selection();
+    st.link_stop = Some((a.min(b), a.max(b)));
+    ensure_position_visible_locked(st, a.min(b), CursorAffinity::Downstream);
+}
+
+/// The tail Tab runs after [`select_link_stop_locked`]: the caret's end of the
+/// link in the editor's own viewport and the whole link in any enclosing
+/// scroll area, the cursor published, a frame requested. For an assistive
+/// `Focus` on a link, which reaches the same link stop by another way.
+pub(super) fn finish_link_stop(state: &SharedState, ctx: &mut EventContext) -> EventResponse {
+    finish_key_action(state, ctx, KeyAction::ClearPreferredX)
 }
 
 /// The shared tail of a handled key or command: what `action` says about the
@@ -1249,27 +1256,7 @@ pub(super) fn chase_caret_into_view_with(
             Some(a) => a,
             None => return,
         };
-        // A link a Tab selected is revealed whole, from its first line to its
-        // last, not only the caret's line at its end: Shift+Tab up to a link
-        // that wraps left its first lines above the page's viewport. The
-        // editor's own viewport gets the same in the Tab arm. Only the part
-        // of the link inside that viewport: lines the editor scrolled out of
-        // its own view are not on the page either, and revealing them scrolled
-        // the page to whatever sits above the editor.
-        let link = st
-            .link_stop
-            .filter(|&stop| {
-                let (a, b) = st.shown_selection();
-                (a.min(b), a.max(b)) == stop
-            })
-            .and_then(|(start, end)| range_window_rect(&st, start, end))
-            .map(|link| {
-                let top = link.y.max(st.viewport_origin.y);
-                let bottom = (link.y + link.height)
-                    .min(st.viewport_origin.y + st.viewport_height)
-                    .max(top);
-                (top, bottom)
-            });
+        let link = link_stop_span(&st);
         let visible_height = st.visible_height;
 
         // Reveal the caret only when it actually MOVES. A repeat call at the
@@ -1312,27 +1299,73 @@ pub(super) fn chase_caret_into_view_with(
         // the target's height, so padding it by a line would shift the pin by
         // half a line and put the text permanently off the mark.
         Some(fraction) => ctx.ensure_visible_aligned(area, fraction, motion),
-        None => {
-            // Extend downward by one line so the line a wrapping character would
-            // land on is revealed together with the current caret line.
-            let line = area.height.max(1.0);
-            let mut area =
-                teksilo_canvas::Rect::new(area.x, area.y, area.width, area.height + line);
-            // The link's lines with the caret's (horizontally, the caret's
-            // alone), unless together they do not fit the page's view: the
-            // page aligns the top of a target above its viewport (reached by
-            // Shift+Tab), so a link taller than that view would leave the
-            // caret below it.
-            if let Some((top, bottom)) = link {
-                let top = top.min(area.y);
-                let bottom = bottom.max(area.y + area.height);
-                if visible_height.is_none_or(|height| bottom - top <= height) {
-                    area = teksilo_canvas::Rect::new(area.x, top, area.width, bottom - top);
-                }
-            }
-            ctx.ensure_visible(area);
+        None => ctx.ensure_visible(page_follow_area(area, link, visible_height)),
+    }
+}
+
+/// The window-space span, top to bottom, of the link Tab selected, when the
+/// selection is still that link stop.
+///
+/// A link a Tab selected is revealed whole, from its first line to its last,
+/// not only the caret's line at its end: Shift+Tab up to a link that wraps
+/// left its first lines above the page's viewport. The editor's own viewport
+/// gets the same from [`select_link_stop_locked`]. Only the part of the link
+/// inside that viewport: lines the editor scrolled out of its own view are not
+/// on the page either, and revealing them scrolled the page to whatever sits
+/// above the editor.
+fn link_stop_span(st: &EditorState) -> Option<(f32, f32)> {
+    st.link_stop
+        .filter(|&stop| {
+            let (a, b) = st.shown_selection();
+            (a.min(b), a.max(b)) == stop
+        })
+        .and_then(|(start, end)| range_window_rect(st, start, end))
+        .map(|link| {
+            let top = link.y.max(st.viewport_origin.y);
+            let bottom = (link.y + link.height)
+                .min(st.viewport_origin.y + st.viewport_height)
+                .max(top);
+            (top, bottom)
+        })
+}
+
+/// What the page follow shows of a caret at `caret` (window space) with no
+/// typewriter pin: its line and the next one, and the `link` span
+/// ([`link_stop_span`]) when there is one.
+fn page_follow_area(
+    caret: teksilo_canvas::Rect,
+    link: Option<(f32, f32)>,
+    visible_height: Option<f32>,
+) -> teksilo_canvas::Rect {
+    // Extend downward by one line so the line a wrapping character would land
+    // on is revealed together with the current caret line.
+    let line = caret.height.max(1.0);
+    let mut area = teksilo_canvas::Rect::new(caret.x, caret.y, caret.width, caret.height + line);
+    // The link's lines with the caret's (horizontally, the caret's alone),
+    // unless together they do not fit the page's view: the page aligns the top
+    // of a target above its viewport (reached by Shift+Tab), so a link taller
+    // than that view would leave the caret below it.
+    if let Some((top, bottom)) = link {
+        let top = top.min(area.y);
+        let bottom = bottom.max(area.y + area.height);
+        if visible_height.is_none_or(|height| bottom - top <= height) {
+            area = teksilo_canvas::Rect::new(area.x, top, area.width, bottom - top);
         }
     }
+    area
+}
+
+/// The rectangle the framework reveals in an enclosing scroll area when the
+/// editor takes focus: the caret's line, or, when the selection is a link
+/// stop an assistive `Focus` made before the editor had focus, what Tab's
+/// page follow shows of that link ([`page_follow_area`]). `None` before the
+/// first layout or while unfocused.
+pub(super) fn focus_reveal_window_rect(st: &EditorState) -> Option<teksilo_canvas::Rect> {
+    let caret = caret_window_rect(st)?;
+    Some(match link_stop_span(st) {
+        Some(link) => page_follow_area(caret, Some(link), st.visible_height),
+        None => caret,
+    })
 }
 
 /// Ctrl+A escalation ladder. Mirrors the godot reference's `select_all`.

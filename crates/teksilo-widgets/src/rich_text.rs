@@ -4770,8 +4770,9 @@ impl Widget for RichTextEditor {
         // uses (viewport_origin + caret − scroll); `scroll_rect_into_view`
         // excludes the editor itself, so this targets the enclosing ScrollArea
         // with no double-scroll. `None` (→ reveal whole bounds) before the first
-        // layout or while unfocused.
-        self::keyboard::caret_window_rect(&self.state.borrow())
+        // layout or while unfocused. A link an assistive `Focus` selected
+        // before the editor had focus is shown as Tab shows it.
+        self::keyboard::focus_reveal_window_rect(&self.state.borrow())
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
@@ -5059,8 +5060,8 @@ fn handle_access_action_request(
             EventResponse::Handled
         }
         // A Focus on a link that is a stop (each advertises it, see
-        // `FlowWalk::runs_and_links`) selects it as Tab would and gives the
-        // editor keyboard focus, so the link is the editor's active
+        // `FlowWalk::runs_and_links`) selects and shows it as Tab would and
+        // gives the editor keyboard focus, so the link is the editor's active
         // descendant and the platform's focus.
         (Action::Focus, _) => {
             let range = state
@@ -5074,18 +5075,17 @@ fn handle_access_action_request(
                 return EventResponse::Ignored;
             };
             let (start, end) = (st.document_position(start), st.document_position(end));
-            st.cursor.set_position(start, MoveMode::MoveAnchor);
-            st.cursor.set_position(end, MoveMode::KeepAnchor);
-            let (a, b) = st.shown_selection();
-            st.link_stop = Some((a.min(b), a.max(b)));
+            self::keyboard::select_link_stop_locked(&mut st, start, end);
             let editor = st.self_id;
             drop(st);
-            sync_cursor_signals(state);
+            // Shown as Tab shows it. In an editor without focus yet the page
+            // follow waits for the focus, which reveals the link through
+            // `focus_reveal_rect`.
+            self::keyboard::finish_link_stop(state, ctx);
             if let Some(editor) = editor {
                 ctx.request_focus(editor);
             }
             ctx.request_accessibility_update();
-            ctx.request_frame();
             EventResponse::Handled
         }
         // A Click on one of the walk's `Role::Link` nodes follows that link.

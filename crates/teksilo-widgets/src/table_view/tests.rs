@@ -2606,6 +2606,74 @@ fn an_assistive_focus_on_a_cell_makes_it_the_focused_cell() {
     assert_eq!(read_focused_cell(&tree, table), Some((3, 0)));
 }
 
+/// The id of the realized cell at `pos`, if it is realized.
+fn realized_cell(tree: &WidgetTree, table: WidgetId, pos: (usize, usize)) -> Option<WidgetId> {
+    let any = tree.widget_as_any(table).unwrap();
+    let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+    tv.cell_map
+        .borrow()
+        .iter()
+        .find(|&&(p, _)| p == pos)
+        .map(|&(_, id)| id)
+}
+
+/// Whether the cell at `pos` is realized and lies wholly inside the table,
+/// after the layout pass the next frame would run.
+fn cell_in_view(tree: &mut WidgetTree, table: WidgetId, pos: (usize, usize)) -> bool {
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    let Some(cell) = realized_cell(tree, table, pos) else {
+        return false;
+    };
+    let (view, cell) = (tree.bounds(table), tree.bounds(cell));
+    cell.y >= view.y - 0.01 && cell.y + cell.height <= view.y + view.height + 0.01
+}
+
+/// An assistive `Focus` on a realized cell below the viewport shows it, as
+/// Ctrl+ArrowDown onto it would. Windows found data-grid's row 21 read out
+/// and left below the grid.
+#[test]
+fn an_assistive_focus_on_a_cell_below_the_viewport_scrolls_it_into_view() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    use teksilo_core::accessibility::widget_id_to_node_id;
+
+    let (mut tree, table, _model) = build_table(100);
+    focus_at(&mut tree, table, 0, 0);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    let below = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.cell_map
+            .borrow()
+            .iter()
+            .map(|&((row, _), _)| row)
+            .max()
+            .expect("cells are realized")
+    };
+    assert!(
+        !cell_in_view(&mut tree, table, (below, 0)),
+        "row {below} is realized below the viewport"
+    );
+    let node = widget_id_to_node_id(realized_cell(&tree, table, (below, 0)).unwrap());
+
+    assert_eq!(
+        tree.focused(),
+        Some(table),
+        "the table already has the keys"
+    );
+    assert!(assistive_focus(&mut tree, node), "the table took it");
+    assert_eq!(read_focused_cell(&tree, table), Some((below, 0)));
+    assert!(
+        cell_in_view(&mut tree, table, (below, 0)),
+        "row {below} was scrolled into view"
+    );
+}
+
 // ── Taking focus reveals the row the cursor is on ───────────────────────────
 
 /// Taking focus scrolls the keyboard cursor's row into the realized window.

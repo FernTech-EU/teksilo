@@ -233,6 +233,48 @@ fn an_assistive_focus_on_an_option_highlights_it() {
     assert_eq!(reader.heard(&mut tree), vec![focus("Banana")]);
 }
 
+/// An assistive `Focus` on a realized option below the open list's viewport
+/// scrolls it in, as the arrows reaching it do.
+#[test]
+fn an_assistive_focus_on_an_option_below_the_list_scrolls_it_into_view() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    use teksilo_core::accessibility::widget_id_to_node_id;
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let (_combo, mut reader) = focused_combo(
+        &mut tree,
+        ComboBox::new(long_list(), selected.clone()).label(lit!("Huge")),
+    );
+    press(&mut tree, Key::ArrowDown, Modifiers::ALT);
+    assert_eq!(reader.heard(&mut tree), vec![focus("Item 00")]);
+    // The last option realized, and the list box holding it.
+    let (option, name) = (0..40)
+        .rev()
+        .map(|i| format!("Item {i:02}"))
+        .find_map(|name| tree.find_by_label(&name).map(|id| (id, name)))
+        .expect("options are realized");
+    // Looked up again each time: a scroll may realize the rows anew.
+    let in_view = |tree: &WidgetTree| {
+        let Some(option) = tree.find_by_label(&name) else {
+            return false;
+        };
+        let list = std::iter::successors(tree.parent(option), |&id| tree.parent(id))
+            .find(|&id| tree.accessibility_node(id).role() == Role::ListBox)
+            .expect("the list box");
+        let (row, list) = (tree.bounds(option), tree.bounds(list));
+        row.y >= list.y - 0.5 && row.bottom() <= list.bottom() + 0.5
+    };
+    assert!(!in_view(&tree), "precondition: {name} is below the list");
+
+    assert!(
+        assistive_focus(&mut tree, widget_id_to_node_id(option)),
+        "the option took it"
+    );
+    laid_out(&mut tree);
+    assert_eq!(reader.heard(&mut tree), vec![focus(&name)]);
+    assert!(in_view(&tree), "{name} was scrolled into the list");
+}
+
 #[test]
 fn a_short_list_is_one_list_box_of_named_options() {
     let mut tree = light_tree();

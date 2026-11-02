@@ -1246,3 +1246,137 @@ fn a_link_that_fits_the_page_shows_whole_from_a_partly_visible_viewer() {
     );
     assert!(p.caret_shows(), "the caret shows");
 }
+
+/// The node of the only link the last accessibility walk emitted.
+fn the_link_node(tree: &mut WidgetTree, handle: &EditorHandle) -> teksilo_core::accesskit::NodeId {
+    tree.sync_accessibility();
+    let st = handle.state.borrow();
+    let ranges = st.link_ranges.borrow();
+    assert_eq!(ranges.len(), 1, "one link in the walk");
+    *ranges.keys().next().unwrap()
+}
+
+/// An assistive `Focus` on a link outside a viewer's own viewport scrolls it
+/// in, whole when it fits, as Tab and Shift+Tab onto it do: from below, its
+/// start first, then its end, where the caret is. Windows found the link read
+/// out and left outside the Preview, above and below it. With the viewer
+/// focused, and from another control.
+#[test]
+fn an_assistive_focus_on_a_link_outside_the_viewport_scrolls_it_into_view() {
+    use crate::button::Button;
+    use crate::common::item_focus::test_support::assistive_focus;
+    use crate::primitives::{FixedSize, VStack};
+    use teksilo_i18n::lit;
+    use teksilo_text::CursorAffinity;
+
+    let mut markdown = String::new();
+    for i in 0..20 {
+        markdown.push_str(&format!("filler paragraph {i}\n\n"));
+    }
+    markdown.push_str("[a link long enough to wrap over several lines here](a:b)\n\n");
+    for i in 0..20 {
+        markdown.push_str(&format!("more filler {i}\n\n"));
+    }
+    let editor = viewer(doc(&markdown)).v_scroll_policy(super::ScrollPolicy::Auto);
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let after = tree.add(Button::new(lit!("After")));
+    tree.add(
+        VStack::new()
+            .child(Button::new(lit!("Before")))
+            .child(FixedSize::new().width(160.0).height(120.0).child(editor))
+            .child(after),
+    );
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let _ = tree.render();
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    settle(&mut tree);
+    let editor_id = tree.focused().expect("the viewer has focus");
+
+    // The link's two ends, as the engine places them in the viewport.
+    let ends = |handle: &EditorHandle| {
+        let st = handle.state.borrow();
+        let (start, end) = st.link_stop.expect("a link stop");
+        let top = st.engine.caret_rect(start, CursorAffinity::Downstream);
+        let bottom = st.engine.caret_rect(end, CursorAffinity::Downstream);
+        assert!(bottom[1] > top[1], "the link wraps: {top:?} {bottom:?}");
+        (top[1], bottom[1] + bottom[3], st.viewport_height)
+    };
+    let scroll = |handle: &EditorHandle| handle.state.borrow().scroll_y.get();
+
+    // From below, the viewer focused.
+    tree.press_key(Key::End, Modifiers::COMMAND);
+    settle(&mut tree);
+    let bottom_scroll = scroll(&handle);
+    let link = the_link_node(&mut tree, &handle);
+    assert!(assistive_focus(&mut tree, link), "the viewer took it");
+    settle(&mut tree);
+    assert!(scroll(&handle) < bottom_scroll, "the viewer scrolled up");
+    let (top, bottom, height) = ends(&handle);
+    assert!(
+        top >= 0.0 && bottom <= height,
+        "up to the link, all of it shows: {top}..{bottom} in 0..{height}"
+    );
+
+    // From above, focus on another control.
+    tree.press_key(Key::Home, Modifiers::COMMAND);
+    settle(&mut tree);
+    assert!(scroll(&handle).abs() < 0.5, "back at the top");
+    tree.focus(after);
+    settle(&mut tree);
+    let link = the_link_node(&mut tree, &handle);
+    assert!(assistive_focus(&mut tree, link), "the viewer took it");
+    settle(&mut tree);
+    assert_eq!(
+        tree.focused(),
+        Some(editor_id),
+        "the keys are on the viewer"
+    );
+    let (top, bottom, height) = ends(&handle);
+    assert!(
+        top >= 0.0 && bottom <= height,
+        "down to the link, all of it shows: {top}..{bottom} in 0..{height}"
+    );
+}
+
+/// The same in a page: a viewer sized to its text inside a `ScrollArea`, the
+/// page scrolled past the link. An assistive `Focus` on the link reveals it
+/// whole in the page, as Shift+Tab does, whether the viewer had focus or
+/// takes it with the action.
+#[test]
+fn an_assistive_focus_on_a_link_above_the_page_reveals_it_whole() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    let mut markdown = String::new();
+    for i in 0..20 {
+        markdown.push_str(&format!("filler paragraph {i}\n\n"));
+    }
+    markdown.push_str("[a link long enough to wrap over several lines here](a:b)\n\n");
+    for i in 0..20 {
+        markdown.push_str(&format!("more filler {i}\n\n"));
+    }
+    for focused in [true, false] {
+        let editor = viewer(doc(&markdown))
+            .v_scroll_policy(super::ScrollPolicy::AlwaysOff)
+            .min_lines(1);
+        let mut p = Page::new(editor, None, 0.0, 120.0);
+        p.press(Key::End, Modifiers::COMMAND);
+        let scrolled = p.outer_y.get();
+        assert!(scrolled > 0.0, "Ctrl+End scrolled the page");
+        if !focused {
+            p.tree.clear_focus();
+            p.frame();
+        }
+        let link = the_link_node(&mut p.tree, &p.handle);
+        assert!(assistive_focus(&mut p.tree, link), "the viewer took it");
+        p.frame();
+        assert!(p.outer_y.get() < scrolled, "the page scrolled up");
+        let (top, bottom) = p.link_lines();
+        let (page_top, page_bottom) = p.page();
+        assert!(
+            top >= page_top - 0.5 && bottom <= page_bottom + 0.5,
+            "focused {focused}: the link shows whole: {top}..{bottom} in \
+             {page_top}..{page_bottom}"
+        );
+    }
+}

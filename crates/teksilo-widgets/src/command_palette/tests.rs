@@ -475,6 +475,33 @@ fn the_highlight_is_scrolled_into_view() {
     let _ = root;
 }
 
+/// An assistive `Focus` on a realized row below the list scrolls it in, as
+/// the arrows reaching it do: the keyboard stays in the field, so the focus
+/// follow cannot.
+#[test]
+fn an_assistive_focus_on_a_row_below_the_list_scrolls_it_into_view() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    let (mut tree, state, root) = mounted(tree_with_many(40), CommandPalette::new());
+    let list = state.listbox_id.get().expect("the list is up");
+    let last = *options(&tree, root).last().expect("rows are realized");
+    let below = tree.bounds(last);
+    assert!(
+        below.bottom() > tree.bounds(list).bottom() + 0.5,
+        "precondition: row {below:?} is realized below the list"
+    );
+
+    let node = teksilo_core::accessibility::widget_id_to_node_id(last);
+    assert!(assistive_focus(&mut tree, node), "the row took it");
+    frame(&mut tree);
+    frame(&mut tree);
+    let row = state.active_row.get().expect("the highlighted row");
+    let (row, list) = (tree.bounds(row), tree.bounds(list));
+    assert!(
+        row.y >= list.y - 0.5 && row.bottom() <= list.bottom() + 0.5,
+        "row {row:?} must be inside the list {list:?}"
+    );
+}
+
 #[test]
 fn the_palette_hugs_a_short_list() {
     // It used to be pinned at 560 x 420 whatever matched: three rows left two

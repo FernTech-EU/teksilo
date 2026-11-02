@@ -539,6 +539,7 @@ impl<T: 'static> Widget for TableView<T> {
                 move || off_grid_row.get() || keyboard::select_all_declines(&cfg_row),
             );
         }
+        let reveal_cfg = key_cfg.clone();
         let mut shared_key = keyboard::build_key_handler(key_cfg);
         let reorder_key = reorder_perform.clone();
         let focused_kbd = self.focused_cell.clone();
@@ -735,15 +736,15 @@ impl<T: 'static> Widget for TableView<T> {
         handlers = self.export.install_completion(handlers);
 
         // An assistive `Focus` on a realized cell (each one advertises it,
-        // see `CellA11y::accessibility`) makes it the focused cell, as
-        // Ctrl+arrow would, and gives the table keyboard focus.
+        // see `CellA11y::accessibility`) makes it the focused cell and shows
+        // it, as Ctrl+arrow would, and gives the table keyboard focus.
         {
             let cells = self.cell_map.clone();
             let focused = self.focused_cell.clone();
             let editing = self.editing_cell.clone();
             handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
                 self_id,
-                move |item, _ctx| {
+                move |item, ctx| {
                     // An open cell editor keeps the keyboard, as it does
                     // against Ctrl+arrow.
                     if editing.get().is_some() {
@@ -754,7 +755,12 @@ impl<T: 'static> Widget for TableView<T> {
                         .iter()
                         .find(|&&(_, cell)| cell == item)
                         .map(|&(pos, _)| pos);
-                    found.inspect(|&pos| focused.set(Some(pos))).is_some()
+                    let Some((row, col)) = found else {
+                        return false;
+                    };
+                    focused.set(Some((row, col)));
+                    keyboard::reveal_cell(&reveal_cfg, row, col, ctx);
+                    true
                 },
             ));
         }

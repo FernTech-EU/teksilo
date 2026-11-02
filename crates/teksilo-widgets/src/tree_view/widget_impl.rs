@@ -79,6 +79,38 @@ impl<T: 'static> TreeView<T> {
     ///
     /// The handles are cloned into the effect rather than reaching through
     /// `self`, which the closure cannot borrow.
+    /// What the keyboard does to show the row it moved the cursor to: scroll
+    /// the tree's own viewport the least that shows flat row `index`, then
+    /// chase the row into any enclosing scroll area. Shared by the navigation
+    /// keys, find-as-you-type, the reorder chords and an assistive `Focus` on
+    /// a row, so a row reached any of these ways ends up in the same place.
+    fn row_reveal(&self) -> Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)> {
+        let metrics = self.metrics.clone();
+        let scroll_y = self.scroll_y.clone();
+        let viewport_height = self.viewport_height.clone();
+        let max_scroll_y = self.max_scroll_y.clone();
+        let viewport_bounds = self.viewport_bounds.clone();
+        Rc::new(move |index, ctx| {
+            let scroll = scroll_y.get();
+            let new_scroll = metrics.borrow_mut().scroll_for_ensure_visible(
+                index,
+                scroll,
+                viewport_height.get(),
+                max_scroll_y.get(),
+            );
+            if (new_scroll - scroll).abs() > f32::EPSILON {
+                scroll_y.set(new_scroll);
+            }
+            crate::common::row_metrics::chase_row_into_outer_view(
+                ctx,
+                &metrics,
+                viewport_bounds.get(),
+                index,
+                new_scroll,
+            );
+        })
+    }
+
     fn reveal_current_row_on_focus(&self, ctx: &mut teksilo_core::build_context::BuildContext) {
         let metrics = self.metrics.clone();
         let scroll_y = self.scroll_y.clone();
@@ -386,11 +418,7 @@ impl<T: 'static> Widget for TreeView<T> {
                 let fi = self.focused_index.clone();
                 let fi_anchor = self.focused_anchor.clone();
                 let source = self.source.clone();
-                let metrics = self.metrics.clone();
-                let scroll = self.scroll_y.clone();
-                let vh = self.viewport_height.clone();
-                let vb = self.viewport_bounds.clone();
-                let max = self.max_scroll_y.clone();
+                let reveal = self.row_reveal();
                 Rc::new(
                     move |new_flat: usize, ctx: &mut teksilo_core::widget::EventContext| {
                         fi.set(Some(new_flat));
@@ -398,23 +426,7 @@ impl<T: 'static> Widget for TreeView<T> {
                         if let Some(ref sel) = sel {
                             sel.select(new_flat);
                         }
-                        let current = scroll.get();
-                        let new_scroll = metrics.borrow_mut().scroll_for_ensure_visible(
-                            new_flat,
-                            current,
-                            vh.get(),
-                            max.get(),
-                        );
-                        if (new_scroll - current).abs() > f32::EPSILON {
-                            scroll.set(new_scroll);
-                        }
-                        crate::common::row_metrics::chase_row_into_outer_view(
-                            ctx,
-                            &metrics,
-                            vb.get(),
-                            new_flat,
-                            new_scroll,
-                        );
+                        reveal(new_flat, ctx);
                     },
                 )
             };
@@ -510,11 +522,9 @@ impl<T: 'static> Widget for TreeView<T> {
             let fi_anchor = self.focused_anchor.clone();
             let reorder_key = reorder_perform.clone();
             let reparent_key = reparent_perform.clone();
-            let scroll_for_nav = self.scroll_y.clone();
             let metrics_for_nav = self.metrics.clone();
-            let max_for_nav = self.max_scroll_y.clone();
             let vh_for_nav = self.viewport_height.clone();
-            let vb_for_nav = self.viewport_bounds.clone();
+            let reveal_for_nav = self.row_reveal();
             let ta_state = self.type_ahead.clone();
             // Visible index → realized row id, so `Space` can ask the row
             // whether it publishes a keyboard toggle.
@@ -556,23 +566,6 @@ impl<T: 'static> Widget for TreeView<T> {
                     let set_focus = |idx: usize| {
                         fi.set(Some(idx));
                         *fi_anchor.borrow_mut() = Some(source.anchor(idx));
-                    };
-
-                    // Helper: scroll so flat row `idx` is visible in the tree's
-                    // OWN viewport; returns the resulting scroll offset so the
-                    // caller can chain the reveal to enclosing scroll areas.
-                    let ensure_visible = |idx: usize| -> f32 {
-                        let scroll = scroll_for_nav.get();
-                        let new_scroll = metrics_for_nav.borrow_mut().scroll_for_ensure_visible(
-                            idx,
-                            scroll,
-                            vh_for_nav.get(),
-                            max_for_nav.get(),
-                        );
-                        if (new_scroll - scroll).abs() > f32::EPSILON {
-                            scroll_for_nav.set(new_scroll);
-                        }
-                        new_scroll
                     };
 
                     // Deselect all — GTK's Ctrl+Shift+A, which no other
@@ -644,14 +637,7 @@ impl<T: 'static> Widget for TreeView<T> {
                             if let Some(ref sel) = sel_for_key {
                                 sel.select(idx);
                             }
-                            let new_scroll = ensure_visible(idx);
-                            crate::common::row_metrics::chase_row_into_outer_view(
-                                ctx,
-                                &metrics_for_nav,
-                                vb_for_nav.get(),
-                                idx,
-                                new_scroll,
-                            );
+                            reveal_for_nav(idx, ctx);
                             return teksilo_core::event::EventResponse::Handled;
                         }
                         return teksilo_core::event::EventResponse::Ignored;
@@ -704,14 +690,7 @@ impl<T: 'static> Widget for TreeView<T> {
                         if let Some(ref sel) = sel_for_key {
                             sel.select(to);
                         }
-                        let new_scroll = ensure_visible(to);
-                        crate::common::row_metrics::chase_row_into_outer_view(
-                            ctx,
-                            &metrics_for_nav,
-                            vb_for_nav.get(),
-                            to,
-                            new_scroll,
-                        );
+                        reveal_for_nav(to, ctx);
                     };
 
                     // Expand a closed node; on one already open, move into its
@@ -976,14 +955,7 @@ impl<T: 'static> Widget for TreeView<T> {
                                 }
                             }
                         }
-                        let new_scroll = ensure_visible(idx);
-                        crate::common::row_metrics::chase_row_into_outer_view(
-                            ctx,
-                            &metrics_for_nav,
-                            vb_for_nav.get(),
-                            idx,
-                            new_scroll,
-                        );
+                        reveal_for_nav(idx, ctx);
                         return teksilo_core::event::EventResponse::Handled;
                     }
                 }
@@ -1226,22 +1198,26 @@ impl<T: 'static> Widget for TreeView<T> {
         handlers = self.export.install_completion(handlers);
 
         // An assistive `Focus` on a realized row (each one advertises it, see
-        // `list_item_a11y`) makes it the current row, as Ctrl+arrow would,
-        // and gives the view keyboard focus.
+        // `list_item_a11y`) makes it the current row and shows it, as
+        // Ctrl+arrow would, and gives the view keyboard focus.
         {
             let rows = self.row_map.clone();
             let handle = self.handle();
+            let reveal = self.row_reveal();
             handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
                 self_id,
-                move |item, _ctx| {
+                move |item, ctx| {
                     let found = rows
                         .borrow()
                         .iter()
                         .find(|&&(_, row)| row == item)
                         .map(|&(index, _)| index);
-                    found
-                        .inspect(|&index| handle.set_cursor(Some(index)))
-                        .is_some()
+                    let Some(index) = found else {
+                        return false;
+                    };
+                    handle.set_cursor(Some(index));
+                    reveal(index, ctx);
+                    true
                 },
             ));
         }

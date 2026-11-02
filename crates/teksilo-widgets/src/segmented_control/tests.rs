@@ -996,6 +996,45 @@ fn the_selected_segment_reads_as_focusable_and_takes_an_assistive_focus() {
     assert_eq!(selected.get(), Some(B), "a focus request chose nothing");
 }
 
+/// An assistive `Focus` on the selected segment, with the control already
+/// focused and scrolled out of a page, reveals it there, as an arrow landing
+/// on it does: focus does not move, so the focus follow cannot.
+#[test]
+fn an_assistive_focus_on_the_selected_segment_chases_outer_scroll_area() {
+    use crate::ScrollArea;
+    use crate::common::item_focus::test_support::assistive_focus;
+    use crate::primitives::{FixedSize, VStack};
+    use teksilo_core::accessibility::widget_id_to_node_id;
+
+    let selected = Signal::new(Some(C));
+    let mut t = measured_tree();
+    let control = t.add(abc(selected.clone()));
+    let page = t.add(
+        VStack::new()
+            .child(FixedSize::new().width(300.0).height(400.0))
+            .child(control),
+    );
+    let outer = ScrollArea::from_id(page).smooth_scrolling(false);
+    let outer_y = outer.scroll_y_signal().clone();
+    t.add(outer);
+    settle(&mut t, 300.0, 100.0);
+    t.focus(control);
+    settle(&mut t, 300.0, 100.0);
+    outer_y.set(0.0);
+    settle(&mut t, 300.0, 100.0);
+    assert!(outer_y.get().abs() < 0.01, "reset outer to top");
+
+    let c = widget_id_to_node_id(active_cells(&t, control)[2]);
+    assert!(assistive_focus(&mut t, c), "the control took it");
+    settle(&mut t, 300.0, 100.0);
+    assert_eq!(t.focused(), Some(control));
+    assert!(
+        outer_y.get() > 0.01,
+        "a Focus on a segment below the fold must scroll the page (got {})",
+        outer_y.get()
+    );
+}
+
 #[test]
 fn radio_group_relations_never_reference_an_overflowed_segment() {
     // A dormant cell publishes no AccessKit node, so a `push_to_radio_group`

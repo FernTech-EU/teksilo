@@ -2338,6 +2338,45 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_assistive_focus_scrolls_a_capped_menu_to_the_row() {
+        // The same reveal End gets, for an assistive `Focus` on a row below
+        // the capped panel: the keyboard stays on the menu, so the focus
+        // follow cannot show it.
+        use crate::common::item_focus::test_support::assistive_focus;
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        let mut tree = light_tree();
+        let mut menu = MenuList::new().max_visible_items(4);
+        for i in 0..20 {
+            menu = menu.item(MenuItem::new(lit!(format!("Entry {i}"))));
+        }
+        let menu_id = tree.add(menu);
+        tree.layout(SizeProposal::with_width(300.0));
+        tree.focus(menu_id);
+        tree.layout(SizeProposal::with_width(300.0));
+        let last = tree.find_by_label("Entry 19").expect("the row");
+        let panel = tree.bounds(menu_id);
+        assert!(
+            tree.bounds(last).y > panel.bottom(),
+            "precondition: the last row starts below the capped panel"
+        );
+
+        assert!(
+            assistive_focus(&mut tree, widget_id_to_node_id(last)),
+            "the menu took it"
+        );
+        tree.layout(SizeProposal::with_width(300.0));
+        let row = tree.bounds(last);
+        assert!(
+            row.y >= panel.y - 0.5 && row.bottom() <= panel.bottom() + 0.5,
+            "the row was scrolled into the panel, got {}..{} for a panel of {}..{}",
+            row.y,
+            row.bottom(),
+            panel.y,
+            panel.bottom()
+        );
+    }
+
     // --- `inset` ---
 
     /// Lay `menu` (with a probe row as its only row) out at a 300 dp width
