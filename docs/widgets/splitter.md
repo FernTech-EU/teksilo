@@ -122,6 +122,34 @@ Collapsing and hiding a pane each have an animated door
 an instant one (`SplitterModel::set_collapsed_immediate`,
 `SplitterModel::set_pane_visible_immediate`) for restoring a layout.
 
+#### Minimum sizes
+
+A pane's `min_size` is a floor the splitter keeps while it can. When the
+splitter is smaller than the sum of its panes' minimums (plus the
+gutters), the minimums become a preference: the expanded panes shrink
+below them together, in proportion to their minimums, collapsed panes
+keep their `collapsed_size` while there is room for it, and the sizes add
+up to exactly the splitter's extent. Every pane and divider stays inside
+the splitter, in the Tab order and in the accessibility tree, though a
+very small splitter can leave a pane only a few pixels wide.
+
+While the panes are below their minimums the divider cannot move: the
+layout then depends on the minimums alone. A drag or an arrow key on it
+changes nothing, and it offers assistive technology no Increment or
+Decrement, so the sizes the user chose come back once the splitter is
+large enough again. Collapsing and expanding a pane still work. The
+divider keeps its resize cursor and hover feedback meanwhile.
+
+Asked with a bounded main axis, the splitter answers with the size it
+was offered; asked with an unbounded one (a size-to-content window, a
+horizontal `ScrollArea`) it answers with its panes' content or its
+floors, whichever is larger. Either counts only visible panes, and a
+collapsed pane at its `collapsed_size`.
+
+The splitter clips its children. Each pane already clips its content to
+itself, and the dividers paint inside their gutters, so this cuts no
+focus ring that was visible before.
+
 ```ignore
 let model = SplitterModel::from_panes(vec![
     PaneDescriptor::new().size(220.0).min_size(160.0).stretch(0.0).collapsible(true),
@@ -252,7 +280,7 @@ pub struct PaneDescriptor { /* fields */ }
 ### Fields
 
 - **`initial_size`**: `Option<f32>` — Initial main-axis size in px. `None` ⇒ take an equal share (the first layout equalizes via the stretch path).
-- **`min_size`**: `f32` — Hard compression floor in px.
+- **`min_size`**: `f32` — Compression floor in px. The pane never shrinks below it while the splitter can hold every pane's floor; in a splitter smaller than the sum of its panes' minimums, the minimums are scaled down together so every pane stays inside it (see the `Splitter` module docs).
 - **`max_size`**: `Option<f32>` — Optional growth ceiling in px.
 - **`stretch`**: `f32` — Container-resize slack weight (Qt `setStretchFactor`). `0.0` ⇒ rigid (keeps its size on resize); `>0` ⇒ absorbs slack ∝ weight.
 - **`collapsible`**: `bool` — Whether the user may collapse this pane (drag-snap / double-click / keyboard). Programmatic `set_collapsed` ignores this flag (it governs *interactive* collapse only, like Qt's `childrenCollapsible`).

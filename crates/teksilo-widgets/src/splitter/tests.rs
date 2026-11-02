@@ -973,3 +973,494 @@ fn a_vertical_splitter_ignores_the_layout_direction() {
         "ArrowDown still grows the pane above, whatever the layout direction"
     );
 }
+
+// ---------------------------------------------------------------------------
+// N22: a splitter smaller than its panes' minimums
+// ---------------------------------------------------------------------------
+
+/// Two expanded horizontal panes with minimum 320 each: they need
+/// 646 px with the gutter, and these tests lay them out in 330.
+fn too_small_model(orientation: Orientation, collapsible: bool) -> SplitterModel {
+    SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new()
+                .size(500.0)
+                .min_size(320.0)
+                .stretch(0.0)
+                .collapsible(collapsible),
+            PaneDescriptor::new()
+                .size(400.0)
+                .min_size(320.0)
+                .stretch(0.0)
+                .collapsible(collapsible),
+        ],
+        orientation,
+    )
+}
+
+fn contains(outer: Rect, inner: Rect) -> bool {
+    const TOL: f32 = 0.5;
+    inner.x >= outer.x - TOL
+        && inner.y >= outer.y - TOL
+        && inner.x + inner.width <= outer.x + outer.width + TOL
+        && inner.y + inner.height <= outer.y + outer.height + TOL
+}
+
+/// Every descendant of `root` that is laid out lies inside `root`'s bounds.
+fn assert_descendants_inside(tree: &WidgetTree, root: WidgetId) {
+    let outer = tree.bounds(root);
+    let mut stack = tree.children(root);
+    while let Some(id) = stack.pop() {
+        let b = tree.bounds(id);
+        assert!(
+            contains(outer, b),
+            "{id:?} at {b:?} lies outside the splitter at {outer:?}"
+        );
+        stack.extend(tree.children(id));
+    }
+}
+
+fn too_small_tree(model: &SplitterModel, proposal: SizeProposal) -> (WidgetTree, WidgetId) {
+    let mut tree = theme_tree();
+    let root = tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(100.0, 40.0))
+            .pane(FixedLeaf(100.0, 40.0)),
+    );
+    tree.layout(proposal);
+    (tree, root)
+}
+
+#[test]
+fn a_splitter_too_small_for_its_minimums_keeps_every_child_inside() {
+    let (tree, root) = too_small_tree(
+        &too_small_model(Orientation::Horizontal, false),
+        SizeProposal::exact(330.0, 200.0),
+    );
+    let avail = 330.0 - SPLITTER_GUTTER_THICKNESS;
+    let a = tree.bounds(tree.child_widget(root, 0)).width;
+    let b = tree.bounds(tree.child_widget(root, 2)).width;
+    assert!(
+        (a - avail / 2.0).abs() < 0.5 && (b - avail / 2.0).abs() < 0.5,
+        "equal minimums share the room equally: {a} and {b}"
+    );
+    assert_descendants_inside(&tree, root);
+}
+
+#[test]
+fn a_too_small_splitter_keeps_every_child_inside_in_rtl() {
+    let model = too_small_model(Orientation::Horizontal, false);
+    let mut tree = theme_tree();
+    tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+    let root = tree.add(
+        Splitter::new(model)
+            .pane(FixedLeaf(100.0, 40.0))
+            .pane(FixedLeaf(100.0, 40.0)),
+    );
+    tree.layout(SizeProposal::exact(330.0, 200.0));
+    assert_descendants_inside(&tree, root);
+}
+
+#[test]
+fn a_too_small_vertical_splitter_keeps_every_child_inside() {
+    let (tree, root) = too_small_tree(
+        &too_small_model(Orientation::Vertical, false),
+        SizeProposal::exact(200.0, 330.0),
+    );
+    assert_descendants_inside(&tree, root);
+}
+
+#[test]
+fn a_too_small_splitter_hiding_a_pane_keeps_every_child_inside() {
+    let model = too_small_model(Orientation::Horizontal, false);
+    let (mut tree, root) = too_small_tree(&model, SizeProposal::exact(330.0, 200.0));
+    model.set_pane_visible(1, false);
+    let outer = tree.bounds(root);
+    for _ in 0..12 {
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        tree.layout(SizeProposal::exact(330.0, 200.0));
+        // The panes and the divider; a folding pane's content keeps its
+        // full layout and is clipped by its pane, as in any fold.
+        for id in tree.children(root) {
+            let b = tree.bounds(id);
+            assert!(contains(outer, b), "{id:?} at {b:?} outside {outer:?}");
+        }
+    }
+    // Once hidden, the remaining pane fits on its own: it gets the whole
+    // splitter, at its minimum or above.
+    tree.tick_animations(std::time::Duration::from_millis(600));
+    tree.layout(SizeProposal::exact(330.0, 200.0));
+    let first = tree.bounds(tree.child_widget(root, 0));
+    assert!((first.width - 330.0).abs() < 0.5, "{first:?}");
+}
+
+#[test]
+fn gutters_wider_than_the_splitter_narrow_to_fit() {
+    let model = too_small_model(Orientation::Horizontal, false);
+    let (tree, root) = too_small_tree(&model, SizeProposal::exact(5.0, 200.0));
+    const { assert!(SPLITTER_GUTTER_THICKNESS > 5.0) };
+    assert_descendants_inside(&tree, root);
+    assert!(tree.bounds(tree.child_widget(root, 0)).width.abs() < 0.01);
+}
+
+#[test]
+fn a_too_small_splitter_lays_pane_content_at_the_scaled_size() {
+    let (tree, root) = too_small_tree(
+        &too_small_model(Orientation::Horizontal, false),
+        SizeProposal::exact(330.0, 200.0),
+    );
+    for k in [0, 2] {
+        let pane = tree.child_widget(root, k);
+        let content = tree.child_widget(pane, 0);
+        assert!(
+            (tree.bounds(content).width - tree.bounds(pane).width).abs() < 0.5,
+            "pane {k}'s content is laid at its pane's scaled width"
+        );
+    }
+    assert_descendants_inside(&tree, root);
+}
+
+#[test]
+fn a_bounded_proposal_is_answered_with_itself_and_an_unbounded_one_with_the_floors() {
+    let model = too_small_model(Orientation::Horizontal, false);
+    let (mut tree, _root) = too_small_tree(&model, SizeProposal::exact(330.0, 200.0));
+    let bounded = tree
+        .measure_root_intrinsic(SizeProposal {
+            width: Some(330.0),
+            height: Some(200.0),
+        })
+        .unwrap()
+        .width;
+    assert!(
+        (bounded - 330.0).abs() < 0.01,
+        "bounded 330 reports {bounded}"
+    );
+    let unbounded = tree
+        .measure_root_intrinsic(SizeProposal {
+            width: None,
+            height: Some(200.0),
+        })
+        .unwrap()
+        .width;
+    let floors = 640.0 + SPLITTER_GUTTER_THICKNESS;
+    assert!(
+        (unbounded - floors).abs() < 0.01,
+        "unbounded reports the floors {floors}, got {unbounded}"
+    );
+    // A hidden pane asks for nothing, nor does its gutter.
+    model.set_pane_visible_immediate(1, false);
+    tree.layout(SizeProposal::exact(330.0, 200.0));
+    let one = tree
+        .measure_root_intrinsic(SizeProposal {
+            width: None,
+            height: Some(200.0),
+        })
+        .unwrap()
+        .width;
+    assert!(
+        (one - 320.0).abs() < 0.01,
+        "one visible pane reports 320, got {one}"
+    );
+}
+
+#[test]
+fn the_splitter_clips_its_children() {
+    let (mut tree, root) = too_small_tree(
+        &too_small_model(Orientation::Horizontal, false),
+        SizeProposal::exact(330.0, 200.0),
+    );
+    assert!(tree.widget_clips_children(root));
+    let bounds = tree.bounds(root);
+    let frame = tree.render();
+    assert!(
+        frame.draw_order.iter().any(|cmd| matches!(
+            cmd,
+            teksilo_canvas::DrawCommand::SetClip(r) if *r == bounds
+        )),
+        "the render walk opens a clip at the splitter's bounds {bounds:?}"
+    );
+}
+
+#[test]
+fn a_small_drag_in_a_too_small_splitter_collapses_nothing_and_keeps_the_sizes() {
+    let model = too_small_model(Orientation::Horizontal, true);
+    let (mut tree, root) = too_small_tree(&model, SizeProposal::exact(330.0, 200.0));
+    let before = (
+        tree.bounds(tree.child_widget(root, 0)).width,
+        tree.bounds(tree.child_widget(root, 2)).width,
+    );
+    let handle = tree.child_widget(root, 1);
+    let start = tree.bounds(handle).center();
+    tree.pointer_down_button(start, PointerButton::Primary);
+    let to = Point::new(start.x + 2.0, start.y);
+    tree.pointer_move(to);
+    tree.layout(SizeProposal::exact(330.0, 200.0));
+    tree.pointer_up_button(to, PointerButton::Primary);
+    tree.layout(SizeProposal::exact(330.0, 200.0));
+
+    assert!(
+        !model.is_collapsed(0) && !model.is_collapsed(1),
+        "nothing collapses"
+    );
+    let after = (
+        tree.bounds(tree.child_widget(root, 0)).width,
+        tree.bounds(tree.child_widget(root, 2)).width,
+    );
+    assert!(
+        (after.0 - before.0).abs() < 0.5 && (after.1 - before.1).abs() < 0.5,
+        "the divider cannot move while the panes are below their minimums: {before:?} -> {after:?}"
+    );
+    assert_eq!((model.stored_size(0), model.stored_size(1)), (500.0, 400.0));
+}
+
+#[test]
+fn resizing_a_too_small_splitter_keeps_the_users_split() {
+    let model = too_small_model(Orientation::Horizontal, true);
+    let wide = SizeProposal::exact(900.0 + SPLITTER_GUTTER_THICKNESS, 200.0);
+    let narrow = SizeProposal::exact(330.0, 200.0);
+    let (mut tree, root) = too_small_tree(&model, wide);
+    let handle = tree.child_widget(root, 1);
+    tree.layout(narrow);
+
+    // An arrow key, an AccessKit Increment and a drag on the divider.
+    tree.focus(handle);
+    tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    tree.layout(narrow);
+    let mut ops = teksilo_core::window::NoopWindowOps;
+    tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(handle),
+        teksilo_core::accesskit::Action::Increment,
+        None,
+        &mut ops,
+    );
+    tree.layout(narrow);
+    let start = tree.bounds(handle).center();
+    let to = Point::new(start.x + 10.0, start.y);
+    tree.pointer_down_button(start, PointerButton::Primary);
+    tree.pointer_move(to);
+    tree.layout(narrow);
+    tree.pointer_up_button(to, PointerButton::Primary);
+    assert!(!model.is_collapsed(0) && !model.is_collapsed(1));
+
+    tree.layout(wide);
+    assert_eq!(
+        (model.stored_size(0), model.stored_size(1)),
+        (500.0, 400.0),
+        "the stored split survives a gesture at a width that could not show it"
+    );
+    assert!((tree.bounds(tree.child_widget(root, 0)).width - 500.0).abs() < 0.5);
+    assert!((tree.bounds(tree.child_widget(root, 2)).width - 400.0).abs() < 0.5);
+}
+
+/// A pin, not a test of the fix: proportional scaling keeps the ratio of
+/// the minimums, which is what the overflowing layout reported too.
+#[test]
+fn a_too_small_splitter_divider_value_keeps_the_ratio_of_the_minimums() {
+    let (tree, _root) = too_small_tree(
+        &too_small_model(Orientation::Horizontal, false),
+        SizeProposal::exact(330.0, 200.0),
+    );
+    let handle = tree
+        .find_by_role(teksilo_core::accesskit::Role::Splitter)
+        .unwrap();
+    let node = tree.accessibility_node(handle);
+    let value = node.numeric_value().expect("a numeric value");
+    assert!(
+        (value - 50.0).abs() < 0.5,
+        "equal minimums read 50 %, got {value}"
+    );
+}
+
+#[test]
+fn expanding_a_pane_in_a_too_small_splitter_does_not_jump_at_the_end() {
+    let model = SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new()
+                .size(400.0)
+                .min_size(320.0)
+                .stretch(0.0)
+                .collapsible(true)
+                .collapsed(true),
+            PaneDescriptor::new()
+                .size(400.0)
+                .min_size(320.0)
+                .stretch(1.0),
+        ],
+        Orientation::Horizontal,
+    );
+    let proposal = SizeProposal::exact(330.0, 200.0);
+    let (mut tree, root) = too_small_tree(&model, proposal);
+    let sibling = |tree: &WidgetTree| tree.bounds(tree.child_widget(root, 2)).width;
+    assert!((sibling(&tree) - 324.0).abs() < 0.5);
+
+    model.set_collapsed(0, false);
+    let mut last = sibling(&tree);
+    for _ in 0..120 {
+        tree.tick_animations(std::time::Duration::from_millis(8));
+        tree.layout(proposal);
+        let now = sibling(&tree);
+        assert!(
+            (now - last).abs() < 60.0,
+            "the sibling jumps from {last} to {now} during the expansion"
+        );
+        last = now;
+    }
+    assert!(
+        (last - 162.0).abs() < 0.5,
+        "the expansion ends with equal shares, got {last}"
+    );
+    assert_descendants_inside(&tree, root);
+}
+
+#[test]
+fn collapsing_a_pane_in_a_too_small_splitter_keeps_the_users_split() {
+    let model = too_small_model(Orientation::Horizontal, true);
+    let wide = SizeProposal::exact(900.0 + SPLITTER_GUTTER_THICKNESS, 200.0);
+    let narrow = SizeProposal::exact(330.0, 200.0);
+    let (mut tree, root) = too_small_tree(&model, wide);
+    let handle = tree.child_widget(root, 1);
+    tree.layout(narrow);
+
+    // Enter on the divider collapses pane 0, animated, at the scaled size.
+    tree.focus(handle);
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    tree.tick_animations(std::time::Duration::from_millis(600));
+    tree.layout(narrow);
+    assert!(model.is_collapsed(0));
+
+    tree.layout(wide);
+    model.set_collapsed(0, false);
+    tree.tick_animations(std::time::Duration::from_millis(600));
+    tree.layout(wide);
+    assert_eq!(
+        (model.stored_size(0), model.stored_size(1)),
+        (500.0, 400.0),
+        "collapsing at a scaled size does not store the scaled size"
+    );
+    assert!((tree.bounds(tree.child_widget(root, 0)).width - 500.0).abs() < 0.5);
+}
+
+#[test]
+fn a_drag_that_collapses_a_pane_in_a_too_small_splitter_keeps_the_stored_sizes() {
+    let model = too_small_model(Orientation::Horizontal, true);
+    let (mut tree, root) = too_small_tree(&model, SizeProposal::exact(330.0, 200.0));
+    let handle = tree.child_widget(root, 1);
+    let start = tree.bounds(handle).center();
+    let to = Point::new(5.0, start.y);
+    tree.pointer_down_button(start, PointerButton::Primary);
+    tree.pointer_move(to);
+    tree.layout(SizeProposal::exact(330.0, 200.0));
+    tree.pointer_up_button(to, PointerButton::Primary);
+    assert!(
+        model.is_collapsed(0),
+        "dragging past the scaled floor collapses"
+    );
+    assert_eq!((model.stored_size(0), model.stored_size(1)), (500.0, 400.0));
+}
+
+#[test]
+fn a_frozen_divider_offers_no_increment_or_decrement() {
+    use teksilo_core::accesskit::Action;
+    let model = too_small_model(Orientation::Horizontal, false);
+    let (mut tree, root) = too_small_tree(&model, SizeProposal::exact(330.0, 200.0));
+    let handle = tree.child_widget(root, 1);
+    let actions = |tree: &WidgetTree| tree.accessibility_node(handle).actions().to_vec();
+    let frozen = actions(&tree);
+    assert!(frozen.contains(&Action::Focus));
+    assert!(
+        !frozen.contains(&Action::Increment) && !frozen.contains(&Action::Decrement),
+        "a divider that cannot move advertises no resize: {frozen:?}"
+    );
+    tree.layout(SizeProposal::exact(
+        900.0 + SPLITTER_GUTTER_THICKNESS,
+        200.0,
+    ));
+    let free = actions(&tree);
+    assert!(free.contains(&Action::Increment) && free.contains(&Action::Decrement));
+}
+
+/// The tween runs to the settled layout in a splitter of any size: before,
+/// an expanding pane tweened to its stored size and its sibling then jumped
+/// by the slack the pane's stretch takes, and a hiding pane started from its
+/// stored size rather than from where it was.
+#[test]
+fn expanding_and_hiding_a_stretch_pane_do_not_jump() {
+    let model = SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new()
+                .size(100.0)
+                .min_size(0.0)
+                .stretch(1.0)
+                .collapsible(true)
+                .collapsed(true),
+            PaneDescriptor::new().size(100.0).min_size(0.0).stretch(1.0),
+        ],
+        Orientation::Horizontal,
+    );
+    let proposal = SizeProposal::exact(600.0 + SPLITTER_GUTTER_THICKNESS, 200.0);
+    let (mut tree, root) = too_small_tree(&model, proposal);
+    let width = |tree: &WidgetTree, k: usize| tree.bounds(tree.child_widget(root, k)).width;
+    assert!((width(&tree, 2) - 600.0).abs() < 0.5);
+
+    let run = |tree: &mut WidgetTree, what: &str| {
+        let mut last = (width(tree, 0), width(tree, 2));
+        for _ in 0..250 {
+            tree.tick_animations(std::time::Duration::from_millis(4));
+            tree.layout(proposal);
+            let now = (width(tree, 0), width(tree, 2));
+            assert!(
+                (now.0 - last.0).abs() < 100.0 && (now.1 - last.1).abs() < 100.0,
+                "{what}: the panes jump from {last:?} to {now:?}"
+            );
+            last = now;
+        }
+        last
+    };
+    model.set_collapsed(0, false);
+    let expanded = run(&mut tree, "expanding");
+    assert!(
+        (expanded.0 - 300.0).abs() < 0.5 && (expanded.1 - 300.0).abs() < 0.5,
+        "the expansion ends with the stretch shares, got {expanded:?}"
+    );
+    model.set_pane_visible(0, false);
+    let hidden = run(&mut tree, "hiding");
+    assert!(hidden.0 < 0.5, "the pane is hidden, got {hidden:?}");
+}
+
+#[test]
+fn an_unbounded_proposal_ignores_hidden_and_collapsed_content() {
+    let model = SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new().size(100.0).min_size(0.0).stretch(0.0),
+            PaneDescriptor::new().size(100.0).min_size(0.0).stretch(0.0),
+            PaneDescriptor::new()
+                .size(100.0)
+                .min_size(0.0)
+                .stretch(0.0)
+                .collapsed(true)
+                .collapsed_size(20.0),
+        ],
+        Orientation::Horizontal,
+    );
+    let mut tree = theme_tree();
+    tree.add(
+        Splitter::new(model.clone())
+            .pane(FixedLeaf(100.0, 40.0))
+            .pane(FixedLeaf(1000.0, 40.0))
+            .pane(FixedLeaf(1000.0, 40.0)),
+    );
+    model.set_pane_visible_immediate(1, false);
+    tree.layout(SizeProposal::exact(400.0, 200.0));
+    let width = tree
+        .measure_root_intrinsic(SizeProposal {
+            width: None,
+            height: Some(200.0),
+        })
+        .unwrap()
+        .width;
+    let expected = 100.0 + 20.0 + SPLITTER_GUTTER_THICKNESS;
+    assert!(
+        (width - expected).abs() < 0.01,
+        "one visible pane, one collapsed header and one gutter: {expected}, got {width}"
+    );
+}

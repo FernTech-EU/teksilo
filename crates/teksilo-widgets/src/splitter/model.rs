@@ -61,7 +61,10 @@ pub struct PaneDescriptor {
     /// Initial main-axis size in px. `None` ⇒ take an equal share (the
     /// first layout equalizes via the stretch path).
     pub initial_size: Option<f32>,
-    /// Hard compression floor in px.
+    /// Compression floor in px. The pane never shrinks below it while the
+    /// splitter can hold every pane's floor; in a splitter smaller than the
+    /// sum of its panes' minimums, the minimums are scaled down together
+    /// so every pane stays inside it (see the `Splitter` module docs).
     pub min_size: f32,
     /// Optional growth ceiling in px.
     pub max_size: Option<f32>,

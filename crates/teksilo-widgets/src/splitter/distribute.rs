@@ -15,11 +15,17 @@
 //! panes proportional to weight (Qt `setStretchFactor`); a deficit
 //! shrinks panes proportional to their room-above-min. Both are iterative
 //! clamp-and-redistribute loops that respect max/min floors.
+//!
+//! When even the floors do not fit (`available < Σ min`), the minimum
+//! becomes a preference: the panes are scaled down so the sizes sum to
+//! `available` and nothing is placed outside the container (see
+//! `fit_overflow`).
 
 use super::model::PaneSnapshot;
 
 /// Sub-pixel tolerance for "absorbed everything" / "no room left" checks.
-const EPS: f32 = 0.01;
+/// The divider handles use it too, for an empty `[lo, hi]` range.
+pub(super) const EPS: f32 = 0.01;
 
 /// Compute the effective main-axis size of every pane.
 ///
@@ -27,15 +33,46 @@ const EPS: f32 = 0.01;
 /// - `progress[i]` ∈ `[0,1]` is pane `i`'s collapse tween (1 = expanded,
 ///   0 = fully collapsed); missing entries default to `1.0`.
 ///
-/// The returned sizes sum to `≤ available` except where a pane's floor
-/// forbids it: they fall short when the container is larger than `Σ max`
-/// (nothing left to grow), and they overshoot when it is smaller than
-/// `Σ min` — the floors win and the container clips the overflow (see
-/// `shrink`).
+/// The returned sizes sum to `≤ available`: they fall short when the
+/// container is larger than `Σ max` (nothing left to grow), and they sum
+/// to exactly `available` when it is smaller than `Σ min`. In that last
+/// case the floors cannot all hold, so the panes are scaled below them
+/// (see `fit_overflow`): collapsed headers keep their size while they fit,
+/// and the expanded panes share what is left in proportion to their
+/// minimums.
 pub fn distribute(available: f32, panes: &[PaneSnapshot], progress: &[f32]) -> Vec<f32> {
+    distribute_with_floors(available, panes, progress).sizes
+}
+
+/// The result of [`distribute_with_floors`].
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct Distribution {
+    /// Effective main-axis size of every pane, as [`distribute`] returns.
+    pub sizes: Vec<f32>,
+    /// The factor the expanded panes' minimums were scaled by to fit:
+    /// `1.0` when every floor holds, below `1.0` when the container is
+    /// smaller than `Σ min` (`0.0` when the collapsed headers alone fill
+    /// it). An expanded pane's effective floor is `min_size * floor_scale`.
+    pub floor_scale: f32,
+}
+
+/// [`distribute`], also reporting how far the floors had to be scaled.
+///
+/// The divider handles read `floor_scale`: while it is below `1.0` the
+/// sizes depend only on the minimums, so a drag or an arrow key cannot
+/// move the divider, and committing one would only overwrite the stored
+/// sizes the user chose.
+pub(super) fn distribute_with_floors(
+    available: f32,
+    panes: &[PaneSnapshot],
+    progress: &[f32],
+) -> Distribution {
     let n = panes.len();
     if n == 0 {
-        return Vec::new();
+        return Distribution {
+            sizes: Vec::new(),
+            floor_scale: 1.0,
+        };
     }
     let available = available.max(0.0);
 
@@ -92,12 +129,72 @@ pub fn distribute(available: f32, panes: &[PaneSnapshot], progress: &[f32]) -> V
 
     let total: f32 = sizes.iter().sum();
     let slack = available - total;
+    let mut floor_scale = 1.0;
     if slack > EPS {
         grow(&mut sizes, &emax, panes, slack);
     } else if slack < -EPS {
         shrink(&mut sizes, &emin, panes, -slack);
+        floor_scale = fit_overflow(&mut sizes, panes, available);
     }
-    sizes
+    Distribution { sizes, floor_scale }
+}
+
+/// Scale the panes down when `shrink` could not reach `available` (the
+/// floors do not fit), so the sizes sum to exactly `available`. Returns the
+/// factor applied to the expanded panes (`1.0` when nothing overflowed).
+///
+/// The rule is continuous in `available`, which keeps every pane's size a
+/// non-decreasing function of it:
+/// - collapsed panes (headers, and panes mid-tween) keep their size while
+///   it fits, and are scaled by `available / C` when they alone overflow;
+/// - the expanded panes share `max(0, available - C)` in proportion to
+///   their sizes, which `shrink` has just left at their minimums.
+///
+/// A pane whose size is zero or negative (a negative minimum, which only a
+/// raw `PaneSnapshot` can carry) is left where it is and its size is
+/// counted against `available`, so the factors never divide by a total
+/// that can vanish or change sign.
+fn fit_overflow(sizes: &mut [f32], panes: &[PaneSnapshot], available: f32) -> f32 {
+    let total: f32 = sizes.iter().sum();
+    if total <= available + EPS {
+        return 1.0;
+    }
+    let mut fixed = 0.0_f32; // Σ sizes <= 0, left untouched.
+    let mut collapsed = 0.0_f32; // C: Σ positive collapsed sizes.
+    let mut expanded = 0.0_f32; // E: Σ positive expanded sizes.
+    for (size, pane) in sizes.iter().zip(panes) {
+        if *size <= 0.0 {
+            fixed += *size;
+        } else if pane.collapsed {
+            collapsed += *size;
+        } else {
+            expanded += *size;
+        }
+    }
+    // What the positive panes may take between them. `fixed <= 0`, so this
+    // is at least `available`.
+    let target = available - fixed;
+    // `C + E > target` here: the overflow is in the positive panes.
+    let (collapsed_scale, expanded_scale) = if collapsed > target {
+        // The headers alone overflow: they share `target`, the expanded
+        // panes get nothing. `collapsed > target >= 0`, so no 0/0.
+        (target / collapsed, 0.0)
+    } else if expanded > 0.0 {
+        (1.0, ((target - collapsed) / expanded).clamp(0.0, 1.0))
+    } else {
+        (1.0, 1.0)
+    };
+    for (size, pane) in sizes.iter_mut().zip(panes) {
+        if *size <= 0.0 {
+            continue;
+        }
+        *size *= if pane.collapsed {
+            collapsed_scale
+        } else {
+            expanded_scale
+        };
+    }
+    expanded_scale
 }
 
 /// Distribute positive `surplus` to non-collapsed `stretch > 0` panes,
@@ -153,8 +250,8 @@ fn grow(sizes: &mut [f32], emax: &[f32], panes: &[PaneSnapshot], mut surplus: f3
 
 /// Shrink non-collapsed panes to absorb `deficit`, proportional to each
 /// pane's room above its min, freezing at min and iterating. A leftover
-/// deficit is unavoidable overflow (container smaller than `Σ min`) and
-/// is accepted — the container clips it.
+/// deficit means the container is smaller than `Σ min`; `fit_overflow`
+/// then scales the panes below their floors.
 fn shrink(sizes: &mut [f32], emin: &[f32], panes: &[PaneSnapshot], mut deficit: f32) {
     let n = sizes.len();
     let mut frozen = vec![false; n];
@@ -298,9 +395,68 @@ mod tests {
         let sizes = distribute(400.0, &panes, &ones(2));
         assert!(approx(sizes[0], 200.0), "{sizes:?}");
         assert!(approx(sizes[1], 200.0), "{sizes:?}");
-        // Below Σmin → both pinned at min, overflow accepted.
+        // Below Σmin → both scaled below their min, in proportion to it,
+        // filling exactly the container.
         let tiny = distribute(150.0, &panes, &ones(2));
-        assert!(approx(tiny[0], 100.0) && approx(tiny[1], 100.0), "{tiny:?}");
+        assert!(approx(tiny[0], 75.0) && approx(tiny[1], 75.0), "{tiny:?}");
+    }
+
+    #[test]
+    fn floors_that_do_not_fit_scale_down_to_fill_available() {
+        // N22: a 330 px splitter (324 px once its 6 px gutter is out) with
+        // two panes of minimum 320 used to place them at 320 + 320 and draw
+        // the second one outside the container.
+        let panes = vec![
+            pane(400.0, 320.0, None, 1.0, false),
+            pane(320.0, 320.0, None, 1.0, false),
+        ];
+        let d = distribute_with_floors(324.0, &panes, &ones(2));
+        assert!(
+            approx(d.sizes[0], 162.0) && approx(d.sizes[1], 162.0),
+            "{d:?}"
+        );
+        assert!(approx(d.sizes.iter().sum(), 324.0), "{d:?}");
+        assert!((d.floor_scale - 324.0 / 640.0).abs() < 1e-3, "{d:?}");
+
+        // Unequal minimums share the room in proportion to them.
+        let panes = vec![
+            pane(100.0, 100.0, None, 1.0, false),
+            pane(300.0, 300.0, None, 1.0, false),
+        ];
+        let sizes = distribute(200.0, &panes, &ones(2));
+        assert!(
+            approx(sizes[0], 50.0) && approx(sizes[1], 150.0),
+            "{sizes:?}"
+        );
+
+        // A container large enough keeps every floor and reports no scaling.
+        let d = distribute_with_floors(700.0, &panes, &ones(2));
+        assert_eq!(d.floor_scale, 1.0);
+    }
+
+    #[test]
+    fn collapsed_headers_keep_their_size_while_they_fit() {
+        let mut header = pane(300.0, 0.0, None, 0.0, true);
+        header.collapsed_size = 40.0;
+        let expanded = pane(320.0, 320.0, None, 1.0, false);
+        let d = distribute_with_floors(200.0, &[expanded, header], &[1.0, 0.0]);
+        assert!(approx(d.sizes[1], 40.0), "header keeps 40: {d:?}");
+        assert!(
+            approx(d.sizes[0], 160.0),
+            "the expanded pane gets the rest: {d:?}"
+        );
+        assert!((d.floor_scale - 0.5).abs() < 1e-3, "{d:?}");
+
+        // Headers that alone overflow share the container; nothing is left
+        // for an expanded pane.
+        let d = distribute_with_floors(30.0, &[header, header], &[0.0, 0.0]);
+        assert!(
+            approx(d.sizes[0], 15.0) && approx(d.sizes[1], 15.0),
+            "{d:?}"
+        );
+        let d = distribute_with_floors(30.0, &[expanded, header], &[1.0, 0.0]);
+        assert!(approx(d.sizes[0], 0.0) && approx(d.sizes[1], 30.0), "{d:?}");
+        assert_eq!(d.floor_scale, 0.0);
     }
 
     #[test]
@@ -342,9 +498,12 @@ mod tests {
     #[test]
     fn min_greater_than_max_honors_min() {
         let panes = vec![pane(50.0, 200.0, Some(100.0), 1.0, false)];
-        let sizes = distribute(80.0, &panes, &ones(1));
-        // emax < emin defensive path → honor min (200), even past available.
+        let sizes = distribute(300.0, &panes, &ones(1));
+        // emax < emin defensive path → honor min (200) when it fits…
         assert!(approx(sizes[0], 200.0), "{sizes:?}");
+        // …and scale it down like any other floor when it does not.
+        let sizes = distribute(80.0, &panes, &ones(1));
+        assert!(approx(sizes[0], 80.0), "{sizes:?}");
     }
 
     #[test]
@@ -396,17 +555,19 @@ mod tests {
 ///    capacity is unbounded and stretch-weighted.
 /// 2. Shrink fully closes a deficit down to `available` when every pane's
 ///    floor is zero.
-/// 3. An unsatisfiable shrink (`Σ min > available`) floors every pane at its
-///    `min` and accepts the resulting overflow, rather than clamping to
-///    `available` or panicking.
-/// 4. Every pane stays within its effective `[min, max]` — or, for a
-///    deliberately contradictory pane (`min > max`), is pinned exactly at
-///    `min` (the documented "defensive" path).
+/// 3. An unsatisfiable shrink (`Σ min > available`) sums to exactly
+///    `available` and scales the floors in proportion, rather than placing
+///    a pane outside the container or panicking.
+/// 4. When the panes' floors fit in `available`, every pane stays within
+///    its effective `[min, max]`, or, for a deliberately contradictory
+///    pane (`min > max`), is pinned exactly at `min` (the documented
+///    "defensive" path). When they do not, the sizes sum to `available`.
 /// 5. Growth splits proportionally to `stretch` weight.
 /// 6. With `stretch == 0` everywhere, all surplus routes to the last
 ///    non-collapsed pane.
 /// 7. A collapsed pane at `progress == 0` folds to exactly its
-///    `collapsed_size`.
+///    `collapsed_size` when that fits in `available`, and to `available`
+///    when it does not.
 /// 8. `distribute` is deterministic for identical inputs.
 /// 9. Increasing `available` never shrinks any individual pane.
 /// 10. A negative `available` behaves identically to `available == 0.0`.
@@ -417,6 +578,8 @@ mod tests {
 ///     finite size; a non-finite `min_size`, and a NaN bound on either
 ///     side, is a caller error `distribute` debug-asserts against and
 ///     normalises before clamping — see that property's comment.
+/// 13. Given non-negative pane fields, the sizes never sum past
+///     `available`: nothing is placed outside the container.
 ///
 /// **Generator cost**: every pane-list generator is bounded to at most 8
 /// panes (`prop::collection::vec(..., 1..=8)`), matching the ≤ 12-pane cap
@@ -725,54 +888,61 @@ mod proptests {
         }
     }
 
-    // ── 3. an unsatisfiable shrink floors every pane at its min and accepts
-    //      the resulting overflow ──
-    // `shrink`'s own doc comment: "a leftover deficit is unavoidable overflow
-    // ... and is accepted — the container clips it." With `available` set to
-    // a fraction (<= 0.9, leaving comfortable margin past the algorithm's
-    // internal EPS) of `Σ min`, the deficit exceeds total room above min in
-    // a single round, so every non-collapsed pane converges to exactly its
-    // own `min_size`, and the total sits at `Σ min` — strictly above
-    // `available`, not clamped down to it.
+    // ── 3. an unsatisfiable shrink sums to available and scales the floors
+    //      in proportion ──
+    // With `available` set to a fraction (<= 0.9, leaving comfortable margin
+    // past the algorithm's internal EPS) of `Σ min`, the deficit exceeds the
+    // total room above min, so `shrink` leaves every pane at its `min_size`
+    // and `fit_overflow` scales them all by `available / Σ min`: the total is
+    // `available`, never more, and each pane keeps its share of the floors.
 
     proptest! {
         #[test]
-        fn shrink_floor_accepts_overflow_when_total_min_exceeds_available(
+        fn unsatisfiable_shrink_scales_the_floors_to_fill_available(
             panes in arb_min_bound_panes(),
             shortfall_fraction in 0.0f32..=0.9f32,
         ) {
             let total_min: f32 = panes.iter().map(|p| p.min_size).sum();
             let available = total_min * shortfall_fraction;
             let progress = vec![1.0f32; panes.len()];
-            let sizes = distribute(available, &panes, &progress);
-            let sum: f32 = sizes.iter().sum();
+            let d = distribute_with_floors(available, &panes, &progress);
+            let sum: f32 = d.sizes.iter().sum();
             prop_assert!(
-                sum >= available - 0.5,
-                "an unsatisfiable shrink must not undershoot available: sum={} available={}",
-                sum, available
+                (sum - available).abs() < 0.5,
+                "an unsatisfiable shrink must fill exactly available: sum={} available={} sizes={:?}",
+                sum, available, d.sizes
             );
+            let k = available / total_min;
             prop_assert!(
-                (sum - total_min).abs() < 1.0,
-                "an unsatisfiable shrink floors every pane at its min, so the total should equal Sum(min)={}, got {} (sizes={:?})",
-                total_min, sum, sizes
+                (d.floor_scale - k).abs() < 1e-3,
+                "floor_scale should be available / Sum(min) = {}, got {}",
+                k, d.floor_scale
             );
-            for (i, (size, p)) in sizes.iter().zip(panes.iter()).enumerate() {
+            for (i, (size, p)) in d.sizes.iter().zip(panes.iter()).enumerate() {
                 prop_assert!(
-                    (size - p.min_size).abs() < 0.5,
-                    "pane {} should be pinned at its min {} under an unsatisfiable shrink, got {}",
-                    i, p.min_size, size
+                    size.is_finite() && *size >= 0.0,
+                    "pane {} has an invalid size {}",
+                    i, size
+                );
+                prop_assert!(
+                    (size - p.min_size * k).abs() < 0.5,
+                    "pane {} should be its min {} scaled by {}, got {}",
+                    i, p.min_size, k, size
                 );
             }
         }
     }
 
     // ── 4. every pane stays within its effective bounds, or honors min when
-    //      those bounds are contradictory ──
+    //      those bounds are contradictory, as long as the floors fit ──
     // Mirrors the "Defensive: an impossible [min,max] honors the min"
     // comment at the top of `distribute` (and the `min_greater_than_max_
     // honors_min` unit test) generalized to arbitrary panes, including
     // collapsed ones (whose effective bounds are `[0, max(stored,
-    // collapsed_size)]` per the documented phase-0 formula).
+    // collapsed_size)]` per the documented phase-0 formula). A floor is a
+    // non-collapsed pane's `min` and a collapsed pane's tween size, which
+    // `shrink` never moves. When those floors do not fit, `fit_overflow`
+    // scales the panes below them and the sizes sum to `available` instead.
 
     proptest! {
         #[test]
@@ -782,6 +952,33 @@ mod proptests {
         ) {
             let (panes, progress) = panes_and_progress;
             let sizes = distribute(available, &panes, &progress);
+            let floors: f32 = panes
+                .iter()
+                .zip(progress.iter())
+                .map(|(p, prog)| {
+                    if p.collapsed {
+                        let c = p.collapsed_size;
+                        let top = p.stored_size.max(c);
+                        let req = c + (top - c) * prog.clamp(0.0, 1.0);
+                        if 0.0 > top { 0.0 } else { req.clamp(0.0, top) }
+                    } else {
+                        p.min_size
+                    }
+                })
+                .sum();
+            if floors > available.max(0.0) + 1.0 {
+                let sum: f32 = sizes.iter().sum();
+                prop_assert!(
+                    (sum - available.max(0.0)).abs() < 1.0,
+                    "floors {} do not fit available {}: the sizes should sum to it, got {} ({:?})",
+                    floors, available, sum, sizes
+                );
+                return Ok(());
+            }
+            if floors > available.max(0.0) - 1.0 {
+                // Within float tolerance of the boundary: either branch.
+                return Ok(());
+            }
             for (i, (size, p)) in sizes.iter().zip(panes.iter()).enumerate() {
                 let (emin, emax) = if p.collapsed {
                     (0.0f32, p.stored_size.max(p.collapsed_size))
@@ -875,6 +1072,8 @@ mod proptests {
     // it never gets clamped up by the `[0, top]` bounds. A single stretchy
     // sibling exists purely so a non-degenerate `available` has somewhere
     // to route the freed space (irrelevant to this pane's own assertion).
+    // A `collapsed_size` larger than `available` is scaled down to it, so
+    // nothing is placed outside the container.
 
     proptest! {
         #[test]
@@ -903,10 +1102,12 @@ mod proptests {
                 visible: true,
             };
             let sizes = distribute(available, &[pane, sibling], &[0.0, 1.0]);
+            // A header larger than the container is scaled down to it.
+            let expected = pane.collapsed_size.min(available);
             prop_assert!(
-                (sizes[0] - pane.collapsed_size).abs() < 0.5,
-                "a pane at progress 0 should fold to exactly its collapsed_size {}, got {}",
-                pane.collapsed_size, sizes[0]
+                (sizes[0] - expected).abs() < 0.5,
+                "a pane at progress 0 should fold to its collapsed_size {} (capped at available {}), got {}",
+                pane.collapsed_size, available, sizes[0]
             );
         }
     }
@@ -1070,6 +1271,31 @@ mod proptests {
                     i, size, available, panes
                 );
             }
+        }
+    }
+
+    // ── 13. non-negative pane fields never sum past available ──
+    // The N22 invariant: whatever the floors, collapsed headers, tweens and
+    // contradictory bounds, a `Splitter` never places a pane past its own
+    // trailing edge. Growth stops at `available` (or short of it when every
+    // pane is maxed); shrink reaches it when the floors fit, and
+    // `fit_overflow` scales the panes to it when they do not.
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 512, ..ProptestConfig::default() })]
+        #[test]
+        fn nonnegative_inputs_never_sum_past_available(
+            panes_and_progress in arb_nonneg_panes_with_progress(),
+            available in arb_available(),
+        ) {
+            let (panes, progress) = panes_and_progress;
+            let sizes = distribute(available, &panes, &progress);
+            let sum: f32 = sizes.iter().sum();
+            prop_assert!(
+                sum <= available.max(0.0) + 0.5,
+                "sizes sum to {} past available {} (sizes={:?}, panes={:?})",
+                sum, available, sizes, panes
+            );
         }
     }
 }

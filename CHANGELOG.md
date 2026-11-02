@@ -162,6 +162,13 @@ by crate for clarity, not because crates version independently.
   control, or on Next (Finish on the last step) when the step has no enabled
   control, and moves once. Step markers and their numbers count only visible
   steps.
+- **A `Splitter` pane's `min_size` is a preference when the splitter is
+  smaller than the sum of its panes' minimums.** The panes then shrink below
+  their minimums together, in proportion to them, and the divider cannot be
+  moved until the splitter is large enough again; a drag or arrow key on it
+  meanwhile leaves the stored sizes as they were. Asked with a bounded width
+  (or height), a `Splitter` now reports that size rather than the sum of its
+  minimums, and it clips its children.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.
@@ -306,6 +313,16 @@ by crate for clarity, not because crates version independently.
 - **Up and Down move a segmented control's selection**, as Left and Right
   do, in list order and not mirrored in right-to-left layouts. They no longer
   reach the enclosing widget while the control has focus.
+- **A `Splitter` too small for its panes' minimum sizes no longer draws a
+  pane outside itself.** The panes shrink to fit and stay in the Tab order
+  and the accessibility tree.
+- **A `Splitter` pane that expands, collapses or hides animates all the way
+  without a jump.** A pane with a stretch factor used to animate to its
+  stored size and then snap to its share of the room, and a hiding pane
+  started from its stored size instead of where it was. This includes every
+  `DockingLayout` accordion pane.
+- **A `Splitter` sized to its content no longer counts hidden panes, nor a
+  collapsed pane's content.**
 - **In a `CodeEditor`, the completion list follows text the input system
   commits.** After the accent popup replaced a typed `e` with `é`, or an
   emoji or dictated text was inserted, the list stayed open on the old word;

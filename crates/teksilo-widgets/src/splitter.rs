@@ -23,6 +23,34 @@
 //! an instant one ([`SplitterModel::set_collapsed_immediate`],
 //! [`SplitterModel::set_pane_visible_immediate`]) for restoring a layout.
 //!
+//! ## Minimum sizes
+//!
+//! A pane's `min_size` is a floor the splitter keeps while it can. When the
+//! splitter is smaller than the sum of its panes' minimums (plus the
+//! gutters), the minimums become a preference: the expanded panes shrink
+//! below them together, in proportion to their minimums, collapsed panes
+//! keep their `collapsed_size` while there is room for it, and the sizes add
+//! up to exactly the splitter's extent. Every pane and divider stays inside
+//! the splitter, in the Tab order and in the accessibility tree, though a
+//! very small splitter can leave a pane only a few pixels wide.
+//!
+//! While the panes are below their minimums the divider cannot move: the
+//! layout then depends on the minimums alone. A drag or an arrow key on it
+//! changes nothing, and it offers assistive technology no Increment or
+//! Decrement, so the sizes the user chose come back once the splitter is
+//! large enough again. Collapsing and expanding a pane still work. The
+//! divider keeps its resize cursor and hover feedback meanwhile.
+//!
+//! Asked with a bounded main axis, the splitter answers with the size it
+//! was offered; asked with an unbounded one (a size-to-content window, a
+//! horizontal `ScrollArea`) it answers with its panes' content or its
+//! floors, whichever is larger. Either counts only visible panes, and a
+//! collapsed pane at its `collapsed_size`.
+//!
+//! The splitter clips its children. Each pane already clips its content to
+//! itself, and the dividers paint inside their gutters, so this cuts no
+//! focus ring that was visible before.
+//!
 //! ```ignore
 //! let model = SplitterModel::from_panes(vec![
 //!     PaneDescriptor::new().size(220.0).min_size(160.0).stretch(0.0).collapsible(true),
@@ -55,7 +83,7 @@ use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_tokens::Orientation;
 
-use self::distribute::distribute;
+use self::distribute::{Distribution, distribute, distribute_with_floors};
 use self::handle::{SplitterHandle, SplitterHandleConfig};
 
 pub use self::model::{
@@ -113,6 +141,11 @@ pub struct Splitter {
     /// Effective per-gap gutter widths (0 when a neighbor is hidden), shared
     /// with handles so the drag math uses the real positions.
     layout_gutters: Rc<RefCell<Vec<f32>>>,
+    /// The factor the expanded panes' minimums were scaled by in the latest
+    /// layout (`1.0` = every floor held; below `1.0` = the splitter is
+    /// smaller than `Σ min`). Shared with the handles, which neither resize
+    /// nor commit sizes while it is below `1.0`.
+    layout_floor_scale: Rc<Cell<f32>>,
 }
 
 impl Splitter {
@@ -137,6 +170,7 @@ impl Splitter {
             is_rtl: Rc::new(Cell::new(false)),
             layout_sizes: Rc::new(RefCell::new(Vec::new())),
             layout_gutters: Rc::new(RefCell::new(Vec::new())),
+            layout_floor_scale: Rc::new(Cell::new(1.0)),
         }
     }
 
@@ -229,6 +263,28 @@ impl Splitter {
             Orientation::Horizontal => bounds.width,
             Orientation::Vertical => bounds.height,
         }
+    }
+
+    /// The main-axis size the panes' floors ask for: the minimum of each
+    /// visible expanded pane, the `collapsed_size` of each visible collapsed
+    /// one, and a gutter between visible panes. A hidden pane asks for
+    /// nothing, as it takes no room once laid out.
+    fn min_main(&self) -> f32 {
+        let n = self.model.pane_count();
+        let mut visible = 0usize;
+        let mut sum = 0.0_f32;
+        for i in 0..n {
+            if !self.model.is_pane_visible(i) {
+                continue;
+            }
+            visible += 1;
+            sum += if self.model.is_collapsed(i) {
+                self.model.collapsed_size(i)
+            } else {
+                self.model.min_size(i)
+            };
+        }
+        sum + visible.saturating_sub(1) as f32 * self.model.gutter_thickness()
     }
 }
 
@@ -358,6 +414,7 @@ impl Widget for Splitter {
                 is_rtl: self.is_rtl.clone(),
                 layout_sizes: self.layout_sizes.clone(),
                 layout_gutters: self.layout_gutters.clone(),
+                layout_floor_scale: self.layout_floor_scale.clone(),
                 active: active.clone(),
             });
             let handle_id = ctx.add(handle.access_controls(left).access_controls(right));
@@ -377,6 +434,7 @@ impl Widget for Splitter {
         let prev_c = self.prev_collapsed.clone();
         let prev_v = self.prev_visible.clone();
         let layout_sizes = self.layout_sizes.clone();
+        let layout_floor_scale = self.layout_floor_scale.clone();
         ctx.effect(&self.model.version(), move |_| {
             let animate = model.consume_animate_flag();
             // Collapse changes.
@@ -395,8 +453,15 @@ impl Widget for Splitter {
                             // actually is (and restores there) — independent of
                             // any tiny fallback stored size from a stretch-grown
                             // pane that was never dragged.
+                            //
+                            // While the splitter is too small for its floors the
+                            // displayed size is a scaled-down one: writing it
+                            // would lose the size the user chose, so only a
+                            // larger displayed size is taken then.
+                            let scaled = layout_floor_scale.get() < 1.0;
                             if let Some(&disp) = layout_sizes.borrow().get(i)
                                 && disp > model.collapsed_size(i)
+                                && (!scaled || disp > model.stored_size(i))
                             {
                                 model.set_stored_size_silent(i, disp);
                             }
@@ -435,10 +500,8 @@ impl Widget for Splitter {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let n = self.pane_clip_ids.len();
         let gutter = self.model.gutter_thickness();
         let orientation = self.model.orientation();
-        let total_gutter = (n.saturating_sub(1)) as f32 * gutter;
 
         // Query each pane's intrinsic size with an unbounded main axis.
         let child_proposal = match orientation {
@@ -451,34 +514,46 @@ impl Widget for Splitter {
                 height: None,
             },
         };
+        // A hidden pane takes no room once laid out, and a collapsed one
+        // only its `collapsed_size`, so neither asks for its content's size.
         let mut sum_main = 0.0;
         let mut max_cross = 0.0_f32;
-        for id in &self.pane_clip_ids {
-            if let Some(sz) = ctx.child_size(*id, child_proposal) {
-                match orientation {
-                    Orientation::Horizontal => {
-                        sum_main += sz.width;
-                        max_cross = max_cross.max(sz.height);
-                    }
-                    Orientation::Vertical => {
-                        sum_main += sz.height;
-                        max_cross = max_cross.max(sz.width);
-                    }
-                }
+        let mut visible = 0usize;
+        for (i, id) in self.pane_clip_ids.iter().enumerate() {
+            if !self.model.is_pane_visible(i) {
+                continue;
             }
+            visible += 1;
+            let Some(sz) = ctx.child_size(*id, child_proposal) else {
+                continue;
+            };
+            let (main, cross) = match orientation {
+                Orientation::Horizontal => (sz.width, sz.height),
+                Orientation::Vertical => (sz.height, sz.width),
+            };
+            sum_main += if self.model.is_collapsed(i) {
+                self.model.collapsed_size(i)
+            } else {
+                main
+            };
+            max_cross = max_cross.max(cross);
         }
-        let min_main: f32 = (0..n).map(|i| self.model.min_size(i)).sum::<f32>() + total_gutter;
-        let intrinsic_main = sum_main + total_gutter;
+        let min_main = self.min_main();
+        let intrinsic_main = sum_main + visible.saturating_sub(1) as f32 * gutter;
+        // A bounded main axis gets exactly what it offered: the panes shrink
+        // below their minimums to fit it (see `distribute`), so claiming
+        // `Σ min` would only tell the parent the splitter is wider than it
+        // is. An unbounded one (size-to-content, a horizontal `ScrollArea`)
+        // still gets the floors.
+        let main = |offered: Option<f32>| offered.unwrap_or(intrinsic_main.max(min_main));
 
         match orientation {
-            Orientation::Horizontal => Size::new(
-                proposal.width.unwrap_or(intrinsic_main).max(min_main),
-                proposal.height.unwrap_or(max_cross),
-            ),
-            Orientation::Vertical => Size::new(
-                proposal.width.unwrap_or(max_cross),
-                proposal.height.unwrap_or(intrinsic_main).max(min_main),
-            ),
+            Orientation::Horizontal => {
+                Size::new(main(proposal.width), proposal.height.unwrap_or(max_cross))
+            }
+            Orientation::Vertical => {
+                Size::new(proposal.width.unwrap_or(max_cross), main(proposal.height))
+            }
         }
         .into()
     }
@@ -514,9 +589,21 @@ impl Widget for Splitter {
             let r = vis_p.get(k + 1).copied().unwrap_or(1.0);
             gutter_w[k] = gutter * l.min(r);
         }
+        // A splitter thinner than its gutters narrows them to fit, and its
+        // panes get nothing: no divider is placed past the trailing edge.
+        let main = self.main_extent(bounds).max(0.0);
+        let gutter_sum: f32 = gutter_w.iter().sum();
+        if gutter_sum > main && gutter_sum > 0.0 {
+            let k = main / gutter_sum;
+            for g in &mut gutter_w {
+                *g *= k;
+            }
+        }
+        // Written after the narrowing: the handles' `geometry()` must read
+        // the gutters as placed.
         *self.layout_gutters.borrow_mut() = gutter_w.clone();
         let total_gutter: f32 = gutter_w.iter().sum();
-        let available = (self.main_extent(bounds) - total_gutter).max(0.0);
+        let available = (main - total_gutter).max(0.0);
 
         let collapse_p: Vec<f32> = self.progress.iter().map(|s| s.get()).collect();
         // A hidden pane shrinks like a collapsed one; combine both tweens. A
@@ -546,8 +633,28 @@ impl Widget for Splitter {
                 collapse_p.get(i).copied().unwrap_or(1.0) * vis_p.get(i).copied().unwrap_or(1.0)
             })
             .collect();
-        let sizes = distribute(available, &snapshots, &combined);
+        // A pane mid-tween runs between its folded size and the size it has
+        // once expanded: the size it takes in the layout where every pane
+        // still on screen is expanded, which is not its stored size when
+        // the floors had to shrink or scale it. Tweening up to the stored
+        // size would jump at the end of an expansion (and at the start of a
+        // collapse), the sibling snapping from what the tween left it to
+        // its own floor.
+        let settled = settled_sizes(
+            available,
+            &snapshots,
+            &self.model.pane_snapshots(),
+            &combined,
+        );
+        for (i, s) in snapshots.iter_mut().enumerate() {
+            if s.collapsed && combined.get(i).copied().unwrap_or(1.0) > 0.0 {
+                s.stored_size = settled[i];
+            }
+        }
+        let Distribution { sizes, floor_scale } =
+            distribute_with_floors(available, &snapshots, &combined);
         *self.layout_sizes.borrow_mut() = sizes.clone();
+        self.layout_floor_scale.set(floor_scale);
 
         // Each pane's *full* size (what it would be fully expanded). The
         // clips lay their content at this width and clip the overflow, so
@@ -593,6 +700,12 @@ impl Widget for Splitter {
         builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
     }
 
+    /// A guard: `distribute` already keeps every pane and divider inside the
+    /// splitter, and this keeps a child's paint there too.
+    fn clips_children(&self) -> bool {
+        true
+    }
+
     fn children(&self) -> Vec<WidgetId> {
         let n = self.pane_clip_ids.len();
         let mut v = Vec::with_capacity(2 * n);
@@ -606,6 +719,34 @@ impl Widget for Splitter {
         }
         v
     }
+}
+
+/// Each pane's size in the layout where every pane still on screen
+/// (`combined > 0`) is expanded as the model declares it, and every folded
+/// or hidden one (`combined == 0`) sits at its fold. `layout` is the
+/// snapshot `place_children` lays out with (tweening panes forced
+/// collapsed), `declared` the model's own.
+fn settled_sizes(
+    available: f32,
+    layout: &[PaneSnapshot],
+    declared: &[PaneSnapshot],
+    combined: &[f32],
+) -> Vec<f32> {
+    let mut snaps = layout.to_vec();
+    let mut progress = vec![1.0_f32; snaps.len()];
+    for (i, s) in snaps.iter_mut().enumerate() {
+        if combined.get(i).copied().unwrap_or(1.0) > 0.0 {
+            if let Some(d) = declared.get(i) {
+                *s = PaneSnapshot {
+                    collapsed: false,
+                    ..*d
+                };
+            }
+        } else {
+            progress[i] = 0.0;
+        }
+    }
+    distribute(available, &snaps, &progress)
 }
 
 /// Single-child clip wrapper for one pane. Clips overflowing content to

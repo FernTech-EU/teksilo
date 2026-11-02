@@ -113,6 +113,10 @@ pub(super) struct SplitterHandleConfig {
     /// Effective per-gap gutter widths (0 when a neighbor is hidden), written
     /// by `Splitter::place_children`. Needed so `pre` reflects real positions.
     pub layout_gutters: Rc<std::cell::RefCell<Vec<f32>>>,
+    /// The factor the expanded panes' minimums were scaled by in the latest
+    /// layout, written by `Splitter::place_children` (`1.0` = the floors
+    /// fit). See [`resize_is_frozen`].
+    pub layout_floor_scale: Rc<Cell<f32>>,
     /// `true` while both adjacent panes are visible. When false the handle is
     /// arena-disabled (Tab-skipped, event-gated) and hidden from the AT tree.
     pub active: Signal<bool>,
@@ -128,6 +132,7 @@ pub(super) struct SplitterHandle {
     is_rtl: Rc<Cell<bool>>,
     layout_sizes: Rc<std::cell::RefCell<Vec<f32>>>,
     layout_gutters: Rc<std::cell::RefCell<Vec<f32>>>,
+    layout_floor_scale: Rc<Cell<f32>>,
     active: Signal<bool>,
     /// This handle's own absolute bounds, written by its `place_children`.
     /// Pointer events arrive localized to *this* (moving) handle, so we add
@@ -155,6 +160,7 @@ impl SplitterHandle {
             is_rtl: config.is_rtl,
             layout_sizes: config.layout_sizes,
             layout_gutters: config.layout_gutters,
+            layout_floor_scale: config.layout_floor_scale,
             active: config.active,
             self_bounds: Rc::new(Cell::new(Rect::ZERO)),
             is_hovered: Signal::new(false),
@@ -218,6 +224,44 @@ fn geometry(sizes: &[f32], gutters: &[f32], index: usize) -> Option<(f32, f32, f
     Some((pre, sizes[index], sizes[index + 1], gut))
 }
 
+/// Whether the divider has no room to move: the splitter is smaller than
+/// its panes' minimums (`floor_scale < 1`), or the two floors either side
+/// of this divider leave no range between them (`hi - lo`).
+///
+/// While the splitter is too small, `distribute` derives the sizes from the
+/// minimums alone, so a size the divider commits cannot show: the next
+/// layout scales the panes back to the same place. Committing it would only
+/// overwrite the sizes the user chose (and `SplitterState` persists them),
+/// so that, once the window grows back, the panes would return at their
+/// minimums instead of the user's split. A resize gesture is therefore
+/// consumed and changes nothing; collapse and expand still work.
+fn resize_is_frozen(floor_scale: f32, lo: f32, hi: f32) -> bool {
+    floor_scale < 1.0 || hi - lo <= super::distribute::EPS
+}
+
+/// `(lo, hi, pair)` for the divider between panes `index` and `index + 1`:
+/// the range pane `index`'s size may take, from the declared minimums (a
+/// collapsed side has none), and the two panes' combined size.
+fn divider_range(
+    model: &SplitterModel,
+    index: usize,
+    size_i: f32,
+    size_ip1: f32,
+) -> (f32, f32, f32) {
+    let pair = size_i + size_ip1;
+    let lo = if model.is_collapsed(index) {
+        0.0
+    } else {
+        model.min_size(index)
+    };
+    let hi = if model.is_collapsed(index + 1) {
+        pair
+    } else {
+        pair - model.min_size(index + 1)
+    };
+    (lo, hi, pair)
+}
+
 /// The adjacent pane the user's collapse gesture should target: prefer
 /// restoring a collapsed collapsible neighbor, else collapse a collapsible
 /// one (leading pane `i` preferred).
@@ -269,6 +313,7 @@ impl Widget for SplitterHandle {
         let is_rtl = self.is_rtl.clone();
         let layout_sizes = self.layout_sizes.clone();
         let layout_gutters = self.layout_gutters.clone();
+        let layout_floor_scale = self.layout_floor_scale.clone();
 
         // Per-drag captured state (stable across the drag even if a far
         // pane animates).
@@ -301,6 +346,7 @@ impl Widget for SplitterHandle {
             let is_rtl = is_rtl.clone();
             let layout_sizes = layout_sizes.clone();
             let layout_gutters = layout_gutters.clone();
+            let layout_floor_scale = layout_floor_scale.clone();
             let self_bounds = self.self_bounds.clone();
             let is_dragging = self.is_dragging.clone();
             let focus_origin = self.focus_origin.clone();
@@ -397,8 +443,15 @@ impl Widget for SplitterHandle {
 
                         let i = index;
                         let j = index + 1;
-                        let min_i = model.min_size(i);
-                        let min_j = model.min_size(j);
+                        // The floors as laid out: scaled below the declared
+                        // minimums while the splitter is too small for them,
+                        // so the snap-to-collapse below is measured from where
+                        // the pane actually is. The declared minimum there
+                        // would collapse a collapsible pane on the first move.
+                        let floor_scale = layout_floor_scale.get();
+                        let frozen = floor_scale < 1.0;
+                        let min_i = model.min_size(i) * floor_scale;
+                        let min_j = model.min_size(j) * floor_scale;
                         let snap = model.snap_offset();
                         // Pull a collapsed pane open after this much travel;
                         // re-collapse a just-restored pane only after shoving
@@ -428,7 +481,9 @@ impl Widget for SplitterHandle {
                                 } else if raw_i < collapse_back {
                                     expanding_i.set(false);
                                     model.set_collapsed_immediate(i, true);
-                                    model.set_pair_sizes(i, 0.0, pair);
+                                    if !frozen {
+                                        model.set_pair_sizes(i, 0.0, pair);
+                                    }
                                     is_dragging.set(false);
                                     ctx.release_pointer();
                                     return EventResponse::Handled;
@@ -436,7 +491,9 @@ impl Widget for SplitterHandle {
                                 // else: still restoring — suspend the min-snap.
                             } else if raw_i < min_i - snap {
                                 model.set_collapsed_immediate(i, true);
-                                model.set_pair_sizes(i, 0.0, pair);
+                                if !frozen {
+                                    model.set_pair_sizes(i, 0.0, pair);
+                                }
                                 is_dragging.set(false);
                                 ctx.release_pointer();
                                 return EventResponse::Handled;
@@ -458,20 +515,30 @@ impl Widget for SplitterHandle {
                                 } else if raw_j < collapse_back {
                                     expanding_j.set(false);
                                     model.set_collapsed_immediate(j, true);
-                                    model.set_pair_sizes(i, pair, 0.0);
+                                    if !frozen {
+                                        model.set_pair_sizes(i, pair, 0.0);
+                                    }
                                     is_dragging.set(false);
                                     ctx.release_pointer();
                                     return EventResponse::Handled;
                                 }
                             } else if raw_j < min_j - snap {
                                 model.set_collapsed_immediate(j, true);
-                                model.set_pair_sizes(i, pair, 0.0);
+                                if !frozen {
+                                    model.set_pair_sizes(i, pair, 0.0);
+                                }
                                 is_dragging.set(false);
                                 ctx.release_pointer();
                                 return EventResponse::Handled;
                             }
                         }
 
+                        // Too small for the floors: the divider cannot move,
+                        // and the stored sizes stay the user's (see
+                        // `resize_is_frozen`).
+                        if frozen {
+                            return EventResponse::Handled;
+                        }
                         // Apply the resize. `distribute` clamps each expanded
                         // pane to its own min, so passing the raw desired sizes
                         // is enough — a restored pane sits at its min until the
@@ -551,6 +618,7 @@ impl Widget for SplitterHandle {
             let model = model.clone();
             let layout_sizes = layout_sizes.clone();
             let layout_gutters = layout_gutters.clone();
+            let layout_floor_scale = layout_floor_scale.clone();
             let focus_origin = self.focus_origin.clone();
             let is_rtl = is_rtl.clone();
             handlers = handlers.on_key(move |event, _ctx| {
@@ -584,18 +652,7 @@ impl Widget for SplitterHandle {
                     return EventResponse::Ignored;
                 };
                 let i = index;
-                let j = index + 1;
-                let pair = size_i + size_ip1;
-                let lo = if model.is_collapsed(i) {
-                    0.0
-                } else {
-                    model.min_size(i)
-                };
-                let hi = if model.is_collapsed(j) {
-                    pair
-                } else {
-                    pair - model.min_size(j)
-                };
+                let (lo, hi, pair) = divider_range(&model, i, size_i, size_ip1);
                 let step = model.keyboard_step_px();
 
                 // A divider binds the arrows and the two edges, and no page
@@ -621,6 +678,15 @@ impl Widget for SplitterHandle {
                 ) else {
                     return EventResponse::Ignored;
                 };
+                if matches!(mv, RangeMove::Page { .. }) {
+                    // `Divider` never yields a page move; asserted in
+                    // `range_nav`'s own tests.
+                    return EventResponse::Ignored;
+                }
+                focus_origin.set(Some(FocusOrigin::Keyboard));
+                if resize_is_frozen(layout_floor_scale.get(), lo, hi) {
+                    return EventResponse::Handled;
+                }
                 // `grow` = pane i takes space from pane i+1, which happens
                 // when the divider moves *away* from pane i — trailing-ward.
                 // Not `increase` directly: that is axis-relative, so on a
@@ -633,20 +699,13 @@ impl Widget for SplitterHandle {
                             matches!(orientation, Orientation::Horizontal),
                         );
                         let target = if grow { size_i + step } else { size_i - step };
-                        if lo > hi {
-                            pair * 0.5
-                        } else {
-                            target.clamp(lo, hi)
-                        }
+                        target.clamp(lo, hi)
                     }
                     RangeMove::ToMin => lo,
                     RangeMove::ToMax => hi,
-                    // `Divider` never yields a page move; asserted in
-                    // `range_nav`'s own tests.
-                    RangeMove::Page { .. } => return EventResponse::Ignored,
+                    RangeMove::Page { .. } => unreachable!("a page move returned above"),
                 };
                 commit_resize(&model, i, new_i, pair);
-                focus_origin.set(Some(FocusOrigin::Keyboard));
                 EventResponse::Handled
             });
         }
@@ -656,6 +715,7 @@ impl Widget for SplitterHandle {
             let model = model.clone();
             let layout_sizes = layout_sizes.clone();
             let layout_gutters = layout_gutters.clone();
+            let layout_floor_scale = layout_floor_scale.clone();
             handlers = handlers.on_access_action(move |action, _ctx| {
                 if !enabled {
                     return EventResponse::Ignored;
@@ -670,29 +730,17 @@ impl Widget for SplitterHandle {
                             return EventResponse::Ignored;
                         };
                         let i = index;
-                        let j = index + 1;
-                        let pair = size_i + size_ip1;
-                        let lo = if model.is_collapsed(i) {
-                            0.0
-                        } else {
-                            model.min_size(i)
-                        };
-                        let hi = if model.is_collapsed(j) {
-                            pair
-                        } else {
-                            pair - model.min_size(j)
-                        };
+                        let (lo, hi, pair) = divider_range(&model, i, size_i, size_ip1);
                         let step = model.keyboard_step_px();
                         let delta = if matches!(action, Action::Increment) {
                             step
                         } else {
                             -step
                         };
-                        let new_i = if lo > hi {
-                            pair * 0.5
-                        } else {
-                            (size_i + delta).clamp(lo, hi)
-                        };
+                        if resize_is_frozen(layout_floor_scale.get(), lo, hi) {
+                            return EventResponse::Handled;
+                        }
+                        let new_i = (size_i + delta).clamp(lo, hi);
                         commit_resize(&model, i, new_i, pair);
                         EventResponse::Handled
                     }
@@ -807,6 +855,11 @@ impl Widget for SplitterHandle {
         drop(sizes);
         drop(gutters);
         let frac = if pair > 0.0 { size_i / pair } else { 0.5 };
+        // A divider with no room to move (see `resize_is_frozen`) offers no
+        // Increment or Decrement: a screen reader would invoke them and hear
+        // nothing change.
+        let (lo, hi, _) = divider_range(&self.model, self.index, size_i, pair - size_i);
+        let frozen = resize_is_frozen(self.layout_floor_scale.get(), lo, hi);
         builder.set_numeric_value((frac * 100.0) as f64);
         builder.set_min_numeric_value(0.0);
         builder.set_max_numeric_value(100.0);
@@ -840,8 +893,10 @@ impl Widget for SplitterHandle {
             builder.set_disabled();
         } else {
             builder.add_action(Action::Focus);
-            builder.add_action(Action::Increment);
-            builder.add_action(Action::Decrement);
+            if !frozen {
+                builder.add_action(Action::Increment);
+                builder.add_action(Action::Decrement);
+            }
             if collapsible_neighbor.is_some() {
                 builder.add_action(Action::Collapse);
                 builder.add_action(Action::Expand);
