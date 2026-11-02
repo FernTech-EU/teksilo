@@ -830,6 +830,39 @@ fn a_row_is_named_by_its_line_and_announces_its_shortcut() {
         .find(|n| n.label() == Some("File: New Work"))
         .expect("the row is named by its whole line");
     assert!(new.keyboard_shortcut().is_some(), "and carries its chord");
+    assert_eq!(
+        new.description(),
+        new.keyboard_shortcut(),
+        "which the tree copies into the description, as no adapter exports it"
+    );
+}
+
+#[test]
+fn a_rows_description_is_followed_by_its_chord() {
+    let mut tree = tree_with_commands();
+    tree.shortcut_registry_mut().register(
+        Shortcut::new("file.save")
+            .name("Save Work")
+            .category("File")
+            .description("Writes the work to disk")
+            .primary(teksilo_core::shortcut::KeyStroke::ctrl(
+                teksilo_core::event::Key::S,
+            ))
+            .build(),
+    );
+    let (mut tree, _state, root) = mounted(tree, CommandPalette::new());
+    let rows = options(&tree, root);
+    let nodes = a11y_nodes(&mut tree);
+    let save = rows
+        .iter()
+        .map(|id| node_of(&nodes, *id))
+        .find(|n| n.label() == Some("File: Save Work"))
+        .expect("the row is listed");
+    let chord = save.keyboard_shortcut().expect("a chord").to_owned();
+    assert_eq!(
+        save.description().map(str::to_owned),
+        Some(format!("Writes the work to disk, {chord}"))
+    );
 }
 
 #[test]

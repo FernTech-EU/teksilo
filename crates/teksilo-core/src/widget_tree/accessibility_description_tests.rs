@@ -907,3 +907,230 @@ fn a_dialog_focus_enters_follows_the_same_rules_as_the_field() {
         );
     }
 }
+
+// A node's keyboard shortcut is written at the end of its description, the
+// one property every adapter passes on, until AccessKit's adapters export the
+// shortcut itself (`CHORD_IN_DESCRIPTION`).
+
+/// The description of `widget`, alone in a tree, after one sync.
+fn description_alone(widget: impl Widget + 'static) -> Option<String> {
+    let mut tree = WidgetTree::new();
+    let id = tree.add(widget);
+    tree.layout(SizeProposal::exact(200.0, 100.0));
+    let update = tree.sync_accessibility();
+    description_of(&update, id)
+}
+
+#[test]
+fn a_shortcut_alone_is_the_description() {
+    assert_eq!(
+        description_alone(
+            FillWidget::new()
+                .access_role(Role::Button)
+                .access_label("Save")
+                .access_shortcut_literal("Ctrl+S"),
+        )
+        .as_deref(),
+        Some("Ctrl+S")
+    );
+}
+
+#[test]
+fn a_shortcut_follows_the_nodes_own_description() {
+    assert_eq!(
+        description_alone(
+            FillWidget::new()
+                .access_role(Role::Button)
+                .access_label("Save")
+                .access_description_literal("Saves the file")
+                .access_shortcut_literal("Ctrl+S"),
+        )
+        .as_deref(),
+        Some("Saves the file, Ctrl+S")
+    );
+}
+
+#[test]
+fn a_shortcut_follows_the_text_a_relation_brings() {
+    let mut tree = WidgetTree::new();
+    let hint = tree.add(FillWidget::new().label("Keeps a copy"));
+    let button = tree.add(
+        FillWidget::new()
+            .access_role(Role::Button)
+            .access_label("Save")
+            .access_description_literal("Saves the file")
+            .access_described_by(hint)
+            .access_shortcut_literal("Ctrl+S"),
+    );
+    tree.layout(SizeProposal::exact(200.0, 100.0));
+    let update = tree.sync_accessibility();
+    assert_eq!(
+        description_of(&update, button).as_deref(),
+        Some("Saves the file Keeps a copy, Ctrl+S")
+    );
+}
+
+#[test]
+fn a_shortcut_the_text_already_says_is_not_added() {
+    let button = |description: &str, chord: &str| {
+        FillWidget::new()
+            .access_role(Role::Button)
+            .access_label("Save")
+            .access_description_literal(description)
+            .access_shortcut_literal(chord)
+    };
+    assert_eq!(
+        description_alone(button("Saves the file (Ctrl+S)", "Ctrl+S")).as_deref(),
+        Some("Saves the file (Ctrl+S)")
+    );
+    // A whole token only: a bare-key chord is not found inside a word, nor
+    // "S" inside "Ctrl+S".
+    assert_eq!(
+        description_alone(button("Saves the file", "S")).as_deref(),
+        Some("Saves the file, S")
+    );
+    assert_eq!(
+        description_alone(button("Ctrl+S saves", "S")).as_deref(),
+        Some("Ctrl+S saves, S")
+    );
+    // A name that holds the chord as a token: not said twice.
+    assert_eq!(
+        description_alone(
+            FillWidget::new()
+                .access_role(Role::Button)
+                .access_label("Save (Ctrl+S)")
+                .access_shortcut_literal("Ctrl+S"),
+        ),
+        None
+    );
+    // The macOS glyphs join a chord: "S" is not found inside "⌘S".
+    assert_eq!(
+        description_alone(button("Press ⌘S to save", "S")).as_deref(),
+        Some("Press ⌘S to save, S")
+    );
+    // The node's own name.
+    assert_eq!(
+        description_alone(
+            FillWidget::new()
+                .access_role(Role::Button)
+                .access_label("F5")
+                .access_shortcut_literal("F5"),
+        ),
+        None
+    );
+    // An empty or blank chord writes nothing.
+    assert_eq!(
+        description_alone(
+            FillWidget::new()
+                .access_role(Role::Button)
+                .access_label("Save")
+                .access_shortcut_literal("  "),
+        ),
+        None
+    );
+}
+
+#[test]
+fn a_shortcut_is_written_once_however_many_updates() {
+    let mut tree = WidgetTree::new();
+    let button = tree.add(
+        FillWidget::new()
+            .focusable()
+            .access_role(Role::Button)
+            .access_label("Save")
+            .access_shortcut_literal("Ctrl+S"),
+    );
+    tree.layout(SizeProposal::exact(200.0, 100.0));
+    tree.focus(button);
+    for _ in 0..3 {
+        tree.request_accessibility_update();
+        let update = tree.sync_accessibility();
+        assert_eq!(description_of(&update, button).as_deref(), Some("Ctrl+S"));
+    }
+}
+
+/// A shortcut is the node's own text: rebound while the node holds focus, the
+/// next update carries the new chord, not the old.
+#[test]
+fn a_focused_nodes_rebound_shortcut_is_written_at_once() {
+    use crate::event::Key;
+    use crate::shortcut::{KeyStroke, Shortcut};
+    let mut tree = WidgetTree::new();
+    tree.shortcut_registry_mut().register(
+        Shortcut::new("app.save")
+            .primary(KeyStroke::ctrl(Key::S))
+            .build(),
+    );
+    let button = tree.add(
+        FillWidget::new()
+            .focusable()
+            .access_role(Role::Button)
+            .access_label("Save")
+            .access_shortcut_id("app.save"),
+    );
+    tree.layout(SizeProposal::exact(200.0, 100.0));
+    tree.focus(button);
+    let chord = |tree: &WidgetTree| {
+        tree.shortcut_registry()
+            .effective("app.save")
+            .and_then(|effective| effective.primary)
+            .expect("bound")
+            .to_string()
+    };
+    let before = chord(&tree);
+    let update = tree.sync_accessibility();
+    assert_eq!(description_of(&update, button), Some(before.clone()));
+
+    tree.shortcut_registry_mut()
+        .rebind_primary("app.save", Some(KeyStroke::ctrl(Key::K)));
+    let after = chord(&tree);
+    assert_ne!(before, after);
+    tree.request_accessibility_update();
+    let update = tree.sync_accessibility();
+    assert_eq!(description_of(&update, button), Some(after));
+}
+
+/// The shortcut is not part of what the rules remember, and does not unlock a
+/// message rule 2 holds back while focus stays.
+#[test]
+fn a_shortcut_leaves_the_relation_rules_as_they_are() {
+    for reader in [Kept, Cut] {
+        a_shortcut_leaves_the_relation_rules_as_they_are_with(reader);
+    }
+}
+
+fn a_shortcut_leaves_the_relation_rules_as_they_are_with(reader: AnnouncementOnFocusMove) {
+    let mut tree = WidgetTree::new();
+    tree.description_memory.on_focus_move = reader;
+    let message = Rc::new(RefCell::new(String::new()));
+    let line = tree.add(Line {
+        text: message.clone(),
+        live: Rc::new(Cell::new(Live::Assertive)),
+    });
+    let field = tree.add(
+        FillWidget::new()
+            .focusable()
+            .access_role(Role::TextInput)
+            .access_label("Title")
+            .access_described_by(line)
+            .access_shortcut_literal("Alt+T"),
+    );
+    tree.layout(SizeProposal::exact(200.0, 100.0));
+    tree.focus(field);
+    let update = tree.sync_accessibility();
+    assert_eq!(description_of(&update, field).as_deref(), Some("Alt+T"));
+
+    *message.borrow_mut() = "Too short".to_owned();
+    tree.request_accessibility_update();
+    let update = tree.sync_accessibility();
+    assert_eq!(
+        description_of(&update, field).as_deref(),
+        Some("Alt+T"),
+        "rule 2 still holds the message back"
+    );
+    let parts = tree
+        .description_memory
+        .focus_parts_of(widget_id_to_node_id(field))
+        .expect("focus is on the field");
+    assert!(parts.is_empty(), "no chord remembered: {parts:?}");
+}

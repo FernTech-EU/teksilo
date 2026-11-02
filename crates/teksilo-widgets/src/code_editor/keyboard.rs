@@ -598,7 +598,10 @@ fn finish_key_action(
 /// chords [`handle_key`] leaves to focus traversal, named as this platform and
 /// locale name keys. The accessibility walk puts it in the text node's
 /// description, which AT-SPI, UIA and macOS all read; none of the three
-/// adapters exports `keyboard_shortcut`.
+/// adapters exports `keyboard_shortcut`. (The tree copies a node's
+/// `keyboard_shortcut` into its description for that reason, but a bare
+/// chord says nothing about leaving, so the editor sets prose instead and no
+/// `keyboard_shortcut`.)
 pub(super) fn tab_escape_hint() -> String {
     let (next, previous) = crate::common::editor_runtime::tab_escape_chords();
     tr_widget!(code_editor_tab_escape_hint(

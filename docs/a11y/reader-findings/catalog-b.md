@@ -31,7 +31,7 @@ How to read an entry, and what the words mean, is in
 | [catalog-b-16](#catalog-b-16) | widget-catalog | Wrapped text fields announce twice: HexColorInput and SearchField nest a named entry inside a second entry | medium | Linux | open |
 | [catalog-b-17](#catalog-b-17) | widget-catalog | Content below the fold is missing from the accessibility tree until it is scrolled into view | medium | Linux | open |
 | [catalog-b-18](#catalog-b-18) | widget-catalog | Unnamed controls and indistinguishable duplicates on the catalog pages (the example labels nothing) | high | Linux | open (example) |
-| [catalog-b-19](#catalog-b-19) | widget-catalog | A disabled menu item is exposed as enabled, and a menu item's shortcut never reaches AT-SPI | medium | Linux | partly fixed |
+| [catalog-b-19](#catalog-b-19) | widget-catalog | A disabled menu item is exposed as enabled, and a menu item's shortcut never reaches AT-SPI | medium | all | fixed (interim, readers unchecked) |
 | [catalog-b-20](#catalog-b-20) | widget-catalog | The colour of the ColorEdit trigger and of the picker's 'Selected color' well never reaches the reader | medium | Linux | open |
 | [catalog-b-21](#catalog-b-21) | widget-catalog | Decorative chrome reaches AT: an unnamed separator after every SpinBox, and an empty status bar after every text field | low | Linux | open |
 | [catalog-b-M1](#catalog-b-m1) | widget-catalog | ColorEdit's popover is an unnamed dialog, and opening it replays the ColorPicker's live flood each time | medium | Linux | partly fixed |
@@ -669,6 +669,8 @@ A disabled menu item is exposed as enabled, and a menu item's shortcut never rea
 - **Reproduced:** 2 of 2 runs
 - **Verification:** confirmed. Reproduced: 2 of 2 menus-open (b1, b2); 1 of 1 verify-menu-tree
 - **Fix idea:** Upstream: have accesskit\_atspi\_common drop Enabled/Sensitive for a disabled node whatever its role, and export keyboard\_shortcut as the action key binding. Until then, Teksilo could append the shortcut to the description on Linux.
+- **Correction:** the shortcut is missing on every platform, not on Linux only: no adapter in the pinned versions (accesskit\_windows-0.35.2, accesskit\_atspi\_common-0.21.1, accesskit\_macos-0.27.2) exports `keyboard_shortcut`.
+- **Interim (commit "fix(core): a node's keyboard shortcut is heard, written at the end of its description"):** the tree now writes a node's chord at the end of its description (`CHORD_IN_DESCRIPTION` in `accessibility_description_impl.rs`), so 'With shortcut' is described as 'Ctrl+S' on every platform. That is what the tree writes; no reader has been checked against it yet (NVDA, Orca and VoiceOver are to be run). The harness's key\_binding check still fails, upstream; it is left failing.
 
 ### catalog-b-20 {#catalog-b-20}
 

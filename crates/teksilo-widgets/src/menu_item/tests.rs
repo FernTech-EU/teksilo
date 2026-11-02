@@ -342,10 +342,12 @@ fn trailing_hint_is_announced_as_a_description_not_a_chord() {
     );
 }
 
-/// The sibling guarantee — `shortcut_label` keeps its accelerator
-/// semantics, and does not leak into the description slot.
+/// The sibling guarantee: `shortcut_label` keeps its accelerator
+/// semantics. The tree also copies the chord into the description, the one
+/// property every screen reader reports, until AccessKit's adapters export
+/// the shortcut itself; the chord stays a chord.
 #[test]
-fn shortcut_label_stays_a_chord_and_sets_no_description() {
+fn shortcut_label_stays_a_chord_and_is_copied_into_the_description() {
     let mut t = tree();
     let list_id = t.add(MenuList::new().item(MenuItem::new(lit!("Save")).shortcut_label("Ctrl+S")));
     layout(&mut t);
@@ -353,7 +355,40 @@ fn shortcut_label_stays_a_chord_and_sets_no_description() {
     let update = t.sync_accessibility();
     let node = a11y_node(&update, item_id);
     assert_eq!(node.keyboard_shortcut(), Some("Ctrl+S"));
-    assert_eq!(node.description(), None);
+    assert_eq!(node.description(), Some("Ctrl+S"));
+}
+
+/// A row bound to a registered shortcut is described with its chord, and a
+/// rebind reaches the description at the next update.
+#[test]
+fn a_rows_registered_shortcut_is_in_its_description_and_follows_a_rebind() {
+    use teksilo_core::event::Key;
+    use teksilo_core::shortcut::Shortcut;
+
+    let mut t = tree();
+    t.shortcut_registry_mut().register(
+        Shortcut::new("app.save")
+            .primary(KeyStroke::ctrl(Key::S))
+            .build(),
+    );
+    let list_id = t.add(MenuList::new().item(MenuItem::new(lit!("Save")).for_shortcut("app.save")));
+    layout(&mut t);
+    let item_id = first_descendant_with_role(&t, list_id, Role::MenuItem);
+    let update = t.sync_accessibility();
+    let before = a11y_node(&update, item_id).description().map(str::to_owned);
+    assert_eq!(
+        before.as_deref(),
+        a11y_node(&update, item_id).keyboard_shortcut()
+    );
+    assert!(before.is_some());
+
+    t.shortcut_registry_mut()
+        .rebind_primary("app.save", Some(KeyStroke::ctrl(Key::K)));
+    layout(&mut t);
+    let update = t.sync_accessibility();
+    let node = a11y_node(&update, item_id);
+    assert_ne!(node.description().map(str::to_owned), before);
+    assert_eq!(node.description(), node.keyboard_shortcut());
 }
 
 /// Both may coexist: the chord and the phrase occupy the same trailing
@@ -373,7 +408,11 @@ fn a_chord_and_a_hint_coexist_without_displacing_each_other() {
     let update = t.sync_accessibility();
     let node = a11y_node(&update, item_id);
     assert_eq!(node.keyboard_shortcut(), Some("Ctrl+D"));
-    assert_eq!(node.description(), Some("after"));
+    assert_eq!(
+        node.description(),
+        Some("after, Ctrl+D"),
+        "the hint, then the chord the tree copies after it"
+    );
 }
 
 #[test]

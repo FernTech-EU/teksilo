@@ -423,6 +423,16 @@ by crate for clarity, not because crates version independently.
   between the clicks.** The tap count now survives a rebuild of the node, so a
   widget whose first click makes it rebuild (a data-view row that the first
   click selects) still sees the second click as the second.
+- **Screen readers hear the keyboard shortcut of a menu row, a command
+  palette row and any control given a shortcut**, read after its
+  description, on Windows, Linux and macOS. AccessKit does not pass
+  shortcuts to screen readers yet; Teksilo will stop adding them to the
+  description once it does.
+- **The keyboard shortcut of a menu row, a command palette row and any
+  control given a shortcut is written at the end of its accessible
+  description**, on every platform, so a screen reader that reads
+  descriptions says it. AccessKit does not pass shortcuts to screen readers
+  yet; Teksilo will stop adding them to the description once it does.
 - **Cut, copy, paste, undo, redo and select all work in a text field inside
   a dialog shown in the window when the application re-registered their
   shortcuts to rename them.** Before, the chords did nothing there.

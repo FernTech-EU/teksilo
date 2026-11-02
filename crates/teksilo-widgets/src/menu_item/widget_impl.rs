@@ -1053,6 +1053,9 @@ impl Widget for MenuItem {
         // Announce the current chord *live*: a manual label, else the
         // per-id signal's present value — so AT reflects a rebind even
         // though the item itself is never rebuilt for shortcut changes.
+        // No adapter exports `keyboard_shortcut` yet, so the tree's last
+        // accessibility pass also copies it to the end of the description,
+        // after the trailing hint set below.
         let accel = self.shortcut_label.clone().or_else(|| {
             self.shortcut_signal
                 .as_ref()

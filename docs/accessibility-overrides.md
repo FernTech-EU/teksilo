@@ -355,6 +355,10 @@ my_button.access_shortcut_literal("Ctrl+Shift+P");
 
 Does NOT track rebinds, that's the literal variant's tradeoff. For chords routed through `Shortcut`, prefer `access_shortcut_id` or the announcement and the actual binding will drift.
 
+### How a reader hears it
+
+No AccessKit adapter exports a node's keyboard shortcut yet (UIA has no `AcceleratorKey`, the AT-SPI key binding is always empty, macOS has nothing). Until they do, Teksilo also writes the chord at the end of the node's description, after `", "` (`"Saves the file, Ctrl+S"`), so a reader that reports descriptions can say it (NVDA on focus, Orca, VoiceOver as a hint are expected to; none has been checked with it yet, and how VoiceOver and braille render the macOS glyphs is unknown). This is an interim, not a contract: it stops once the adapters export the shortcut. A description or a name that already holds the chord as a whole word is left as it is. Note that `access_shortcut_id` writes the `KeyStroke` `Display` form (`"Ctrl+S"`, `"Cmd+S"`), not the localized form a `MenuItem` shows (`format_keystroke`: `"Strg+S"`, `"⌘S"`).
+
 See [shortcut-intent-action.md](shortcut-intent-action.md) for the full Shortcut/Intent/Action pipeline.
 
 ---

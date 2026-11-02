@@ -122,12 +122,96 @@
 //! Rule 2 costs only a change Orca alone would have spoken, so on every
 //! platform a message that must be heard as it appears needs a live region,
 //! and one without it is heard on the next arrival.
+//!
+//! ## A node's keyboard shortcut
+//!
+//! An interim, until AccessKit's adapters export it. A node's own
+//! `keyboard_shortcut` (a menu row's chord, a command palette row's, a control
+//! given `access_shortcut_id` or `access_shortcut_literal`) reaches no screen
+//! reader in the pinned versions: `accesskit_windows-0.35.2` sets no UIA
+//! `AcceleratorKey`, `accesskit_atspi_common-0.21.1` answers an empty key
+//! binding for every action (`node.rs:1112-1113`), and `accesskit_macos-0.27.2`
+//! has nothing for it (AccessKit #668 is open for AT-SPI). So this pass also
+//! writes the chord at the end of the node's description, which every reader
+//! reports, behind the one switch [`CHORD_IN_DESCRIPTION`]: turn it off once
+//! the adapters export the shortcut, or readers say it twice.
+//!
+//! - The chord follows what the description already says after `", "`, which
+//!   is punctuation (a pause in speech, a break in braille), not a
+//!   translatable string; alone, it is the whole description. It is the
+//!   string the node carries, with no prefix.
+//! - It is left out when it is empty, when it is the node's own text, or when
+//!   the description already holds it as a whole token (bounded by the start
+//!   or end of the text or by a character that is neither alphanumeric nor
+//!   `+`), so a description such as "Saves the file (Ctrl+S)" is not doubled
+//!   and a bare-key chord "S" is not taken to be in "Saves". The comparison is
+//!   literal: `access_shortcut_id` writes `KeyStroke`'s `Display` form
+//!   ("Ctrl+S", "Cmd+S"), while a widget's own text may hold the localized
+//!   `format_keystroke` form ("Strg+S", "⌘S"), and the two count as
+//!   different, so such a control hears its chord twice.
+//! - It is the node's own text, a property its widget sets on every walk like
+//!   its own description, not text drawn from a relation, so rules 1 and 2 do
+//!   not apply to it: it is written as soon as it is there, a focused node
+//!   included. It is not part of what [`DescriptionMemory`] remembers, so the
+//!   rules judge relation text against the same history with the switch on or
+//!   off.
 
 use std::collections::{HashMap, HashSet};
 
 use accesskit::{Live, Node, NodeId, Role};
 
 use super::WidgetTree;
+
+/// Whether a node's `keyboard_shortcut` is also written at the end of its
+/// description (see the module docs, "A node's keyboard shortcut").
+///
+/// On because no adapter in the pinned AccessKit versions exports the
+/// shortcut: UIA has no `AcceleratorKey`, the AT-SPI adapter answers an empty
+/// key binding (`accesskit_atspi_common-0.21.1` `node.rs:1113`, AccessKit
+/// #668), macOS has nothing. Turn it off once they export it as UIA
+/// `AcceleratorKey`, the AT-SPI key binding and the macOS equivalent;
+/// otherwise readers say the chord twice.
+pub(crate) const CHORD_IN_DESCRIPTION: bool = true;
+
+/// The separator written before a chord that follows other text. Not
+/// translated: teksilo-core has no translations, so an Arabic or a CJK
+/// description shows an ASCII comma here.
+const CHORD_SEPARATOR: &str = ", ";
+
+/// The node's chord, trimmed, when [`CHORD_IN_DESCRIPTION`] is on and it has
+/// one that is not empty.
+fn chord_of(node: &Node) -> Option<&str> {
+    if !CHORD_IN_DESCRIPTION {
+        return None;
+    }
+    node.keyboard_shortcut()
+        .map(str::trim)
+        .filter(|chord| !chord.is_empty())
+}
+
+/// The chord to append to `assembled`, the description built so far: none
+/// when the node's own text (its name) or `assembled` already holds it as a
+/// whole token, so "Save (Ctrl+S)" is not followed by "Ctrl+S" again.
+fn chord_for<'a>(node: &'a Node, assembled: &str) -> Option<&'a str> {
+    let chord = chord_of(node)?;
+    if own_text(node).is_some_and(|name| holds_token(name, chord)) || holds_token(assembled, chord)
+    {
+        return None;
+    }
+    Some(chord)
+}
+
+/// Whether `text` holds `token` bounded on each side by its start or end or
+/// by a character that is neither alphanumeric nor part of a chord (`+`, and
+/// the macOS modifier glyphs, which join a chord with no `+`: "⌘S").
+fn holds_token(text: &str, token: &str) -> bool {
+    let bounds = |c: Option<char>| {
+        c.is_none_or(|c| !c.is_alphanumeric() && !matches!(c, '+' | '⌘' | '⇧' | '⌥' | '⌃'))
+    };
+    text.match_indices(token).any(|(at, _)| {
+        bounds(text[..at].chars().next_back()) && bounds(text[at + token.len()..].chars().next())
+    })
+}
 
 /// What a platform's screen reader does with an announcement made in the
 /// update focus moves in, which decides rule 1 (see the module docs).
@@ -184,8 +268,18 @@ pub(super) struct DescriptionMemory {
     pub(super) catching_up: bool,
 }
 
+#[cfg(test)]
+impl DescriptionMemory {
+    /// The description parts remembered for `id`, which focus was on or
+    /// inside.
+    pub(super) fn focus_parts_of(&self, id: NodeId) -> Option<&[String]> {
+        self.focus_parts.get(&id).map(Vec::as_slice)
+    }
+}
+
 impl WidgetTree {
-    /// Write each `described_by` node's description from its targets, and
+    /// Write each `described_by` node's description from its targets, append
+    /// each node's keyboard shortcut to its description, and
     /// answer what the update now says for the next one to be measured
     /// against. See the module docs for the rules.
     ///
@@ -301,7 +395,7 @@ impl WidgetTree {
         let announcement_kept = previous.on_focus_move == AnnouncementOnFocusMove::Kept;
         for (i, (id, n)) in nodes.iter().enumerate() {
             let focused = on_focus_path.contains(id);
-            if n.described_by().is_empty() && !focused {
+            if n.described_by().is_empty() && !focused && chord_of(n).is_none() {
                 continue;
             }
             // On or inside the focus the last update carried: this node is
@@ -340,8 +434,14 @@ impl WidgetTree {
                 parts.push(text);
                 derived = true;
             }
-            if derived {
-                written.push((i, parts.join(" ")));
+            let assembled = parts.join(" ");
+            // The node's own chord, after everything else; never one of
+            // `parts`, which the rules remember.
+            match chord_for(n, &assembled) {
+                Some(chord) if assembled.is_empty() => written.push((i, chord.to_owned())),
+                Some(chord) => written.push((i, format!("{assembled}{CHORD_SEPARATOR}{chord}"))),
+                None if derived => written.push((i, assembled)),
+                None => {}
             }
             if focused {
                 focus_parts.insert(*id, parts);

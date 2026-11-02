@@ -37,7 +37,7 @@ How to read an entry, and what the words mean, is in
 | [chrome-22](#chrome-22) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Status lines that are the only feedback are not live | low | all | open (example) |
 | [chrome-23](#chrome-23) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Orca drops a plain tooltip that resembles the button's name ('Open a file', 'Close the tab') | low | Linux | upstream |
 | [chrome-24](#chrome-24) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | At launch the vertical TabWidget's selection makes Orca say 'Food page tab' and move its point of regard to an unfocused tab | low | Linux | upstream |
-| [chrome-25](#chrome-25) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Mnemonics, shortcut keys and has-popup never reach AT-SPI | low | Linux | upstream |
+| [chrome-25](#chrome-25) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Mnemonics, shortcut keys and has-popup never reach AT-SPI | low | Linux | upstream (shortcut keys: interim) |
 | [chrome-26](#chrome-26) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | A second bare Alt tap does not leave the revealed menu bar | low | all | open |
 | [chrome-27](#chrome-27) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Custom title bar: no keyboard route to its window controls or window menu | low | all | open |
 | [chrome-v01](#chrome-v01) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | The collapsible menu bar goes silent after its first use: every later reveal (F10, Alt tap, hamburger) lands focus on a trigger Orca treats as defunct | high | Linux | fixed |
@@ -787,6 +787,7 @@ Mnemonics, shortcut keys and has-popup never reach AT-SPI
 - **Reproduced:** static, every run
 - **Verification:** corrected by the verifier. Reproduced: static, every native-menu / collapsible-menu-bar run The platform claim is wider than stated. No adapter in use maps access\_key or keyboard\_shortcut. atspi\_common 0.20 has key\_binding "" (node.rs:1097), and accesskit\_windows-0.35.0 and accesskit\_macos-0.27.0 contain no reference to either. The trigger.rs:224-231 comment ('announced by Windows Narrator as Access key: F') is therefore untrue for these versions. has\_popup is mapped only on Windows (accesskit\_windows node.rs:485-494, aria properties). The menu items' Ctrl+N / Ctrl+O accelerators (MenuItem set\_keyboard\_shortcut, widget\_impl.rs:986-995) are also lost on all three platforms.
 - **Fix idea:** Upstream: fill Action.key\_binding from access\_key/keyboard\_shortcut and map has\_popup to HAS\_POPUP.
+- **Interim (commit "fix(core): a node's keyboard shortcut is heard, written at the end of its description"):** shortcut keys now reach the reader through the description (the menu items' 'Ctrl+N', 'Ctrl+O'). Mnemonics (`access_key`) and has-popup are unchanged.
 
 ### chrome-26 {#chrome-26}
 
