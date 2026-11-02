@@ -509,7 +509,9 @@ changes which events are accepted, never a dimension.
 - `prefers_touch: Option<bool>`, the OS's stated preference for a touch-first
   UI (Windows tablet mode, a convertible in slate posture). `None` when the
   platform does not report one, which leaves the density where the app put it.
-- `screen_reader: ScreenReaderState`, `Unknown` / `Inactive` / `Active`.
+- `screen_reader: ScreenReaderState`, `Unknown` / `Inactive` / `Active`. The
+  reactive form an application reads is `BuildContext::screen_reader_signal()`
+  (see [a11y/explore-by-touch.md](a11y/explore-by-touch.md)).
 - `explore_by_touch: ExploreByTouch`, `Off` / `Auto` / `On`. While touch
   exploration is on (VoiceOver, TalkBack, Narrator touch mode) a touch is a
   *probe*: the first tap announces, the second activates, and gesture

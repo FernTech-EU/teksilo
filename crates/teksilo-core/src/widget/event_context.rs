@@ -314,6 +314,10 @@ pub struct EventContext<'ops> {
     /// [`window_active`](Self::window_active). Defaults `true` (matches the
     /// tree's initial value) for standalone / test contexts.
     pub(crate) tree_window_active: bool,
+    /// Snapshot of the tree's OS screen-reader state at construction time.
+    /// Read by [`screen_reader_state`](Self::screen_reader_state). `Unknown`
+    /// for standalone / test contexts.
+    pub(crate) tree_screen_reader: crate::environment::ScreenReaderState,
     /// Last `PointerMove` position observed by the tree. Snapshotted
     /// at handler-invocation time so widgets that don't see the live
     /// pointer event (e.g. an `on_hover` callback that fires on the
@@ -592,6 +596,7 @@ impl<'ops> EventContext<'ops> {
             window_ops: None,
             current_window: None,
             tree_window_active: true,
+            tree_screen_reader: crate::environment::ScreenReaderState::Unknown,
             tree_pointer_position: None,
             press_claimed_by_interactive_child: false,
             overlay_bounds_snapshot: Vec::new(),
@@ -901,6 +906,17 @@ impl<'ops> EventContext<'ops> {
     /// [`window_active`](Self::window_active).
     pub(crate) fn with_window_active(mut self, active: bool) -> Self {
         self.tree_window_active = active;
+        self
+    }
+
+    /// Snapshot the tree's OS screen-reader state. Called by
+    /// `make_event_context` once per event batch so handlers can read
+    /// [`screen_reader_state`](Self::screen_reader_state).
+    pub(crate) fn with_screen_reader_state(
+        mut self,
+        state: crate::environment::ScreenReaderState,
+    ) -> Self {
+        self.tree_screen_reader = state;
         self
     }
 
@@ -1320,6 +1336,17 @@ impl<'ops> EventContext<'ops> {
     /// [`BuildContext::window_active`]: crate::build_context::BuildContext::window_active
     pub fn window_active(&self) -> bool {
         self.tree_window_active
+    }
+
+    /// Whether the operating system says a screen reader is running, as it
+    /// was when this event batch was dispatched (a snapshot). Only `Active`
+    /// means a reader is present. See
+    /// [`BuildContext::screen_reader_signal`] for the contract and the
+    /// reactive form.
+    ///
+    /// [`BuildContext::screen_reader_signal`]: crate::build_context::BuildContext::screen_reader_signal
+    pub fn screen_reader_state(&self) -> crate::environment::ScreenReaderState {
+        self.tree_screen_reader
     }
 
     /// Open a new window, creating the winit-level surface

@@ -4601,15 +4601,15 @@ impl WindowManager {
         let ts = fresh.text_scale_factor;
         let sr = fresh.screen_reader;
         self.a11y_prefs = fresh;
-        for managed in self.windows.values_mut() {
-            managed.tree.set_accessibility_preferences(hc, rm, ts);
-            // A screen reader starting or stopping while the app runs is the
-            // case this refresh exists for: `AccessibilityPreferences` compares
-            // on the field, so the early return above no longer swallows it.
-            managed.tree.set_screen_reader_state(sr);
-        }
-        if let Some(tree) = &mut self.app_tree {
+        // Every window's tree and the application tree, through the one
+        // iterator, so a window is written exactly as the application tree
+        // the tests can build.
+        for tree in self.trees_mut() {
             tree.set_accessibility_preferences(hc, rm, ts);
+            // A screen reader starting or stopping while the app runs is the
+            // case this refresh exists for: `AccessibilityPreferences`
+            // compares on the field, so the early return above no longer
+            // swallows it.
             tree.set_screen_reader_state(sr);
         }
         true
@@ -7424,6 +7424,38 @@ mod app_tree_tests {
         }
         assert!(wm.refresh_accessibility_preferences_from(high_contrast));
         assert!(wm.app_tree().unwrap().high_contrast_signal().get());
+    }
+
+    /// A `ManagedWindow` wraps a real winit window, so a headless test cannot
+    /// build one; the refresh writes windows and the application tree through
+    /// the one `trees_mut` iterator, which the application tree here covers.
+    #[test]
+    fn a_screen_reader_starting_reaches_the_app_tree_signal_once() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use teksilo_core::ScreenReaderState;
+        let mut wm = manager_with_app_tree();
+        fn reader_on() -> AccessibilityPreferences {
+            AccessibilityPreferences {
+                screen_reader: ScreenReaderState::Active,
+                ..AccessibilityPreferences::default()
+            }
+        }
+        let signal = wm.app_tree().unwrap().screen_reader_signal();
+        assert_ne!(signal.get(), ScreenReaderState::Active);
+        let calls = Rc::new(Cell::new(0));
+        let _watch = {
+            let calls = calls.clone();
+            signal.observe(move |_| calls.set(calls.get() + 1))
+        };
+        assert!(wm.refresh_accessibility_preferences_from(reader_on));
+        assert_eq!(signal.get(), ScreenReaderState::Active);
+        assert_eq!(calls.get(), 1);
+        assert!(
+            !wm.refresh_accessibility_preferences_from(reader_on),
+            "an unchanged reading is not a change"
+        );
+        assert_eq!(calls.get(), 1, "and notifies nobody");
     }
 
     #[test]

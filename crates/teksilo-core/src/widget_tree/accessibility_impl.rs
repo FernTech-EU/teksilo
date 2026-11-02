@@ -3767,6 +3767,186 @@ mod tests {
         assert_eq!(tree.screen_reader_state(), crate::ScreenReaderState::Active);
     }
 
+    // ── the reactive screen-reader state ──────────────────────────────────
+
+    /// Subscribes to the tree's screen-reader signal through
+    /// `BuildContext`, counting callbacks and keeping the handle it got.
+    #[derive(Debug)]
+    struct ScreenReaderProbe {
+        calls: std::rc::Rc<std::cell::Cell<u32>>,
+        seen: std::rc::Rc<std::cell::RefCell<Vec<crate::ScreenReaderState>>>,
+        handle: std::rc::Rc<
+            std::cell::RefCell<Option<crate::signal::Signal<crate::ScreenReaderState>>>,
+        >,
+        at_build: std::rc::Rc<std::cell::Cell<Option<crate::ScreenReaderState>>>,
+    }
+
+    impl Widget for ScreenReaderProbe {
+        fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+            let signal = ctx.screen_reader_signal();
+            self.at_build.set(Some(ctx.screen_reader_state()));
+            let calls = self.calls.clone();
+            let seen = self.seen.clone();
+            ctx.effect(&signal, move |state| {
+                calls.set(calls.get() + 1);
+                seen.borrow_mut().push(*state);
+            });
+            *self.handle.borrow_mut() = Some(signal);
+            vec![]
+        }
+
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    struct ProbeTree {
+        tree: WidgetTree,
+        calls: std::rc::Rc<std::cell::Cell<u32>>,
+        seen: std::rc::Rc<std::cell::RefCell<Vec<crate::ScreenReaderState>>>,
+        handle: std::rc::Rc<
+            std::cell::RefCell<Option<crate::signal::Signal<crate::ScreenReaderState>>>,
+        >,
+        at_build: std::rc::Rc<std::cell::Cell<Option<crate::ScreenReaderState>>>,
+    }
+
+    fn screen_reader_probe_tree() -> ProbeTree {
+        screen_reader_probe_tree_in(crate::ScreenReaderState::Unknown)
+    }
+
+    /// The probe tree with the OS reporting `state` before the probe builds.
+    fn screen_reader_probe_tree_in(state: crate::ScreenReaderState) -> ProbeTree {
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let handle = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let at_build = std::rc::Rc::new(std::cell::Cell::new(None));
+        let mut tree = WidgetTree::new();
+        tree.set_screen_reader_state(state);
+        tree.add(ScreenReaderProbe {
+            calls: calls.clone(),
+            seen: seen.clone(),
+            handle: handle.clone(),
+            at_build: at_build.clone(),
+        });
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        ProbeTree {
+            tree,
+            calls,
+            seen,
+            handle,
+            at_build,
+        }
+    }
+
+    #[test]
+    fn the_screen_reader_signal_starts_unknown_and_is_one_signal_for_tree_and_context() {
+        let p = screen_reader_probe_tree();
+        assert_eq!(
+            p.tree.screen_reader_signal().get(),
+            crate::ScreenReaderState::Unknown
+        );
+        assert_eq!(p.at_build.get(), Some(crate::ScreenReaderState::Unknown));
+        let from_context = p.handle.borrow().clone().expect("built");
+        assert!(
+            crate::signal::Signal::same(&p.tree.screen_reader_signal(), &from_context),
+            "the build context hands out the tree's own signal"
+        );
+    }
+
+    #[test]
+    fn the_screen_reader_signal_notifies_on_a_real_change_only() {
+        let mut p = screen_reader_probe_tree();
+        p.tree
+            .set_screen_reader_state(crate::ScreenReaderState::Active);
+        assert_eq!(p.calls.get(), 1);
+        p.tree
+            .set_screen_reader_state(crate::ScreenReaderState::Active);
+        assert_eq!(p.calls.get(), 1, "the same value again notifies nobody");
+        assert_eq!(*p.seen.borrow(), vec![crate::ScreenReaderState::Active]);
+    }
+
+    #[test]
+    fn a_client_detaching_notifies_once_and_a_repeat_notifies_nobody() {
+        let mut p = screen_reader_probe_tree();
+        p.tree
+            .set_screen_reader_state(crate::ScreenReaderState::Active);
+        p.tree.set_at_client_attached(true);
+        let before = p.calls.get();
+        p.tree.set_at_client_attached(false);
+        assert_eq!(p.calls.get(), before + 1);
+        assert_eq!(
+            p.tree.screen_reader_signal().get(),
+            crate::ScreenReaderState::Inactive
+        );
+        p.tree.set_at_client_attached(false);
+        assert_eq!(p.calls.get(), before + 1, "a repeated detach adds nothing");
+        p.tree
+            .set_screen_reader_state(crate::ScreenReaderState::Active);
+        assert_eq!(p.calls.get(), before + 2);
+        assert_eq!(
+            p.tree.screen_reader_state(),
+            crate::ScreenReaderState::Active,
+            "a later OS reading sticks"
+        );
+    }
+
+    #[test]
+    fn a_detach_that_finds_the_state_already_inactive_notifies_nobody() {
+        let mut p = screen_reader_probe_tree();
+        p.tree
+            .set_screen_reader_state(crate::ScreenReaderState::Inactive);
+        p.tree.set_at_client_attached(true);
+        let before = p.calls.get();
+        p.tree.set_at_client_attached(false);
+        assert_eq!(p.calls.get(), before);
+    }
+
+    #[test]
+    fn a_state_the_os_reported_before_the_build_is_read_at_build() {
+        let p = screen_reader_probe_tree_in(crate::ScreenReaderState::Active);
+        assert_eq!(p.at_build.get(), Some(crate::ScreenReaderState::Active));
+        assert_eq!(
+            p.tree.screen_reader_signal().get(),
+            crate::ScreenReaderState::Active
+        );
+    }
+
+    #[test]
+    fn a_screen_reader_change_dirties_neither_layout_nor_the_accessibility_tree() {
+        let mut p = screen_reader_probe_tree();
+        // The baseline a real loop reaches: laid out, painted, walked.
+        p.tree.render();
+        let _ = p.tree.sync_accessibility();
+        assert!(!p.tree.needs_render(), "the baseline is clean");
+        assert!(!p.tree.a11y_dirty, "the baseline is clean");
+
+        p.tree
+            .set_screen_reader_state(crate::ScreenReaderState::Active);
+        assert!(
+            !p.tree.needs_render(),
+            "the setter schedules no relayout and no repaint"
+        );
+        assert!(
+            !p.tree.a11y_dirty,
+            "the accessibility tree is not re-walked"
+        );
+    }
+
+    #[test]
+    fn an_event_handler_reads_the_screen_reader_state_of_its_dispatch() {
+        let mut tree = WidgetTree::new();
+        tree.set_screen_reader_state(crate::ScreenReaderState::Active);
+        let mut read = None;
+        tree.run_with_event_context(&mut crate::window::NoopWindowOps, |ctx| {
+            read = Some(ctx.screen_reader_state());
+        });
+        assert_eq!(read, Some(crate::ScreenReaderState::Active));
+    }
+
     // ── announcements ─────────────────────────────────────────────────────
 
     #[test]

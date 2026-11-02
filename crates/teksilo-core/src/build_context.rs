@@ -552,6 +552,47 @@ impl<'a> BuildContext<'a> {
         self.tree.high_contrast_signal()
     }
 
+    /// Whether the operating system says a screen reader is running. One-shot
+    /// read for build-time use; for a value that follows it, bind
+    /// [`screen_reader_signal`](Self::screen_reader_signal).
+    pub fn screen_reader_state(&self) -> crate::environment::ScreenReaderState {
+        self.tree.screen_reader_state()
+    }
+
+    /// Reactive handle on the OS screen-reader state, the companion of
+    /// [`high_contrast_signal`](Self::high_contrast_signal). Starts
+    /// [`Unknown`](crate::environment::ScreenReaderState::Unknown).
+    ///
+    /// It is the OS flag, not AccessKit attachment. Only `Active` means a
+    /// reader is present; `Unknown` and `Inactive` both mean the framework
+    /// does not treat one as present, so never remove or disable anything
+    /// unless the state is `Active`. A new window starts with the window
+    /// manager's last reading; it is taken again when a window takes the
+    /// focus, and a detaching AccessKit client forces `Inactive`, which holds
+    /// until the OS flag itself changes. The value is per window tree (two
+    /// windows can briefly disagree). Read it, do not write it, and compare
+    /// against `teksilo_core::ScreenReaderState`
+    /// (`teksilo::core::ScreenReaderState` from the umbrella crate; it is not
+    /// in the prelude).
+    ///
+    /// Nothing is marked dirty when it changes: bind at the level you need
+    /// (`Rebuild` to swap widgets, `AccessibilityOnly` for an accessibility
+    /// property, `RepaintOnly` for colour). [`effect`](Self::effect) does not
+    /// replay the current value: read
+    /// [`screen_reader_state`](Self::screen_reader_state) once in `build()`,
+    /// then subscribe.
+    ///
+    /// Use it for additive presentation (longer status wording, a one-time
+    /// offer the user can refuse), not as a switch for a second, reduced UI,
+    /// not as a gate on semantics, focus or the AccessKit tree, and not in
+    /// place of [`prefers_reduced_motion`](Self::prefers_reduced_motion).
+    /// Many readers never set the OS flag.
+    pub fn screen_reader_signal(
+        &self,
+    ) -> crate::signal::Signal<crate::environment::ScreenReaderState> {
+        self.tree.screen_reader_signal()
+    }
+
     /// The [`PaintState`](crate::styles::PaintState) the host window paints
     /// under right now. One-shot read; see
     /// [`high_contrast_signal`](Self::high_contrast_signal) for the reactive

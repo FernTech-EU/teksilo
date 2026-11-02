@@ -104,6 +104,40 @@ says — which is also the answer to Windows' stale-flag caveat.
 `true` → `false` edge acts, so the per-frame push of the flag cannot undo a
 fresh OS reading.
 
+### Reading the screen-reader state
+
+An application can follow the same OS flag the gate uses: at build time with
+`BuildContext::screen_reader_state()`, reactively with
+`BuildContext::screen_reader_signal()` (the tree's own
+`WidgetTree::screen_reader_signal()`), and in a handler with
+`EventContext::screen_reader_state()`, a snapshot taken when the event batch
+was dispatched.
+
+- Only `Active` means a reader is present. `Unknown` (the platform cannot
+  tell) and `Inactive` both mean the framework does not treat one as present,
+  so never remove or disable anything unless the state is `Active`.
+- It is the OS flag, not AccessKit attachment. Attaching a client changes
+  nothing; a client detaching forces `Inactive`.
+- A new window starts with the window manager's last reading (taken at
+  startup or when a window last took the focus). The reading is taken again
+  when a window takes the focus. A detaching AccessKit client forces
+  `Inactive`, which then holds until the OS flag itself changes, so a reader
+  restarted without the flag having been seen to drop is not seen again. The
+  value is kept per window tree, so two windows can briefly disagree.
+- Read the signal, do not write it: the framework writes it, and a write would
+  also switch the `Auto` gate above. The type is `teksilo_core::ScreenReaderState`
+  (`teksilo::core::ScreenReaderState` from the umbrella crate); it is not in the
+  prelude.
+- A change marks nothing dirty. Bind at the level you need: `Rebuild` to swap
+  widgets, `AccessibilityOnly` for an accessibility property, `RepaintOnly` for
+  colour. An effect does not replay the current value: read the state once in
+  `build()`, then subscribe.
+- Use it for additive presentation, such as a longer status wording or a
+  one-time offer the user can refuse. It is not a switch for a second, reduced
+  interface, not a gate on semantics, focus or the AccessKit tree, and not a
+  substitute for the reduced-motion preference. Many readers never set the
+  flag (see the Linux notes above).
+
 ### What is *not* implemented
 
 Nothing in the framework branches on `explore_by_touch_active()` yet. The

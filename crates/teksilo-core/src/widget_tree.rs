@@ -677,7 +677,9 @@ pub struct WidgetTree {
     /// Whether an assistive technology is reading the tree, as reported by the
     /// *operating system* — not by AccessKit. See
     /// [`Self::set_screen_reader_state`] for why the distinction matters.
-    screen_reader: crate::environment::ScreenReaderState,
+    /// A signal so an application can follow it; written only through
+    /// `set_if_changed`, so an observer fires on a real change.
+    screen_reader: crate::signal::Signal<crate::environment::ScreenReaderState>,
     /// The app's explore-by-touch policy. See [`Self::set_explore_by_touch`].
     explore_by_touch: crate::environment::ExploreByTouch,
     /// Whether an AccessKit client is currently attached to this window's
@@ -1159,7 +1161,9 @@ impl WidgetTree {
             prefers_high_contrast: crate::signal::Signal::new(false),
             prefers_reduced_motion: false,
             text_scale_factor: 1.0,
-            screen_reader: crate::environment::ScreenReaderState::default(),
+            screen_reader: crate::signal::Signal::new(
+                crate::environment::ScreenReaderState::default(),
+            ),
             explore_by_touch: crate::environment::ExploreByTouch::default(),
             at_client_attached: false,
             density_announcement: None,
@@ -1251,6 +1255,7 @@ impl WidgetTree {
             .with_pointer_captor(self.current_pointer_capture())
             .with_layout_direction(self.layout_direction)
             .with_window_active(self.is_window_active())
+            .with_screen_reader_state(self.screen_reader.get())
             .with_modal_open(self.overlay_manager.has_open_modal())
             .with_input_snapshot(self.current_input.clone())
             .with_touch_action(self.current_frozen_touch_action())
@@ -3329,9 +3334,13 @@ impl WidgetTree {
     /// a screen reader is how explore-by-touch gets switched on under an
     /// inspector and makes the app untouchable.
     ///
+    /// Observers of [`Self::screen_reader_signal`] fire when the value
+    /// changes. Nothing is marked dirty here: a binding chooses its own
+    /// [`BindingLevel`](crate::binding::BindingLevel).
+    ///
     /// [`ScreenReaderState`]: crate::environment::ScreenReaderState
     pub fn set_screen_reader_state(&mut self, state: crate::environment::ScreenReaderState) {
-        self.screen_reader = state;
+        self.screen_reader.set_if_changed(state);
     }
 
     /// The screen-reader state most recently reported by the platform.
@@ -3340,7 +3349,48 @@ impl WidgetTree {
     ///
     /// [`ScreenReaderState::Unknown`]: crate::environment::ScreenReaderState::Unknown
     pub fn screen_reader_state(&self) -> crate::environment::ScreenReaderState {
-        self.screen_reader
+        self.screen_reader.get()
+    }
+
+    /// Reactive handle on the operating system's screen-reader state, the
+    /// companion of [`Self::high_contrast_signal`]. Starts
+    /// [`ScreenReaderState::Unknown`].
+    ///
+    /// It is the OS flag, not AccessKit attachment: attaching a client
+    /// changes nothing, and a client detaching forces `Inactive`. Only
+    /// `Active` means a reader is present; `Unknown` (cannot tell) and
+    /// `Inactive` both mean the framework does not treat one as present, so
+    /// an application must never remove or disable anything unless the
+    /// state is `Active`.
+    ///
+    /// A new window starts with the window manager's last reading (taken at
+    /// startup or when a window last took the focus). The reading is taken
+    /// again when a window takes the focus, and a detaching AccessKit client
+    /// forces `Inactive`, which then holds until the OS flag itself changes.
+    /// The value is per window tree, so two windows can briefly disagree.
+    ///
+    /// Read it, do not write it: the framework writes it, and a write to the
+    /// signal would also switch the `Auto` explore-by-touch gate. The type is
+    /// `teksilo_core::ScreenReaderState` (`teksilo::core::ScreenReaderState`
+    /// from the umbrella crate); it is not in the prelude.
+    ///
+    /// Nothing is marked dirty when it changes: bind at the level you need
+    /// ([`BindingLevel::Rebuild`](crate::binding::BindingLevel::Rebuild) to
+    /// swap widgets, `AccessibilityOnly` for an accessibility property,
+    /// `RepaintOnly` for colour). An effect does not replay the current
+    /// value: read [`Self::screen_reader_state`] once, then subscribe.
+    ///
+    /// Use it for additive presentation (longer status wording, a one-time
+    /// offer the user can refuse). It is not a switch for a second, reduced
+    /// interface, not a gate on semantics, focus or the AccessKit tree, and
+    /// not a substitute for the reduced-motion preference. Many readers
+    /// never set the OS flag.
+    ///
+    /// [`ScreenReaderState::Unknown`]: crate::environment::ScreenReaderState::Unknown
+    pub fn screen_reader_signal(
+        &self,
+    ) -> crate::signal::Signal<crate::environment::ScreenReaderState> {
+        self.screen_reader.clone()
     }
 
     /// Choose how explore-by-touch is decided for this window.
@@ -3374,7 +3424,7 @@ impl WidgetTree {
         match self.explore_by_touch {
             ExploreByTouch::Off => false,
             ExploreByTouch::On => true,
-            ExploreByTouch::Auto => self.screen_reader == ScreenReaderState::Active,
+            ExploreByTouch::Auto => self.screen_reader.get() == ScreenReaderState::Active,
         }
     }
 
@@ -3397,7 +3447,8 @@ impl WidgetTree {
     /// [`ScreenReaderState::Inactive`]: crate::environment::ScreenReaderState::Inactive
     pub fn set_at_client_attached(&mut self, attached: bool) {
         if self.at_client_attached && !attached {
-            self.screen_reader = crate::environment::ScreenReaderState::Inactive;
+            self.screen_reader
+                .set_if_changed(crate::environment::ScreenReaderState::Inactive);
         }
         self.at_client_attached = attached;
     }

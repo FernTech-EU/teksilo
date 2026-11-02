@@ -34,6 +34,13 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **An application can follow whether the operating system reports a screen
+  reader.** `BuildContext::screen_reader_state()` reads it,
+  `BuildContext::screen_reader_signal()` and `WidgetTree::screen_reader_signal()`
+  follow it, and `EventContext::screen_reader_state()` gives a handler the state
+  at dispatch. It is read again when a window takes the focus,
+  and a detaching accessibility client sets it to inactive. See
+  [docs/a11y/explore-by-touch.md](docs/a11y/explore-by-touch.md).
 - **`ImeOrigin`** (`Composition`, `Dictation`, `WritingTools`, `Insertion`;
   `#[non_exhaustive]`) says which part of the input system committed a text.
 - **`WidgetEvent::ime_commit(text)`** and
