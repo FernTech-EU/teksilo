@@ -421,6 +421,8 @@ grid-view-detail-name = Detaliile elementului { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab indentează. { $next } trece la controlul următor, { $previous } la cel anterior.
 
+list-view-row-actions-hint = Apăsați { $enter } pentru a edita rândul. { $exit } revine la listă.
+
 shortcut-settings-uncategorized = Generale
 shortcut-settings-search-placeholder = Caută comenzi sau taste
 shortcut-settings-search-label = Caută comenzi rapide

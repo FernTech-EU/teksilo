@@ -410,6 +410,8 @@ grid-view-detail-name = פרטי פריט { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab מוסיף הזחה. { $next } עובר לפקד הבא, { $previous } לפקד הקודם.
 
+list-view-row-actions-hint = הקישו { $enter } כדי לערוך את השורה. { $exit } חוזר לרשימה.
+
 shortcut-settings-uncategorized = כללי
 shortcut-settings-search-placeholder = חיפוש פקודות או מקשים
 shortcut-settings-search-label = חיפוש מקשי קיצור

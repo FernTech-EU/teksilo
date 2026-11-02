@@ -21,7 +21,7 @@
 //! (name-from-content, as ARIA specifies for `option` / `treeitem`), so the
 //! emitted row node carries role, state and name together.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::{Rect, SizeProposal};
@@ -86,6 +86,9 @@ pub(crate) struct ListItemWrapper {
     /// Publish nothing: the row widget inside is the option (see
     /// `ListView::presentational`).
     presentational: bool,
+    /// Set when the owning view is in
+    /// [`RowKeyboard::Actions`](crate::RowKeyboard::Actions).
+    actions: Option<RowActionsSetup>,
 
     // Build state.
     selected: bool,
@@ -100,6 +103,7 @@ impl ListItemWrapper {
             index,
             version: Signal::new(0),
             presentational: false,
+            actions: None,
             selected: false,
             child: None,
         }
@@ -110,6 +114,57 @@ impl ListItemWrapper {
     pub fn presentational(mut self, presentational: bool) -> Self {
         self.presentational = presentational;
         self
+    }
+
+    /// Make the row a place the keyboard can step into, for a view in
+    /// [`RowKeyboard::Actions`](crate::RowKeyboard::Actions).
+    pub fn actions(mut self, setup: RowActionsSetup) -> Self {
+        self.actions = Some(setup);
+        self
+    }
+}
+
+/// What a row wrapper needs to know about a view in
+/// [`RowKeyboard::Actions`](crate::RowKeyboard::Actions).
+pub(crate) struct RowActionsSetup {
+    /// The key that enters the row, named in the row's description: `F2`, or
+    /// `Enter` when the view has no activation handler.
+    pub entry_key: teksilo_core::event::Key,
+    /// Whether the row's controls can be Tab stops at all: while focus is in
+    /// the row the user stepped into. The wrapper installs it as a Tab gate
+    /// on itself, which holds the whole row out of the Tab order otherwise.
+    pub stop: teksilo_core::signal::Prop<bool>,
+    /// Written on every build: the row's controls that can take focus now
+    /// (enabled), in Tab order. Empty for a row with nothing to enter.
+    pub controls: Rc<RefCell<Vec<WidgetId>>>,
+    /// Written when one of the row's controls gains focus: its position in
+    /// `controls`. Shared by every row of the view, so it holds the position
+    /// in the row focus was last in.
+    ///
+    /// The hook lives on each control's node, so it is lost when a composite
+    /// rebuilds its focusable leaf on its own, and a control enabled after
+    /// the row was built has none. The position then stays what it was until
+    /// the row is built again.
+    pub ordinal: Rc<Cell<usize>>,
+}
+
+impl ListItemWrapper {
+    /// The description a row in action mode carries: which key enters it,
+    /// and that `Escape` comes back. Only a row holding a control says so.
+    fn actions_hint(&self) -> Option<String> {
+        let setup = self.actions.as_ref()?;
+        if setup.controls.borrow().is_empty() {
+            return None;
+        }
+        use crate::keystroke_format::format_keystroke;
+        use teksilo_core::event::{Key, Modifiers};
+        use teksilo_core::shortcut::KeyStroke;
+        let enter = format_keystroke(KeyStroke::new(setup.entry_key, Modifiers::NONE));
+        let exit = format_keystroke(KeyStroke::new(Key::Escape, Modifiers::NONE));
+        Some(
+            teksilo_i18n::tr_widget!(list_view_row_actions_hint(enter = enter, exit = exit))
+                .resolve_now(),
+        )
     }
 }
 
@@ -157,6 +212,48 @@ impl Widget for ListItemWrapper {
         }
 
         self.child = (self.body)(ctx, selected);
+
+        if let Some(ref setup) = self.actions {
+            // One Tab cycle per row, for the whole life of the mode. While the
+            // row is not entered its subtree is out of the Tab order (the
+            // `stop` gate), so the scope is empty and Tab skips it. A cycle
+            // rather than a pass-through: Tab past the row's last control
+            // would otherwise leave the list from the middle of it, and
+            // `Escape`, which the row describes, is the way out.
+            ctx.set_traversal_scope(teksilo_core::focus::TraversalScopePolicy::Cycle);
+            // A gate, not a Tab-stop prop: it holds the whole row out of the
+            // Tab order until the user steps in, whatever its controls' own
+            // props say. A roving group (a toolbar's current item) carries a
+            // prop nearer than any the row could set, and a mere inherited
+            // `false` would leave it a stop, so Tab would walk into the row's
+            // cycle from the list and never leave. Inside an entered row the
+            // controls' own props work as everywhere else.
+            ctx.set_tab_gate(ctx.self_id(), setup.stop.clone());
+            // Every control that can take focus now, in Tab order, read without
+            // touching any of them: a roving item out of the Tab order still
+            // has its place, so a position names the same control in the next
+            // build of the row.
+            let controls = self
+                .child
+                .map(|child| ctx.focusables_in_tab_order(child))
+                .unwrap_or_default();
+            for (ordinal, &control) in controls.iter().enumerate() {
+                // Which control the user is in, so a rebuild that has to put
+                // focus back explicitly puts it on the same one. Focus bubbles,
+                // so only the control's own arrival counts.
+                let last = setup.ordinal.clone();
+                ctx.apply_handlers(
+                    control,
+                    teksilo_core::widget_builder::HandlerSet::new().on_focus(move |gained, ctx| {
+                        if gained && ctx.dispatch_target() == Some(control) {
+                            last.set(ordinal);
+                        }
+                    }),
+                );
+            }
+            *setup.controls.borrow_mut() = controls;
+        }
+
         self.child.into_iter().collect()
     }
 
@@ -212,6 +309,9 @@ impl Widget for ListItemWrapper {
         // per-item `aria-setsize`, and `size_of_set_from_container` walks up
         // from an item to find it. A `ListView` announced neither until now.
         builder.set_position_in_set(self.index + 1);
+        if let Some(hint) = self.actions_hint() {
+            builder.set_description(hint);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

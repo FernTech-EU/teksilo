@@ -424,6 +424,8 @@ grid-view-detail-name = Detalles del elemento { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab aplica sangría. { $next } pasa al control siguiente y { $previous }, al anterior.
 
+list-view-row-actions-hint = Pulse { $enter } para editar la fila. { $exit } vuelve a la lista.
+
 shortcut-settings-uncategorized = General
 shortcut-settings-search-placeholder = Buscar comandos o teclas
 shortcut-settings-search-label = Buscar atajos

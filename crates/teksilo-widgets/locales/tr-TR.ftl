@@ -407,6 +407,8 @@ grid-view-detail-name = { $position }. öğenin ayrıntıları
 # crates/teksilo-widgets/src/code_editor/keyboard.rs
 code-editor-tab-escape-hint = Sekme girinti ekler. { $next } sonraki denetime, { $previous } önceki denetime geçer.
 
+list-view-row-actions-hint = Satırı düzenlemek için { $enter } tuşuna basın. { $exit } listeye döner.
+
 shortcut-settings-uncategorized = Genel
 shortcut-settings-search-placeholder = Komut veya tuş ara
 shortcut-settings-search-label = Kısayollarda ara

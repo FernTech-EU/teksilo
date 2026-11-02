@@ -37,12 +37,16 @@ as `Linear`.
 | `Enter` | activate | activate | activate the row |
 | `Ctrl`+`A` / `Ctrl`+`Shift`+`A` | select all / deselect all (Multi only) | " | " |
 | `Escape` |, | clear the focus ring | end the edit, else clear the ring |
-| `F2` |, |, | begin editing |
+| `F2` | `ListView` in action mode: step into the row² |, | begin editing |
 | `*` / `+` / `-` | tree only: expand the subtree / one level / collapse |, | tree table: the same |
 | `←` / `→` | tree only: collapse-or-ascend / expand-then-descend | ±1 tile | ±1 cell (tree column: expand / collapse) |
 
 ¹ In a multiple selection. A single selection moves with the cursor on every
 navigation key; see the next section.
+
+² Only a `ListView` built with `.row_keyboard(RowKeyboard::Actions)`, and only
+on a row holding a control. `Enter` steps in as well when the list has no
+`on_activate`. See [Action mode](#action-mode-listview) below.
 
 A `ListView` grouped with `.sections(..)` keeps this table unchanged. Its
 section headers are not items, so every chord moves between items and steps
@@ -151,6 +155,59 @@ on a plain click or arrow and on `Ctrl+Space`, in **either** direction, which
 is the clause that makes *`Ctrl`+arrow away → `Ctrl+Space` → `Shift`+arrow*
 extend from the row just picked. See
 [`SelectionModel`](../crates/teksilo-data/src/selection_model.rs).
+
+### Action mode (`ListView`)
+
+`Space` reaches one control per row. A list whose rows are small forms (a tag
+list where each row has a name, a description and a folder) needs every
+control, so a `ListView` takes `.row_keyboard(RowKeyboard::Actions)`. The other
+four views do not have it yet. The default, `RowKeyboard::Toggle`, is the
+behaviour above, unchanged.
+
+- **Entering.** `F2` moves focus into the cursor row's first control. `Enter`
+  does the same when the list has no `on_activate`; with one, `Enter` keeps
+  activating the row, so `F2` is the key there. On a row with no control, or only
+  disabled ones, `F2` does nothing and `Enter` selects as before. Focus arriving in a row any other
+  way (a click into a control, an assistive technology moving focus) enters it
+  too, and puts the cursor on it.
+- **Inside.** `Tab` and `Shift+Tab` cycle among the row's controls: the row is a
+  Tab cycle while focus is in it, and out of the Tab order otherwise, so the
+  list stays one Tab stop. The list's own keys stay with the control: the
+  arrows, paging, `Home`/`End`, type-ahead, `Alt`+arrow reordering, select all
+  and deselect all neither move the cursor nor touch the selection while a
+  control in a row has focus.
+- **Leaving.** `Escape` returns focus to the list, the cursor on that row. It
+  always does, before the focused control sees it, so a control's own use of
+  `Escape` (a code editor collapsing its extra carets) is not reached inside an
+  entered row. The one exception is a popup a control opened (a combo box's
+  list), which closes on its own `Escape` first. A second `Escape` on the list
+  reaches whatever is around it. Focus moved
+  out of the row with the mouse takes it out of the mode, and `Tab` coming back
+  lands on the list.
+- **Rebuilds.** A model change, a selection change and scrolling rebuild rows;
+  focus stays in the entered row through all of them. A change above the row
+  moves it, and focus follows it to its new place, on its first control. A row
+  scrolled out of the realized window leaves focus on the list until it is
+  realized again, and focus goes back in then if it is still on the list and
+  the user has not moved on: a key on the list, a click or tap on a row, or an
+  assistive technology's click on a row while the row is away leaves it. A
+  pan that scrolls the row back does not.
+  Removing the row, or a `Reset` of the model, ends the mode with focus on the
+  list. Each rebuild makes a new control, with its caret at the end of its
+  text, so a row editor should write the model when its edit commits
+  (`on_commit_fn`), not on every keystroke.
+- **Accessibility.** Each row holding an enabled control carries a
+  description naming the key that enters it ("Press F2 to edit the row.
+  Escape returns to the list.", or `Enter` when that is the key). While a control in a row has focus
+  the list names no active descendant: the control is the focus, and the row is
+  its container. A presentational view publishes no description.
+
+Without action mode, a control inside a row that sets its own Tab stop (a
+roving group's current item: a toolbar, a tab bar) escapes the row's
+suppression and stays a Tab stop. In action mode a row is held out of the Tab
+order as a whole until the user steps into it, whatever its controls' own Tab
+stops say; inside an entered row a roving group keeps its one stop, as part of
+the row's cycle.
 
 ### Scope: what `Home` is scoped to
 

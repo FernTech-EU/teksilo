@@ -413,6 +413,8 @@ grid-view-detail-name = Szczegóły elementu { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab wstawia wcięcie. { $next } przechodzi do następnej kontrolki, { $previous } do poprzedniej.
 
+list-view-row-actions-hint = Naciśnij { $enter }, aby edytować wiersz. { $exit } wraca do listy.
+
 shortcut-settings-uncategorized = Ogólne
 shortcut-settings-search-placeholder = Szukaj poleceń lub klawiszy
 shortcut-settings-search-label = Szukaj skrótów

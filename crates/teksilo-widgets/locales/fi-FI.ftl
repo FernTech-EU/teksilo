@@ -411,6 +411,8 @@ grid-view-detail-name = Kohteen { $position } tiedot
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Sarkain sisentää. { $next } siirtyy seuraavaan ohjausobjektiin, { $previous } edelliseen.
 
+list-view-row-actions-hint = Muokkaa riviä painamalla { $enter }. { $exit } palaa luetteloon.
+
 shortcut-settings-uncategorized = Yleiset
 shortcut-settings-search-placeholder = Hae komentoja tai näppäimiä
 shortcut-settings-search-label = Hae pikanäppäimiä

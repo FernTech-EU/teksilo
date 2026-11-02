@@ -98,6 +98,14 @@ by crate for clarity, not because crates version independently.
 - **`export_os_handoff(OsHandoff)`** on `ListView`, `TreeView`, `TableView`,
   `TreeTableView` and `GridView`: when a drag carrying the `export_external`
   MIME data is handed to the platform.
+- **`ListView::row_keyboard(RowKeyboard::Actions)`**, an action mode for a
+  list whose rows are small forms. `F2` moves focus into the cursor row's
+  first control (`Enter` too, when the list has no `on_activate`), and so does
+  a click into a control; `Tab` and `Shift+Tab` then cycle among that row's
+  controls, and `Escape` returns to the list on the same row. Each row holding
+  a control names the key that enters it in its accessible description. The
+  default, `RowKeyboard::Toggle`, keeps the list as it was. See
+  [docs/data-view-keyboard.md](docs/data-view-keyboard.md).
 - **`EditSource::Dictation` and `EditSource::WritingTools`.** A
   `RichTextEditor` and a `TextInputField` report dictation, Writing Tools and
   emoji insertions under `Dictation`, `WritingTools` and `Ime`.

@@ -415,6 +415,8 @@ grid-view-detail-name = Details van item { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab springt in. { $next } gaat naar het volgende besturingselement, { $previous } naar het vorige.
 
+list-view-row-actions-hint = Druk op { $enter } om de rij te bewerken. { $exit } keert terug naar de lijst.
+
 shortcut-settings-uncategorized = Algemeen
 shortcut-settings-search-placeholder = Opdrachten of toetsen zoeken
 shortcut-settings-search-label = Sneltoetsen zoeken

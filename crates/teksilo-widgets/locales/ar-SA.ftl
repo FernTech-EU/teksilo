@@ -422,6 +422,8 @@ grid-view-detail-name = تفاصيل العنصر { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = يضيف مفتاح Tab مسافة بادئة. ينقل { $next } إلى عنصر التحكم التالي، و{ $previous } إلى السابق.
 
+list-view-row-actions-hint = اضغط { $enter } لتحرير الصف. يعيدك { $exit } إلى القائمة.
+
 shortcut-settings-uncategorized = عام
 shortcut-settings-search-placeholder = البحث عن الأوامر أو المفاتيح
 shortcut-settings-search-label = البحث في الاختصارات

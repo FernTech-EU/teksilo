@@ -48,6 +48,7 @@ ListView — a virtualized, scrollable list backed by a reactive data model.
 | `Self` | [`on_rows_received(f: impl Fn(Vec<T>, usize, &mut teksilo_core::widget::EventContext) + 'static)`](#listview-on_rows_received) |
 | `Self` | [`on_activate(f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static)`](#listview-on_activate) |
 | `Self` | [`activate_on(mode: crate::data_views::ActivateOn)`](#listview-activate_on) |
+| `Self` | [`row_keyboard(mode: RowKeyboard)`](#listview-row_keyboard) |
 | `Self` | [`row_tooltip_sticky(on: bool)`](#listview-row_tooltip_sticky) |
 | `Self` | [`row_tooltip(f: impl Fn(usize, &T) -> Option<teksilo_i18n::LocalizedString> + 'static)`](#listview-row_tooltip) |
 | `Self` | [`row_rich_tooltip(f: impl Fn(usize, &T) -> Option<crate::tooltip::RichTooltipSource> + 'static)`](#listview-row_rich_tooltip) |
@@ -208,7 +209,10 @@ control the delegate puts in a row (the checkbox `StandardListItem` embeds,
 most often) never becomes a Tab stop of its own. Such a control publishes a
 keyboard toggle instead, which `Space` runs. A control in a section header
 has no cursor to be reached through, so it is a Tab stop while its header
-is on screen. Full
+is on screen. A list whose rows are small forms takes
+`row_keyboard(RowKeyboard::Actions)`: `F2` (or
+`Enter`, with no `on_activate`) steps into the cursor's row, `Tab` cycles
+among its controls, and `Escape` comes back to the list. Full
 keyboard navigation: arrows, Home, End, PageUp, PageDown (each moving the
 selection; in a multiple selection, Ctrl on an arrow or the accelerator on
 the others moves only the cursor), Shift for a range and Ctrl+Shift for an
@@ -657,6 +661,31 @@ toggle the selection but do **not** activate.
 Choose single- vs double-click activation (default
 `ActivateOn::DoubleClick`). Enter activates in
 either mode.
+
+<a id="listview-row_keyboard"></a>
+
+#### `pub fn row_keyboard(mut self, mode: RowKeyboard) -> Self`
+
+How the keyboard reaches the controls inside a row (default
+`RowKeyboard::Toggle`).
+
+`RowKeyboard::Actions` is for a list
+whose rows are small forms (a name field, a colour, a folder): `F2`
+moves focus into the cursor row's first control, and so does `Enter`
+when the view has no `on_activate`. A click into
+a control enters as well. `Tab` and `Shift+Tab` then cycle among that
+row's controls, the list's own keys (arrows, paging, type-ahead,
+select all) stay with the control, and `Escape` returns focus to the
+list with the cursor on that row. Outside a row the list is still one
+Tab stop.
+
+Each row holding a control says in its accessible description which
+key enters it.
+
+A row editor should write the model when its edit commits
+(`on_commit_fn`), not on every keystroke: a model change rebuilds the
+rows. Focus stays in the row across that rebuild, but the field is a
+new one, with its caret at the end of its text.
 
 <a id="listview-row_tooltip_sticky"></a>
 

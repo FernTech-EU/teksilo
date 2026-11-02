@@ -134,7 +134,10 @@
 //! most often) never becomes a Tab stop of its own. Such a control publishes a
 //! keyboard toggle instead, which `Space` runs. A control in a section header
 //! has no cursor to be reached through, so it is a Tab stop while its header
-//! is on screen. Full
+//! is on screen. A list whose rows are small forms takes
+//! [`row_keyboard(RowKeyboard::Actions)`](ListView::row_keyboard): `F2` (or
+//! `Enter`, with no `on_activate`) steps into the cursor's row, `Tab` cycles
+//! among its controls, and `Escape` comes back to the list. Full
 //! keyboard navigation: arrows, Home, End, PageUp, PageDown (each moving the
 //! selection; in a multiple selection, Ctrl on an arrow or the accelerator on
 //! the others moves only the cursor), Shift for a range and Ctrl+Shift for an
@@ -191,7 +194,9 @@ use crate::common::list_nav;
 use crate::common::row_metrics::{HeightSource, RowMetrics, SharedRowMetrics};
 use crate::common::row_reveal::{RevealAlign, RowReveal, SharedRowReveal};
 use crate::common::scroll::OverscrollBehavior;
-use crate::data_views::{DragTransferMode, RowDragData, ViewId, ViewKind, flat_insertion_target};
+use crate::data_views::{
+    DragTransferMode, RowDragData, RowKeyboard, ViewId, ViewKind, flat_insertion_target,
+};
 use crate::grid_view::sections::SectionProvider;
 use crate::list_source::ListSource;
 use crate::scroll_area::ScrollBarMode;
@@ -199,6 +204,7 @@ use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVisual};
 use teksilo_core::styles::density::dp;
 
 mod body_pane;
+mod row_actions;
 mod sections;
 mod widget_impl;
 
@@ -308,6 +314,10 @@ pub struct ListView<T: 'static> {
     on_activate: Option<Rc<dyn Fn(usize, &mut teksilo_core::widget::EventContext)>>,
     /// Whether activation is a single or double click (default `DoubleClick`).
     activate_on: crate::data_views::ActivateOn,
+    /// Action-mode state, present exactly when the view is in
+    /// [`RowKeyboard::Actions`]. A persistent
+    /// field, shared with the body pane, so it survives every rebuild.
+    row_actions: Option<Rc<row_actions::RowActions>>,
 
     /// `true` while the view holds keyboard focus (root's inclusive
     /// [`BuildContext::view_focus_active`](teksilo_core::BuildContext::view_focus_active) signal). With `focus_visible`, drives
@@ -512,6 +522,7 @@ impl<T: 'static> ListView<T> {
             placed_content_width: Rc::new(Cell::new(0.0)),
             on_activate: None,
             activate_on: crate::data_views::ActivateOn::default(),
+            row_actions: None,
             overscroll_behavior: OverscrollBehavior::default(),
             smooth_scrolling: true,
             smooth_scroll_duration: Duration::from_millis(150),
@@ -905,8 +916,17 @@ impl<T: 'static> ListView<T> {
         });
 
         let on_focus = reveal.clone();
+        let row_actions = self.row_actions.clone();
         ctx.effect(&self.view_focused, move |focused| {
-            if *focused {
+            // Action mode moves focus between a row and the view when a scroll
+            // takes the entered row out of the window or brings it back. That
+            // is the user scrolling, and revealing the cursor's row would
+            // scroll them straight back.
+            if *focused
+                && !row_actions
+                    .as_ref()
+                    .is_some_and(|actions| actions.keep_on_view_focus.get())
+            {
                 on_focus();
             }
         });
@@ -1109,6 +1129,38 @@ impl<T: 'static> ListView<T> {
     /// either mode.
     pub fn activate_on(mut self, mode: crate::data_views::ActivateOn) -> Self {
         self.activate_on = mode;
+        self
+    }
+
+    /// How the keyboard reaches the controls inside a row (default
+    /// [`RowKeyboard::Toggle`]).
+    ///
+    /// [`RowKeyboard::Actions`] is for a list
+    /// whose rows are small forms (a name field, a colour, a folder): `F2`
+    /// moves focus into the cursor row's first control, and so does `Enter`
+    /// when the view has no [`on_activate`](Self::on_activate). A click into
+    /// a control enters as well. `Tab` and `Shift+Tab` then cycle among that
+    /// row's controls, the list's own keys (arrows, paging, type-ahead,
+    /// select all) stay with the control, and `Escape` returns focus to the
+    /// list with the cursor on that row. Outside a row the list is still one
+    /// Tab stop.
+    ///
+    /// Each row holding a control says in its accessible description which
+    /// key enters it.
+    ///
+    /// A row editor should write the model when its edit commits
+    /// (`on_commit_fn`), not on every keystroke: a model change rebuilds the
+    /// rows. Focus stays in the row across that rebuild, but the field is a
+    /// new one, with its caret at the end of its text.
+    pub fn row_keyboard(mut self, mode: RowKeyboard) -> Self {
+        self.row_actions = match mode {
+            RowKeyboard::Toggle => None,
+            RowKeyboard::Actions => Some(
+                self.row_actions
+                    .take()
+                    .unwrap_or_else(row_actions::RowActions::new),
+            ),
+        };
         self
     }
 
@@ -1467,3 +1519,6 @@ mod handle_tests;
 
 #[cfg(test)]
 mod cursor_tests;
+
+#[cfg(test)]
+mod row_actions_tests;

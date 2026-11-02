@@ -406,6 +406,8 @@ grid-view-detail-name = 항목 { $position } 세부 정보
 # crates/teksilo-widgets/src/code_editor/keyboard.rs
 code-editor-tab-escape-hint = Tab 키는 들여쓰기합니다. { $next } 키는 다음 컨트롤로, { $previous } 키는 이전 컨트롤로 이동합니다.
 
+list-view-row-actions-hint = { $enter } 키를 눌러 행을 편집합니다. { $exit } 키를 누르면 목록으로 돌아갑니다.
+
 shortcut-settings-uncategorized = 일반
 shortcut-settings-search-placeholder = 명령 또는 키 검색
 shortcut-settings-search-label = 바로 가기 키 검색

@@ -11,6 +11,7 @@ loading.
 | Kind | Name |
 | ---: | :--- |
 | `enum` | [`ActivateOn`](#activateon) — How a data-view row/tile is *activated* (opened/committed) by pointer — distinct from *selection*, which also moves on arrow-key navigation |
+| `enum` | [`RowKeyboard`](#rowkeyboard) — How the keyboard reaches the controls inside a data-view row |
 | `struct` | [`ViewId`](#viewid) — Opaque, kind-tagged, process-unique identity of a drag-capable data-view instance |
 | `enum` | [`DragTransferMode`](#dragtransfermode) — What the *origin* view does to its own rows once a drag is accepted by a **foreign** target (a different `DropTarget` / view / the OS) |
 | `struct` | [`RowDragData`](#rowdragdata) — The public, generic drag payload every data-view row (or selected set) emits |
@@ -82,6 +83,31 @@ pub enum ActivateOn { /* variants */ }
 
 - **`SingleClick`** — One primary click activates the row (KDE / web / Scrivener convention). Selection and activation happen on the same click.
 - **`DoubleClick`** — A double primary click activates the row; the first click only selects it (Finder / Explorer / Qt and GTK default). This is the `Default`.
+
+<a id="rowkeyboard"></a>
+
+## `pub enum RowKeyboard`
+
+**Import:** `use teksilo::widgets::RowKeyboard;`
+
+How the keyboard reaches the controls inside a data-view row.
+
+A list is one Tab stop with a cursor moving inside it, so a control the
+row delegate puts in a row is out of the Tab order. `Toggle` (the default)
+leaves it there and gives a checkbox its `Space`; `Actions` lets the user
+step into the cursor's row and work its controls, for a list whose rows
+are small forms.
+
+Pass to `ListView::row_keyboard`.
+
+```rust
+pub enum RowKeyboard { /* variants */ }
+```
+
+### Variants
+
+- **`Toggle`** — Rows are out of the Tab order. `Space` runs the row's published keyboard toggle (a checkbox), `Enter` activates the row.
+- **`Actions`** — Action mode. `F2` moves focus into the cursor row's first control, and so does `Enter` when the view has no `on_activate` (with one, `Enter` keeps activating the row). A click into a control enters too. `Tab` and `Shift+Tab` cycle among that row's controls, and `Escape` returns focus to the list with the cursor on that row. Each row with a control says in its accessible description which key enters it.
 
 <a id="viewid"></a>
 

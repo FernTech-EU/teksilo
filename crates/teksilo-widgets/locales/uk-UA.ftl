@@ -413,6 +413,8 @@ grid-view-detail-name = Відомості про елемент { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab додає відступ. { $next } переходить до наступного елемента керування, { $previous } до попереднього.
 
+list-view-row-actions-hint = Натисніть { $enter }, щоб змінити рядок. { $exit } повертає до списку.
+
 shortcut-settings-uncategorized = Загальні
 shortcut-settings-search-placeholder = Пошук команд або клавіш
 shortcut-settings-search-label = Пошук сполучень клавіш

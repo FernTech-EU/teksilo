@@ -405,6 +405,8 @@ grid-view-detail-name = Detaljer for element { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab indrykker. { $next } flytter til næste kontrolelement, { $previous } til det forrige.
 
+list-view-row-actions-hint = Tryk på { $enter } for at redigere rækken. { $exit } vender tilbage til listen.
+
 shortcut-settings-uncategorized = Generelt
 shortcut-settings-search-placeholder = Søg efter kommandoer eller taster
 shortcut-settings-search-label = Søg i tastaturgenveje

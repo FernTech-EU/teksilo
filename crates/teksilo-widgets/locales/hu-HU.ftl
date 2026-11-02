@@ -409,6 +409,8 @@ grid-view-detail-name = { $position }. elem részletei
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = A Tab behúz. A { $next } a következő vezérlőre lép, a { $previous } az előzőre.
 
+list-view-row-actions-hint = A sor szerkesztéséhez nyomja meg a { $enter } billentyűt. A { $exit } visszavisz a listához.
+
 shortcut-settings-uncategorized = Általános
 shortcut-settings-search-placeholder = Parancsok vagy billentyűk keresése
 shortcut-settings-search-label = Gyorsbillentyűk keresése

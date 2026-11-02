@@ -94,6 +94,20 @@ impl<T: 'static> Widget for ListView<T> {
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
+        // Action mode: focus leaving the list disengages the entered row, so
+        // its controls drop out of the Tab order and Tab arriving from outside
+        // lands on the list again. The same edge fires when a rebuild destroys
+        // the focused control; the restore that follows lands in the row,
+        // whose arrival engages it again.
+        if let Some(ref actions) = self.row_actions {
+            let actions = actions.clone();
+            let handle = self.view_focused.observe(move |focused| {
+                if !*focused && actions.engaged.get() {
+                    actions.engaged.set(false);
+                }
+            });
+            ctx.own_handle(handle);
+        }
         self.focus_visible.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
@@ -117,6 +131,7 @@ impl<T: 'static> Widget for ListView<T> {
             let first_changed = self.source.first_changed_fn.clone();
             let row_sel = self.row_selection.clone();
             let focused = self.focused_index.clone();
+            let row_actions = self.row_actions.clone();
             move |change| {
                 // Keep row metrics in step with the data: rows before
                 // the first changed index keep their (seeded or
@@ -157,6 +172,12 @@ impl<T: 'static> Widget for ListView<T> {
                     focused.set(teksilo_data::data_change::adjust_single_index_for_change(
                         current, change,
                     ));
+                }
+                // The entered row follows the same rule, before the pane is
+                // asked to rebuild: that request records whether focus was in
+                // the row, and the rebuild reads where the row went.
+                if let Some(ref actions) = row_actions {
+                    actions.on_data_change(change);
                 }
                 let next = dv.get() + 1;
                 dv.set(next);
@@ -298,10 +319,18 @@ impl<T: 'static> Widget for ListView<T> {
         {
             let len = self.source.len_fn.clone();
             let sel = self.row_selection.clone();
+            let in_row = self.row_actions.is_some();
             crate::common::standard_edit::register_standard_edit_action(
                 ctx,
                 teksilo_core::shortcut::StandardEdit::SelectAll,
-                move |_ctx| {
+                move |ctx| {
+                    // In action mode a control in a row has the keys, select
+                    // all included: a field that takes it has its own action,
+                    // and one that does not (a checkbox) must not select every
+                    // row behind the user's back.
+                    if in_row && ctx.focused() != Some(self_id) {
+                        return false;
+                    }
                     let count = (len)();
                     match sel {
                         Some(ref sel)
@@ -338,13 +367,69 @@ impl<T: 'static> Widget for ListView<T> {
             let ta_label = self.type_ahead_label.clone();
             let ta_timeout = self.type_ahead_timeout;
             let with_item_str = self.source.with_item_str_fn.clone();
+            let actions_for_key = self.row_actions.clone();
 
             handlers = handlers.on_key(move |event, ctx| {
                 if let teksilo_core::event::WidgetEvent::KeyDown { key, modifiers, .. } = event {
                     use teksilo_core::event::Key;
+                    // Action mode: a key that reaches the list from a control
+                    // in a row is the control's to decline, not the list's to
+                    // take. Down in a field must not move the cursor out from
+                    // under the user, nor Alt+Up reorder the row being edited.
+                    if actions_for_key.is_some() && ctx.focused() != Some(self_id) {
+                        return teksilo_core::event::EventResponse::Ignored;
+                    }
+                    // A key on the list while an entered row waits outside the
+                    // window (`resume_on_realize`) is the user working the list:
+                    // the row is left, so a Down that scrolls it back in does
+                    // not pull focus into its field.
+                    // Caps Lock is the one lone modifier that arrives as a key
+                    // (Shift, Ctrl and Alt never do), and it is not the user
+                    // working the list.
+                    if let Some(ref actions) = actions_for_key
+                        && *key != Key::CapsLock
+                        && actions.resume_on_realize.get()
+                    {
+                        actions.exit();
+                    }
                     let count = (len_for_key)();
                     if count == 0 {
                         return teksilo_core::event::EventResponse::Ignored;
+                    }
+
+                    // Action mode: F2 steps into the cursor's row, and so does
+                    // Enter on a list with nothing to activate. A row with no
+                    // control has nothing to step into: F2 does nothing there
+                    // and Enter keeps selecting.
+                    if let Some(ref actions) = actions_for_key
+                        && *modifiers == teksilo_core::event::Modifiers::NONE
+                        && (*key == Key::F2 || (*key == Key::Enter && activate_key.is_none()))
+                    {
+                        let row = fi
+                            .get()
+                            .or_else(|| {
+                                sel_for_key
+                                    .as_ref()
+                                    .and_then(|s| s.selected_indices().first().copied())
+                            })
+                            .unwrap_or(0)
+                            .min(count - 1);
+                        if let Some(slot) = actions.slot(row)
+                            && slot.has_control()
+                        {
+                            if *key == Key::Enter
+                                && let Some(ref sel) = sel_for_key
+                            {
+                                sel.select(row);
+                            }
+                            fi.set(Some(row));
+                            actions.enter(row);
+                            ctx.request_focus_into(slot.wrapper);
+                            return teksilo_core::event::EventResponse::Handled;
+                        }
+                        if *key == Key::F2 {
+                            return teksilo_core::event::EventResponse::Ignored;
+                        }
                     }
 
                     // Deselect all — Ctrl+Shift+A, ⇧⌘A on macOS (Multi
@@ -813,6 +898,47 @@ impl<T: 'static> Widget for ListView<T> {
         // root id, the stable id start_drag was given.
         handlers = self.export.install_completion(handlers);
 
+        // --- Action mode: the view's own focus, and Escape out of a row ---
+        if let Some(ref actions) = self.row_actions {
+            // Focus landing on the view itself ends the mode: a click on the
+            // list, Tab arriving from outside, Escape. A control's focus
+            // bubbles here too, which the dispatch target tells apart.
+            let on_view = actions.clone();
+            handlers = handlers.on_focus(move |gained, ctx| {
+                if ctx.dispatch_target() != Some(self_id) {
+                    return;
+                }
+                on_view.focus_on_view.set(gained);
+                if gained && !on_view.keep_on_view_focus.get() {
+                    on_view.exit();
+                }
+            });
+            // Escape from a control in the entered row comes back to the list,
+            // cursor on that row. Only from inside the row's own subtree: a
+            // popup a control opened (a combo box's list) is not, and closes on
+            // its own Escape first. Anything else passes, so a second Escape
+            // reaches the dialog around the list.
+            let on_escape = actions.clone();
+            let cursor = self.focused_index.clone();
+            handlers = handlers.on_key_preview(move |event, ctx| {
+                if let teksilo_core::event::WidgetEvent::KeyDown {
+                    key: teksilo_core::event::Key::Escape,
+                    ..
+                } = event
+                    && let Some(row) = on_escape.entered.get()
+                    && on_escape.slot(row).is_some_and(|slot| slot.inside.get())
+                {
+                    on_escape.exit();
+                    if cursor.get() != Some(row) {
+                        cursor.set(Some(row));
+                    }
+                    ctx.request_focus(self_id);
+                    return teksilo_core::event::EventResponse::Handled;
+                }
+                teksilo_core::event::EventResponse::Ignored
+            });
+        }
+
         ctx.apply_self_handlers(handlers);
 
         // --- Body pane ---
@@ -852,6 +978,8 @@ impl<T: 'static> Widget for ListView<T> {
             header_tab_stops: Vec::new(),
             presentational: self.presentational,
             reveal: self.reveal.clone(),
+            row_actions: self.row_actions.clone(),
+            view_focused: self.view_focused.clone(),
         };
         self.body_pane_id = Some(ctx.add(pane));
 
@@ -1187,7 +1315,16 @@ impl<T: 'static> Widget for ListView<T> {
         // combobox pattern (`CommandPalette`) keeps focus on a text field that
         // points at a row in *this* list, and two publishers of the same row is
         // an ambiguity nobody needs to resolve.
+        //
+        // In action mode, only while focus is on the view itself. With a
+        // control in a row focused, that control is the focus target and the
+        // row is its container; a second focus claim on the row would have a
+        // Windows reader announce the row over the field.
         if self.view_focused.get()
+            && self
+                .row_actions
+                .as_ref()
+                .is_none_or(|actions| actions.focus_on_view.get())
             && let Some(row) = self.current_row_widget()
         {
             builder.set_active_descendant(teksilo_core::accessibility::widget_id_to_node_id(row));

@@ -412,6 +412,8 @@ grid-view-detail-name = 項目 { $position } の詳細
 # crates/teksilo-widgets/src/code_editor/keyboard.rs
 code-editor-tab-escape-hint = Tab キーでインデントします。{ $next } で次のコントロールへ、{ $previous } で前のコントロールへ移動します。
 
+list-view-row-actions-hint = { $enter } キーで行を編集します。{ $exit } キーでリストに戻ります。
+
 shortcut-settings-uncategorized = 一般
 shortcut-settings-search-placeholder = コマンドまたはキーを検索
 shortcut-settings-search-label = ショートカットを検索

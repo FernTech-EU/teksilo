@@ -467,6 +467,13 @@ grid-view-detail-name = Details of item { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab indents. { $next } moves to the next control, { $previous } to the previous one.
 
+# ListView in action mode (`RowKeyboard::Actions`): the description of a
+# row holding a control. $enter is the key that moves focus into the row
+# (F2, or Enter when the list has no activation), $exit is Escape, both named
+# as this platform and locale name keys. See
+# crates/teksilo-widgets/src/list_item_a11y.rs.
+list-view-row-actions-hint = Press { $enter } to edit the row. { $exit } returns to the list.
+
 # ShortcutSettings: the header of the group holding every shortcut that
 # declared no category. See crates/teksilo-widgets/src/shortcut_settings.rs.
 shortcut-settings-uncategorized = General

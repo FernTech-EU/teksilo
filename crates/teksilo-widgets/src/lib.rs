@@ -48,7 +48,7 @@ pub mod date_time_edit;
 pub mod dialog;
 pub mod docking;
 pub mod editor_shortcuts;
-pub use data_views::{ActivateOn, DragTransferMode, RowDragData, ViewId};
+pub use data_views::{ActivateOn, DragTransferMode, RowDragData, RowKeyboard, ViewId};
 // The Option rule for single-key commands, for the sibling widget crates.
 #[doc(hidden)]
 pub use common::range_nav::option_blocks_key;

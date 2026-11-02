@@ -165,6 +165,13 @@ pub(crate) struct ListBodyPane<T: 'static> {
     /// in `place_children` after the measure pass — this pane is where the
     /// row offsets settle, and the scroll anchoring with them.
     pub(crate) reveal: crate::common::row_reveal::SharedRowReveal,
+    /// Action-mode state, when the view is in
+    /// [`RowKeyboard::Actions`](crate::RowKeyboard::Actions).
+    pub(crate) row_actions: Option<Rc<super::row_actions::RowActions>>,
+    /// The root's own focus signal (`true` while focus is on the view or
+    /// inside it), which action mode reads and, after a build-time focus move,
+    /// writes back (see [`Self::refocus_after_rebuild`]).
+    pub(crate) view_focused: Signal<bool>,
 }
 
 impl<T: 'static> ListBodyPane<T> {
@@ -229,6 +236,96 @@ impl<T: 'static> ListBodyPane<T> {
         self.header_tab_stops.push((section, on_screen));
     }
 
+    /// Put focus where action mode needs it after this build: back into the
+    /// entered row, on the view, or nowhere (the framework's own restore).
+    ///
+    /// Runs at the end of `build`, after the rows exist. The rebuild has
+    /// already destroyed the control that had focus, so focus is `None` here
+    /// whenever `was_inside` is true.
+    ///
+    /// - The row is realized at the same place among the realized rows (same
+    ///   first row, same index): nothing to do. The tree's restore puts focus
+    ///   back on the control at the position it had among this pane's
+    ///   controls, which is the same control of the same row.
+    /// - The row moved (a change above it) or the window moved: that position
+    ///   now names another row's control, so focus goes explicitly to the
+    ///   entered row's control the user was in (its first one if that is
+    ///   gone), which makes the restore stand down.
+    /// - The row left the window: focus goes to the view, so the restore does
+    ///   not land in another row, and it goes back to the same control when
+    ///   the row returns, if it is still on the view then and the user has not
+    ///   worked the list meanwhile.
+    /// - The row was removed: focus goes to the view and the mode ends.
+    fn refocus_after_rebuild(
+        &self,
+        ctx: &mut BuildContext,
+        actions: &super::row_actions::RowActions,
+        was_inside: bool,
+        start: usize,
+    ) {
+        let moved = actions.shifted.replace(false) || actions.last_start.get() != Some(start);
+        actions.last_start.set(Some(start));
+        if actions.refocus_view.replace(false) {
+            ctx.focus(self.root_id);
+            return;
+        }
+        let Some(entered) = actions.entered.get() else {
+            return;
+        };
+        match actions.slot(entered) {
+            Some(slot) if actions.resume_on_realize.replace(false) => {
+                if actions.focus_on_view.get() {
+                    self.focus_row_control(ctx, actions, &slot);
+                } else {
+                    // Focus went elsewhere while the row was away: it is not
+                    // taken back.
+                    actions.exit();
+                }
+            }
+            Some(slot) if was_inside && moved => {
+                self.focus_row_control(ctx, actions, &slot);
+            }
+            Some(_) => {}
+            None if was_inside => {
+                actions.keep_on_view_focus.set(true);
+                ctx.focus(self.root_id);
+                actions.keep_on_view_focus.set(false);
+                actions.resume_on_realize.set(true);
+            }
+            None => {}
+        }
+    }
+
+    /// Focus the control of a row this build created that sits where the
+    /// user's was (`RowActions::ordinal`), or the row's first one.
+    ///
+    /// The row is not parented to this pane until `build` returns, so the
+    /// focus move cannot reach the signals above it: the view's focus signal
+    /// is left `false` by the destruction that preceded this build, and the
+    /// row's own `focus_within` (below the break) flips as it should. The view
+    /// does hold focus now, so its signal is written here, and with it the
+    /// mode's `engaged`, which the view's signal going `false` had turned off.
+    fn focus_row_control(
+        &self,
+        ctx: &mut BuildContext,
+        actions: &super::row_actions::RowActions,
+        slot: &super::row_actions::RowSlot,
+    ) {
+        let Some(control) = slot.control(actions.ordinal.get()) else {
+            actions.exit();
+            return;
+        };
+        ctx.focus(control);
+        if !self.view_focused.get() {
+            actions.keep_on_view_focus.set(true);
+            self.view_focused.set(true);
+            actions.keep_on_view_focus.set(false);
+        }
+        if let Some(index) = actions.entered.get() {
+            actions.enter(index);
+        }
+    }
+
     /// Whether `section`'s header shows in the viewport: inside it, and not
     /// under the pinned copy, which stands in for it.
     fn header_on_screen(&self, section: usize) -> bool {
@@ -264,6 +361,21 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         version.bind_to(ctx.self_id(), ctx.binding_registry(), BindingLevel::Rebuild);
         // A handle's reveal request re-places this pane, which applies it.
         self.reveal.bind(ctx);
+
+        // Action mode: whether focus was in the entered row, as of the request
+        // for this rebuild. Asked now it would always say no, since the
+        // rebuild has already destroyed the focused control.
+        let was_inside = self
+            .row_actions
+            .as_ref()
+            .is_some_and(|actions| actions.inside_at_bump.replace(false));
+        if let Some(ref actions) = self.row_actions {
+            let actions = actions.clone();
+            let handle = version.observe(move |_| {
+                actions.inside_at_bump.set(actions.inside_now());
+            });
+            ctx.own_handle(handle);
+        }
 
         // Scroll position re-places rows without rebuilding (within buffer).
         // Deliberately NOT `register_animated_signal`: the root owns that
@@ -368,6 +480,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
         // Key the row focus scope on the ListView root (which is the
         // focusable node), not this pane — see `root_id`'s docs.
         ctx.begin_view_focus_for(root_id);
+        let mut rows: Vec<super::row_actions::RowSlot> = Vec::new();
         for i in start..end {
             while let Some(&section) = pending_headers.peek()
                 && section_firsts[section] <= i
@@ -424,10 +537,33 @@ impl<T: 'static> Widget for ListBodyPane<T> {
             };
 
             {
-                let child_id = ctx.add(
+                let mut controls = None;
+                let mut wrapper =
                     crate::list_item_a11y::ListItemWrapper::new(body, selection.clone(), i)
-                        .presentational(self.presentational),
-                );
+                        .presentational(self.presentational);
+                if let Some(ref actions) = self.row_actions {
+                    let list = Rc::new(RefCell::new(Vec::new()));
+                    controls = Some(list.clone());
+                    wrapper = wrapper.actions(crate::list_item_a11y::RowActionsSetup {
+                        entry_key: if self.on_activate.is_some() {
+                            teksilo_core::event::Key::F2
+                        } else {
+                            teksilo_core::event::Key::Enter
+                        },
+                        // A row's controls are Tab stops while it is the row
+                        // the user stepped into and focus is in it. While no
+                        // row is, every row's scope is empty and skipped, and
+                        // the list stays one Tab stop.
+                        stop: actions
+                            .entered
+                            .map(move |entered| *entered == Some(i))
+                            .and(&actions.engaged)
+                            .into(),
+                        controls: list,
+                        ordinal: actions.ordinal.clone(),
+                    });
+                }
+                let child_id = ctx.add(wrapper);
 
                 // A listbox is *one* Tab stop, with a cursor moving inside it.
                 // Any focusable the delegate put in a row — the checkbox
@@ -439,7 +575,70 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                 // `tab_stop_effective`, so one call covers whatever the
                 // delegate built. The control stays clickable, and `Space`
                 // reaches it through the row's keyboard-toggle target.
-                ctx.set_tab_stop(child_id, false);
+                //
+                // In action mode the row the user stepped into is the
+                // exception, for as long as focus is in it: the wrapper holds
+                // its whole subtree out of Tab with a gate on that condition,
+                // and is a Tab cycle (`ListItemWrapper::build`), empty and
+                // skipped while the gate is closed.
+                match self.row_actions {
+                    None => ctx.set_tab_stop(child_id, false),
+                    Some(ref actions) => {
+                        let controls = controls.clone().unwrap_or_default();
+                        let inside = Signal::new(false);
+                        ctx.apply_handlers(
+                            child_id,
+                            HandlerSet::new().focus_within(inside.clone()),
+                        );
+                        // Focus arriving in the row by any route (F2, a click
+                        // into a control, an assistive technology's focus)
+                        // enters it, and puts the cursor on it so `Escape`
+                        // comes back to this row. A `false` edge is no exit:
+                        // every rebuild writes one (see `row_actions`).
+                        let entered_actions = actions.clone();
+                        let anchor = self.source.anchor(i);
+                        let cursor = self.focused_index.clone();
+                        let handle = inside.observe(move |now| {
+                            if !*now {
+                                return;
+                            }
+                            let Some(row) = anchor.index() else {
+                                return;
+                            };
+                            entered_actions.enter(row);
+                            if cursor.get() != Some(row) {
+                                cursor.set(Some(row));
+                            }
+                        });
+                        ctx.own_handle(handle);
+                        // A press on a row while the entered row waits outside
+                        // the window leaves that row, as a key on the list does.
+                        // On the release of a press that stayed a press: a
+                        // finger that pans the list back to the row starts on
+                        // a row too, and must still find it waiting.
+                        let waiting = actions.clone();
+                        ctx.apply_handlers(
+                            child_id,
+                            HandlerSet::new().on_pointer_event(move |event, ctx| {
+                                if matches!(
+                                    event,
+                                    teksilo_core::event::WidgetEvent::PointerUp { .. }
+                                ) && ctx.press_is_inside()
+                                    && waiting.resume_on_realize.get()
+                                {
+                                    waiting.exit();
+                                }
+                                teksilo_core::event::EventResponse::Ignored
+                            }),
+                        );
+                        rows.push(super::row_actions::RowSlot {
+                            index: i,
+                            wrapper: child_id,
+                            inside,
+                            controls,
+                        });
+                    }
+                }
 
                 // Selection click handling: plain click selects,
                 // Ctrl+click toggles, Shift+click extends range.
@@ -562,6 +761,7 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                     let vh_a11y = self.viewport_height.clone();
                     let len_a11y = self.source.len_fn.clone();
                     let activate_a11y = self.on_activate.clone();
+                    let actions_a11y = self.row_actions.clone();
                     ctx.apply_handlers(
                         child_id,
                         HandlerSet::new().on_access_action(move |action, ctx| {
@@ -572,6 +772,13 @@ impl<T: 'static> Widget for ListBodyPane<T> {
                             };
                             match action {
                                 Action::Click => {
+                                    // An entered row waiting outside the window
+                                    // is left, as by a pointer press on a row.
+                                    if let Some(ref actions) = actions_a11y
+                                        && actions.resume_on_realize.get()
+                                    {
+                                        actions.exit();
+                                    }
                                     // Default action: select AND activate — an
                                     // AT client has no double-click to give.
                                     if let Some(ref sel) = sel_a11y {
@@ -731,6 +938,11 @@ impl<T: 'static> Widget for ListBodyPane<T> {
 
         // Publish the realized (index → wrapper id) map for the root's a11y.
         *self.row_map.borrow_mut() = self.item_entries.clone();
+
+        if let Some(actions) = self.row_actions.clone() {
+            *actions.rows.borrow_mut() = rows;
+            self.refocus_after_rebuild(ctx, &actions, was_inside, start);
+        }
 
         self.child_roots.clone()
     }

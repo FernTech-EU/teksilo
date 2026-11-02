@@ -414,6 +414,8 @@ grid-view-detail-name = Podrobnosti položky { $position }
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab odsazuje. { $next } přejde na další ovládací prvek, { $previous } na předchozí.
 
+list-view-row-actions-hint = Stisknutím { $enter } upravíte řádek. { $exit } se vrátí do seznamu.
+
 shortcut-settings-uncategorized = Obecné
 shortcut-settings-search-placeholder = Hledat příkazy nebo klávesy
 shortcut-settings-search-label = Hledat klávesové zkratky

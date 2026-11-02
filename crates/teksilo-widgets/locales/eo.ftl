@@ -373,6 +373,8 @@ grid-view-detail-name = Detaloj de ero { $position }
 
 code-editor-tab-escape-hint = Tab enŝovas. { $next } movas al la sekva regilo, { $previous } al la antaŭa.
 
+list-view-row-actions-hint = Premu { $enter } por redakti la vicon. { $exit } revenas al la listo.
+
 shortcut-settings-uncategorized = Ĝeneralaj
 shortcut-settings-search-placeholder = Serĉi komandojn aŭ klavojn
 shortcut-settings-search-label = Serĉi klavkombinojn

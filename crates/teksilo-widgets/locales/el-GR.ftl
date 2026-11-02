@@ -412,6 +412,8 @@ grid-view-detail-name = Λεπτομέρειες στοιχείου { $position 
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Το Tab προσθέτει εσοχή. Το { $next } μεταβαίνει στο επόμενο στοιχείο ελέγχου, το { $previous } στο προηγούμενο.
 
+list-view-row-actions-hint = Πατήστε { $enter } για επεξεργασία της γραμμής. Το { $exit } επιστρέφει στη λίστα.
+
 shortcut-settings-uncategorized = Γενικά
 shortcut-settings-search-placeholder = Αναζήτηση εντολών ή πλήκτρων
 shortcut-settings-search-label = Αναζήτηση συντομεύσεων

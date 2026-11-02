@@ -53,6 +53,32 @@ pub enum ActivateOn {
     DoubleClick,
 }
 
+/// How the keyboard reaches the controls inside a data-view row.
+///
+/// A list is one Tab stop with a cursor moving inside it, so a control the
+/// row delegate puts in a row is out of the Tab order. `Toggle` (the default)
+/// leaves it there and gives a checkbox its `Space`; `Actions` lets the user
+/// step into the cursor's row and work its controls, for a list whose rows
+/// are small forms.
+///
+/// Pass to [`ListView::row_keyboard`](crate::ListView::row_keyboard).
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RowKeyboard {
+    /// Rows are out of the Tab order. `Space` runs the row's published
+    /// keyboard toggle (a checkbox), `Enter` activates the row.
+    #[default]
+    Toggle,
+    /// Action mode. `F2` moves focus into the cursor row's first control, and
+    /// so does `Enter` when the view has no
+    /// [`on_activate`](crate::ListView::on_activate) (with one, `Enter` keeps
+    /// activating the row). A click into a control enters too. `Tab` and
+    /// `Shift+Tab` cycle among that row's controls, and `Escape` returns focus
+    /// to the list with the cursor on that row. Each row with a control says
+    /// in its accessible description which key enters it.
+    Actions,
+}
+
 /// Which kind of data view minted a [`ViewId`]. Folded into the id so two
 /// different widget kinds that happen to draw the same value from the shared
 /// process counter can never be mistaken for one another — the reason a bare
