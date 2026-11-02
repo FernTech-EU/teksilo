@@ -678,12 +678,19 @@ impl teksilo_core::text_surface::TextSurface for CodeEditorHandle {
         CodeEditorHandle::has_selection(self).get()
     }
 
+    /// By the command filter, the question typing asks, as every other
+    /// command gate of this editor does.
     fn is_read_only(&self) -> bool {
-        CodeEditorHandle::is_read_only(self)
+        !self
+            .state
+            .borrow()
+            .policy
+            .command_filter
+            .accepts(policy::CodeCommand::InsertChar)
     }
 
     fn allows_copy(&self) -> bool {
-        self.state.borrow().policy.clipboard_policy.allows_copy()
+        context_menu::copy_allowed(&self.state.borrow().policy)
     }
 
     fn history_frozen(&self) -> bool {
@@ -745,11 +752,9 @@ impl teksilo_core::text_surface::TextSurface for CodeEditorHandle {
     /// into it.
     fn input_editor(&self) -> Option<&dyn teksilo_core::text_input_document::TextInputEditor> {
         let editable = self.state.try_borrow().is_ok_and(|st| {
-            !st.policy.is_read_only()
-                && st
-                    .policy
-                    .command_filter
-                    .accepts(policy::CodeCommand::InsertChar)
+            st.policy
+                .command_filter
+                .accepts(policy::CodeCommand::InsertChar)
         });
         editable.then_some(self as &dyn teksilo_core::text_input_document::TextInputEditor)
     }

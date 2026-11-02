@@ -67,9 +67,9 @@ impl CodeEditorHandle {
                 .state
                 .try_borrow_mut()
                 .map_err(|_| WriteRefused::Busy)?;
-            if st.policy.is_read_only()
-                || !st.policy.command_filter.accepts(CodeCommand::InsertChar)
-            {
+            // The command filter decides, as it does for `is_editable` and
+            // every other command gate: the input system's writes are typing.
+            if !st.policy.command_filter.accepts(CodeCommand::InsertChar) {
                 return Err(WriteRefused::ReadOnly);
             }
             if !st.pending_chars.is_empty() {
@@ -277,9 +277,9 @@ impl TextInputDocument for CodeEditorHandle {
     }
 
     fn is_editable(&self) -> bool {
-        self.state.try_borrow().is_ok_and(|st| {
-            !st.policy.is_read_only() && st.policy.command_filter.accepts(CodeCommand::InsertChar)
-        })
+        self.state
+            .try_borrow()
+            .is_ok_and(|st| st.policy.command_filter.accepts(CodeCommand::InsertChar))
     }
 
     /// Never: code has no secure mode.

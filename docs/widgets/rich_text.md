@@ -442,9 +442,9 @@ independently via `on_change` subscriptions.
 #### `pub fn editor(document: TextDocument) -> Self`
 
 Construct an editable rich text editor bound to `document`.
-Uses the full editor preset: every command accepted, caret
-blinks, `MultilineTextInput` accessibility role, full clipboard
-support. Multiple editors on the same document share live edits
+Uses the full editor preset: every command accepted (Cut, Copy
+and Paste included), caret blinks, `MultilineTextInput`
+accessibility role. Multiple editors on the same document share live edits
 via per-widget `on_change` subscriptions.
 
 <a id="richtexteditor-label"></a>
@@ -1892,18 +1892,27 @@ Current typewriter anchor (see `typewriter`).
 
 #### `pub fn set_command_filter(&self, filter: policy::CommandFilter)`
 
-Narrow (or restore) what the keyboard may do on this mounted editor.
+Narrow (or widen) what this mounted editor may do.
 
-The other three policy dimensions — caret, accessibility role, clipboard
-surface — describe what *kind* of surface this is and are fixed at
-construction; only the command filter is a mode the host can change
-while the writer is looking at it. Swapping in
+The filter is the only gate on the commands, the clipboard ones
+included, and every place that offers or accepts a command reads it
+live: the keys, the default context menu, the touch selection toolbar
+(its rows and its caret handle), drag-and-drop (text and files), the
+standard edit actions and the platform's input system. So this takes
+effect on the next event without rebuilding the widget; a touch toolbar
+already on screen is updated the next time it is raised. Swapping in
 `CommandFilter::ForwardOnly` gives a forward-only drafting mode;
 `CommandFilter::All` restores ordinary editing.
 
-Every gate reads the filter live — the keyboard dispatch, the default
-context menu, and drag-and-drop — so this takes effect on the next
-event without rebuilding the widget.
+The other policy dimensions describe what *kind* of surface this is and
+are fixed at construction: whether a caret is shown, the accessibility
+role and its read-only flag, whether the input method and soft
+keyboard are enabled, the `format.*` shortcuts, how a click on a link
+behaves, the pointer cursor, and the style chrome's read-only look. A
+`read_only` viewer widened to `CommandFilter::All`
+therefore accepts typing, Cut and Paste, but keeps a hidden caret and
+no input method; build it with `editor` for a surface
+that is meant to be written in.
 
 <a id="richtexteditor-command_filter"></a>
 
@@ -2624,10 +2633,11 @@ Current typewriter anchor.
 
 #### `pub fn set_command_filter(&self, filter: policy::CommandFilter)`
 
-Narrow (or restore) what the keyboard may do — the `EditorHandle`
+Narrow (or widen) what the editor may do: the `EditorHandle`
 counterpart of `RichTextEditor::set_command_filter`, for hosts that
 drive a drafting mode from a settings or session effect after the editor
-is mounted.
+is mounted. Which gates follow the filter, and which are fixed at
+construction, is listed there.
 
 <a id="editorhandle-command_filter"></a>
 

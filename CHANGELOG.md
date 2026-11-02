@@ -266,6 +266,14 @@ by crate for clarity, not because crates version independently.
   3.0 takes ICU4X 2.4, so Teksilo moves to ICU4X 2.4 too (`icu_experimental`
   0.7): an application that pins an ICU4X crate at 2.3 needs to move it.
 
+### Removed
+
+#### Widgets
+
+- **Breaking.** **`ClipboardPolicy` and `PolicyBundle::clipboard_policy`.**
+  The command filter alone decides which clipboard commands an editor
+  offers. Drop `clipboard_policy` from a `PolicyBundle` struct literal.
+
 ### Fixed
 
 #### Platform
@@ -395,6 +403,14 @@ by crate for clarity, not because crates version independently.
   `DockingLayout` accordion pane.
 - **A `Splitter` sized to its content no longer counts hidden panes, nor a
   collapsed pane's content.**
+- **A `RichTextEditor`'s command filter decides its clipboard everywhere.**
+  An editor whose filter a host widened with `set_command_filter` (a
+  `read_only()` viewer set to `CommandFilter::All`) offers Cut and Paste in
+  its context menu and touch toolbar and takes dropped text and files, as
+  its keys already did; one narrowed to `ReadOnly` hides them, refuses
+  drops, and its menu has no separator before Select All. A forward-only
+  editor no longer shows a drop caret for a drag of its own text, which it
+  then refused.
 - **In a `CodeEditor`, the completion list follows text the input system
   commits.** After the accent popup replaced a typed `e` with `é`, or an
   emoji or dictated text was inserted, the list stayed open on the old word;

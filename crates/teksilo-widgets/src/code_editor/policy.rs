@@ -3,11 +3,12 @@
 
 //! The code editor's command vocabulary and construction presets.
 //!
-//! The policy *machinery* — the command filter, the caret behaviour, the AT
-//! role, the clipboard surface, and the `PolicyBundle` that ties the four
-//! together — is shared with every other text surface and lives in the
-//! crate-internal `common::editor_runtime`. What lives here is only what is
-//! genuinely code-specific: the list of commands.
+//! The policy *machinery* (the command filter, which also decides the
+//! clipboard commands, the caret behaviour, the AT role, and the
+//! `PolicyBundle` that ties the three together) is shared with every other
+//! text surface and lives in the crate-internal `common::editor_runtime`.
+//! What lives here is only what is genuinely code-specific: the list of
+//! commands.
 //!
 //! That list is deliberately *not* the rich text editor's. `EditCommandKind`
 //! knows about tables, lists, blockquotes, and bold — none of which mean
@@ -18,7 +19,7 @@
 //! not.
 
 use crate::common::editor_runtime::{
-    AccessibilityRole, CaretPolicy, ClipboardPolicy, CommandFilter, EditorCommand, PolicyBundle,
+    AccessibilityRole, CaretPolicy, CommandFilter, EditorCommand, PolicyBundle,
 };
 
 /// Commands the code editor's keyboard layer may emit.
@@ -142,12 +143,11 @@ impl EditorCommand for CodeCommand {
 
 /// The editable preset, shared by `CodeEditor::new` and
 /// `PlainTextEditor::new`: every command accepted, blinking caret,
-/// `MultilineTextInput` role, full clipboard.
+/// `MultilineTextInput` role.
 pub const CODE_EDITOR_PRESET: PolicyBundle = PolicyBundle {
     command_filter: CommandFilter::All,
     caret_policy: CaretPolicy::Blinking,
     access_role: AccessibilityRole::Editor,
-    clipboard_policy: ClipboardPolicy::Full,
 };
 
 /// The read-only preset for `CodeEditor::read_only` / `PlainTextEditor::read_only`
@@ -167,7 +167,6 @@ pub const CODE_READ_ONLY_PRESET: PolicyBundle = PolicyBundle {
     command_filter: CommandFilter::ReadOnly,
     caret_policy: CaretPolicy::Hidden,
     access_role: AccessibilityRole::Document,
-    clipboard_policy: ClipboardPolicy::CopyAndSelectAllOnly,
 };
 
 #[cfg(test)]

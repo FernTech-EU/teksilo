@@ -110,10 +110,10 @@ pub enum CommandFilter {
     ///
     /// Deletes, word-deletes, cut and undo/redo are rejected; typing, pasting,
     /// splitting blocks, formatting and every navigation command are accepted.
-    /// Unlike [`ReadOnly`](Self::ReadOnly) the surface is still a real editor —
-    /// caret, accessibility role and clipboard stay editable — so a host
-    /// swapping this in at runtime changes what the keyboard may do and nothing
-    /// else.
+    /// Unlike [`ReadOnly`](Self::ReadOnly) the surface is still a real editor
+    /// (caret and accessibility role stay editable, and Paste is offered), so
+    /// a host swapping this in at runtime changes what the keyboard, the menu
+    /// and the touch toolbar may do and nothing else.
     ///
     /// ⚠ Rejecting commands is only half of the guarantee. Inserting over a
     /// selection deletes it one layer below any command vocabulary (in
@@ -179,51 +179,22 @@ pub enum AccessibilityRole {
     Document,
 }
 
-/// Clipboard surface exposed by a text widget.
-///
-/// The command filter already rejects cut/paste for a read-only preset; this
-/// drives UI affordances such as disabled menu items.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClipboardPolicy {
-    Full,
-    CopyAndSelectAllOnly,
-}
-
-impl ClipboardPolicy {
-    pub fn allows_cut(&self) -> bool {
-        matches!(self, Self::Full)
-    }
-    pub fn allows_paste(&self) -> bool {
-        matches!(self, Self::Full)
-    }
-    /// `PasteUnformatted` mirrors `Paste` today: both are gated by the
-    /// same policy bit. Kept as a separate accessor so a future preset
-    /// that admits plain-only paste while rejecting rich paste can
-    /// diverge without changing call sites.
-    pub fn allows_paste_unformatted(&self) -> bool {
-        matches!(self, Self::Full)
-    }
-    /// Always `true` — copying is allowed under every policy, including
-    /// `CopyAndSelectAllOnly`. Provided as a method (rather than a
-    /// hardcoded literal at call sites) so a future preset can diverge
-    /// without changing callers.
-    pub fn allows_copy(&self) -> bool {
-        true
-    }
-}
-
-/// One bundle per construction preset: the single source of truth for the four
+/// One bundle per construction preset: the single source of truth for the three
 /// independent decisions that separate an editable surface from a viewer.
 ///
+/// The clipboard has no dimension of its own: which of Cut, Copy and Paste a
+/// surface offers, in its keys, its context menu and its touch toolbar, and
+/// whether it takes a drop, is what the [`CommandFilter`] accepts.
+///
 /// Shared by every text surface. The bundle is what lets a widget never consult
-/// a `read_only: bool` flag — each dimension is decided once, at construction,
-/// and read where it matters.
+/// a `read_only: bool` flag: caret and role are decided once, at construction,
+/// and read where they matter, while the command filter is the one dimension a
+/// host may change on a mounted editor (`RichTextEditor::set_command_filter`).
 #[derive(Debug, Clone, Copy)]
 pub struct PolicyBundle {
     pub command_filter: CommandFilter,
     pub caret_policy: CaretPolicy,
     pub access_role: AccessibilityRole,
-    pub clipboard_policy: ClipboardPolicy,
 }
 
 impl PolicyBundle {
@@ -235,9 +206,10 @@ impl PolicyBundle {
     /// untouched.
     ///
     /// The only supported way to build a restricted-but-still-editable preset:
-    /// caret, accessibility role and clipboard describe *what kind of surface
-    /// this is*, and a mode that merely narrows what the keyboard may do must
-    /// not quietly turn an editor into a document.
+    /// caret and accessibility role describe *what kind of surface this is*,
+    /// and a mode that merely narrows what the keyboard may do must not quietly
+    /// turn an editor into a document. The filter alone decides which
+    /// clipboard commands the surface offers.
     pub const fn with_command_filter(self, command_filter: CommandFilter) -> Self {
         Self {
             command_filter,
@@ -246,24 +218,21 @@ impl PolicyBundle {
     }
 }
 
-/// The full editor preset: every command accepted, caret blinks,
-/// `MultilineTextInput` role, full clipboard support.
+/// The full editor preset: every command accepted (Cut, Copy and Paste
+/// included), caret blinks, `MultilineTextInput` role.
 pub const EDITOR_PRESET: PolicyBundle = PolicyBundle {
     command_filter: CommandFilter::All,
     caret_policy: CaretPolicy::Blinking,
     access_role: AccessibilityRole::Editor,
-    clipboard_policy: ClipboardPolicy::Full,
 };
 
-/// The read-only preset: only navigation + copy/select-all, `Document` role,
-/// no cut/paste. The caret is hidden entirely — view-only widgets ship without
-/// any caret affordance. Applications that need a focusable read-only surface
-/// with a visible caret can construct a custom preset via [`PolicyBundle`].
+/// The read-only preset: only navigation + copy/select-all, `Document` role.
+/// Its filter rejects Cut and Paste, so no surface offers them. The caret is
+/// hidden entirely: view-only widgets ship without any caret affordance.
 pub const READ_ONLY_PRESET: PolicyBundle = PolicyBundle {
     command_filter: CommandFilter::ReadOnly,
     caret_policy: CaretPolicy::Hidden,
     access_role: AccessibilityRole::Document,
-    clipboard_policy: ClipboardPolicy::CopyAndSelectAllOnly,
 };
 
 /// Wall-clock caret blink state machine.

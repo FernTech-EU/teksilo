@@ -393,6 +393,29 @@ fn a_cell_selection_dropped_in_its_own_editor_changes_nothing() {
     );
 }
 
+/// A forward-only draft cannot move its own text, since the move removes it
+/// from where it was: the hovering drag gets no caret promising a landing
+/// place, and the drop leaves the text as it was.
+#[test]
+fn a_forward_only_editor_promises_no_landing_place_for_its_own_drag() {
+    let mut m = mount(TABLE_BETWEEN);
+    m.handle
+        .set_command_filter(super::policy::CommandFilter::ForwardOnly);
+    let before = m.djot();
+    let beta = m.at("Alpha beta.", 6);
+    m.handle.select_range(beta, beta + 4);
+    let drop_at = m.at("Gamma delta.", 8);
+    pick_up_selection(&mut m, beta);
+    let target = caret_point(&m.handle, drop_at);
+    m.tree.dispatch_event(WidgetEvent::pointer_move(target));
+    assert!(
+        !m.state.borrow().drop_caret,
+        "no caret may promise a landing place the drop refuses"
+    );
+    release_over(&mut m, drop_at);
+    assert_eq!(m.djot(), before);
+}
+
 // ── Shift and an arrow over a selection holding a table ──────────────────
 
 /// A selection from inside `beta.` to inside `Gamma`, the table whole between.

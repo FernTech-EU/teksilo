@@ -2696,9 +2696,9 @@ fn editor_context_menu_copy_item_disabled_without_selection() {
     );
 }
 
-/// The command filter gates the menu's Paste rows as it gates Cut: an editor
-/// built editable keeps its full clipboard policy when a host sets
-/// `CommandFilter::ReadOnly` on it, and its menu offered a Paste that wrote.
+/// The command filter gates the menu's Paste rows as it gates Cut: a host that
+/// sets `CommandFilter::ReadOnly` on an editor built editable gets a menu that
+/// only copies, with no separator before Select All.
 #[test]
 fn a_read_only_filter_hides_the_menus_paste_rows_too() {
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
@@ -2733,13 +2733,143 @@ fn a_read_only_filter_hides_the_menus_paste_rows_too() {
     for refused in ["Cut", "Paste", "Paste Unformatted"] {
         assert!(!labels.contains(&Some(refused)), "{refused} in {labels:?}");
     }
+    assert_eq!(
+        menu_separators(&update),
+        0,
+        "a menu that only copies has no separator before Select All"
+    );
+}
+
+/// The menu separators (`Role::Splitter`) in an accessibility update.
+fn menu_separators(update: &teksilo_core::accesskit::TreeUpdate) -> usize {
+    update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == teksilo_core::accesskit::Role::Splitter)
+        .count()
+}
+
+/// Right-click a mounted editor at (20, 10) and return its menu's rows and its
+/// separator count.
+fn context_menu_rows(tree: &mut WidgetTree) -> (Vec<String>, usize) {
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        Point::new(20.0, 10.0),
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let update = tree.sync_accessibility();
+    let labels = update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == teksilo_core::accesskit::Role::MenuItem)
+        .filter_map(|(_, n)| n.label().map(str::to_string))
+        .collect();
+    (labels, menu_separators(&update))
+}
+
+/// A viewer whose host widened the command filter to `All` offers Cut and the
+/// two pastes, as its keys accept them: the filter is the only gate, not the
+/// construction preset.
+#[test]
+fn a_viewer_widened_to_all_offers_cut_and_paste_in_its_menu() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("quiet words").unwrap();
+    let editor = RichTextEditor::read_only(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    handle.set_command_filter(super::policy::CommandFilter::All);
+    handle.select_range(0, 5);
+
+    let (labels, separators) = context_menu_rows(&mut tree);
+    for offered in ["Cut", "Copy", "Paste", "Paste Unformatted", "Select All"] {
+        assert!(
+            labels.iter().any(|l| l == offered),
+            "{offered} missing from {labels:?}"
+        );
+    }
+    // The blockquote row's separator and the one before Select All.
+    assert_eq!(
+        separators, 2,
+        "a menu offering Cut and Paste separates Select All: {labels:?}"
+    );
+
+    // The menu and the keys answer alike, for every standard command.
+    use teksilo_core::shortcut::StandardEdit;
+    use teksilo_core::text_surface::TextSurface as _;
+    for command in StandardEdit::ALL {
+        let offered_by_menu = match command {
+            StandardEdit::Cut => Some(labels.iter().any(|l| l == "Cut")),
+            StandardEdit::Copy => Some(labels.iter().any(|l| l == "Copy")),
+            StandardEdit::Paste => Some(labels.iter().any(|l| l == "Paste")),
+            StandardEdit::PastePlain => Some(labels.iter().any(|l| l == "Paste Unformatted")),
+            StandardEdit::SelectAll => Some(labels.iter().any(|l| l == "Select All")),
+            _ => None,
+        };
+        if let Some(offered) = offered_by_menu {
+            assert_eq!(handle.accepts(command), offered, "{command:?}");
+        }
+    }
+}
+
+/// …and its `Ctrl+V` writes the clipboard into the document.
+#[test]
+fn a_viewer_widened_to_all_pastes_from_the_keys() {
+    use teksilo_core::event::{Key, Modifiers};
+    let doc = TextDocument::new();
+    doc.set_plain_text("quiet").unwrap();
+    let editor = RichTextEditor::read_only(doc.clone());
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let cb = ctx_with_memory_clipboard(&mut tree);
+    cb.set_text(" pasted").unwrap();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    handle.set_command_filter(super::policy::CommandFilter::All);
+    handle.select_range(5, 5);
+    press_key(&mut tree, Key::V, Modifiers::COMMAND);
+    tick_past_debounce(&mut tree);
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "quiet pasted");
+}
+
+/// A viewer widened to a forward-only draft offers Paste and no Cut, as its
+/// keys do, with the blockquote row's separator and the one before Select
+/// All.
+#[test]
+fn a_viewer_widened_to_forward_only_offers_paste_and_no_cut() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("draft").unwrap();
+    let editor = RichTextEditor::read_only(doc);
+    let handle = editor.handle();
+
+    let mut tree = WidgetTree::new();
+    let _cb = ctx_with_memory_clipboard(&mut tree);
+    let _ = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    handle.set_command_filter(super::policy::CommandFilter::ForwardOnly);
+
+    let (labels, separators) = context_menu_rows(&mut tree);
+    assert!(!labels.iter().any(|l| l == "Cut"), "{labels:?}");
+    assert!(labels.iter().any(|l| l == "Paste"), "{labels:?}");
+    assert_eq!(separators, 2, "{labels:?}");
+    use teksilo_core::text_surface::TextSurface as _;
+    assert!(!handle.accepts(teksilo_core::shortcut::StandardEdit::Cut));
 }
 
 #[test]
 fn read_only_editor_context_menu_shape_hides_cut_and_paste() {
-    // The read-only preset's `ClipboardPolicy::CopyAndSelectAllOnly`
-    // filters out Cut, Paste, and Paste Unformatted entirely — the
-    // rendered menu has only Copy + Select All.
+    // The read-only preset's command filter rejects Cut, Paste and
+    // Paste Unformatted, so the rendered menu has only Copy and
+    // Select All.
     use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
 
     let doc = TextDocument::new();
@@ -2791,6 +2921,7 @@ fn read_only_editor_context_menu_shape_hides_cut_and_paste() {
         "read-only menu must NOT include Paste Unformatted, got labels {:?}",
         labels
     );
+    assert_eq!(menu_separators(&update), 0, "{labels:?}");
 }
 
 #[test]
@@ -11192,4 +11323,131 @@ fn table_accessibility_boxes_follow_the_scroll_offset() {
         "scrolling by {SHIFT} must move the table's box by the same amount \
          (before {before}, after {after})"
     );
+}
+
+// ── Drops follow the command filter ──────────────────────────────────
+
+/// A text drop from another program, through the window's external drag.
+fn drop_text(tree: &mut WidgetTree, text: &str) {
+    use teksilo_core::ExternalDropData;
+    use teksilo_core::window::NoopWindowOps;
+    let data = || ExternalDropData {
+        text: Some(text.to_string()),
+        formats: vec!["text/plain".to_string()],
+        ..Default::default()
+    };
+    let at = Point::new(300.0, 8.0);
+    tree.begin_external_drag(at, data(), &mut NoopWindowOps);
+    tree.end_external_drag(at, data(), &mut NoopWindowOps);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+}
+
+/// An editor inside a container that records the drops reaching it, so a
+/// refused drop can be seen to bubble.
+fn editor_in_drop_recorder(
+    editor: RichTextEditor,
+) -> (WidgetTree, std::rc::Rc<std::cell::Cell<usize>>) {
+    use teksilo_core::widget_builder::WidgetBuilder as _;
+    let bubbled = std::rc::Rc::new(std::cell::Cell::new(0));
+    let seen = bubbled.clone();
+    let mut tree = WidgetTree::new();
+    let _ = tree.add(
+        crate::primitives::VStack::new()
+            .child(editor)
+            .on_drag_hover(|_, _, _| teksilo_core::DropFeedback::Accept)
+            .on_drop(move |_, _, _| {
+                seen.set(seen.get() + 1);
+                true
+            }),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    (tree, bubbled)
+}
+
+/// A viewer whose host widened the filter takes a dropped text, as its
+/// `Ctrl+V` does.
+#[test]
+fn a_viewer_widened_to_all_takes_a_dropped_text() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("quiet").unwrap();
+    let editor = RichTextEditor::read_only(doc.clone());
+    let handle = editor.handle();
+    let (mut tree, bubbled) = editor_in_drop_recorder(editor);
+    handle.set_command_filter(super::policy::CommandFilter::All);
+    drop_text(&mut tree, " dropped");
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "quiet dropped");
+    assert_eq!(bubbled.get(), 0, "the editor took the drop itself");
+}
+
+/// A viewer refuses it, and the drop bubbles to the container.
+#[test]
+fn a_viewer_refuses_a_dropped_text_and_lets_it_bubble() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("quiet").unwrap();
+    let editor = RichTextEditor::read_only(doc.clone());
+    let (mut tree, bubbled) = editor_in_drop_recorder(editor);
+    drop_text(&mut tree, " dropped");
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "quiet");
+    assert_eq!(bubbled.get(), 1, "the refused drop reached the container");
+}
+
+/// An editor whose host narrowed the filter to `ReadOnly` refuses a dropped
+/// file before its `on_files_dropped` hears of it.
+#[test]
+fn an_editor_narrowed_to_read_only_refuses_a_dropped_file() {
+    use teksilo_core::ExternalDropData;
+    use teksilo_core::window::NoopWindowOps;
+    let heard = std::rc::Rc::new(std::cell::Cell::new(0));
+    let sink = heard.clone();
+    let doc = TextDocument::new();
+    doc.set_plain_text("quiet").unwrap();
+    let editor = RichTextEditor::editor(doc).on_files_dropped(move |_, _| sink.set(sink.get() + 1));
+    let handle = editor.handle();
+    let (mut tree, bubbled) = editor_in_drop_recorder(editor);
+    let data = || ExternalDropData {
+        files: vec![std::path::PathBuf::from("/tmp/picture.png")],
+        formats: vec!["text/uri-list".to_string()],
+        ..Default::default()
+    };
+    // Over the text, inside the editable chrome's padding.
+    let at = Point::new(20.0, 20.0);
+    let drop_file = |tree: &mut WidgetTree| {
+        tree.begin_external_drag(at, data(), &mut NoopWindowOps);
+        tree.end_external_drag(at, data(), &mut NoopWindowOps);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+    };
+    drop_file(&mut tree);
+    assert_eq!(
+        heard.get(),
+        1,
+        "setup: the editor takes a file while it edits"
+    );
+    assert_eq!(bubbled.get(), 0);
+
+    handle.set_command_filter(super::policy::CommandFilter::ReadOnly);
+    drop_file(&mut tree);
+    assert_eq!(heard.get(), 1, "on_files_dropped must not run");
+    assert_eq!(bubbled.get(), 1, "the refused drop reached the container");
+}
+
+/// Under `ForwardOnly` a drag back into its own editor is a cut, refused
+/// before the caret follows it; a drag from another editor is a paste and is
+/// taken.
+#[test]
+fn a_forward_only_editor_refuses_its_own_drag_and_takes_another_editors() {
+    let (state, handle, _tree) = drag_fixture("Hello world");
+    handle.set_command_filter(super::policy::CommandFilter::ForwardOnly);
+    let mut drag = drag_of(&state, &handle, (0, 5), 11);
+    assert!(
+        !super::mouse::refuses_text_drop(&state, &drag),
+        "a drag from another editor is a paste"
+    );
+    drag.source = state.borrow().self_id.expect("the editor is mounted");
+    assert!(
+        super::mouse::refuses_text_drop(&state, &drag),
+        "a drag back into its own editor is a cut"
+    );
+    handle.set_command_filter(super::policy::CommandFilter::All);
+    assert!(!super::mouse::refuses_text_drop(&state, &drag));
 }

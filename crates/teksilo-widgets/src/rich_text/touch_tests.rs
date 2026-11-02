@@ -625,6 +625,85 @@ fn a_hold_on_a_viewer_offers_copy_only() {
     assert_eq!(h.toolbar_actions(), vec![TextAction::Copy]);
 }
 
+/// The toolbar rows that are shown, read from the accessibility tree: the
+/// controller's actions **and** the editor's own command filter.
+fn toolbar_rows(h: &mut Harness) -> Vec<String> {
+    h.render();
+    let update = h.tree.sync_accessibility();
+    update
+        .nodes
+        .iter()
+        .filter(|(_, n)| n.role() == teksilo_core::accesskit::Role::MenuItem)
+        .filter_map(|(_, n)| n.label().map(str::to_string))
+        .collect()
+}
+
+/// A viewer whose host widened the command filter is editable for the touch
+/// controller too: its toolbar offers Cut and Paste as its keys and its menu
+/// do. Its caret stays hidden (the construction preset), but a tap raises the
+/// caret handle, the place Paste would land.
+#[test]
+fn a_viewer_widened_to_all_offers_cut_and_paste_on_its_toolbar() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello world and a longer line of prose")
+        .unwrap();
+    let mut h = Harness::new(RichTextEditor::read_only(doc));
+    h.handle
+        .set_command_filter(super::policy::CommandFilter::All);
+    h.tree.focus(h.editor);
+    h.render();
+    h.hold_at(PointerKind::Touch, h.at(8));
+    let actions = h.toolbar_actions();
+    for wanted in [TextAction::Cut, TextAction::Copy, TextAction::Paste] {
+        assert!(actions.contains(&wanted), "{wanted:?} missing: {actions:?}");
+    }
+    let rows = toolbar_rows(&mut h);
+    for wanted in ["Cut", "Copy", "Paste"] {
+        assert!(
+            rows.iter().any(|r| r == wanted),
+            "{wanted} row missing: {rows:?}"
+        );
+    }
+
+    // A fresh viewer, so the tap is not read as the end of the hold.
+    let doc = TextDocument::new();
+    doc.set_plain_text("hello world and a longer line of prose")
+        .unwrap();
+    let mut h = Harness::new(RichTextEditor::read_only(doc));
+    h.handle
+        .set_command_filter(super::policy::CommandFilter::All);
+    h.tree.focus(h.editor);
+    h.render();
+    h.finger_tap(h.at(3));
+    let kinds: Vec<_> = h.handles().iter().map(|g| g.kind).collect();
+    assert_eq!(kinds, vec![SelectionHandleKind::Caret]);
+}
+
+/// An editor narrowed to `ReadOnly` offers Copy only, as a viewer does.
+#[test]
+fn an_editor_narrowed_to_read_only_offers_copy_only_on_its_toolbar() {
+    let mut h = Harness::focused("hello world and a longer line of prose");
+    h.handle
+        .set_command_filter(super::policy::CommandFilter::ReadOnly);
+    h.hold_at(PointerKind::Touch, h.at(8));
+    assert_eq!(h.toolbar_actions(), vec![TextAction::Copy]);
+    assert_eq!(toolbar_rows(&mut h), vec!["Copy".to_string()]);
+}
+
+/// A forward-only draft is editable, so the controller offers Cut, and the
+/// editor's own filter hides that row: Copy and Paste are shown.
+#[test]
+fn a_forward_only_toolbar_shows_no_cut_row() {
+    let mut h = Harness::focused("hello world and a longer line of prose");
+    h.handle
+        .set_command_filter(super::policy::CommandFilter::ForwardOnly);
+    h.hold_at(PointerKind::Touch, h.at(8));
+    let rows = toolbar_rows(&mut h);
+    assert!(!rows.iter().any(|r| r == "Cut"), "{rows:?}");
+    assert!(rows.iter().any(|r| r == "Copy"), "{rows:?}");
+    assert!(rows.iter().any(|r| r == "Paste"), "{rows:?}");
+}
+
 // ---------------------------------------------------------------------------
 // Touch: links
 // ---------------------------------------------------------------------------

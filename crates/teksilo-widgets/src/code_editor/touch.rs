@@ -177,8 +177,13 @@ impl TextHitSource for CodeHitSource {
         self.state.borrow().document.character_count()
     }
 
+    /// By the command filter, the question typing asks.
     fn is_editable(&self) -> bool {
-        !self.state.borrow().policy.is_read_only()
+        self.state
+            .borrow()
+            .policy
+            .command_filter
+            .accepts(super::policy::CodeCommand::InsertChar)
     }
 
     /// The predicate this surface's own `Ctrl+C` consults, so the touch toolbar

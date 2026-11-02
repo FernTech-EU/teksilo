@@ -55,7 +55,7 @@ live target of Milestone 8a of §27.10 of the Teksilo architecture.
   path until the scaling helper is extended to cover them.
 - Full rich clipboard round-trip (in-process rich fragment +
   plain-text fallback) — plain copy works, cut and paste are
-  gated by the `ReadOnly` clipboard policy.
+  refused by the viewer's `CommandFilter::ReadOnly`.
 
 ## Try it
 

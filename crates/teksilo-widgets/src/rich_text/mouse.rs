@@ -315,8 +315,13 @@ fn start_text_drag(state: &SharedState, ctx: &mut EventContext) {
     ctx.request_frame();
 }
 
-/// Whether this editor refuses `drag` outright: a cell selection dropped back
-/// into the editor it came from.
+/// Whether this editor refuses `drag` outright: a drag back into the editor it
+/// came from that the editor cannot carry out as a move.
+///
+/// Two reasons. The move removes the passage from where it was, which is a cut,
+/// so a filter that rejects Cut (a forward-only draft) refuses it here, before
+/// the caret follows the drag, rather than promising a landing place that
+/// [`apply_text_drop`] then refuses. And a cell selection:
 ///
 /// A rectangle of a table's cells copies as a table of those cells, while the
 /// removal of its range only empties them, so the move put a copy of the table
@@ -327,7 +332,12 @@ fn start_text_drag(state: &SharedState, ctx: &mut EventContext) {
 /// cells are a copy there as any dragged text is.
 pub(super) fn refuses_text_drop(state: &SharedState, drag: &super::EditorTextDrag) -> bool {
     let st = state.borrow();
-    st.self_id == Some(drag.source) && st.drag_holds_cells
+    st.self_id == Some(drag.source)
+        && (st.drag_holds_cells
+            || !st
+                .policy
+                .command_filter
+                .accepts(super::policy::EditCommandKind::Cut))
 }
 
 /// Insert dragged editor text at the caret, removing the original when the drop

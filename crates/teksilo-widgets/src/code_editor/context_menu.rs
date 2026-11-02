@@ -123,13 +123,13 @@ fn row_select_all(state: &SharedState) -> MenuItem {
 /// caller; this says only what the surface will honour.
 pub(super) fn offered(policy: &PolicyBundle) -> Vec<TextAction> {
     let mut out = Vec::with_capacity(4);
-    if policy.clipboard_policy.allows_cut() && policy.command_filter.accepts(CodeCommand::Cut) {
+    if policy.command_filter.accepts(CodeCommand::Cut) {
         out.push(TextAction::Cut);
     }
-    if policy.clipboard_policy.allows_copy() && policy.command_filter.accepts(CodeCommand::Copy) {
+    if policy.command_filter.accepts(CodeCommand::Copy) {
         out.push(TextAction::Copy);
     }
-    if policy.clipboard_policy.allows_paste() && policy.command_filter.accepts(CodeCommand::Paste) {
+    if policy.command_filter.accepts(CodeCommand::Paste) {
         out.push(TextAction::Paste);
     }
     if policy.command_filter.accepts(CodeCommand::SelectAll) {

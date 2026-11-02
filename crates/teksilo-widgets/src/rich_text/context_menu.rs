@@ -70,7 +70,7 @@ use crate::menu_item::MenuItem;
 use crate::menu_list::MenuList;
 
 use super::clipboard as rt_clipboard;
-use super::policy::{ClipboardPolicy, EditCommandKind, PolicyBundle};
+use super::policy::{EditCommandKind, PolicyBundle};
 use super::state::SharedState;
 
 /// Intent fired when the user activates the **Cut** item of the
@@ -150,42 +150,40 @@ fn build_menu(state: SharedState) -> MenuList {
         .is_empty();
 
     // --- Cut -----------------------------------------------------
-    // Two independent gates, and both are load-bearing: `ClipboardPolicy`
-    // answers "does this surface have a clipboard at all", while the command
-    // filter answers "may this surface take text away". A forward-only editor
-    // says yes to the first and no to the second — checking only the clipboard
-    // policy would leave a working Cut in the menu of an editor whose Ctrl+X is
-    // blocked.
-    if policy.clipboard_policy.allows_cut() && policy.command_filter.accepts(EditCommandKind::Cut) {
+    // The command filter is the only gate, the one `Ctrl+X` asks: a
+    // forward-only editor rejects Cut (`is_regressive`) and a read-only one
+    // rejects Cut and both pastes (`mutates_document`), so every preset gets
+    // the rows its keys allow, and a host that widens or narrows the filter on
+    // a mounted editor gets them too.
+    let offers_cut = policy.command_filter.accepts(EditCommandKind::Cut);
+    if offers_cut {
         list = list.item(row_cut(&state).enabled(has_selection));
     }
 
     // --- Copy ----------------------------------------------------
-    list = list.item(row_copy(&state).enabled(has_selection));
+    // No filter shipped today rejects Copy; asked anyway, as the touch
+    // toolbar asks it.
+    if policy.command_filter.accepts(EditCommandKind::Copy) {
+        list = list.item(row_copy(&state).enabled(has_selection));
+    }
 
     // --- Paste ---------------------------------------------------
     // Availability: at factory-call time, probe the clipboard handle
     // via the EventContext path. But here, inside the factory, we have
     // no EventContext. We can only check what the editor itself knows
-    // — the stashed `rich_clipboard_fragment` isn't the right signal.
-    // Leave Paste always enabled when the policy allows; the closure
+    // (the stashed `rich_clipboard_fragment` isn't the right signal).
+    // Leave Paste always enabled when the filter accepts it; the closure
     // itself silently no-ops if the clipboard is empty (matches the
     // existing Ctrl+V behaviour).
-    //
-    // Both gates, as for Cut: a host that set `CommandFilter::ReadOnly` on an
-    // editor built editable keeps its full clipboard policy, and a Paste row
-    // there wrote into the read-only editor.
-    if policy.clipboard_policy.allows_paste()
-        && policy.command_filter.accepts(EditCommandKind::Paste)
-    {
+    let offers_paste = policy.command_filter.accepts(EditCommandKind::Paste);
+    if offers_paste {
         list = list.item(row_paste(&state));
     }
 
     // --- Paste Unformatted ---------------------------------------
-    if policy.clipboard_policy.allows_paste_unformatted()
-        && policy
-            .command_filter
-            .accepts(EditCommandKind::PasteUnformatted)
+    if policy
+        .command_filter
+        .accepts(EditCommandKind::PasteUnformatted)
     {
         let state_for_pu = state.clone();
         list = list.item(
@@ -232,9 +230,9 @@ fn build_menu(state: SharedState) -> MenuList {
         );
     }
 
-    // Separator before Select All under the full policy; read-only
-    // presets keep the menu minimal (no separator).
-    if matches!(policy.clipboard_policy, ClipboardPolicy::Full) {
+    // Separator before Select All when the menu offers Cut or Paste; a
+    // menu that only copies keeps minimal (no separator).
+    if offers_cut || offers_paste {
         list = list.separator();
     }
 
@@ -318,7 +316,7 @@ fn row_select_all(state: &SharedState) -> MenuItem {
 
 /// The selection toolbar a finger raises: the same four rows, each shown only
 /// while the controller says the surface will honour it **and** this editor's
-/// own policy allows it.
+/// own command filter accepts it.
 ///
 /// Built once per `build()` rather than per raise, because it is overlay content
 /// and an `EventContext` cannot add widgets. Reactive visibility does the work a
@@ -326,9 +324,13 @@ fn row_select_all(state: &SharedState) -> MenuItem {
 /// [`ClipboardActions`](teksilo_core::text_touch::ClipboardActions) — derived
 /// from the surface's own `is_editable` / `allows_copy` / selection — **and** on
 /// the live `PolicyBundle`, which a host may swap on a mounted editor. The
-/// controller cannot see the second: `TextHitSource` reports whether copying is
-/// allowed, but not whether *this* editor's command filter has vetoed Cut or its
-/// clipboard policy has withdrawn Paste.
+/// controller cannot see the second: `TextHitSource` reports whether the surface
+/// is editable and whether copying is allowed, but not whether *this* editor's
+/// command filter has vetoed Cut (a forward-only draft is editable and refuses
+/// Cut).
+///
+/// Both halves are read when the controller raises the toolbar, so a filter
+/// changed while the toolbar is on screen applies from its next raise.
 pub(super) fn selection_toolbar(
     state: SharedState,
     affordances: teksilo_core::text_touch::TextAffordances,
@@ -347,22 +349,19 @@ pub(super) fn selection_toolbar(
             .item_when(
                 row_cut(&state),
                 offers(TextAction::Cut, |p| {
-                    p.clipboard_policy.allows_cut()
-                        && p.command_filter.accepts(EditCommandKind::Cut)
+                    p.command_filter.accepts(EditCommandKind::Cut)
                 }),
             )
             .item_when(
                 row_copy(&state),
                 offers(TextAction::Copy, |p| {
-                    p.clipboard_policy.allows_copy()
-                        && p.command_filter.accepts(EditCommandKind::Copy)
+                    p.command_filter.accepts(EditCommandKind::Copy)
                 }),
             )
             .item_when(
                 row_paste(&state),
                 offers(TextAction::Paste, |p| {
-                    p.clipboard_policy.allows_paste()
-                        && p.command_filter.accepts(EditCommandKind::Paste)
+                    p.command_filter.accepts(EditCommandKind::Paste)
                 }),
             )
             .item_when(

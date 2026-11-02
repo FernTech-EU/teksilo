@@ -322,7 +322,11 @@ pub(crate) fn handle_access_action(
             }
         }
         (Action::SetValue, Some(ActionData::Value(value))) => {
-            if state.borrow().policy.is_read_only() {
+            // The command filter decides, as for every other write: typing
+            // must be accepted, and so must a wholesale replacement, which a
+            // forward-only filter refuses however additive the text looks.
+            let filter = state.borrow().policy.command_filter;
+            if !filter.accepts(CodeCommand::InsertChar) || !filter.allows_wholesale_replacement() {
                 return EventResponse::Ignored;
             }
             let _ = state.borrow().document.set_plain_text(&value);
@@ -331,11 +335,18 @@ pub(crate) fn handle_access_action(
             EventResponse::Handled
         }
         (Action::ReplaceSelectedText, Some(ActionData::Value(value))) => {
-            if state.borrow().policy.is_read_only() {
+            let filter = state.borrow().policy.command_filter;
+            if !filter.accepts(CodeCommand::InsertChar) {
                 return EventResponse::Ignored;
             }
             {
                 let st = state.borrow();
+                // A forward-only filter keeps what is selected: the text
+                // lands after it rather than over it.
+                if filter.collapses_selection_before_insert() && st.cursor.has_selection() {
+                    let end = st.cursor.position().max(st.cursor.anchor());
+                    st.cursor.set_position(end, MoveMode::MoveAnchor);
+                }
                 let _ = st.cursor.insert_text(&value);
             }
             super::sync_cursor_signals(state);

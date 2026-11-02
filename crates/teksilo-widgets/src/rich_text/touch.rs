@@ -199,21 +199,26 @@ impl TextHitSource for RichTextHitSource {
         self.doc_len()
     }
 
+    /// By the live command filter, the question typing asks, and the one
+    /// `TextSurface::is_read_only` and the input document's `is_editable`
+    /// answer too: a viewer whose host widened the filter offers Paste and a
+    /// caret handle, an editor narrowed to read-only offers neither.
     fn is_editable(&self) -> bool {
-        !self.state.borrow().policy.is_read_only()
+        self.state
+            .borrow()
+            .policy
+            .command_filter
+            .accepts(EditCommandKind::InsertChar)
     }
 
     /// The predicate this editor's own `Ctrl+C` consults, so the touch toolbar
-    /// cannot offer a Copy the keyboard would refuse — or refuse one it allows.
-    ///
-    /// Both halves: the clipboard policy answers "does this surface have a
-    /// clipboard at all", and the command filter answers "may this surface
-    /// yield its text". A viewer says yes to both; a surface whose host vetoed
-    /// `Copy` says no.
+    /// cannot offer a Copy the keyboard would refuse, or refuse one it allows.
     fn allows_copy(&self) -> bool {
-        let policy = self.state.borrow().policy;
-        policy.clipboard_policy.allows_copy()
-            && policy.command_filter.accepts(EditCommandKind::Copy)
+        self.state
+            .borrow()
+            .policy
+            .command_filter
+            .accepts(EditCommandKind::Copy)
     }
 }
 

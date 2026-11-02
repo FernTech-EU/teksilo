@@ -5,9 +5,9 @@
 //!
 //! A `PolicyBundle` captures every decision that varies between the
 //! `editor()` and `read_only()` constructors so each widget never
-//! consults a `read_only: bool` flag. The four independent dimensions
-//! mirror §27.10.1: command filter, caret behaviour, accessibility role,
-//! and clipboard capabilities.
+//! consults a `read_only: bool` flag. The three independent dimensions
+//! are the command filter (which also decides the clipboard commands),
+//! caret behaviour and accessibility role.
 
 /// Commands the keyboard handler may emit. Editing commands map to
 /// `TextCursor` mutations; navigation commands are always accepted.
@@ -92,10 +92,9 @@ pub enum EditCommandKind {
     Paste,
     /// Paste as plain text — strips any rich fragment or HTML payload
     /// and inserts only the plain-text portion. Bound to Ctrl+Shift+V
-    /// (⌘⇧V on macOS). Distinct from [`Paste`](Self::Paste) so the
-    /// command filter and `ClipboardPolicy` can gate it independently
-    /// (e.g. a future "no-paste" preset could still allow explicit
-    /// plain-text pasting).
+    /// (⌘⇧V on macOS). Distinct from [`Paste`](Self::Paste) so a
+    /// command filter could gate it independently; every filter shipped
+    /// today classifies the two the same way.
     PasteUnformatted,
 }
 
@@ -168,13 +167,12 @@ impl crate::common::editor_runtime::EditorCommand for EditCommandKind {
     }
 }
 
-// The policy machinery — command filter, AT role, clipboard surface, and the
-// bundle that ties them together — is shared with every other text surface and
+// The policy machinery (command filter, AT role, and the bundle that ties
+// them together) is shared with every other text surface and
 // lives in `common::editor_runtime`. Only the *vocabulary* above is
 // rich-text-specific. Re-exported here because these are their public names.
 pub use crate::common::editor_runtime::{
-    AccessibilityRole, CaretPolicy, ClipboardPolicy, CommandFilter, EDITOR_PRESET, PolicyBundle,
-    READ_ONLY_PRESET,
+    AccessibilityRole, CaretPolicy, CommandFilter, EDITOR_PRESET, PolicyBundle, READ_ONLY_PRESET,
 };
 
 #[cfg(test)]
@@ -349,17 +347,26 @@ mod tests {
         assert!(!fwd.is_read_only());
         assert_eq!(fwd.caret_policy, EDITOR_PRESET.caret_policy);
         assert_eq!(fwd.access_role, EDITOR_PRESET.access_role);
-        assert_eq!(fwd.clipboard_policy, EDITOR_PRESET.clipboard_policy);
     }
 
+    /// The context menu and the touch toolbar ask the filter about `Paste` and
+    /// `PasteUnformatted` separately; every filter must answer both alike, or
+    /// one paste row would show without the other.
     #[test]
-    fn paste_unformatted_policy_mirrors_paste() {
-        let full = ClipboardPolicy::Full;
-        let ro = ClipboardPolicy::CopyAndSelectAllOnly;
-        assert!(full.allows_paste());
-        assert!(full.allows_paste_unformatted());
-        assert!(!ro.allows_paste());
-        assert!(!ro.allows_paste_unformatted());
+    fn every_filter_classifies_both_pastes_alike() {
+        for f in [
+            CommandFilter::All,
+            CommandFilter::ReadOnly,
+            CommandFilter::ForwardOnly,
+        ] {
+            assert_eq!(
+                f.accepts(EditCommandKind::Paste),
+                f.accepts(EditCommandKind::PasteUnformatted),
+                "{f:?}"
+            );
+        }
+        assert!(!CommandFilter::ReadOnly.accepts(EditCommandKind::Paste));
+        assert!(CommandFilter::ForwardOnly.accepts(EditCommandKind::Paste));
     }
 
     #[test]

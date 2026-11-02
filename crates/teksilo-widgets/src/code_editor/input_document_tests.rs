@@ -285,3 +285,82 @@ fn a_replacement_of_the_last_typed_character_is_undone_with_that_typing() {
         "one undo takes back the typing and the pick"
     );
 }
+
+/// The input system's writes ask the command filter alone, as `is_editable`
+/// does: a bundle with a viewer's role and an editor's filter takes them.
+#[test]
+fn the_input_systems_writes_ask_the_command_filter() {
+    use crate::common::editor_runtime::{CommandFilter, PolicyBundle};
+    let doc = TextDocument::new();
+    doc.set_plain_text("ab").unwrap();
+    let policy = PolicyBundle {
+        command_filter: CommandFilter::All,
+        ..super::policy::CODE_READ_ONLY_PRESET
+    };
+    let state = super::construct(
+        doc.clone(),
+        policy,
+        super::config::CodeConfig::default(),
+        teksilo_text::WrapMode::None,
+    );
+    let handle = CodeEditorHandle::new(state);
+    assert!(handle.is_editable());
+    handle
+        .replace_text(1..1, "x", WriteOptions::default())
+        .expect("the filter takes the write");
+    assert_eq!(doc.to_plain_text().unwrap(), "axb");
+}
+
+/// An assistive technology's writes ask the command filter alone too: a
+/// bundle with a viewer's role and an editor's filter takes a `SetValue` and
+/// a `ReplaceSelectedText`, and one with an editor's role and a forward-only
+/// filter refuses the wholesale `SetValue`.
+#[test]
+fn an_assistive_technologys_writes_ask_the_command_filter() {
+    use crate::common::editor_runtime::{CommandFilter, PolicyBundle};
+    use teksilo_core::accesskit::{Action, ActionData, NodeId};
+    let mounted = |text: &str, policy: PolicyBundle| {
+        let doc = TextDocument::new();
+        doc.set_plain_text(text).unwrap();
+        let state = super::construct(
+            doc.clone(),
+            policy,
+            super::config::CodeConfig::default(),
+            teksilo_text::WrapMode::None,
+        );
+        (doc, state)
+    };
+    let act = |state: &super::state::SharedState, action: Action, value: &str| {
+        let mut tree = WidgetTree::new();
+        tree.add(crate::primitives::RectWidget::new());
+        let mut handled = None;
+        tree.run_with_event_context(&mut teksilo_core::window::NoopWindowOps, |ctx| {
+            handled = Some(super::a11y::handle_access_action(
+                state,
+                action,
+                NodeId(0),
+                Some(ActionData::Value(value.into())),
+                ctx,
+            ));
+        });
+        handled.expect("the action ran")
+    };
+
+    let widened = PolicyBundle {
+        command_filter: CommandFilter::All,
+        ..super::policy::CODE_READ_ONLY_PRESET
+    };
+    let (doc, state) = mounted("ab", widened);
+    act(&state, Action::SetValue, "new text");
+    assert_eq!(doc.to_plain_text().unwrap(), "new text");
+    act(&state, Action::ReplaceSelectedText, "!");
+    assert!(doc.to_plain_text().unwrap().contains('!'));
+
+    let forward = PolicyBundle {
+        command_filter: CommandFilter::ForwardOnly,
+        ..super::policy::CODE_EDITOR_PRESET
+    };
+    let (doc, state) = mounted("keep", forward);
+    act(&state, Action::SetValue, "gone");
+    assert_eq!(doc.to_plain_text().unwrap(), "keep");
+}
