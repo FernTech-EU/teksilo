@@ -600,3 +600,5 @@ a11y-data-view-moved-to-position = { $name } перемещён на позиц�
 a11y-data-view-moved-to-position-unnamed = Перемещено на позицию { $position } из { $count }
 a11y-data-view-moved-to-level = { $name } перемещён на уровень { $level }
 a11y-data-view-moved-to-level-unnamed = Перемещено на уровень { $level }
+
+table-header-filter-trigger = Фильтр: { $column }

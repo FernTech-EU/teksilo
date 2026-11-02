@@ -61,14 +61,15 @@
 
 use std::rc::Rc;
 
-use teksilo_canvas::{Rect, SizeProposal};
+use teksilo_canvas::{Canvas, Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accesskit::{Action, HasPopup, Role};
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{ButtonMask, EventResponse, Key, WidgetEvent};
 use teksilo_core::signal::{Prop, Signal};
+use teksilo_core::styles::FocusRingStroke;
 use teksilo_core::widget::{
-    CursorIcon, EventContext, LayoutContext, PendingChild, Widget, WidgetPlacement,
+    CursorIcon, EventContext, LayoutContext, PaintContext, PendingChild, Widget, WidgetPlacement,
 };
 use teksilo_core::widget_builder::HandlerSet;
 use teksilo_core::widget_id::WidgetId;
@@ -121,6 +122,12 @@ pub struct OverlayTrigger {
     /// mounts. `Some` makes that widget the control, and this node structure;
     /// `None` makes this node the control. See the module docs.
     wrapped_control: Option<WidgetId>,
+    /// `true` while this node holds keyboard focus. Written by its own
+    /// `on_focus` when it is the control (no `wrapped_control`).
+    focused: Signal<bool>,
+    /// `:focus-visible`, captured at build. With `focused`, decides whether
+    /// [`paint`](Widget::paint) draws the focus ring.
+    focus_visible: Option<Signal<bool>>,
 }
 
 impl OverlayTrigger {
@@ -139,6 +146,8 @@ impl OverlayTrigger {
             on_activate: None,
             activate_on_key_up: false,
             wrapped_control: None,
+            focused: Signal::new(false),
+            focus_visible: None,
         }
     }
 
@@ -233,6 +242,29 @@ impl OverlayTrigger {
                     EventResponse::Ignored
                 }
             })
+    }
+
+    /// Make this node the Tab stop, and follow its focus for the ring it
+    /// paints: a glyph or a panel wrapped as a trigger draws no ring of its
+    /// own, and a stop with no visible focus fails WCAG 2.4.7.
+    fn own_focus(&mut self, keys: HandlerSet, ctx: &mut BuildContext) -> HandlerSet {
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        let focus_visible = ctx.focus_visible();
+        self.focused.bind_to(
+            self_id,
+            registry,
+            teksilo_core::binding::BindingLevel::RepaintOnly,
+        );
+        focus_visible.bind_to(
+            self_id,
+            registry,
+            teksilo_core::binding::BindingLevel::RepaintOnly,
+        );
+        self.focus_visible = Some(focus_visible);
+        let focused = self.focused.clone();
+        keys.focusable(true)
+            .on_focus(move |gained, _ctx| focused.set(gained))
     }
 
     /// The popup state, written onto a wrapped control's own node after its
@@ -334,11 +366,13 @@ impl Widget for OverlayTrigger {
                 }
                 (Some(child), None) => {
                     ctx.apply_handlers(child, pointer());
-                    ctx.apply_self_handlers(keys.focusable(true));
+                    let own = self.own_focus(keys, ctx);
+                    ctx.apply_self_handlers(own);
                 }
                 (None, _) => {
                     ctx.apply_self_handlers(pointer());
-                    ctx.apply_self_handlers(keys.focusable(true));
+                    let own = self.own_focus(keys, ctx);
+                    ctx.apply_self_handlers(own);
                 }
             }
         }
@@ -377,6 +411,39 @@ impl Widget for OverlayTrigger {
             child.origin = bounds.origin();
             child.size = bounds.size();
         }
+    }
+
+    /// The ring is drawn over the wrapped widget: a theme whose ring lies
+    /// partly inside the control (Breeze centres it on the edge) would have
+    /// an opaque face (a `Panel`) cover its inner half.
+    fn wants_post_paint(&self) -> bool {
+        self.wrapped_control.is_none()
+    }
+
+    /// The focus ring, when this node is the control and has keyboard focus
+    /// (`:focus-visible`, so a click does not ring it). The theme's ring, as
+    /// every stock control draws it: `focus_ring` colour and width, at
+    /// `focus_ring_offset` outside the wrapped widget. A wrapped control
+    /// draws its own.
+    fn post_paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
+        if self.wrapped_control.is_some()
+            || !self.focused.get()
+            || !self.focus_visible.as_ref().is_some_and(|v| v.get())
+        {
+            return;
+        }
+        let shape = &ctx.theme.shape;
+        let radius = shape
+            .radius_control
+            .min(bounds.width.min(bounds.height) * 0.5)
+            .max(0.0);
+        let ring = FocusRingStroke::around(bounds, radius, shape);
+        canvas.stroke_rounded_rect(
+            ring.rect,
+            teksilo_tokens::CornerRadius::uniform(ring.corner_radius),
+            ctx.theme.colors.focus_ring,
+            shape.focus_ring_width,
+        );
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

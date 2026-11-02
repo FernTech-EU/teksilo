@@ -595,3 +595,5 @@ a11y-data-view-moved-to-position = { $name } flyttet til plass { $position } av 
 a11y-data-view-moved-to-position-unnamed = Flyttet til plass { $position } av { $count }
 a11y-data-view-moved-to-level = { $name } flyttet til nivå { $level }
 a11y-data-view-moved-to-level-unnamed = Flyttet til nivå { $level }
+
+table-header-filter-trigger = Filtrer { $column }

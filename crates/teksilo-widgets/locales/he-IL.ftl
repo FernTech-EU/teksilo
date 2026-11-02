@@ -590,3 +590,5 @@ a11y-data-view-moved-to-position = { $name } הועבר למקום { $position }
 a11y-data-view-moved-to-position-unnamed = הועבר למקום { $position } מתוך { $count }
 a11y-data-view-moved-to-level = { $name } הועבר לרמה { $level }
 a11y-data-view-moved-to-level-unnamed = הועבר לרמה { $level }
+
+table-header-filter-trigger = סינון { $column }

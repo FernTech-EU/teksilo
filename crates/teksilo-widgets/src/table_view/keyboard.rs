@@ -995,12 +995,33 @@ fn clear_selection(cfg: &KeyHandlerConfig) {
 /// for an empty table and outside the multi modes, so the command reaches the
 /// application.
 pub(crate) fn run_select_all(cfg: &KeyHandlerConfig) -> bool {
-    let row_count = cfg.navigator.row_count();
-    if row_count == 0 || cfg.col_count == 0 || !cfg.selection_mode.is_multi() {
+    if select_all_declines(cfg) {
         return false;
     }
-    select_all(cfg, row_count);
+    select_all(cfg, cfg.navigator.row_count());
     true
+}
+
+/// Whether [`run_select_all`] would decline now: no rows, no columns, no
+/// model to select into, or a selection that holds one row or cell. That
+/// last is the selection's cardinality, not the mode: a `MultiRow` or
+/// `MultiCell` table handed a single model holds one entry, and its
+/// `select_all` does nothing. A menu row reads this (through the action's
+/// `passes_on_when`) to grey itself as the command would do nothing.
+pub(crate) fn select_all_declines(cfg: &KeyHandlerConfig) -> bool {
+    let has_model = match cfg.selection_mode {
+        TableSelectionMode::MultiRow => cfg.selection.is_some(),
+        TableSelectionMode::MultiCell => cfg.cell_selection.is_some(),
+        _ => false,
+    };
+    cfg.navigator.row_count() == 0
+        || cfg.col_count == 0
+        || !has_model
+        || super::selection::cardinality(
+            cfg.selection_mode,
+            cfg.selection.as_ref(),
+            cfg.cell_selection.as_ref(),
+        ) == crate::common::list_nav::Cardinality::Single
 }
 
 fn select_all(cfg: &KeyHandlerConfig, row_count: usize) {

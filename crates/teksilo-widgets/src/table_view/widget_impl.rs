@@ -328,13 +328,25 @@ impl<T: 'static> Widget for TableView<T> {
             self.row_selection.as_ref(),
             self.cell_selection.as_ref(),
         );
-        self.reveal_current_row_on_focus(ctx);
+        let reveal_on_focus = self.reveal_current_row_on_focus(ctx);
         self.view_focused.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
         );
         self.focus_visible.bind_to(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            BindingLevel::RepaintOnly,
+        );
+        // Focus inside the view but off the grid: in the header strip (a
+        // "Filter" trigger is a tab stop of its own, reached by Ctrl+Tab out
+        // of the grid) or in the empty view. A fresh signal per build: both
+        // are rebuilt with the table, and the framework only clears
+        // `focus_within` on a node still in the tree, so a header torn down
+        // while it held focus would otherwise leave this `true` for good.
+        self.off_grid_focus = Signal::new(false);
+        self.off_grid_focus.bind_to(
             ctx.self_id(),
             ctx.binding_registry(),
             BindingLevel::RepaintOnly,
@@ -513,10 +525,18 @@ impl<T: 'static> Widget for TableView<T> {
         // Select all comes through the rebindable `edit.select_all`.
         {
             let cfg = key_cfg.clone();
-            crate::common::standard_edit::register_standard_edit_action(
+            // Select-all passes on when it would do nothing: off the grid (a
+            // header trigger has focus), or in a table it cannot select all
+            // of (empty, or a single selection). It says so beforehand, so an
+            // Edit menu's row greys rather than doing nothing.
+            let off_grid_focus = self.off_grid_focus.clone();
+            let off_grid_row = self.off_grid_focus.clone();
+            let cfg_row = cfg.clone();
+            crate::common::standard_edit::register_standard_edit_action_passing_on(
                 ctx,
                 teksilo_core::shortcut::StandardEdit::SelectAll,
-                move |_ctx| keyboard::run_select_all(&cfg),
+                move |_ctx| !off_grid_focus.get() && keyboard::run_select_all(&cfg),
+                move || off_grid_row.get() || keyboard::select_all_declines(&cfg_row),
             );
         }
         let mut shared_key = keyboard::build_key_handler(key_cfg);
@@ -524,10 +544,19 @@ impl<T: 'static> Widget for TableView<T> {
         let focused_kbd = self.focused_cell.clone();
         let sel_kbd = self.row_selection.clone();
         let len_kbd = self.len_fn.clone();
+        let off_grid_focus_kbd = self.off_grid_focus.clone();
         let key_handler = move |event: &teksilo_core::event::WidgetEvent,
                                 ctx: &mut teksilo_core::widget::EventContext|
               -> teksilo_core::event::EventResponse {
             use teksilo_core::event::{EventResponse, WidgetEvent};
+            // A key bubbling up from the header strip is its control's, not
+            // the grid's: Tab, Shift+Tab and Down on a "Filter" trigger must
+            // not walk the cursor and the selection behind a focus that is on
+            // the trigger (the AT and the user both follow the trigger).
+            // Ignored here, the framework's focus cycling moves on from it.
+            if off_grid_focus_kbd.get() {
+                return EventResponse::Ignored;
+            }
             if let Some(ref perform) = reorder_key
                 && let WidgetEvent::KeyDown { key, modifiers, .. } = event
                 && let Some(mv) = crate::common::ordered_move::OrderedMove::from_key(
@@ -557,7 +586,10 @@ impl<T: 'static> Widget for TableView<T> {
         // finger's claimant chain all come from `common::scrollable`. A wheel
         // still takes the path it always did — `handle_scroll_event` branches
         // on the scroll *source*, not the phase.
-        let mut handlers = HandlerSet::new().clips_children(true).focusable(true);
+        let mut handlers = HandlerSet::new()
+            .on_focus(reveal_on_focus)
+            .clips_children(true)
+            .focusable(true);
         {
             use crate::common::scrollable::{
                 ScrollableAxes, ScrollableBehavior, handle_scroll_event, shift_wheel_remap,
@@ -766,7 +798,12 @@ impl<T: 'static> Widget for TableView<T> {
                     resize_preview_x: self.resize_preview_x.clone(),
                     frozen_widths: self.column_widths_frozen.clone(),
                 });
-            self.header_row_id = Some(ctx.add(header));
+            self.header_row_id = Some(ctx.add(
+                teksilo_core::widget_builder::WidgetBuilder::focus_within(
+                    header,
+                    self.off_grid_focus.clone(),
+                ),
+            ));
         }
 
         let row_count = (self.len_fn)();
@@ -783,7 +820,14 @@ impl<T: 'static> Widget for TableView<T> {
         if row_count == 0 {
             // Empty state.
             if let Some(ref f) = self.empty_view {
-                let id = ctx.add_boxed(f());
+                // Focus in an empty view's control is not the grid's either.
+                // `focus_within` reads strict descendants, so it goes on a
+                // zero padding around the view: the view itself is often the
+                // control (a lone "Clear filter" button).
+                let id = ctx.add(teksilo_core::widget_builder::WidgetBuilder::focus_within(
+                    crate::primitives::Padding::symmetric(0.0, 0.0).child(f()),
+                    self.off_grid_focus.clone(),
+                ));
                 self.empty_id = Some(id);
             }
         } else {
@@ -1211,7 +1255,7 @@ impl<T: 'static> Widget for TableView<T> {
             // keyboard focus AND the host window is active; muted
             // `SelectedInactive` once focus moves elsewhere or the window goes
             // inactive (the same desaturation serves both states).
-            let bg = if self.view_focused.get() && ctx.window_active {
+            let bg = if self.grid_focused() && ctx.window_active {
                 SurfaceRole::Selected.resolve(colors)
             } else {
                 SurfaceRole::SelectedInactive.resolve(colors)
@@ -1294,7 +1338,7 @@ impl<T: 'static> Widget for TableView<T> {
         // Focus ring on the currently-focused cell — keyboard-only
         // (`:focus-visible`) and only while the table itself holds focus, so a
         // mouse click never leaves a ring and an unfocused table shows none.
-        if self.view_focused.get()
+        if self.grid_focused()
             && self.focus_visible.get()
             && let Some((focus_row, focus_col)) = self.focused_cell.get()
             && focus_col < widths.len()
@@ -1374,7 +1418,7 @@ impl<T: 'static> Widget for TableView<T> {
                 .as_ref()
                 .is_none_or(|s| s.selected_indices().is_empty())
             && self.cell_selection.as_ref().is_none_or(|s| s.count() == 0);
-        if self.view_focused.get() && self.focus_visible.get() && nothing_indicated {
+        if self.grid_focused() && self.focus_visible.get() && nothing_indicated {
             let inset = 1.0_f32;
             let rect = Rect::new(
                 bounds.x + inset,

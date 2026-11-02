@@ -2300,6 +2300,134 @@ fn ctrl_tab_escapes_the_cell_grid() {
     );
 }
 
+/// The cell focus ring's paint, if any: a `BorderRole::Focused` fill below the
+/// header strip. The header's own controls (the filter trigger) sit above it.
+fn cell_ring_rects(tree: &mut WidgetTree, table: WidgetId) -> usize {
+    use crate::styles::recipe_table_style as cp;
+    let ring = teksilo_tokens::BorderRole::Focused
+        .resolve(&teksilo_core::presets::intui::light().colors)
+        .to_array();
+    let body_top = tree.bounds(table).y + cp::HEADER_HEIGHT;
+    tree.render()
+        .decorations
+        .iter()
+        .filter(|d| d.color == ring && d.rect[1] >= body_top)
+        .count()
+}
+
+/// Ctrl+Tab out of a table whose header holds a tab stop (a filterable
+/// column's "Filter" trigger) lands on that trigger, and the keys, the focus
+/// ring and the assistive focus all go with it: before, the trigger took the
+/// AT focus while every key bubbled back up to the table, which walked its
+/// cursor and selection behind a screen reader that heard nothing, with the
+/// ring still on the cell.
+#[test]
+fn ctrl_tab_to_the_header_filter_takes_the_keys_ring_and_at_focus_with_it() {
+    use crate::primitives::VStack;
+    use teksilo_core::accessibility::widget_id_to_node_id;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::widget_builder::WidgetBuilder;
+
+    let sel = SelectionModel::new(SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(5))
+            .add_column(id_col())
+            .add_column(name_col().filterable(true))
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(sel.clone()),
+    );
+    let sink = tree.add(TextWidget::new(lit!("sink")).focusable(true));
+    let _root = tree.add(VStack::new().child(table).child(sink));
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    let filter = tree
+        .find_by_label("Filter by Name")
+        .expect("filter trigger");
+
+    // A key on the grid makes the ring visible (`:focus-visible`).
+    focus_at(&mut tree, table, 0, 0);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((1, 0)));
+    assert_eq!(sel.selected_indices(), vec![1]);
+    assert!(cell_ring_rects(&mut tree, table) > 0, "ring on the cell");
+
+    tree.press_key(Key::Tab, Modifiers::CTRL);
+    let focused = tree.focused().expect("something focused");
+    assert!(
+        focused == filter || tree.is_descendant_of(focused, filter),
+        "Ctrl+Tab lands on the header's filter trigger, the next tab stop"
+    );
+    let update = tree.sync_accessibility();
+    assert_eq!(
+        update.focus,
+        widget_id_to_node_id(focused),
+        "the AT focus is the widget the keys go to"
+    );
+    let focus_node = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == update.focus)
+        .map(|(_, n)| n)
+        .expect("the focus is in the update");
+    assert_eq!(
+        focus_node.label(),
+        Some("Filter by Name"),
+        "the trigger says which column it filters"
+    );
+    assert_eq!(
+        cell_ring_rects(&mut tree, table),
+        0,
+        "no cell ring while the header has the keys"
+    );
+    // The ring is on the trigger instead (WCAG 2.4.7).
+    {
+        let ring = teksilo_core::presets::intui::light()
+            .colors
+            .focus_ring
+            .to_array();
+        let b = tree.bounds(focused);
+        let frame = tree.render();
+        assert!(
+            frame.shapes.iter().any(|s| s.color == ring
+                && s.screen[0] <= b.x
+                && s.screen[1] <= b.y
+                && s.screen[0] + s.screen[2] >= b.x + b.width
+                && s.screen[1] + s.screen[3] >= b.y + b.height),
+            "the focused trigger draws the focus ring around itself"
+        );
+    }
+
+    // Keys now belong to the trigger: Down and Shift+Tab do not walk the
+    // grid's cursor or selection.
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((1, 0)));
+    assert_eq!(sel.selected_indices(), vec![1]);
+
+    // Tab goes on to the next tab stop after the trigger, not to a cell.
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((1, 0)));
+    assert_eq!(sel.selected_indices(), vec![1]);
+    assert_eq!(tree.focused(), Some(sink), "Tab leaves the header");
+
+    // Back in: Shift+Tab from the sink reaches the trigger, a second Shift+Tab
+    // the grid itself, which takes the keys and shows its ring again.
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    let focused = tree.focused().expect("something focused");
+    assert!(focused == filter || tree.is_descendant_of(focused, filter));
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    assert_eq!(tree.focused(), Some(table));
+    assert!(
+        cell_ring_rects(&mut tree, table) > 0,
+        "ring back on the cell"
+    );
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((2, 0)));
+}
+
 #[test]
 fn shift_tab_moves_to_prev_cell_with_row_wrap() {
     let (mut tree, table, _) = build_table(3);
@@ -2554,6 +2682,544 @@ fn taking_focus_reveals_the_focused_cells_row() {
         "1-based, and it must be the cursor's own row rather than whichever \
          row the viewport happened to be showing"
     );
+}
+
+/// The rest of the header-trigger contract: Tab walks from one "Filter" to
+/// the next, Ctrl+A on a trigger selects no rows, the selection band shows
+/// its inactive colour while a trigger has focus, and a rebuild of the view
+/// while a trigger has focus (a sort change, as using a filter does) leaves
+/// the keys with the header and the grid with none of them.
+#[test]
+fn header_triggers_keep_the_keys_across_triggers_select_all_and_a_rebuild() {
+    use crate::primitives::VStack;
+    use teksilo_canvas::DecorationKind;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::widget_builder::WidgetBuilder;
+    use teksilo_tokens::SurfaceRole;
+
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(5))
+            .add_column(id_col().filterable(true))
+            .add_column(name_col().filterable(true))
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    let sink = tree.add(TextWidget::new(lit!("sink")).focusable(true));
+    let _root = tree.add(VStack::new().child(table).child(sink));
+    let viewport = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(viewport);
+    let colors = teksilo_core::presets::intui::light().colors;
+    let active = SurfaceRole::Selected.resolve(&colors).to_array();
+    let inactive = SurfaceRole::SelectedInactive.resolve(&colors).to_array();
+    let bands = |tree: &mut WidgetTree| -> Vec<[f32; 4]> {
+        tree.render()
+            .decorations
+            .iter()
+            .filter(|d| matches!(d.kind, DecorationKind::WidgetBackground))
+            .map(|d| d.color)
+            .collect()
+    };
+    let in_header = |tree: &WidgetTree| {
+        let f = tree.focused().expect("focused");
+        f != table && tree.is_descendant_of(f, table)
+    };
+
+    focus_at(&mut tree, table, 0, 0);
+    sel.select(0);
+    tree.layout(viewport);
+    assert!(
+        bands(&mut tree).contains(&active),
+        "the grid's band is active"
+    );
+    assert!(
+        tree.can_handle("edit.select_all"),
+        "the grid takes select-all"
+    );
+
+    tree.press_key(Key::Tab, Modifiers::CTRL);
+    tree.layout(viewport);
+    assert!(in_header(&tree), "on the first trigger");
+    let first = tree.focused();
+    let b = bands(&mut tree);
+    assert!(
+        b.contains(&inactive) && !b.contains(&active),
+        "inactive band: {b:?}"
+    );
+
+    tree.press_key(Key::A, Modifiers::COMMAND);
+    assert_eq!(
+        sel.selected_indices(),
+        vec![0],
+        "Ctrl+A on a trigger selects no rows"
+    );
+    assert!(
+        !tree.can_handle("edit.select_all"),
+        "an Edit menu's Select All greys while a trigger has focus"
+    );
+
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    tree.layout(viewport);
+    assert!(in_header(&tree), "Tab goes on to the second trigger");
+    assert_ne!(tree.focused(), first);
+
+    // Rebuild the view while the second trigger has focus: the header is
+    // built anew, and focus lands on the new header's trigger.
+    let second = tree.focused();
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .set_sort(Some("name"), SortDirection::Descending);
+    }
+    tree.layout(viewport);
+    assert_ne!(tree.focused(), second, "the old trigger is gone");
+    assert!(in_header(&tree), "focus is on a trigger of the new header");
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(
+        read_focused_cell(&tree, table),
+        Some((0, 0)),
+        "keys stay off the grid"
+    );
+    let b = bands(&mut tree);
+    assert!(
+        !b.contains(&active),
+        "no active band after the rebuild: {b:?}"
+    );
+
+    // And back to the grid, which takes the keys again.
+    while tree.focused() != Some(table) {
+        assert!(in_header(&tree));
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        tree.layout(viewport);
+    }
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(read_focused_cell(&tree, table), Some((1, 0)));
+}
+
+/// The header's strings follow a locale switch: the "Filter <column>"
+/// trigger name is resolved when the header builds, and the switch rebuilds
+/// it.
+#[test]
+fn the_filter_trigger_is_renamed_by_a_locale_switch() {
+    use crate::common::locale_switch_test::speaking;
+
+    let (manager, mut tree) = speaking("en-US");
+    tree.add(
+        TableView::new(rows(5))
+            .add_column(id_col())
+            .add_column(name_col().filterable(true))
+            .row_height(20.0),
+    );
+    let p = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(p);
+    assert!(tree.find_by_label("Filter by Name").is_some());
+
+    manager.set_locale("fr-FR".parse().unwrap());
+    tree.set_locale("fr-FR".to_string());
+    tree.layout(p);
+    let found = tree.find_by_label("Filtrer Name").is_some();
+    teksilo_i18n::thread_local::clear();
+    assert!(found, "the trigger is renamed in French");
+}
+
+/// A locale switch with focus on a header trigger rebuilds the header and
+/// keeps focus on its (renamed) trigger: the keys stay off the grid, and
+/// the grid does not reveal its cursor's row.
+#[test]
+fn a_locale_switch_keeps_focus_on_the_header_trigger() {
+    use crate::common::locale_switch_test::speaking;
+    use crate::primitives::VStack;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::widget_builder::WidgetBuilder;
+
+    let (manager, mut tree) = speaking("en-US");
+    let table = tree.add(
+        TableView::new(rows(1000))
+            .add_column(id_col())
+            .add_column(name_col().filterable(true))
+            .row_height(20.0),
+    );
+    let sink = tree.add(TextWidget::new(lit!("sink")).focusable(true));
+    let _root = tree.add(VStack::new().child(table).child(sink));
+    let p = SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    };
+    tree.layout(p);
+    let scroll = |tree: &WidgetTree| {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .scroll_y_signal()
+            .clone()
+    };
+
+    focus_at(&mut tree, table, 500, 0);
+    tree.layout(p);
+    tree.press_key(Key::Tab, Modifiers::CTRL);
+    tree.layout(p);
+    scroll(&tree).set(0.0);
+    tree.layout(p);
+    let old = tree
+        .find_by_label("Filter by Name")
+        .expect("English trigger");
+    let focused = tree.focused().expect("focused");
+    assert!(focused == old || tree.is_descendant_of(focused, old));
+
+    manager.set_locale("fr-FR".parse().unwrap());
+    tree.set_locale("fr-FR".to_string());
+    tree.layout(p);
+    let new = tree.find_by_label("Filtrer Name");
+    let focused = tree.focused();
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    tree.layout(p);
+    let cursor = read_focused_cell(&tree, table);
+    let scrolled = scroll(&tree).get();
+    teksilo_i18n::thread_local::clear();
+
+    let new = new.expect("the trigger renamed in French");
+    let focused = focused.expect("focus kept");
+    assert!(
+        focused == new || tree.is_descendant_of(focused, new),
+        "focus is on the new header's trigger"
+    );
+    assert_eq!(cursor, Some((500, 0)), "the keys stay off the grid");
+    assert_eq!(scrolled, 0.0, "and the grid revealed nothing");
+}
+
+/// Select All is offered only where it would do something: a selection that
+/// can hold several rows or cells, over rows that exist. That is the
+/// selection's cardinality, not the mode: a `MultiRow` table handed a single
+/// model holds one row. Elsewhere the table passes it on, so an Edit menu's
+/// row greys, and Ctrl+A selects nothing.
+#[test]
+fn select_all_is_offered_only_where_it_selects() {
+    // (mode, the model takes several entries, rows, offered)
+    for (mode, model_multi, rows_n, offered) in [
+        (TableSelectionMode::MultiRow, true, 5, true),
+        (TableSelectionMode::MultiCell, true, 5, true),
+        (TableSelectionMode::SingleRow, false, 5, false),
+        (TableSelectionMode::SingleCell, false, 5, false),
+        (TableSelectionMode::None, false, 5, false),
+        (TableSelectionMode::MultiRow, false, 5, false),
+        (TableSelectionMode::MultiCell, false, 5, false),
+        (TableSelectionMode::MultiRow, true, 0, false),
+    ] {
+        let mut view = TableView::new(rows(rows_n))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(mode);
+        let row_sel = SelectionModel::new(if model_multi {
+            SelectionMode::Multi
+        } else {
+            SelectionMode::Single
+        });
+        let cell_sel = super::CellSelectionModel::new(if model_multi {
+            TableSelectionMode::MultiCell
+        } else {
+            TableSelectionMode::SingleCell
+        });
+        if mode.is_cell_mode() {
+            view = view.cell_selection(cell_sel.clone());
+        } else if mode != TableSelectionMode::None {
+            view = view.selection(row_sel.clone());
+        }
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(view);
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(table);
+        let case = format!("{mode:?}, multi model {model_multi}, {rows_n} rows");
+        assert_eq!(tree.can_handle("edit.select_all"), offered, "{case}");
+        tree.press_key(
+            teksilo_core::event::Key::A,
+            teksilo_core::event::Modifiers::COMMAND,
+        );
+        let selected = row_sel.selected_indices().len() + cell_sel.count();
+        assert_eq!(selected > 1, offered, "Ctrl+A acts as offered: {case}");
+    }
+}
+
+/// A click on a row takes focus before the clicked cell becomes the cursor,
+/// so revealing "the cursor's row" then would scroll away from the row the
+/// user just clicked, on screen already. Neither from a header trigger nor
+/// from outside the table does a click scroll.
+#[test]
+fn a_click_into_the_grid_does_not_scroll_to_the_old_cursor() {
+    use crate::primitives::VStack;
+    use crate::styles::recipe_table_style as cp;
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+    use teksilo_core::widget_builder::WidgetBuilder;
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(1000))
+            .add_column(id_col())
+            .add_column(name_col().filterable(true))
+            .row_height(20.0),
+    );
+    let sink = tree.add(TextWidget::new(lit!("sink")).focusable(true));
+    let _root = tree.add(VStack::new().child(table).child(sink));
+    let viewport = SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    };
+    tree.layout(viewport);
+    let tv = |tree: &WidgetTree| {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        (tv.scroll_y_signal().clone(), tv.focused_cell_signal().get())
+    };
+    let click = |tree: &mut WidgetTree, y: f32| {
+        for e in [
+            WidgetEvent::pointer_down(
+                Point::new(100.0, y),
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ),
+            WidgetEvent::pointer_up(
+                Point::new(100.0, y),
+                PointerButton::Primary,
+                Modifiers::NONE,
+            ),
+        ] {
+            tree.dispatch_event(e);
+        }
+        tree.layout(viewport);
+    };
+    let row_y = cp::HEADER_HEIGHT + 2.0 * 20.0 + 10.0; // third visible row
+
+    for from_trigger in [true, false] {
+        // The cursor on row 0, focus away from the grid, the rows scrolled
+        // down to row 300.
+        focus_at(&mut tree, table, 0, 0);
+        if from_trigger {
+            tree.press_key(Key::Tab, Modifiers::CTRL);
+            let filter = tree
+                .find_by_label("Filter by Name")
+                .expect("filter trigger");
+            let focused = tree.focused().expect("focused");
+            assert!(focused == filter || tree.is_descendant_of(focused, filter));
+        } else {
+            tree.focus(sink);
+        }
+        let (scroll, _) = tv(&tree);
+        scroll.set(6000.0);
+        tree.layout(viewport);
+        assert_eq!(scroll.get(), 6000.0);
+
+        click(&mut tree, row_y);
+        let (scroll, cursor) = tv(&tree);
+        assert_eq!(tree.focused(), Some(table), "the click focuses the grid");
+        assert_eq!(
+            scroll.get(),
+            6000.0,
+            "no jump (from_trigger: {from_trigger})"
+        );
+        assert_eq!(
+            cursor.map(|(r, _)| r),
+            Some(302),
+            "the clicked row is the cursor"
+        );
+    }
+}
+
+/// Focus given back as a context menu closes is no arrival: with the cursor
+/// scrolled away, a right click on a visible row and Escape leave the rows
+/// where they are. An application that moves the cursor and then focuses the
+/// table still gets the row shown.
+#[test]
+fn closing_a_context_menu_does_not_scroll_to_the_old_cursor() {
+    use crate::button::Button;
+    use crate::primitives::VStack;
+    use crate::styles::recipe_table_style as cp;
+    use teksilo_canvas::Point;
+    use teksilo_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
+    use teksilo_core::widget_builder::WidgetBuilder;
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(1000))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .context_menu(|_, _| Some(Box::new(Button::new(lit!("Copy"))))),
+    );
+    let _root = tree.add(VStack::new().child(table));
+    let viewport = SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    };
+    tree.layout(viewport);
+    let tv = |tree: &WidgetTree| {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .scroll_y_signal()
+            .clone()
+    };
+
+    focus_at(&mut tree, table, 0, 0);
+    tree.layout(viewport);
+    tv(&tree).set(6000.0);
+    tree.layout(viewport);
+
+    let at = Point::new(100.0, cp::HEADER_HEIGHT + 50.0);
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        at,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_up(
+        at,
+        PointerButton::Secondary,
+        Modifiers::NONE,
+    ));
+    tree.layout(viewport);
+    assert_ne!(tree.focused(), Some(table), "the menu has focus");
+    tree.press_key(Key::Escape, Modifiers::NONE);
+    tree.layout(viewport);
+    assert_eq!(tree.focused(), Some(table), "Escape gives focus back");
+    assert_eq!(tv(&tree).get(), 6000.0, "and the rows stay where they were");
+
+    // The application's way: move the cursor, then focus the table.
+    let sink_focus = tree.add(Button::new(lit!("elsewhere")));
+    tree.focus(sink_focus);
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .set_focused_cell(900, 0);
+    }
+    tree.focus(table);
+    tree.layout(viewport);
+    assert!(tv(&tree).get() > 6000.0, "row 900 is shown");
+}
+
+/// A control in the `empty_view` (a "Clear filter" button) is not the grid
+/// either: with focus on it the table does not outline itself as focused.
+#[test]
+fn focus_in_the_empty_view_leaves_the_table_unringed() {
+    use crate::button::Button;
+    use crate::primitives::VStack;
+    use teksilo_core::event::{Key, Modifiers};
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(0))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .empty_view(|| Box::new(Button::new(lit!("Clear filter")))),
+    );
+    let _root = tree.add(VStack::new().child(table));
+    let viewport = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(viewport);
+    let ring = teksilo_tokens::BorderRole::Focused
+        .resolve(&teksilo_core::presets::intui::light().colors)
+        .to_array();
+    // The container ring: four edges in the focus colour, the top one as
+    // wide as the table and at its top (the button's own ring is a shape
+    // below the header).
+    let outlined = |tree: &mut WidgetTree| {
+        let b = tree.bounds(table);
+        tree.render()
+            .decorations
+            .iter()
+            .any(|d| d.color == ring && d.rect[2] >= b.width - 4.0 && d.rect[1] <= b.y + 2.0)
+    };
+
+    tree.focus(table);
+    tree.press_key(Key::Escape, Modifiers::NONE); // keyboard modality
+    tree.layout(viewport);
+    assert_eq!(tree.focused(), Some(table));
+    assert!(
+        outlined(&mut tree),
+        "the focused, empty table outlines itself"
+    );
+
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    tree.layout(viewport);
+    let button = tree.find_by_label("Clear filter").expect("the button");
+    let focused = tree.focused().expect("focused");
+    assert!(focused == button || tree.is_descendant_of(focused, button));
+    assert!(
+        !outlined(&mut tree),
+        "focus is on the button, not the table"
+    );
+}
+
+/// The reveal follows the grid taking focus, not the view: focus arriving on
+/// the header's "Filter" trigger leaves the rows where they are, and the
+/// grid taking focus back from the trigger reveals the cursor's row.
+#[test]
+fn the_reveal_follows_the_grid_not_the_header_trigger() {
+    use crate::primitives::VStack;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::widget_builder::WidgetBuilder;
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(1000))
+            .add_column(id_col())
+            .add_column(name_col().filterable(true))
+            .row_height(20.0),
+    );
+    let sink = tree.add(TextWidget::new(lit!("sink")).focusable(true));
+    let _root = tree.add(VStack::new().child(table).child(sink));
+    let viewport = SizeProposal {
+        width: Some(400.0),
+        height: Some(300.0),
+    };
+    tree.layout(viewport);
+    let scroll_y = |tree: &WidgetTree| {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .scroll_y_signal()
+            .get()
+    };
+    {
+        let any = tree.widget_as_any(table).unwrap();
+        any.downcast_ref::<TableView<Row>>()
+            .unwrap()
+            .set_focused_cell(500, 0);
+    }
+    tree.focus(sink);
+    tree.layout(viewport);
+    assert_eq!(scroll_y(&tree), 0.0);
+
+    // Shift+Tab from the sink: the trigger, the last tab stop in the table.
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    tree.layout(viewport);
+    let filter = tree
+        .find_by_label("Filter by Name")
+        .expect("filter trigger");
+    let focused = tree.focused().expect("focused");
+    assert!(focused == filter || tree.is_descendant_of(focused, filter));
+    assert_eq!(scroll_y(&tree), 0.0, "the rows stay put under the trigger");
+
+    // Shift+Tab again: the grid, which brings its cursor's row into view.
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    tree.layout(viewport);
+    assert_eq!(tree.focused(), Some(table));
+    assert!(scroll_y(&tree) > 0.0, "row 500 is revealed");
 }
 
 /// With no cell navigated to yet, the selected row is the one revealed.
@@ -3047,8 +3713,8 @@ fn empty_view_renders_when_no_rows() {
 
 #[test]
 fn filterable_column_exposes_filter_trigger_in_a11y_tree() {
-    // The filter glyph is wrapped in a `Popover` whose default name
-    // is "Filter" — locating it via `find_by_label` confirms the
+    // The filter glyph is wrapped in a `Popover` named for its column
+    // ("Filter by Name"); locating it via `find_by_label` confirms the
     // affordance is present for filterable columns.
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
     tree.add(
@@ -3061,10 +3727,10 @@ fn filterable_column_exposes_filter_trigger_in_a11y_tree() {
         width: Some(400.0),
         height: Some(200.0),
     });
-    let trigger = tree.find_by_label("Filter");
+    let trigger = tree.find_by_label("Filter by Name");
     assert!(
         trigger.is_some(),
-        "filterable column must expose a 'Filter' trigger via the Popover"
+        "filterable column must expose a 'Filter by <column>' trigger via the Popover"
     );
 }
 
@@ -3082,7 +3748,7 @@ fn non_filterable_column_does_not_expose_filter_trigger() {
         height: Some(200.0),
     });
     assert!(
-        tree.find_by_label("Filter").is_none(),
+        tree.find_by_label("Filter by Name").is_none(),
         "columns without `.filterable(true)` must not advertise a filter trigger"
     );
 }
@@ -3104,7 +3770,9 @@ fn filter_popover_opens_via_trigger_click() {
     // pointer click on the wrapper hit-tests into the child where the
     // handler lives. AccessAction dispatched at the wrapper id alone
     // no longer fires (handlers aren't on the wrapper node).
-    let trigger = tree.find_by_label("Filter").expect("trigger present");
+    let trigger = tree
+        .find_by_label("Filter by Name")
+        .expect("trigger present");
     tree.click(trigger);
     assert_eq!(
         tree.active_overlays().len(),
@@ -3274,7 +3942,9 @@ fn filter_popover_editor_gains_focus_on_mouse_click() {
         width: Some(400.0),
         height: Some(300.0),
     });
-    let trigger = tree.find_by_label("Filter").expect("trigger present");
+    let trigger = tree
+        .find_by_label("Filter by Name")
+        .expect("trigger present");
     tree.click(trigger);
     tree.layout(SizeProposal {
         width: Some(400.0),

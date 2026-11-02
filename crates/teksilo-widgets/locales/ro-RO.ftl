@@ -600,3 +600,5 @@ a11y-data-view-moved-to-position = { $name } mutat pe poziția { $position } din
 a11y-data-view-moved-to-position-unnamed = Mutat pe poziția { $position } din { $count }
 a11y-data-view-moved-to-level = { $name } mutat la nivelul { $level }
 a11y-data-view-moved-to-level-unnamed = Mutat la nivelul { $level }
+
+table-header-filter-trigger = Filtrează { $column }

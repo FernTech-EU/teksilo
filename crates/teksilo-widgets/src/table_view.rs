@@ -429,6 +429,22 @@ pub struct TableView<T: 'static> {
     /// after a pointer press. Gates the cell focus ring so it shows only
     /// during keyboard navigation, never on a mouse click. Bound `RepaintOnly`.
     focus_visible: Signal<bool>,
+    /// `true` while keyboard focus is inside the view but off the grid: in
+    /// the header strip (a filterable column's "Filter" trigger, a tab stop
+    /// of its own) or in the `empty_view` (a "Clear filter" button). Written
+    /// by the framework through `focus_within` on both and replaced at every
+    /// build, since both are rebuilt with the table. The keys, the cell ring,
+    /// the container ring and the active selection band belong to the grid
+    /// only while this is `false`: [`view_focused`](Self::view_focused) alone
+    /// counts every descendant, which left the grid answering keys the
+    /// trigger had focus for.
+    off_grid_focus: Signal<bool>,
+    /// The row the reveal-on-focus would bring into view, as it stood when
+    /// focus last left the root (`None` until it first does). A
+    /// programmatic focus that finds it unchanged is focus being given back
+    /// (a menu, popover or dialog closing), not an arrival, and reveals
+    /// nothing. Kept across builds, since a dialog can outlive a rebuild.
+    row_at_blur: Rc<Cell<Option<Option<usize>>>>,
 
     // Build state
     header_row_id: Option<WidgetId>,
@@ -691,6 +707,8 @@ impl<T: 'static> TableView<T> {
             // only the pre-build values (treat as focused, pointer modality).
             view_focused: Signal::new(true),
             focus_visible: Signal::new(false),
+            off_grid_focus: Signal::new(false),
+            row_at_blur: Rc::new(Cell::new(None)),
             tab_traversal: TabTraversal::default(),
             editing_cell: Signal::new(None),
             edit_triggers: EditTriggers::default(),
@@ -1496,8 +1514,18 @@ impl<T: 'static> TableView<T> {
 
     // ── Internals ──────────────────────────────────────────────────────
 
-    /// Scroll the row the keyboard cursor is on into view when this table
-    /// takes focus.
+    /// Whether the grid itself has the keys: the view holds keyboard focus
+    /// (its root, or a cell editor inside it) and that focus is not in the
+    /// header strip or the empty view. Gates the cell ring, the container ring and the active
+    /// selection band, so they never claim a focus the header's trigger has.
+    fn grid_focused(&self) -> bool {
+        self.view_focused.get() && !self.off_grid_focus.get()
+    }
+
+    /// The root's `on_focus`: scroll the row the keyboard cursor is on into
+    /// view when the grid takes focus by keyboard, assistive technology or
+    /// program (not a header control in it, and not a click, which is on a
+    /// row already in view).
     ///
     /// Only the rows near the viewport are realized, so on a table taller than
     /// the window the cursor's row frequently has no widget. Everything that
@@ -1527,7 +1555,10 @@ impl<T: 'static> TableView<T> {
     ///
     /// The handles are cloned into the effect rather than reaching through
     /// `self`, which the closure cannot borrow.
-    fn reveal_current_row_on_focus(&self, ctx: &mut teksilo_core::build_context::BuildContext) {
+    fn reveal_current_row_on_focus(
+        &self,
+        ctx: &mut teksilo_core::build_context::BuildContext,
+    ) -> impl FnMut(bool, &mut teksilo_core::widget::EventContext) + 'static {
         let row_metrics = self.row_metrics.clone();
         let scroll_y = self.scroll_y.clone();
         let max_scroll_y = self.max_scroll_y.clone();
@@ -1536,15 +1567,49 @@ impl<T: 'static> TableView<T> {
         let focused_cell = self.focused_cell.clone();
         let selection = self.row_selection.clone();
 
-        ctx.effect(&self.view_focused, move |focused| {
-            if !*focused {
-                return;
-            }
-            let Some(row) = focused_cell.get().map(|(row, _col)| row).or_else(|| {
+        // The root's own `on_focus`, not `view_focused`, which also counts
+        // the header: focus arriving on a "Filter" trigger from outside would
+        // scroll the rows under it, and focus coming back from the trigger to
+        // the grid, which flips nothing there, would not. Not for a pointer:
+        // a click focuses the root before the pressed cell becomes the cursor,
+        // so revealing the old cursor would scroll away from the row clicked,
+        // which is on screen already. Not for a restore after a rebuild either,
+        // which is no arrival. The check on the focused id keeps out a focus
+        // bubbling here from a descendant with no `on_focus` of its own.
+        let root = ctx.self_id();
+        //
+        // Nor for focus given back as a menu, popover or dialog closes. That
+        // return is a programmatic focus, as an application's own
+        // `request_focus` is, and the tree marks the two alike; what tells
+        // them apart here is that the row has not changed since focus left
+        // the root. The user is put back where they were, as a keyboard
+        // return would (Escape after a right click on a row scrolled away
+        // from the cursor stays on that row), and an application that wants
+        // a row shown sets the cursor on it before focusing.
+        let row_at_blur = self.row_at_blur.clone();
+        move |gained, ctx| {
+            let current = focused_cell.get().map(|(row, _col)| row).or_else(|| {
                 selection
                     .as_ref()
                     .and_then(|s| s.selected_indices().first().copied())
-            }) else {
+            });
+            if !gained {
+                row_at_blur.set(Some(current));
+                return;
+            }
+            if ctx.focused() != Some(root) {
+                return;
+            }
+            let given_back = row_at_blur.take() == Some(current);
+            match ctx.focus_origin() {
+                Some(
+                    teksilo_core::focus::FocusOrigin::Pointer(_)
+                    | teksilo_core::focus::FocusOrigin::Restored,
+                ) => return,
+                Some(teksilo_core::focus::FocusOrigin::Programmatic) if given_back => return,
+                _ => {}
+            }
+            let Some(row) = current else {
                 return;
             };
             imperative::ensure_row_visible(
@@ -1555,7 +1620,7 @@ impl<T: 'static> TableView<T> {
                 viewport_height.get(),
                 laid_out.get(),
             );
-        });
+        }
     }
 
     /// The configured row height (override) or the active table style's

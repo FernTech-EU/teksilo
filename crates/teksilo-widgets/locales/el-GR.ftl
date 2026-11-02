@@ -586,3 +586,5 @@ a11y-data-view-moved-to-position = { $name }: μετακινήθηκε στη θ
 a11y-data-view-moved-to-position-unnamed = Μετακινήθηκε στη θέση { $position } από { $count }
 a11y-data-view-moved-to-level = { $name }: μετακινήθηκε στο επίπεδο { $level }
 a11y-data-view-moved-to-level-unnamed = Μετακινήθηκε στο επίπεδο { $level }
+
+table-header-filter-trigger = Φιλτράρισμα { $column }

@@ -575,3 +575,5 @@ a11y-data-view-moved-to-position = { $name }을(를) { $count }개 중 { $positi
 a11y-data-view-moved-to-position-unnamed = { $count }개 중 { $position }번째로 이동함
 a11y-data-view-moved-to-level = { $name }을(를) { $level }단계로 이동함
 a11y-data-view-moved-to-level-unnamed = { $level }단계로 이동함
+
+table-header-filter-trigger = { $column } 필터

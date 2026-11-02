@@ -409,3 +409,135 @@ fn a_composite_with_a_right_click_mask_opens_on_a_right_click_only() {
         "and a second one closes"
     );
 }
+
+/// Shapes stroked in the theme's focus-ring colour.
+fn focus_ring_shapes(tree: &mut WidgetTree) -> usize {
+    let ring = teksilo_core::presets::intui::light()
+        .colors
+        .focus_ring
+        .to_array();
+    tree.render()
+        .shapes
+        .iter()
+        .filter(|s| s.color == ring)
+        .count()
+}
+
+/// A trigger around a widget that takes no focus is the Tab stop itself, and
+/// draws the theme's focus ring while it has keyboard focus: the glyph it
+/// wraps draws none, so without it a keyboard user reaching the stop (a
+/// table header's "Filter") saw nothing. A click focuses it without a ring
+/// (`:focus-visible`).
+#[test]
+fn a_trigger_that_is_its_own_stop_rings_under_keyboard_focus_only() {
+    let popover = PopoverWidget::new(
+        OverlayTrigger::around(MinSize::new(24.0, 24.0).child(RectWidget::new())).named("Options"),
+    )
+    .content(content());
+    let mut tree = light_tree();
+    let first = tree.add(Button::new(lit!("Before")));
+    let id = tree.add(popover);
+    tree.add(VStack::new().child(first).child(id));
+    laid_out(&mut tree);
+    let stop = tree
+        .first_focusable_descendant(id)
+        .expect("the trigger's stop");
+    assert_eq!(focus_ring_shapes(&mut tree), 0, "nothing focused, no ring");
+
+    // Focused after pointer input (a click elsewhere sets the modality):
+    // no ring.
+    click_at(&mut tree, Point::new(790.0, 590.0), PointerButton::Primary);
+    tree.focus(stop);
+    laid_out(&mut tree);
+    assert_eq!(tree.focused(), Some(stop));
+    assert_eq!(focus_ring_shapes(&mut tree), 0, "pointer modality, no ring");
+
+    // Tab onto it from the button before it: keyboard focus, ring.
+    tree.focus(first);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    laid_out(&mut tree);
+    assert_eq!(tree.focused(), Some(stop));
+    let ring = {
+        let colour = teksilo_core::presets::intui::light()
+            .colors
+            .focus_ring
+            .to_array();
+        let frame = tree.render();
+        frame
+            .shapes
+            .iter()
+            .filter(|s| s.color == colour)
+            .map(|s| s.screen)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ring.len(), 1, "one ring, on the trigger");
+    let b = tree.bounds(stop);
+    let r = ring[0];
+    assert!(
+        r[0] <= b.x && r[1] <= b.y && r[0] + r[2] >= b.x + b.width && r[1] + r[3] >= b.y + b.height,
+        "the ring surrounds the trigger: {r:?} around {b:?}"
+    );
+
+    // Focus leaves: the ring goes.
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    laid_out(&mut tree);
+    assert_eq!(tree.focused(), Some(first));
+    let rings_now = focus_ring_shapes(&mut tree);
+    // The button before it rings now; the trigger does not.
+    let trigger_bounds = tree.bounds(stop);
+    let colour = teksilo_core::presets::intui::light()
+        .colors
+        .focus_ring
+        .to_array();
+    let frame = tree.render();
+    assert!(
+        !frame.shapes.iter().any(|s| s.color == colour
+            && s.screen[1] >= trigger_bounds.y - 8.0
+            && s.screen[1] <= trigger_bounds.y),
+        "no ring left on the trigger ({rings_now} ring shapes in all)"
+    );
+}
+
+/// The ring goes over the wrapped widget, not under it: with a theme whose
+/// ring lies partly inside the control, an opaque face painted after it would
+/// hide its inner half.
+#[test]
+fn the_triggers_ring_is_drawn_after_its_face() {
+    use teksilo_canvas::DrawCommand;
+    use teksilo_tokens::Color;
+
+    let face_colour = Color::from_rgb(0.04, 0.78, 0.12);
+    let popover = PopoverWidget::new(
+        OverlayTrigger::around(
+            MinSize::new(24.0, 24.0).child(RectWidget::new().background(face_colour)),
+        )
+        .named("Options"),
+    )
+    .content(content());
+    let mut tree = light_tree();
+    let first = tree.add(Button::new(lit!("Before")));
+    let id = tree.add(popover);
+    tree.add(VStack::new().child(first).child(id));
+    laid_out(&mut tree);
+    tree.focus(first);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    laid_out(&mut tree);
+
+    let ring = teksilo_core::presets::intui::light()
+        .colors
+        .focus_ring
+        .to_array();
+    let face = face_colour.to_array();
+    let frame = tree.render();
+    let position = |pred: &dyn Fn(&DrawCommand) -> bool| {
+        frame.draw_order.iter().position(pred).expect("drawn")
+    };
+    let face_at = position(&|c| match c {
+        DrawCommand::Decoration(i) => frame.decorations[*i].color == face,
+        DrawCommand::Shape(i) => frame.shapes[*i].color == face,
+        _ => false,
+    });
+    let ring_at =
+        position(&|c| matches!(c, DrawCommand::Shape(i) if frame.shapes[*i].color == ring));
+    assert!(ring_at > face_at, "ring at {ring_at}, face at {face_at}");
+}

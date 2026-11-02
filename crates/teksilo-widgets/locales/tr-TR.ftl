@@ -581,3 +581,5 @@ a11y-data-view-moved-to-position = { $name } { $count } öğeden { $position }. 
 a11y-data-view-moved-to-position-unnamed = { $count } öğeden { $position }. konuma taşındı
 a11y-data-view-moved-to-level = { $name } { $level }. düzeye taşındı
 a11y-data-view-moved-to-level-unnamed = { $level }. düzeye taşındı
+
+table-header-filter-trigger = { $column } filtrele

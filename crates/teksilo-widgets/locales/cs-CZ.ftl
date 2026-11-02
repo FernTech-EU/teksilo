@@ -598,3 +598,5 @@ a11y-data-view-moved-to-position = { $name } přesunuto na pozici { $position } 
 a11y-data-view-moved-to-position-unnamed = Přesunuto na pozici { $position } z { $count }
 a11y-data-view-moved-to-level = { $name } přesunuto na úroveň { $level }
 a11y-data-view-moved-to-level-unnamed = Přesunuto na úroveň { $level }
+
+table-header-filter-trigger = Filtrovat { $column }

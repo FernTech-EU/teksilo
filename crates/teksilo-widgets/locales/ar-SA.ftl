@@ -616,3 +616,5 @@ a11y-data-view-moved-to-position = نُقل { $name } إلى الموضع { $pos
 a11y-data-view-moved-to-position-unnamed = نُقل إلى الموضع { $position } من { $count }
 a11y-data-view-moved-to-level = نُقل { $name } إلى المستوى { $level }
 a11y-data-view-moved-to-level-unnamed = نُقل إلى المستوى { $level }
+
+table-header-filter-trigger = تصفية { $column }

@@ -579,3 +579,5 @@ a11y-data-view-moved-to-position = { $name } déplacé en position { $position }
 a11y-data-view-moved-to-position-unnamed = Déplacé en position { $position } sur { $count }
 a11y-data-view-moved-to-level = { $name } déplacé au niveau { $level }
 a11y-data-view-moved-to-level-unnamed = Déplacé au niveau { $level }
+
+table-header-filter-trigger = Filtrer { $column }

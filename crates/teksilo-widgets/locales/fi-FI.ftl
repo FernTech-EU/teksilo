@@ -585,3 +585,5 @@ a11y-data-view-moved-to-position = { $name } siirretty kohtaan { $position }/{ $
 a11y-data-view-moved-to-position-unnamed = Siirretty kohtaan { $position }/{ $count }
 a11y-data-view-moved-to-level = { $name } siirretty tasolle { $level }
 a11y-data-view-moved-to-level-unnamed = Siirretty tasolle { $level }
+
+table-header-filter-trigger = Suodata { $column }

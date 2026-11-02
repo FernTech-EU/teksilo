@@ -704,7 +704,7 @@ clear behaviour).
 | Tab / Shift+Tab             | next / previous cell in row order, wrapping rows (configurable via `tab_traversal`)   |
 | Shift + Arrow               | extend selection in `MultiRow` / `MultiCell` modes                                    |
 | Ctrl + Arrow                | move the focused cell without touching a selection that can hold several rows or cells; a single one follows the cursor |
-| Ctrl-Tab / Ctrl-Shift-Tab   | leave the table (next / previous focusable widget), the escape from cell traversal   |
+| Ctrl-Tab / Ctrl-Shift-Tab   | leave the grid (next / previous focusable widget), the escape from cell traversal. A filterable column's "Filter" trigger is a tab stop after the grid: Ctrl-Tab lands there first, and the keys, the cell ring and the selection's active colour go with it |
 | Space                       | check the focused cell if it holds a checkbox, else toggle selection at focus          |
 | Ctrl-Space / Shift-Space    | `MultiCell`: select the column / the row (Excel and the ARIA grid pattern)             |
 | Enter                       | invoke `on_row_activate` (or fall back to toggle-select)                              |
@@ -715,6 +715,12 @@ clear behaviour).
 | `*` / `+` / `-`             | expand the whole subtree / expand one level / collapse (TreeTableView)                    |
 | ArrowRight on tree column   | expand the row when collapsed and has children (TreeTableView)                            |
 | On a full-width row         | ArrowLeft / ArrowRight act as on the tree column, from any column; it is one cell to Home / End and Tab, and opens no editor (TreeTableView, see [Group rows](#group-rows-and-pinned-ancestors-treetableview)) |
+
+The table answers these keys unless focus is on a control of its header (a
+"Filter" trigger) or of its empty view. A key pressed there is that
+control's: Tab moves on to the next tab stop, and nothing walks the grid's
+cursor behind it. The control shows the focus ring; the grid shows none, and
+its selection takes the inactive colour, until focus comes back to it.
 
 The same handler powers both widgets via the
 [`RowNavigator`](../crates/teksilo-widgets/src/table_view/row_navigator.rs)

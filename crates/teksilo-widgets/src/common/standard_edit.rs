@@ -71,6 +71,24 @@ pub(crate) fn register_standard_edit_action(
     register_command_action(ctx, command.id(), run);
 }
 
+/// [`register_standard_edit_action`] for a widget that declines the command
+/// at times it can tell beforehand: `passes_on` says when `run` would decline
+/// it, so a menu row greys while it does (a table's select-all with focus on
+/// a header control). The command is otherwise always available.
+pub(crate) fn register_standard_edit_action_passing_on(
+    ctx: &mut BuildContext,
+    command: StandardEdit,
+    run: impl FnMut(&mut EventContext) -> bool + 'static,
+    passes_on: impl Fn() -> bool + 'static,
+) {
+    register_action(
+        ctx,
+        command.id(),
+        run,
+        Some((Box::new(|| true), Box::new(passes_on))),
+    );
+}
+
 /// Register, on the widget being built, the action for the command `id`
 /// names: the standard edit commands, and the editors' own
 /// [`FormatShortcut`](crate::editor_shortcuts::FormatShortcut) and

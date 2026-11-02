@@ -513,7 +513,15 @@ impl Widget for HeaderCell {
             // focus by *panel* id and the framework walks to the first focusable
             // descendant, which is this panel's filter field.
             let popover = PopoverWidget::new(
-                OverlayTrigger::around(glyph).named(lit!("Filter").resolve_now()),
+                // Named for its column ("Filter by Name"): every filterable
+                // column has one, and Ctrl+Tab out of the grid lands on the
+                // first, so a bare "Filter" would not say which.
+                OverlayTrigger::around(glyph).named(
+                    teksilo_i18n::tr_widget!(table_header_filter_trigger(
+                        column = self.label.clone()
+                    ))
+                    .resolve_now(),
+                ),
             )
             .content(FilterPopoverContent::new(initial).on_change(on_change))
             .placement(OverlayPlacement::BelowPreferred)

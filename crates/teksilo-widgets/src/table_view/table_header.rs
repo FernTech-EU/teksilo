@@ -520,6 +520,13 @@ impl Widget for TableHeader {
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
         self.scroll_x
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::RepaintOnly);
+        // The column titles and the "Filter <column>" trigger names are
+        // resolved here, at build: a locale switch, which rebuilds nothing on
+        // its own, rebuilds the header so both follow it. Like every header
+        // rebuild (a sort, each filter keystroke) it ends a column resize in
+        // progress where the last move left it.
+        ctx.locale_signal()
+            .bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
         if !self.hosted {
             // A view relays out and rebuilds a hosted header on all of these
             // itself, and owns the display order it reads.

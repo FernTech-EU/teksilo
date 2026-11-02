@@ -593,6 +593,24 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A custom overlay trigger shows the focus ring when it has keyboard
+  focus.** An `OverlayTrigger` around a widget that takes no focus (a
+  table header's "Filter" glyph, a custom `Popover`, `Dialog`, `Snackbar` or
+  `Wizard` trigger) is a Tab stop, but drew no ring, so a keyboard user saw
+  nothing focused. It now draws the theme's focus ring, after keyboard input
+  only, as the stock controls do.
+- **Ctrl+Tab out of a `TableView` or `TreeTableView` onto a column's
+  "Filter" trigger gives that trigger the keys.** The trigger took the
+  screen reader's focus, but the focus ring stayed on the cell and Tab,
+  Shift+Tab and the arrows still moved the grid's cursor and selection, with
+  nothing announced. Ctrl+Tab lands on the trigger, a tab stop after the
+  grid: keys pressed there are its own, Tab goes on past the table, and the
+  grid shows no ring and its selection in the inactive colour until focus
+  comes back. A control in the table's empty view gets the same treatment,
+  and an Edit menu's Select All greys while a trigger has focus. Each
+  trigger is named for its column ("Filter by Name", translated) instead of
+  a bare, untranslated "Filter", and the header's column titles and trigger
+  names follow a change of language while the application runs.
 - **Ctrl+Space and Space in a multiple-selection `TableView` or
   `TreeTableView` add the focused row to the selection, or take it out, and
   keep the other rows.** They used to leave the focused row selected alone,

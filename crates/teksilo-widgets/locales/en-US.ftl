@@ -676,3 +676,6 @@ a11y-data-view-moved-to-position-unnamed = Moved to { $position } of { $count }
 # Announced after a tree row moved in or out: $level is its new depth, 1 at the top.
 a11y-data-view-moved-to-level = { $name } moved to level { $level }
 a11y-data-view-moved-to-level-unnamed = Moved to level { $level }
+
+# The name of a table header's filter button: $column is the column's title.
+table-header-filter-trigger = Filter by { $column }

@@ -583,3 +583,5 @@ a11y-data-view-moved-to-position = { $name } áthelyezve: { $position }. / { $co
 a11y-data-view-moved-to-position-unnamed = Áthelyezve: { $position }. / { $count }
 a11y-data-view-moved-to-level = { $name } áthelyezve a(z) { $level }. szintre
 a11y-data-view-moved-to-level-unnamed = Áthelyezve a(z) { $level }. szintre
+
+table-header-filter-trigger = { $column } szűrése

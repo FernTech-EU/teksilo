@@ -581,3 +581,5 @@ a11y-data-view-moved-to-position = { $name } を { $count } 件中 { $position }
 a11y-data-view-moved-to-position-unnamed = { $count } 件中 { $position } 番目に移動しました
 a11y-data-view-moved-to-level = { $name } をレベル { $level } に移動しました
 a11y-data-view-moved-to-level-unnamed = レベル { $level } に移動しました
+
+table-header-filter-trigger = { $column } をフィルター

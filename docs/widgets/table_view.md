@@ -1347,8 +1347,10 @@ Every trigger at once.
 Tab / Shift-Tab traversal policy across cells of a row.
 
 Regardless of the policy, **Ctrl+Tab / Ctrl+Shift+Tab always move focus
-out of the table** to the next / previous focusable widget — the reliable
-escape from `CellsThenRows`, so keyboard focus is never trapped.
+out of the grid** to the next / previous tab stop: the reliable escape
+from `CellsThenRows`, so keyboard focus is never trapped. The first stop
+after the grid is a filterable column's "Filter" trigger, when the header
+has one; from there Tab goes on to whatever follows the table.
 
 ```rust
 pub enum TabTraversal { /* variants */ }
@@ -1356,8 +1358,8 @@ pub enum TabTraversal { /* variants */ }
 
 ### Variants
 
-- **`CellsThenRows`** — Tab moves to the next cell within the row, then wraps to the first cell of the next row. **Default.** (Ctrl+Tab leaves the table.)
-- **`OutOfTable`** — Tab leaves the table once the focused cell is reached at the row boundary; the focus owner is whatever follows the table in tab order.
+- **`CellsThenRows`** — Tab moves to the next cell within the row, then wraps to the first cell of the next row. **Default.** (Ctrl+Tab leaves the grid.)
+- **`OutOfTable`** — Tab leaves the grid once the focused cell is reached at the row boundary; the focus owner is the next tab stop after the grid (a header "Filter" trigger, if there is one, else whatever follows the table).
 
 <a id="cellcontext"></a>
 
