@@ -296,7 +296,17 @@ pub(crate) struct TreeRowA11y {
     live_selected: Option<LiveFlag>,
     /// 1-based position among this row's siblings (`TreeSource::sibling_pos`).
     position_in_set: usize,
+    /// How many cells the row holds: the set size its cells read (see
+    /// `accessibility`).
+    cell_count: usize,
+    /// The child rows hanging from this one and their set size, filled in
+    /// by the pane (see `common::tree_a11y`).
+    at: Rc<crate::common::tree_a11y::RowAt>,
 }
+
+/// The element id of the group a tree table row's child rows hang from
+/// (owned by the row, so it cannot collide with a pane's stand-ins).
+const CHILD_ROWS_GROUP: u64 = 0;
 
 impl TreeRowA11y {
     pub(crate) fn new(
@@ -315,7 +325,21 @@ impl TreeRowA11y {
             selected,
             live_selected: None,
             position_in_set,
+            cell_count: 0,
+            at: Rc::default(),
         }
+    }
+
+    /// The row's cell count and the cell its pane fills with the child rows
+    /// hanging from it.
+    pub(crate) fn with_rows_below(
+        mut self,
+        cell_count: usize,
+        at: Rc<crate::common::tree_a11y::RowAt>,
+    ) -> Self {
+        self.cell_count = cell_count;
+        self.at = at;
+        self
     }
 
     /// See [`CellA11y::with_live_selected`].
@@ -361,20 +385,79 @@ impl Widget for TreeRowA11y {
         // number and converts to AccessKit's zero-based property itself.
         builder.set_level(self.level_1based.max(1));
         builder.set_position_in_set(self.position_in_set);
-        // No `size_of_set` here, and none on the container either.
-        //
-        // AccessKit resolves an item's set size by walking *up* from it
-        // (`size_of_set_from_container`), so the only value a flattened tree
-        // could publish is one shared by every row at every depth — which is
-        // not what "the 2nd of 5 siblings" means. Expressing it correctly needs
-        // a real `Role::Group` node per expanded branch, between the container
-        // and its rows, and that changes the AT tree shape for every tree
-        // widget. Writing the number on this node instead is dead: no adapter
-        // on any platform reads it, and leaving it there makes a missing
-        // feature look like a working one.
-        //
-        // The level and the expanded state still carry the hierarchy, and
-        // `position_in_set` still says which sibling this is.
+        // AccessKit reads an item's set size from the first node above it
+        // that carries one (`size_of_set_from_container`), never from the
+        // item itself. This row's "of M" is therefore on the node it hangs
+        // from (the pane, the group under its parent row, or a stand-in for
+        // an unrealized ancestor), and the number on this node is what its
+        // cells read: their count, so a cell never reads the row's children
+        // or siblings as its own set.
+        if self.cell_count > 0 {
+            builder.set_size_of_set(self.cell_count);
+        }
+        // The child rows (nested shape): after the row's own cells, in a
+        // group that carries their set size. The group, not this node, so
+        // the cells keep the count above. The walker would push the cells'
+        // node and the child rows straight onto this node; the redirect hook
+        // claims them, and they are attached here in reading order.
+        let kids = self.at.kids.borrow();
+        if !kids.is_empty() {
+            builder
+                .inner_mut()
+                .push_child(teksilo_core::accessibility::widget_id_to_node_id(
+                    self.child,
+                ));
+            let group = builder.push_scene_child(
+                CHILD_ROWS_GROUP,
+                teksilo_core::accessibility::SyntheticKind::TreeChildRows,
+                |b| {
+                    b.set_role(teksilo_core::accesskit::Role::Group);
+                    if let Some(n) = self.at.size_of_set.get() {
+                        b.set_size_of_set(n);
+                    }
+                },
+            );
+            builder.set_child_bounds_local(group, Rect::new(0.0, 0.0, 0.0, 0.0));
+            for &k in kids.iter() {
+                builder.attach_scene_child_under(
+                    group,
+                    teksilo_core::accessibility::widget_id_to_node_id(k),
+                );
+            }
+        }
+    }
+
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        crate::common::tree_a11y::row_accessibility_children([self.child], &self.at)
+    }
+
+    fn wants_descendant_redirects(&self) -> bool {
+        !self.at.kids.borrow().is_empty()
+    }
+
+    fn a11y_redirect_descendant(
+        &self,
+        self_id: WidgetId,
+        descendant: WidgetId,
+    ) -> Option<teksilo_core::accesskit::NodeId> {
+        let kids = self.at.kids.borrow();
+        if kids.is_empty() {
+            return None;
+        }
+        // The row's own cells node: claimed only so the walker does not push
+        // it ahead of the group; `accessibility` pushes it onto this node
+        // itself. The walker reads only whether a claim was made, so the id
+        // returned is this node's own.
+        if descendant == self.child {
+            return Some(teksilo_core::accessibility::widget_id_to_node_id(self_id));
+        }
+        kids.contains(&descendant).then(|| {
+            teksilo_core::accessibility::synthetic_node_id(
+                self_id,
+                CHILD_ROWS_GROUP,
+                teksilo_core::accessibility::SyntheticKind::TreeChildRows,
+            )
+        })
     }
 
     fn children(&self) -> Vec<WidgetId> {

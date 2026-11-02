@@ -4216,3 +4216,511 @@ mod selection_rebuild_boundary {
         b.tree.assert_no_leaked_pointer_state();
     }
 }
+
+// ---------------------------------------------------------------------------
+// Rows nested under their parent row in the accessibility tree
+// ---------------------------------------------------------------------------
+
+mod nested_rows {
+    use super::*;
+    use crate::common::tree_a11y::NestOverride;
+    use accesskit_consumer::{NodeRef as AkNode, TreeState, common_filter};
+
+    /// The consumer node for an AccessKit id.
+    fn find<'a>(state: &'a TreeState, nid: teksilo_core::accesskit::NodeId) -> Option<AkNode<'a>> {
+        let mut stack = vec![state.root()];
+        while let Some(n) = stack.pop() {
+            if n.locate().0 == nid {
+                return Some(n);
+            }
+            stack.extend(n.children());
+        }
+        None
+    }
+    use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
+    use teksilo_core::accesskit::Role;
+
+    /// R0 > (C0 > leaves L0..L{n}), C1 > (M0, M1); R1.
+    fn model(leaves: usize) -> TreeModel<String> {
+        let model = TreeModel::new();
+        let r0 = model.insert_root(0, "R0".to_string());
+        let c0 = model.insert_child(r0, 0, "C0".to_string());
+        for i in 0..leaves {
+            model.insert_child(c0, i, format!("L{i}"));
+        }
+        let c1 = model.insert_child(r0, 1, "C1".to_string());
+        model.insert_child(c1, 0, "M0".to_string());
+        model.insert_child(c1, 1, "M1".to_string());
+        model.insert_root(1, "R1".to_string());
+        model
+    }
+
+    /// A row named by its content: a leaf with an accessible label.
+    fn label_delegate() -> impl Fn(&String, &teksilo_data::FlatEntry, bool) -> Box<dyn Widget> {
+        |item: &String, _e, _s| {
+            use teksilo_core::widget_builder::WidgetBuilder;
+            Box::new(FixedLeaf(120.0, 20.0).access_label(teksilo_i18n::lit!(item.clone())))
+                as Box<dyn Widget>
+        }
+    }
+
+    fn size() -> SizeProposal {
+        SizeProposal::exact(300.0, 200.0)
+    }
+
+    fn mount(tv: TreeView<String>) -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(tv.item_height(20.0));
+        tree.layout(size());
+        view(&tree, id).expand_all();
+        tree.layout(size());
+        tree.layout(size());
+        (tree, id)
+    }
+
+    fn view(tree: &WidgetTree, id: WidgetId) -> &TreeView<String> {
+        tree.widget_as_any(id)
+            .unwrap()
+            .downcast_ref::<TreeView<String>>()
+            .unwrap()
+    }
+
+    fn scroll_to(tree: &mut WidgetTree, id: WidgetId, y: f32) {
+        view(tree, id).scroll_y.set(y);
+        tree.layout(size());
+        tree.layout(size());
+    }
+
+    fn tree_items_above(node: &AkNode) -> usize {
+        let mut n = 0;
+        let mut at = node.filtered_parent(&common_filter);
+        while let Some(p) = at {
+            if p.role() == Role::TreeItem {
+                n += 1;
+            }
+            at = p.filtered_parent(&common_filter);
+        }
+        n
+    }
+
+    /// For every realized row: the level NVDA counts (tree items above it,
+    /// plus one) is its depth, its "of M" read through the container is its
+    /// real sibling count, and its position is its own. Returns how many
+    /// rows were checked.
+    fn assert_levels_and_sets(tree: &mut WidgetTree, id: WidgetId) -> usize {
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let state = consumer.state();
+        let tv = view(tree, id);
+        let rows = tv.row_map.borrow().clone();
+        for &(flat, wid) in &rows {
+            let node = find(state, widget_id_to_node_id(wid))
+                .unwrap_or_else(|| panic!("row {flat} is in the tree"));
+            let meta = tv.source.meta(flat).unwrap();
+            let (pos, count) = tv.source.sibling_pos(flat);
+            assert_eq!(
+                tree_items_above(&node) + 1,
+                meta.depth + 1,
+                "row {flat}: level as counted"
+            );
+            assert_eq!(
+                node.data().level(),
+                Some(meta.depth),
+                "row {flat}: level published"
+            );
+            assert_eq!(
+                node.size_of_set_from_container(&common_filter),
+                Some(count),
+                "row {flat}: of M"
+            );
+            assert_eq!(
+                node.position_in_set(),
+                Some(pos - 1),
+                "row {flat}: position"
+            );
+        }
+        rows.len()
+    }
+
+    fn count_nodes(
+        update: &teksilo_core::accesskit::TreeUpdate,
+        nid: teksilo_core::accesskit::NodeId,
+    ) -> usize {
+        update
+            .nodes
+            .iter()
+            .flat_map(|(_, n)| n.children().iter())
+            .filter(|c| **c == nid)
+            .count()
+    }
+
+    #[test]
+    fn a_whole_tree_reads_each_rows_level_and_sibling_count() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(TreeView::new(model(3), label_delegate()));
+        assert_eq!(assert_levels_and_sets(&mut tree, id), 9);
+
+        // The pane carries the root count; a row's name is its own content.
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let tv = view(&tree, id);
+        let rows = tv.row_map.borrow().clone();
+        let c0 = find(state, widget_id_to_node_id(rows[1].1)).unwrap();
+        assert_eq!(
+            c0.label().as_deref(),
+            Some("C0"),
+            "not its first child's name"
+        );
+        assert_eq!(c0.data().size_of_set(), Some(3), "its children's count");
+        let pane = c0
+            .filtered_parent(&common_filter)
+            .unwrap()
+            .filtered_parent(&common_filter)
+            .unwrap();
+        assert_eq!(pane.role(), Role::Group);
+        assert_eq!(pane.data().size_of_set(), Some(2), "two roots");
+        // Each row once.
+        for &(_, wid) in &rows {
+            assert_eq!(count_nodes(&update, widget_id_to_node_id(wid)), 1);
+        }
+        // Bounds come from the arena, whichever node a row hangs from.
+        let leaf = find(state, widget_id_to_node_id(rows[2].1)).unwrap();
+        let b = leaf.bounding_box().unwrap();
+        let arena = tree.bounds(rows[2].1);
+        assert!((b.y0 - arena.y as f64).abs() < 0.5 && (b.x0 - arena.x as f64).abs() < 0.5);
+    }
+
+    /// A parent row whose own content carries no name stays nameless: it
+    /// does not take its first child row's name.
+    #[test]
+    fn a_parent_row_never_takes_a_child_rows_name() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(TreeView::new(
+            model(3),
+            |item: &String, _e: &teksilo_data::FlatEntry, _s| {
+                use teksilo_core::widget_builder::WidgetBuilder;
+                if item.starts_with('L') {
+                    Box::new(FixedLeaf(120.0, 20.0).access_label(teksilo_i18n::lit!(item.clone())))
+                        as Box<dyn Widget>
+                } else {
+                    Box::new(FixedLeaf(120.0, 20.0)) as Box<dyn Widget>
+                }
+            },
+        ));
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let rows = view(&tree, id).row_map.borrow().clone();
+        let c0 = find(consumer.state(), widget_id_to_node_id(rows[1].1)).unwrap();
+        assert_eq!(c0.label(), None, "C0 is not called L0");
+        let l0 = find(consumer.state(), widget_id_to_node_id(rows[2].1)).unwrap();
+        assert_eq!(l0.label().as_deref(), Some("L0"));
+    }
+
+    /// The realized window starts inside a branch: the rows whose parent is
+    /// scrolled away hang from stand-ins for it, each from its OWN parent's.
+    #[test]
+    fn a_window_inside_a_branch_hangs_from_stand_ins() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(
+            TreeView::new(model(40), label_delegate()).type_ahead_label(|s: &String| s.clone()),
+        );
+        // R0 is 0, C0 is 1, L0..L39 are 2..41, C1 is 42, M0/M1 43/44, R1 45.
+        // Show L30 onward: the window holds leaves of C0 (whose parent C0 is
+        // gone), then C1 (whose parent R0 is gone), then M0, M1, R1.
+        scroll_to(&mut tree, id, 32.0 * 20.0);
+        let first = view(&tree, id).row_map.borrow()[0].0;
+        assert!(
+            first > 1 && first < 42,
+            "the window starts among the leaves: {first}"
+        );
+        assert!(
+            view(&tree, id)
+                .row_map
+                .borrow()
+                .iter()
+                .any(|&(f, _)| f == 42),
+            "C1 is realized"
+        );
+        assert_levels_and_sets(&mut tree, id);
+
+        let update = tree.sync_accessibility();
+        let pane = view(&tree, id).body_pane_id.unwrap();
+        let r0 = synthetic_node_id(pane, 0, SyntheticKind::TreeAncestor);
+        let c0 = synthetic_node_id(pane, 1, SyntheticKind::TreeAncestor);
+        let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let r0n = find(state, r0).expect("a stand-in for R0");
+        let c0n = find(state, c0).expect("a stand-in for C0");
+        assert_eq!(r0n.role(), Role::TreeItem);
+        assert_eq!(r0n.data().level(), Some(0));
+        assert_eq!(r0n.data().size_of_set(), Some(2), "R0's children: C0, C1");
+        assert_eq!(r0n.position_in_set(), Some(0));
+        assert_eq!(
+            r0n.label().as_deref(),
+            Some("R0"),
+            "named from the type-ahead label"
+        );
+        assert_eq!(c0n.data().level(), Some(1));
+        assert_eq!(c0n.data().size_of_set(), Some(40));
+        assert_eq!(
+            c0n.data().is_expanded(),
+            Some(true),
+            "an open ancestor, not a leaf"
+        );
+        assert!(
+            c0n.data()
+                .supports_action(teksilo_core::accesskit::Action::Collapse)
+        );
+        assert_eq!(
+            c0n.filtered_parent(&common_filter).map(|p| p.id()),
+            Some(r0n.id())
+        );
+        // The rows of the window, each once.
+        for &(_, wid) in view(&tree, id).row_map.borrow().iter() {
+            assert_eq!(count_nodes(&update, widget_id_to_node_id(wid)), 1);
+        }
+
+        // Scroll within the branch: the realized rows change, the stand-ins
+        // keep their ids.
+        scroll_to(&mut tree, id, 31.0 * 20.0);
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        assert!(find(consumer.state(), r0).is_some());
+        assert!(find(consumer.state(), c0).is_some());
+        assert_levels_and_sets(&mut tree, id);
+    }
+
+    #[test]
+    fn a_stand_in_without_a_label_has_no_name() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(TreeView::new(model(40), label_delegate()));
+        scroll_to(&mut tree, id, 32.0 * 20.0);
+        let update = tree.sync_accessibility();
+        let pane = view(&tree, id).body_pane_id.unwrap();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let r0 = find(
+            consumer.state(),
+            synthetic_node_id(pane, 0, SyntheticKind::TreeAncestor),
+        )
+        .unwrap();
+        assert_eq!(r0.label(), None);
+    }
+
+    #[test]
+    fn a_drag_source_tree_nests_the_same_way() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(
+            TreeView::new(model(3), label_delegate())
+                .exportable(crate::data_views::DragTransferMode::Copy),
+        );
+        assert_eq!(assert_levels_and_sets(&mut tree, id), 9);
+        let update = tree.sync_accessibility();
+        assert_a11y_tree_valid(&update);
+    }
+
+    /// An expanded row whose children are not realized still publishes its
+    /// full child count.
+    #[test]
+    fn an_open_branch_at_the_window_edge_publishes_its_full_count() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(TreeView::new(model(40), label_delegate()));
+        let rows = view(&tree, id).row_map.borrow().clone();
+        let update = tree.sync_accessibility();
+        let c0 = rows.iter().find(|r| r.0 == 1).unwrap().1;
+        let node = update
+            .nodes
+            .iter()
+            .find(|(n, _)| *n == widget_id_to_node_id(c0))
+            .unwrap();
+        assert_eq!(node.1.size_of_set(), Some(40));
+    }
+
+    /// The focused row is the tree's active descendant, wherever it hangs.
+    #[test]
+    fn the_active_descendant_resolves_to_a_nested_row() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(TreeView::new(model(3), label_delegate()).selection(
+            teksilo_data::SelectionModel::new(teksilo_data::SelectionMode::Single),
+        ));
+        tree.focus(id);
+        view(&tree, id).focused_index.set(Some(3));
+        tree.layout(size());
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let state = consumer.state();
+        let root = find(state, widget_id_to_node_id(id)).unwrap();
+        let active = root.active_descendant().expect("an active descendant");
+        assert_eq!(active.role(), Role::TreeItem);
+        assert_eq!(tree_items_above(&active), 2, "L1 under C0 under R0");
+    }
+
+    /// macOS keeps the flat shape: every row hangs from the pane, and the
+    /// set sizes are still published.
+    #[test]
+    fn the_flat_shape_publishes_the_same_properties() {
+        let _nest = NestOverride::new(false);
+        let (mut tree, id) = mount(TreeView::new(model(3), label_delegate()));
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let tv = view(&tree, id);
+        let rows = tv.row_map.borrow().clone();
+        for &(flat, wid) in &rows {
+            let node = find(state, widget_id_to_node_id(wid)).unwrap();
+            assert_eq!(tree_items_above(&node), 0, "row {flat} hangs from the pane");
+            // The root count: right for the two roots, read by every row.
+            assert_eq!(
+                node.size_of_set_from_container(&common_filter),
+                Some(2),
+                "the root count"
+            );
+        }
+        let c0 = find(state, widget_id_to_node_id(rows[1].1)).unwrap();
+        assert_eq!(c0.data().size_of_set(), Some(3));
+        let pane = view(&tree, id).body_pane_id.unwrap();
+        for flat in 0..9 {
+            let stand_in = synthetic_node_id(pane, flat, SyntheticKind::TreeAncestor);
+            assert!(
+                update.nodes.iter().all(|(n, _)| *n != stand_in),
+                "no stand-in"
+            );
+        }
+    }
+
+    fn assert_a11y_tree_valid(update: &teksilo_core::accesskit::TreeUpdate) {
+        let _ = accesskit_consumer::Tree::new(update.clone(), false);
+    }
+
+    /// A screen reader's Collapse on a stand-in collapses the ancestor it
+    /// stands for.
+    #[test]
+    fn collapse_on_a_stand_in_collapses_its_ancestor() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(TreeView::new(model(40), label_delegate()));
+        scroll_to(&mut tree, id, 32.0 * 20.0);
+        let pane = view(&tree, id).body_pane_id.unwrap();
+        let c0 = synthetic_node_id(pane, 1, SyntheticKind::TreeAncestor);
+        assert!(view(&tree, id).source.is_expanded_at(1));
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+            action: teksilo_core::accesskit::Action::Collapse,
+            target: Some(pane),
+            target_node: c0,
+            data: None,
+        });
+        tree.layout(size());
+        assert!(!view(&tree, id).source.is_expanded_at(1), "C0 collapsed");
+    }
+
+    /// Positions and set sizes count the VISIBLE siblings in view order: a
+    /// filter hides some and a sort reorders them.
+    #[test]
+    fn a_filter_and_a_sort_give_the_visible_position_and_count() {
+        use teksilo_data::{SortDirection, SortFilterTreeModel, TreeFilterMode};
+        for nest in [true, false] {
+            let _nest = NestOverride::new(nest);
+            let model: TreeModel<String> = TreeModel::new();
+            let docs = model.insert_root(0, "docs".to_string());
+            model.insert_child(docs, 0, "guide".to_string());
+            model.insert_child(docs, 1, "readme".to_string());
+            let src = model.insert_root(1, "src".to_string());
+            model.insert_child(src, 0, "a.rs".to_string());
+            model.insert_child(src, 1, "b.rs".to_string());
+            model.insert_child(src, 2, "main.rs".to_string());
+            let proxy = SortFilterTreeModel::new(model)
+                .with_comparator("name", |a: &String, b: &String| a.cmp(b))
+                .with_predicate("name", |q: &str| {
+                    let q = q.to_string();
+                    Box::new(move |s: &String| q.chars().any(|c| s.contains(c)))
+                        as Box<dyn Fn(&String) -> bool>
+                })
+                .filter_mode(TreeFilterMode::KeepAncestors);
+            let mut tree = WidgetTree::new();
+            let id = tree.add(
+                TreeView::from_source(proxy.clone(), |item: &String, _row, _sel| {
+                    use teksilo_core::widget_builder::WidgetBuilder;
+                    Box::new(FixedLeaf(120.0, 20.0).access_label(teksilo_i18n::lit!(item.clone())))
+                        as Box<dyn Widget>
+                })
+                .item_height(20.0),
+            );
+            tree.layout(size());
+            view(&tree, id).expand_all();
+            proxy.set_sort(Some("name"), SortDirection::Descending);
+            proxy.set_filter("name", "em");
+            tree.layout(size());
+            // A `from_source` view keeps no expand set of its own: open every
+            // branch through the source.
+            for i in (0..view(&tree, id).source.visible_count()).rev() {
+                let src = &view(&tree, id).source;
+                if src.meta(i).is_some_and(|m| m.has_children) {
+                    src.set_expanded_at(i, true);
+                }
+            }
+            tree.layout(size());
+            tree.layout(size());
+            // Visible, descending: src > main.rs (a.rs and b.rs filtered
+            // out), docs > readme, guide (guide is first unsorted).
+            let update = tree.sync_accessibility();
+            let consumer = accesskit_consumer::Tree::new(update, false);
+            let state = consumer.state();
+            let tv = view(&tree, id);
+            let mut seen = Vec::new();
+            for &(_, wid) in tv.row_map.borrow().iter() {
+                let node = find(state, widget_id_to_node_id(wid)).unwrap();
+                seen.push((
+                    node.label().unwrap_or_default(),
+                    node.position_in_set().map(|p| p + 1),
+                    node.size_of_set_from_container(&common_filter),
+                ));
+            }
+            let expect = |name: &str, pos: usize, of: usize| {
+                let row = seen
+                    .iter()
+                    .find(|r| r.0 == name)
+                    .unwrap_or_else(|| panic!("{name} shown: {seen:?}"));
+                assert_eq!(row.1, Some(pos), "{name}: position (nest {nest})");
+                // Flat (macOS): every row reads the body's count, which is
+                // the visible roots'; a root row's "N of M" is whole.
+                let is_root = name == "src" || name == "docs";
+                if nest || is_root {
+                    assert_eq!(row.2, Some(of), "{name}: of M (nest {nest})");
+                }
+            };
+            expect("src", 1, 2);
+            expect("main.rs", 1, 1);
+            expect("docs", 2, 2);
+            expect("readme", 1, 2);
+            expect("guide", 2, 2);
+        }
+    }
+
+    /// A structural change between the build and the action: Collapse on
+    /// the stand-in still reaches the ancestor it stands for, not the row
+    /// now at its old flat index.
+    #[test]
+    fn collapse_on_a_stand_in_follows_its_ancestor_through_a_structural_change() {
+        let _nest = NestOverride::new(true);
+        let m = model(40);
+        let (mut tree, id) = mount(TreeView::new(m.clone(), label_delegate()));
+        scroll_to(&mut tree, id, 32.0 * 20.0);
+        let pane = view(&tree, id).body_pane_id.unwrap();
+        // The stand-in for C0, published at flat index 1.
+        let c0 = synthetic_node_id(pane, 1, SyntheticKind::TreeAncestor);
+        // A new root above everything: R0 moves to 1, C0 to 2. No layout, so
+        // the stand-in the reader holds is the one built before the change.
+        m.insert_root(0, "X".to_string());
+        tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+            action: teksilo_core::accesskit::Action::Collapse,
+            target: Some(pane),
+            target_node: c0,
+            data: None,
+        });
+        tree.layout(size());
+        let src = &view(&tree, id).source;
+        let name = |i: usize| src.with_row_str(i, &|s: &String| s.clone()).unwrap();
+        assert_eq!((name(1), name(2)), ("R0".to_string(), "C0".to_string()));
+        assert!(src.is_expanded_at(1), "R0 is left open");
+        assert!(!src.is_expanded_at(2), "C0 collapsed");
+    }
+}

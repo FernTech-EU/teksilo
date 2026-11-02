@@ -321,6 +321,10 @@ pub enum SyntheticKind {
     /// flat index, which no scroll within the branch changes. It has no
     /// visual counterpart and is not focusable.
     TreeAncestor = 21,
+    /// The group a tree table row's child rows hang in, after the row's own
+    /// cells, emitted by the row. It carries the child rows' set size, so
+    /// the row's cells do not read it as theirs. No visual counterpart.
+    TreeChildRows = 22,
 }
 
 /// A live-region announcement every platform adapter would have made.
@@ -1380,12 +1384,13 @@ impl AccessNodeBuilder {
     /// allocates: [`SyntheticKind::SceneItem`],
     /// [`SyntheticKind::SceneGroup`], [`SyntheticKind::SceneMagnet`],
     /// [`SyntheticKind::SceneHandle`], [`SyntheticKind::ChartMark`],
-    /// [`SyntheticKind::LaneMark`], [`SyntheticKind::WebPageNode`] or
-    /// [`SyntheticKind::TreeAncestor`];
+    /// [`SyntheticKind::LaneMark`], [`SyntheticKind::WebPageNode`],
+    /// [`SyntheticKind::TreeAncestor`] or [`SyntheticKind::TreeChildRows`];
     /// passing any other variant panics in debug. `ChartMark` and
     /// `LaneMark` are how a chart or a margin lane emits one node per
     /// datum from its own `accessibility()`; `TreeAncestor` is how a tree
-    /// view stands in for an ancestor row it has not realized.
+    /// view stands in for an ancestor row it has not realized, and
+    /// `TreeChildRows` how a tree table row groups its child rows.
     ///
     /// Any further synthetic children the closure pushes (a
     /// `SceneGroup` containing nested `SceneItem`s) are forwarded into the parent's
@@ -1410,8 +1415,9 @@ impl AccessNodeBuilder {
                     | SyntheticKind::LaneMark
                     | SyntheticKind::WebPageNode
                     | SyntheticKind::TreeAncestor
+                    | SyntheticKind::TreeChildRows
             ),
-            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark, ::WebPageNode or ::TreeAncestor"
+            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark, ::WebPageNode, ::TreeAncestor or ::TreeChildRows"
         );
         let Some(owner) = self.owner else {
             debug_assert!(
@@ -1494,8 +1500,9 @@ impl AccessNodeBuilder {
                     | SyntheticKind::LaneMark
                     | SyntheticKind::WebPageNode
                     | SyntheticKind::TreeAncestor
+                    | SyntheticKind::TreeChildRows
             ),
-            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark, ::WebPageNode or ::TreeAncestor"
+            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark, ::WebPageNode, ::TreeAncestor or ::TreeChildRows"
         );
         let Some(owner) = self.owner else {
             debug_assert!(

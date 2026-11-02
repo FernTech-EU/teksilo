@@ -51,6 +51,7 @@ pub(crate) mod text_nav;
 pub(crate) mod text_scroll;
 #[cfg(test)]
 pub(crate) mod thumb_drag_test;
+pub(crate) mod tree_a11y;
 pub(crate) mod tree_expand;
 pub(crate) mod type_ahead;
 pub(crate) mod viewport;

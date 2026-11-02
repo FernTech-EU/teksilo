@@ -18,6 +18,7 @@
 //! handed to the legacy delegate — lives in `tree_view.rs`, not here.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use teksilo_core::drag_payload::DragPayload;
@@ -74,6 +75,53 @@ impl TreeRow {
 /// sites) instead, then answered by a binary search (`sibling_pos`) or a
 /// direct re-map (`sibling_move` / `reparent`).
 type RootIndexCache = RefCell<Option<(u64, Rc<Vec<usize>>)>>;
+
+/// Per source version: the visible children of each parent the a11y walk
+/// asked about, keyed by the parent's flat index.
+type VisibleChildrenCache = RefCell<Option<(u64, HashMap<usize, Rc<Vec<usize>>>)>>;
+
+/// The visible children of the row at flat index `parent`, in the order the
+/// view shows them: the rows one level deeper inside its subtree. Read from
+/// the flattening, so a filtered-out child is not counted and a sort is
+/// honoured (a sort-filter projection's `child_keys` answers with the
+/// backing tree's children, unfiltered and unsorted). Empty for a collapsed
+/// row. Cached per source version.
+fn visible_children<S: TreeDataSource>(
+    source: &S,
+    parent: usize,
+    cache: &VisibleChildrenCache,
+) -> Rc<Vec<usize>> {
+    let version = source.version_signal().get();
+    {
+        let mut cached = cache.borrow_mut();
+        if cached.as_ref().is_some_and(|(v, _)| *v != version) {
+            *cached = None;
+        }
+        if let Some(found) = cached.as_ref().and_then(|(_, m)| m.get(&parent)) {
+            return found.clone();
+        }
+    }
+    let mut kids = Vec::new();
+    if let Some(depth) = source.with_entry(parent, |_it, e| e.depth) {
+        let n = source.visible_count();
+        for j in parent + 1..n {
+            match source.with_entry(j, |_it, e| e.depth) {
+                // Past the subtree.
+                Some(d) if d <= depth => break,
+                Some(d) if d == depth + 1 => kids.push(j),
+                // Deeper, or not resolved yet (a lazy row): still inside.
+                _ => {}
+            }
+        }
+    }
+    let kids = Rc::new(kids);
+    cache
+        .borrow_mut()
+        .get_or_insert_with(|| (version, HashMap::new()))
+        .1
+        .insert(parent, kids.clone());
+    kids
+}
 
 /// The cached root indices for `source`'s current version, rescanning only
 /// when the version has moved on since the last call.
@@ -278,6 +326,11 @@ pub(crate) struct TreeSource<T: 'static> {
     parent_index_fn: Rc<dyn Fn(usize) -> Option<usize>>,
     /// `(pos_in_set_1based, set_size)` among the row's siblings (a11y).
     sibling_pos_fn: Rc<dyn Fn(usize) -> (usize, usize)>,
+    /// The visible children of a row (`Some(flat)`) or the visible roots
+    /// (`None`), in view order (a11y position and set size).
+    visible_children_fn: Rc<dyn Fn(Option<usize>) -> Rc<Vec<usize>>>,
+    /// How many root rows there are (a11y set size of the top level).
+    root_count_fn: Rc<dyn Fn() -> usize>,
     /// Non-drag sibling reorder: `(index, move) -> new flat index` (or `None`
     /// if the move is unavailable or the source rejected it). Commits through
     /// the source's own `accept_drop`, so it is the row drag's own path; the
@@ -305,8 +358,15 @@ impl<T: 'static> TreeSource<T> {
         // need "all visible roots, in order" and a version bump invalidates
         // them alike, so one scan per version serves every caller.
         let root_cache: Rc<RootIndexCache> = Rc::new(RefCell::new(None));
-        let (root_cache_sib, root_cache_kbd, root_cache_reparent) =
-            (root_cache.clone(), root_cache.clone(), root_cache);
+        let (root_cache_sib, root_cache_kbd, root_cache_reparent, root_cache_count) = (
+            root_cache.clone(),
+            root_cache.clone(),
+            root_cache.clone(),
+            root_cache,
+        );
+        let (s_roots, s_visible) = (s.clone(), s.clone());
+        let visible_cache: Rc<VisibleChildrenCache> = Rc::new(RefCell::new(None));
+        let root_cache_visible = root_cache_count.clone();
         let (s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14) = (
             s.clone(),
             s.clone(),
@@ -393,6 +453,11 @@ impl<T: 'static> TreeSource<T> {
                         (pos, roots.len().max(1))
                     }
                 }
+            }),
+            root_count_fn: Rc::new(move || root_indices(&*s_roots, &root_cache_count).len()),
+            visible_children_fn: Rc::new(move |parent| match parent {
+                None => root_indices(&*s_visible, &root_cache_visible),
+                Some(p) => visible_children(&*s_visible, p, &visible_cache),
             }),
             sibling_move_fn: Rc::new(move |index, mv| {
                 let k = s10.key_at(index)?;
@@ -514,6 +579,29 @@ impl<T: 'static> TreeSource<T> {
 
     pub(crate) fn sibling_pos(&self, index: usize) -> (usize, usize) {
         (self.sibling_pos_fn)(index)
+    }
+
+    /// How many root rows the tree has.
+    pub(crate) fn root_count(&self) -> usize {
+        (self.root_count_fn)()
+    }
+
+    /// The row's 1-based position among its **visible** siblings and their
+    /// number, in the order the view shows them: what a screen reader is
+    /// told. Unlike [`sibling_pos`](Self::sibling_pos), which reads the
+    /// source's own child list (what the move commands act on), this skips
+    /// filtered-out siblings and follows a sort. `None` when the row has no
+    /// key yet.
+    pub(crate) fn visible_sibling_pos(&self, index: usize) -> Option<(usize, usize)> {
+        self.meta(index)?;
+        let group = (self.visible_children_fn)(self.parent_index(index));
+        let pos = group.iter().position(|&j| j == index)?;
+        Some((pos + 1, group.len()))
+    }
+
+    /// How many visible children the row at `index` has (0 when collapsed).
+    pub(crate) fn visible_child_count(&self, index: usize) -> usize {
+        (self.visible_children_fn)(Some(index)).len()
     }
 
     /// Move the row at `index` among its siblings as `mv` says, routed through

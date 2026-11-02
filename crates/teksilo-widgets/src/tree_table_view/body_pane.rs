@@ -180,6 +180,11 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// pane is where the row offsets settle, and the scroll anchoring with
     /// them.
     pub(crate) reveal: SharedRowReveal,
+    /// The view's type-ahead label, which also names the stand-ins for
+    /// unrealized ancestor rows.
+    pub(crate) type_ahead_label: Option<Rc<dyn Fn(&T) -> String>>,
+    /// Where the rows hang in the accessibility tree, computed at build.
+    pub(crate) at: crate::common::tree_a11y::PaneAt,
 }
 
 /// The chevron's click on a realized row: toggles whichever row the anchor
@@ -518,6 +523,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         // Key the row focus scope on the view's focusable root (`drag_anchor`),
         // not this pane — see TableView's body pane for the rationale.
         ctx.begin_view_focus_for(self.drag_anchor);
+        let nested = crate::common::tree_a11y::nest_tree_rows();
+        let mut pane_rows: Vec<crate::common::tree_a11y::PaneRow> = Vec::new();
         for flat_idx in start..end {
             // One anchor per row, cloned into each handler: building three
             // would allocate three closures (each capturing an Rc to the source
@@ -774,6 +781,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             } else {
                 Some(self.row_metrics.borrow_mut().row_height(flat_idx))
             };
+            let cell_count = cell_ids.len();
             let row_inner_id = match band {
                 Some(band) => ctx.add(FullWidthRow::new(
                     band,
@@ -805,14 +813,16 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             ctx.set_tab_stop(row_inner_id, false);
             // 1-based position among this row's siblings. A loading row (no
             // metadata resolved yet) reports 1, the same "unknowable yet"
-            // fallback already used for depth/has_children. `sibling_pos` also
-            // returns the sibling count, which nothing publishes: see
-            // `TreeRowA11y` for why a flattened tree writes no `size_of_set`.
+            // fallback already used for depth/has_children. The row's "of M"
+            // is on the node it hangs from, not on the row: see `TreeRowA11y`.
             let position_in_set = if loading {
                 1
             } else {
-                self.source.sibling_pos(flat_idx).0
+                self.source
+                    .visible_sibling_pos(flat_idx)
+                    .map_or(1, |(pos, _)| pos)
             };
+            let row_at = Rc::new(crate::common::tree_a11y::RowAt::default());
             let row_a11y = TreeRowA11y::new(
                 row_inner_id,
                 flat_idx + 2,
@@ -833,7 +843,8 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     }
                     _ => false,
                 })
-            });
+            })
+            .with_rows_below(cell_count, row_at.clone());
             // A row that declares `set_expanded` already advertises UIA's
             // ExpandCollapse pattern — `accesskit_consumer` derives support
             // from the property, not from the action list — so Windows will
@@ -898,6 +909,15 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 })
             };
             self.row_entries.push((flat_idx, tree_row_id));
+            pane_rows.push(crate::common::tree_a11y::PaneRow {
+                row: crate::common::tree_a11y::RealizedRow {
+                    flat: flat_idx,
+                    resolved: entry.is_some(),
+                    open_branch: has_children && is_expanded,
+                },
+                widget: tree_row_id,
+                at: row_at,
+            });
 
             // Row handlers: selection click + optional drag-to-reorder. The
             // drag is kept apart — it goes on an enclosing `DragSurface`, not
@@ -1243,6 +1263,18 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
             self.row_roots.push(row_root);
         }
         ctx.end_view_focus();
+        self.at = crate::common::tree_a11y::PaneAt::build(
+            &self.source,
+            &pane_rows,
+            self.type_ahead_label.as_deref(),
+            nested,
+        );
+        // Actions on the stand-ins come to this pane (it owns them).
+        ctx.apply_self_handlers(crate::common::tree_a11y::stand_in_actions(
+            ctx.self_id(),
+            self.source.clone(),
+            self.at.stand_ins.iter().map(|s| s.flat).collect(),
+        ));
 
         *self.cell_map.borrow_mut() = cell_entries;
 
@@ -1350,10 +1382,29 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
         // The ARIA-blessed intermediate between `Role::TreeGrid` and
         // `Role::Row` (same shape as `BodyPane` under `Role::Table`).
         builder.set_role(teksilo_core::accesskit::Role::RowGroup);
+        // The root rows' "of M", and on Windows and Linux the stand-ins for
+        // unrealized ancestors (see `common::tree_a11y`).
+        self.at.publish(builder, teksilo_core::accesskit::Role::Row);
     }
 
     fn children(&self) -> Vec<WidgetId> {
         self.row_roots.clone()
+    }
+
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        self.at.accessibility_children()
+    }
+
+    fn wants_descendant_redirects(&self) -> bool {
+        self.at.wants_descendant_redirects()
+    }
+
+    fn a11y_redirect_descendant(
+        &self,
+        self_id: WidgetId,
+        descendant: WidgetId,
+    ) -> Option<teksilo_core::accesskit::NodeId> {
+        self.at.redirect(self_id, descendant)
     }
 
     fn clips_children(&self) -> bool {

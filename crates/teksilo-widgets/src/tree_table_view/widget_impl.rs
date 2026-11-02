@@ -916,6 +916,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 row_map: self.row_map.clone(),
                 cell_map: self.cell_map.clone(),
                 reveal: self.reveal.clone(),
+                type_ahead_label: self.type_ahead_label.clone(),
+                at: Default::default(),
             };
             self.body_pane_id = Some(ctx.add(pane));
             if let Some(ref pinned_reveal) = pinned_reveal {

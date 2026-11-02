@@ -13,8 +13,9 @@
 //!
 //! The matching `size_of_set` is a container property in AccessKit, not a
 //! per-item one: `ListView` publishes it on the `Role::ListBox` node its rows
-//! hang from, and a flattened tree publishes none at all (`TreeItemWrapper`'s
-//! `accessibility` says why).
+//! hang from, and a tree publishes each row's on the node it hangs from: its
+//! parent row, or the pane for a root (`TreeItemWrapper`'s `accessibility`
+//! and `common::tree_a11y` say how).
 //!
 //! The wrapper carries no *name*: the delegate's row widget owns the label, one
 //! node further down. `WidgetTree`'s accessibility walk copies it up
@@ -352,6 +353,9 @@ pub(crate) struct TreeItemWrapper {
     /// 1-based position within the sibling group, or `None` — see `level`.
     position: Option<usize>,
     expanded: Option<bool>, // None if leaf
+    /// The child rows hanging from this one and its children's set size,
+    /// filled in by the pane (see `common::tree_a11y`).
+    at: Rc<crate::common::tree_a11y::RowAt>,
 
     // Build state.
     selected: bool,
@@ -361,6 +365,7 @@ pub(crate) struct TreeItemWrapper {
 impl TreeItemWrapper {
     /// `first` is the row widget the pane built with `body` for `selected`,
     /// the selectedness the wrapper reads again at its first build.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         body: RowBody,
         selection: Option<RowSelection>,
@@ -369,6 +374,7 @@ impl TreeItemWrapper {
         level_1based: Option<usize>,
         position_1based: Option<usize>,
         expanded: Option<bool>,
+        at: Rc<crate::common::tree_a11y::RowAt>,
     ) -> Self {
         Self {
             body,
@@ -379,6 +385,7 @@ impl TreeItemWrapper {
             level: level_1based,
             position: position_1based,
             expanded,
+            at,
             selected: false,
             child: None,
         }
@@ -460,20 +467,23 @@ impl Widget for TreeItemWrapper {
         if let Some(position) = self.position {
             builder.set_position_in_set(position);
         }
-        // No `size_of_set` here, and none on the container either.
-        //
-        // AccessKit resolves an item's set size by walking *up* from it
-        // (`size_of_set_from_container`), so the only value a flattened tree
-        // could publish is one shared by every row at every depth — which is
-        // not what "the 2nd of 5 siblings" means. Expressing it correctly needs
-        // a real `Role::Group` node per expanded branch, between the container
-        // and its rows, and that changes the AT tree shape for every tree
-        // widget. Writing the number on this node instead is dead: no adapter
-        // on any platform reads it, and leaving it there makes a missing
-        // feature look like a working one.
-        //
-        // The level and the expanded state still carry the hierarchy, and
-        // `position_in_set` still says which sibling this is.
+        // The set size on this node is not this row's "of M": AccessKit
+        // reads an item's set size from the first node above it that carries
+        // one (`size_of_set_from_container`), never from the item itself. So
+        // the count published here is this row's number of children, which
+        // its child rows read; this row's own "of M" is on the node it hangs
+        // from (its parent row, a stand-in for one, or the pane). Only an
+        // open branch carries one, and on Windows and Linux every open branch
+        // with child rows under it must, or they would read an ancestor's.
+        // Known side effect: a node inside this row's own content (a row
+        // checkbox, a label) also reads this count as its set size. It
+        // publishes no position, so no reader speaks "x of y" for it;
+        // TreeTableView avoids it with a group for the child rows, which here
+        // would cost NVDA its level count (it stops at the first parent that
+        // is not a tree item).
+        if let Some(n) = self.at.size_of_set.get() {
+            builder.set_size_of_set(n);
+        }
 
         if let Some(expanded) = self.expanded {
             builder.set_expanded(expanded);
@@ -499,5 +509,11 @@ impl Widget for TreeItemWrapper {
 
     fn children(&self) -> Vec<WidgetId> {
         self.child.into_iter().collect()
+    }
+
+    /// Its own content, then the rows that hang from it (the nested shape,
+    /// see `common::tree_a11y`).
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        crate::common::tree_a11y::row_accessibility_children(self.child, &self.at)
     }
 }

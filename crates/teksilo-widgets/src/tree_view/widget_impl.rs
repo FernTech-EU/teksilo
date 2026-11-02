@@ -1262,6 +1262,8 @@ impl<T: 'static> Widget for TreeView<T> {
             row_roots: Vec::new(),
             row_map: self.row_map.clone(),
             reveal: self.reveal.clone(),
+            type_ahead_label: self.type_ahead_label.clone(),
+            at: Default::default(),
         };
         self.body_pane_id = Some(ctx.add(pane));
 

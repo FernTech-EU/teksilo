@@ -240,6 +240,7 @@ TreeView on Linux: expanded/collapsed state, level and the Expand/Collapse actio
 - **Status:** Upstream, outside Teksilo: not fixed here.
 - **Now (`c198e4d1`):** Orca still says only the name on arrival, on expand and on collapse ('Documents.', 'Projects.' each time). On AT-SPI the tree items still carry no expandable or expanded state, no level attribute, and only the 'click' action, so a screen reader's own expand and collapse commands cannot reach them. Teksilo still publishes all of these; accesskit\_atspi\_common 0.21.0 maps none of them.
 - **Measured again:** collections-tree-nav, 2 of 2 runs; verify-collections-tree-levels, 2 of 2 runs; adapter read from source
+- **Since then (not measured yet):** a `TreeView` or `TreeTableView` row now hangs from its parent row in the accessibility tree on Windows and Linux, and every row carries its sibling count on the node it hangs from. Linux still gets no level attribute or NODE\_CHILD\_OF relation from accesskit\_atspi\_common, so Orca's level is unchanged; NVDA, which counts a tree item's level from the tree items above it, should now read the real level. To be measured with collections-tree-nav and verify-collections-tree-levels, and with NVDA on the Windows VM.
 - **Evidence (`c198e4d1`):**
   - `pass1 collections-tree-nav 'Right: expand Documents': +140.7 ms ORCA SAYS: 'Documents.'; FAIL [tree item] 'Documents' carries state 'expanded' / states=['enabled', 'focused', 'selectable', 'selected', 'sensitive', 'showing', 'visible'] attrs={'posinset': '1'} actions=['click']`
   - `pass1 collections-tree-nav 'Left: collapse Projects': +161.5 ms ORCA SAYS: 'Projects.'; FAIL Orca says 'collapsed'`
@@ -343,6 +344,7 @@ Virtualization: Orca's position counts only the realized rows ('1 of 17', 'Item 
 - **Status:** Upstream, outside Teksilo: not fixed here.
 - **Now (`c198e4d1`):** The rows still publish the right posinset and setsize (1 to 200 of 200, 300 of 300), but Orca 46.1 counts the realized siblings under the pane, so its position would be 1 of 17, 9 of 9 for row 200, 8 of 9 for row 199, 10 of 10 for feed message 300, and 3 of 7 for the tree leaf.
 - **Measured again:** collections-listview-arrows, collections-feed, collections-tree-nav: 2 of 2 runs each (computed from the exported tree as Orca does)
+- **Since then (not measured yet):** for the tree part, rows are nested under their parent row on Windows and Linux and the set size is published on the node above each row. That does not fix Orca's count: Orca counts every child of the AT-SPI parent (`script_utilities.py:3272-3296`), and a nested row's parent row holds its own content's nodes before its child rows, so a first child would read 2 of N+1 (and at the root a stand-in for a scrolled-out ancestor counts as a sibling). Hanging the child rows in a group on Linux (ARIA's treeitem > group > treeitem) would give Orca the right siblings; not done, to be decided and measured with orca\_position. The list views are unchanged.
 - **Evidence (`c198e4d1`):**
   - `pass1 collections-listview-arrows 'Down: first row': Orca would count 1 of 17 (parent [panel] '' holds 17 children); the row publishes {'setsize': '200', 'posinset': '1'}`
   - `pass1 collections-listview-arrows 'End: last row': Orca would count 9 of 9 (parent [panel] '' holds 9 children); the row publishes {'posinset': '200', 'setsize': '200'}`
@@ -590,6 +592,7 @@ TreeView level is never spoken on Linux, even as the level changes: no NODE\_CHI
 - **Status:** Upstream, outside Teksilo: not fixed here.
 - **Now (`c198e4d1`):** Orca still says only 'Projects.' when the cursor enters level 2 and 'Documents.' when it comes back to level 1, never 'tree level 2' or 'tree level 1'. The tree items still carry no level attribute and no NODE\_CHILD\_OF relation on AT-SPI.
 - **Measured again:** verify-collections-tree-levels, 2 of 2 runs; adapter read from source
+- **Correction and since then (not measured yet):** NVDA does not take a tree item's level from UIA Level: it counts the tree items above it, so on Windows every row of a flat tree read as level 1. Rows are now nested under their parent row on Windows and Linux, which gives NVDA the real count. Linux is unchanged for Orca (no NODE\_CHILD\_OF from accesskit\_atspi\_common).
 - **Evidence (`c198e4d1`):**
   - `pass1 verify-collections-tree-levels 'Down: Projects, one level down': +138.9 ms ORCA SAYS: 'Projects.'; FAIL Orca says 'level 2'; FAIL [tree item] 'Projects' carries an attribute 'level' / attrs={'posinset': '1'}`
   - `pass1 verify-collections-tree-levels 'Up: back to Documents, level 1': +133.1 ms ORCA SAYS: 'Documents.'; FAIL Orca says 'level 1'`

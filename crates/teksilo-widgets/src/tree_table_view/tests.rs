@@ -2655,16 +2655,41 @@ fn rows_report_sibling_position_and_size_among_siblings() {
         vec![0, 0, 1, 1, 0],
         "docs(1st) readme(1st) guide(2nd) src(2nd) main.rs(1st)"
     );
-    // No sibling *count*, deliberately. AccessKit resolves a set size by
-    // walking up from an item, so the only value a flattened tree could
-    // publish is one shared by every row at every depth — which is not what
-    // "of 2 siblings" means. See `TreeRowA11y::accessibility`.
+    // The sibling *count* is read the way every adapter reads it, from the
+    // node above the row (`size_of_set_from_container`), and the number on
+    // the row itself is its cell count, which only its cells read. In the
+    // flat shape (macOS) every row reads the root count; nested (Windows
+    // and Linux), each reads its own sibling group's. See
+    // `TreeRowA11y::accessibility` and `common::tree_a11y`.
+    let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+    let state = consumer.state();
+    let counts: Vec<Option<usize>> = body_rows
+        .iter()
+        .map(|&r| {
+            let wanted = widget_id_to_node_id(r);
+            let mut stack = vec![state.root()];
+            let mut found = None;
+            while let Some(n) = stack.pop() {
+                if n.locate().0 == wanted {
+                    found = Some(n);
+                    break;
+                }
+                stack.extend(n.children());
+            }
+            found
+                .expect("row in the consumer tree")
+                .size_of_set_from_container(&accesskit_consumer::common_filter)
+        })
+        .collect();
+    let expected = if crate::common::tree_a11y::nest_tree_rows() {
+        vec![Some(2), Some(2), Some(2), Some(2), Some(1)]
+    } else {
+        // Flat: the root count, which every row reads (whole for the roots).
+        vec![Some(2); 5]
+    };
+    assert_eq!(counts, expected, "docs, readme, guide, src, main.rs");
     for &r in body_rows {
-        assert_eq!(
-            find(r).size_of_set(),
-            None,
-            "a per-sibling count is unrepresentable and must not be faked"
-        );
+        assert_eq!(find(r).size_of_set(), Some(1), "the row's one cell");
     }
 }
 #[test]
@@ -5750,8 +5775,11 @@ mod full_width_and_pinned {
             assert_eq!(row.data().is_expanded(), Some(true));
             assert_eq!(row.data().position_in_set(), Some(0), "the first album");
 
+            // The row's own cells; its child rows hang in a group after them
+            // (where tree rows are nested, see `common::tree_a11y`).
             let cells: Vec<_> = row
                 .filtered_children(accesskit_consumer::common_filter)
+                .filter(|c| c.role() != Role::Group)
                 .collect();
             assert_eq!(cells.len(), 1, "{mode:?}: one cell, not one per column");
             let cell = &cells[0];
@@ -7050,5 +7078,317 @@ mod selection_rebuild_boundary {
             "{:?}",
             b.built.borrow()
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Rows nested under their parent row in the accessibility tree
+// ---------------------------------------------------------------------------
+
+mod nested_rows {
+    use super::*;
+    use crate::common::tree_a11y::NestOverride;
+    use accesskit_consumer::{NodeRef, TreeState, common_filter};
+    use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
+
+    fn find<'a>(state: &'a TreeState, nid: teksilo_core::accesskit::NodeId) -> Option<NodeRef<'a>> {
+        let mut stack = vec![state.root()];
+        while let Some(n) = stack.pop() {
+            if n.locate().0 == nid {
+                return Some(n);
+            }
+            stack.extend(n.children());
+        }
+        None
+    }
+
+    /// R0 > (C0 > leaves), C1 > (M0, M1); R1.
+    fn model(leaves: usize) -> TreeModel<&'static str> {
+        let names: &'static [&'static str] = &[
+            "L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10", "L11", "L12", "L13",
+            "L14", "L15", "L16", "L17", "L18", "L19", "L20", "L21", "L22", "L23", "L24", "L25",
+            "L26", "L27", "L28", "L29", "L30", "L31", "L32", "L33", "L34", "L35", "L36", "L37",
+            "L38", "L39",
+        ];
+        let model = TreeModel::new();
+        let r0 = model.insert_root(0, "R0");
+        let c0 = model.insert_child(r0, 0, "C0");
+        for (i, name) in names.iter().take(leaves).enumerate() {
+            model.insert_child(c0, i, *name);
+        }
+        let c1 = model.insert_child(r0, 1, "C1");
+        model.insert_child(c1, 0, "M0");
+        model.insert_child(c1, 1, "M1");
+        model.insert_root(1, "R1");
+        model
+    }
+
+    fn size() -> SizeProposal {
+        SizeProposal::exact(400.0, 200.0)
+    }
+
+    fn mount(leaves: usize) -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::new(model(leaves))
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0)
+                .type_ahead_label(|s: &&'static str| s.to_string()),
+        );
+        tree.layout(size());
+        view(&tree, id).expand_all();
+        tree.layout(size());
+        tree.layout(size());
+        (tree, id)
+    }
+
+    fn view(tree: &WidgetTree, id: WidgetId) -> &TreeTableView<&'static str> {
+        tree.widget_as_any(id)
+            .unwrap()
+            .downcast_ref::<TreeTableView<&'static str>>()
+            .unwrap()
+    }
+
+    fn rows_above(node: &NodeRef) -> usize {
+        let mut n = 0;
+        let mut at = node.filtered_parent(&common_filter);
+        while let Some(p) = at {
+            if p.role() == Role::Row {
+                n += 1;
+            }
+            at = p.filtered_parent(&common_filter);
+        }
+        n
+    }
+
+    /// Level as counted, "of M" as read, and every cell reading its row's
+    /// cell count rather than the row's children or siblings.
+    fn assert_rows(tree: &mut WidgetTree, id: WidgetId, nested: bool) -> usize {
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let state = consumer.state();
+        let tv = view(tree, id);
+        let rows = tv.row_map.borrow().clone();
+        for &(flat, wid) in &rows {
+            let node = find(state, widget_id_to_node_id(wid)).expect("row in the tree");
+            let meta = tv.source.meta(flat).unwrap();
+            let (pos, count) = tv.source.sibling_pos(flat);
+            let roots = 2;
+            assert_eq!(node.data().level(), Some(meta.depth), "row {flat}");
+            if nested {
+                assert_eq!(rows_above(&node), meta.depth, "row {flat}: rows above it");
+                assert_eq!(
+                    node.size_of_set_from_container(&common_filter),
+                    Some(count),
+                    "row {flat}: of M"
+                );
+            } else {
+                assert_eq!(rows_above(&node), 0, "row {flat} hangs from the body");
+                // The root count: right for the two roots, read by every row.
+                assert_eq!(
+                    node.size_of_set_from_container(&common_filter),
+                    Some(roots),
+                    "the root count"
+                );
+            }
+            assert_eq!(node.position_in_set(), Some(pos - 1), "row {flat}");
+            let cells: Vec<_> = node
+                .filtered_children(common_filter)
+                .filter(|c| c.role() == Role::Cell || c.role() == Role::GridCell)
+                .collect();
+            assert_eq!(cells.len(), 2, "row {flat}: its two cells");
+            for cell in cells {
+                assert_eq!(
+                    cell.size_of_set_from_container(&common_filter),
+                    Some(2),
+                    "row {flat}: a cell reads the row's cell count"
+                );
+            }
+        }
+        rows.len()
+    }
+
+    #[test]
+    fn a_whole_tree_reads_each_rows_level_and_sibling_count() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(3);
+        assert_eq!(assert_rows(&mut tree, id, true), 9);
+
+        // The header row still reads first, then the body.
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let root = find(consumer.state(), widget_id_to_node_id(id)).unwrap();
+        let kids: Vec<_> = root.filtered_children(common_filter).collect();
+        assert_eq!(kids[0].role(), Role::Row, "the header row first");
+        // A parent row's child rows come after its own cells.
+        let rows = view(&tree, id).row_map.borrow().clone();
+        let r0 = find(consumer.state(), widget_id_to_node_id(rows[0].1)).unwrap();
+        let roles: Vec<Role> = r0
+            .filtered_children(common_filter)
+            .map(|c| c.role())
+            .collect();
+        assert_eq!(roles.last(), Some(&Role::Group), "{roles:?}");
+        assert!(
+            roles[..roles.len() - 1].iter().all(|r| *r == Role::Cell),
+            "{roles:?}"
+        );
+    }
+
+    #[test]
+    fn a_window_inside_a_branch_hangs_from_stand_ins() {
+        let _nest = NestOverride::new(true);
+        let (mut tree, id) = mount(40);
+        view(&tree, id).scroll_y.set(32.0 * 20.0);
+        tree.layout(size());
+        tree.layout(size());
+        let first = view(&tree, id).row_map.borrow()[0].0;
+        assert!(
+            first > 1 && first < 42,
+            "the window starts among the leaves: {first}"
+        );
+        assert_rows(&mut tree, id, true);
+
+        let pane = view(&tree, id).body_pane_id.unwrap();
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let r0 = find(
+            consumer.state(),
+            synthetic_node_id(pane, 0, SyntheticKind::TreeAncestor),
+        )
+        .expect("a stand-in for R0");
+        assert_eq!(r0.role(), Role::Row);
+        assert_eq!(r0.data().size_of_set(), Some(2));
+        assert_eq!(r0.label().as_deref(), Some("R0"));
+        let c0 = find(
+            consumer.state(),
+            synthetic_node_id(pane, 1, SyntheticKind::TreeAncestor),
+        )
+        .expect("a stand-in for C0");
+        assert_eq!(c0.data().size_of_set(), Some(40));
+        assert_eq!(c0.data().is_expanded(), Some(true), "an open ancestor");
+        // Each realized row once, under one parent.
+        let update = tree.sync_accessibility();
+        for &(_, wid) in view(&tree, id).row_map.borrow().iter() {
+            let nid = widget_id_to_node_id(wid);
+            let parents = update
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.children().contains(&nid))
+                .count();
+            assert_eq!(parents, 1);
+            assert_eq!(update.nodes.iter().filter(|(n, _)| *n == nid).count(), 1);
+        }
+    }
+
+    #[test]
+    fn the_flat_shape_publishes_the_same_properties() {
+        let _nest = NestOverride::new(false);
+        let (mut tree, id) = mount(3);
+        assert_eq!(assert_rows(&mut tree, id, false), 9);
+    }
+
+    /// Full-width rows nest like any row: the band is the row's one cell,
+    /// and its child rows hang in the group after it.
+    #[test]
+    fn full_width_rows_nest_too() {
+        let _nest = NestOverride::new(true);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::new(model(3))
+                .add_column(name_col())
+                .add_column(size_col())
+                .row_height(20.0)
+                .full_width_row(|item: &&'static str| item.starts_with('C'))
+                .full_width_row_delegate(|item: &&'static str, _cx: &CellContext| {
+                    Box::new(crate::primitives::TextWidget::new(lit!(*item))) as Box<dyn Widget>
+                }),
+        );
+        tree.layout(size());
+        view(&tree, id).expand_all();
+        tree.layout(size());
+        tree.layout(size());
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let rows = view(&tree, id).row_map.borrow().clone();
+        // C0 is flat 1: full width, open, three leaves below.
+        let c0 = find(consumer.state(), widget_id_to_node_id(rows[1].1)).unwrap();
+        let kids: Vec<_> = c0.filtered_children(common_filter).collect();
+        assert_eq!(kids.len(), 2, "the band and the group");
+        assert_eq!(kids[0].data().column_span(), Some(2));
+        assert_eq!(
+            kids[0].size_of_set_from_container(&common_filter),
+            Some(1),
+            "one cell"
+        );
+        assert_eq!(kids[1].role(), Role::Group);
+        assert_eq!(kids[1].data().size_of_set(), Some(3));
+        let leaf = find(consumer.state(), widget_id_to_node_id(rows[2].1)).unwrap();
+        assert_eq!(rows_above(&leaf), 2);
+        assert_eq!(leaf.size_of_set_from_container(&common_filter), Some(3));
+    }
+
+    /// A filter and a sort: positions and counts of the visible siblings.
+    #[test]
+    fn a_filter_and_a_sort_give_the_visible_position_and_count() {
+        let _nest = NestOverride::new(true);
+        let t = TreeModel::new();
+        let docs = t.insert_root(0, "docs");
+        t.insert_child(docs, 0, "guide");
+        t.insert_child(docs, 1, "readme");
+        let src = t.insert_root(1, "src");
+        t.insert_child(src, 0, "a.rs");
+        t.insert_child(src, 1, "b.rs");
+        t.insert_child(src, 2, "main.rs");
+        let proxy = SortFilterTreeModel::new(t)
+            .with_comparator("name", |a: &&'static str, b: &&'static str| a.cmp(b))
+            .with_predicate("name", |q: &str| {
+                let q = q.to_string();
+                Box::new(move |s: &&'static str| q.chars().any(|c| s.contains(c)))
+                    as Box<dyn Fn(&&'static str) -> bool>
+            })
+            .filter_mode(TreeFilterMode::KeepAncestors);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy.clone())
+                .add_column(name_col())
+                .row_height(20.0),
+        );
+        tree.layout(size());
+        view(&tree, id).expand_all();
+        proxy.set_sort(Some("name"), teksilo_data::SortDirection::Descending);
+        proxy.set_filter("name", "em");
+        tree.layout(size());
+        view(&tree, id).expand_all();
+        tree.layout(size());
+        tree.layout(size());
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update, false);
+        let tv = view(&tree, id);
+        let mut seen = Vec::new();
+        for &(flat, wid) in tv.row_map.borrow().iter() {
+            let node = find(consumer.state(), widget_id_to_node_id(wid)).unwrap();
+            let name = tv
+                .source
+                .with_row_str(flat, &|s: &&'static str| s.to_string())
+                .unwrap();
+            seen.push((
+                name,
+                node.position_in_set().map(|p| p + 1),
+                node.size_of_set_from_container(&common_filter),
+            ));
+        }
+        let expect = |name: &str, pos: usize, of: usize| {
+            let row = seen
+                .iter()
+                .find(|r| r.0 == name)
+                .unwrap_or_else(|| panic!("{name} shown: {seen:?}"));
+            assert_eq!((row.1, row.2), (Some(pos), Some(of)), "{name}");
+        };
+        expect("src", 1, 2);
+        expect("main.rs", 1, 1);
+        expect("docs", 2, 2);
+        expect("readme", 1, 2);
+        expect("guide", 2, 2);
     }
 }

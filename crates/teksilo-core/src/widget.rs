@@ -574,22 +574,29 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// before the body rows even though they build the body first so it
     /// paints beneath the header (WCAG 1.3.2 Meaningful Sequence).
     ///
-    /// The ids may be any **active descendants**, not only children: that
-    /// places a descendant elsewhere in the AT tree than in the arena (layout
-    /// and paint stay on the arena). `TreeView` nests each row under its
-    /// parent row this way, so a screen reader counts the row's level from
-    /// its ancestors. The rules that come with it:
+    /// The ids need not be children: any active widget other than an ancestor
+    /// of this one may be named (a descendant, or a sibling's subtree as
+    /// `GridView` names its detail band). That places it elsewhere in the AT
+    /// tree than in the arena; layout and paint stay on the arena. `TreeView`
+    /// nests each row under its parent row this way, so a screen reader
+    /// counts the row's level from its ancestors. The rules that come with
+    /// it:
     ///
-    /// * each id must appear in the AT tree exactly once; a second claim, by
-    ///   this widget or another, is skipped (with a "duplicate accessibility
-    ///   child" report) and not built again;
-    /// * the widget that names a descendant owns its placement: the walker
-    ///   no longer emits it where its arena parent would have;
-    /// * a descendant's bounds are still its arena bounds, so a node visited
-    ///   through a parent that is not its arena parent reads the same
+    /// * each id must appear in the AT tree exactly once: the widget the
+    ///   arena would otherwise emit it under must leave it out of its own
+    ///   list (return a list without it), or its claim is a second one, which
+    ///   is skipped with a "duplicate accessibility child" report and not
+    ///   built again;
+    /// * the widget that names an id owns its placement;
+    /// * an arena node between this widget and a named descendant that no
+    ///   list names (a `DragSurface` around a tree row) is not visited, so it
+    ///   emits no node, and an `access_*` override, a tooltip claim or a
+    ///   proxy on it has nowhere to go;
+    /// * a named widget's bounds are still its arena bounds, so a node
+    ///   visited through a parent that is not its arena parent reads the same
     ///   rectangle. The space they are declared in is the AT parent's, so do
-    ///   not move a descendant out from under a content transform
-    ///   (`SceneView`) or into one.
+    ///   not move a widget out from under a content transform (`SceneView`)
+    ///   or into one.
     fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
         None
     }

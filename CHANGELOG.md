@@ -204,6 +204,13 @@ by crate for clarity, not because crates version independently.
   `SyntheticKind::TreeAncestor`, accepted by `push_scene_child` and
   `push_scene_child_under` (an exhaustive `match` on `SyntheticKind` needs
   a new arm).
+- **Breaking.** `SyntheticKind` has two new variants, `TreeAncestor` and
+  `TreeChildRows`, accepted by `push_scene_child` and
+  `push_scene_child_under`; an exhaustive `match` on it needs the two arms.
+- **`Widget::accessibility_children` may name any active widget other than
+  an ancestor**, not only a child, to place it elsewhere in the
+  accessibility tree; each id is emitted once, and a second claim is
+  skipped.
 - **Breaking.** `WidgetEvent::ImeCommit` is `{ text, origin, replacement }`
   where it was `{ text }`: `origin` is an `ImeOrigin` and `replacement` an
   optional character range of the field's text to replace. A `match` on it
@@ -470,6 +477,18 @@ by crate for clarity, not because crates version independently.
   drops, and its menu has no separator before Select All. A forward-only
   editor no longer shows a drop caret for a drag of its own text, which it
   then refused.
+- **Screen readers read a tree row's level and its place among its
+  siblings ("3 of 5")** in `TreeView` and `TreeTableView`. On Windows and
+  Linux the rows are now nested under their parent row in the accessibility
+  tree, so NVDA no longer reads every row as level 1, and the rows whose
+  parent is scrolled out of view hang from a node that stands in for it.
+  Positions and counts are those of the visible siblings in the order shown,
+  so a filter or a sort no longer puts them off. macOS keeps the flat shape
+  of its outline views; there a root row's "N of M" is published too, and
+  each open row publishes its number of children. Known limitation: on Windows and Linux,
+  the selection a screen reader asks a tree for (UIA `SelectionPattern`,
+  AT-SPI `Selection`) lists only selected root rows until AccessKit looks
+  into nested tree items.
 - **A double click on a row that the first click selects activates it**, in
   `ListView`, `GridView`, `TreeView`, `TableView` and `TreeTableView`, where
   only a row that was already selected could be opened by a double click. The

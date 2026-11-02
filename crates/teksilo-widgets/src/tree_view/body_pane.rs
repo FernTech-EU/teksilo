@@ -122,6 +122,11 @@ pub(crate) struct TreeViewBodyPane<T: 'static> {
     /// in `place_children` after the measure pass — this pane is where the
     /// row offsets settle, and the scroll anchoring with them.
     pub(crate) reveal: crate::common::row_reveal::SharedRowReveal,
+    /// The view's type-ahead label, which also names the stand-ins for
+    /// unrealized ancestor rows.
+    pub(crate) type_ahead_label: Option<Rc<dyn Fn(&T) -> String>>,
+    /// Where the rows hang in the accessibility tree, computed at build.
+    pub(crate) at: crate::common::tree_a11y::PaneAt,
 }
 
 impl<T: 'static> TreeViewBodyPane<T> {
@@ -250,6 +255,8 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
         // not this pane, so rows' `StandardTreeItem`s read *its* keyboard
         // focus deterministically.
         ctx.begin_view_focus_for(root_id);
+        let nested = crate::common::tree_a11y::nest_tree_rows();
+        let mut pane_rows: Vec<crate::common::tree_a11y::PaneRow> = Vec::new();
         for i in start..end {
             let selected = self
                 .row_selection
@@ -307,17 +314,21 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
             // metadata, so the expand/drag wiring below is gated off. A row
             // with nothing to show gets no wrapper at all.
             if let Some(inner_id) = body(ctx, selected) {
-                // `sibling_pos` also returns the sibling count, which nothing
-                // publishes: a flattened tree has no per-branch container node
-                // for AccessKit to read a `size_of_set` from, so the wrapper
-                // takes only the position (see `TreeItemWrapper`).
+                // The position among the VISIBLE siblings, in view order (a
+                // filter hides some, a sort reorders them); the wrapper takes
+                // only the position, since its "of M" is read from the node it
+                // hangs from (see `TreeItemWrapper`).
                 let (level, position_1based, expanded_opt) = if let Some(ref m) = meta {
                     let exp = if m.has_children {
                         Some(m.is_expanded)
                     } else {
                         None
                     };
-                    (Some(m.depth + 1), Some(self.source.sibling_pos(i).0), exp)
+                    (
+                        Some(m.depth + 1),
+                        self.source.visible_sibling_pos(i).map(|(pos, _)| pos),
+                        exp,
+                    )
                 } else {
                     // A row whose metadata has not resolved yet publishes no
                     // depth and no sibling position, rather than the level 1 /
@@ -327,6 +338,7 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     // `TreeItemWrapper::level`.
                     (None, None, None)
                 };
+                let row_at = Rc::new(crate::common::tree_a11y::RowAt::default());
                 let child_id = ctx.add(crate::list_item_a11y::TreeItemWrapper::new(
                     body,
                     self.row_selection.clone(),
@@ -335,7 +347,17 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
                     level,
                     position_1based,
                     expanded_opt,
+                    row_at.clone(),
                 ));
+                pane_rows.push(crate::common::tree_a11y::PaneRow {
+                    row: crate::common::tree_a11y::RealizedRow {
+                        flat: i,
+                        resolved: meta.is_some(),
+                        open_branch: expanded_opt == Some(true),
+                    },
+                    widget: child_id,
+                    at: row_at,
+                });
 
                 // One Tab stop for the whole tree — see the sibling call in
                 // `list_view/body_pane.rs` for why a per-row stop makes the
@@ -730,6 +752,18 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
             }
         }
         ctx.end_view_focus();
+        self.at = crate::common::tree_a11y::PaneAt::build(
+            &self.source,
+            &pane_rows,
+            self.type_ahead_label.as_deref(),
+            nested,
+        );
+        // Actions on the stand-ins come to this pane (it owns them).
+        ctx.apply_self_handlers(crate::common::tree_a11y::stand_in_actions(
+            ctx.self_id(),
+            self.source.clone(),
+            self.at.stand_ins.iter().map(|s| s.flat).collect(),
+        ));
 
         // Publish the realized (index -> wrapper id) map for the root.
         *self.row_map.borrow_mut() = self.item_entries.clone();
@@ -852,10 +886,30 @@ impl<T: 'static> Widget for TreeViewBodyPane<T> {
         // here, AT clients that walk Tree → TreeItem directly would balk at a
         // hidden generic container in the path.
         builder.set_role(teksilo_core::accesskit::Role::Group);
+        // The root rows' "of M", and on Windows and Linux the stand-ins for
+        // unrealized ancestors (see `common::tree_a11y`).
+        self.at
+            .publish(builder, teksilo_core::accesskit::Role::TreeItem);
     }
 
     fn children(&self) -> Vec<WidgetId> {
         self.row_roots.clone()
+    }
+
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        self.at.accessibility_children()
+    }
+
+    fn wants_descendant_redirects(&self) -> bool {
+        self.at.wants_descendant_redirects()
+    }
+
+    fn a11y_redirect_descendant(
+        &self,
+        self_id: WidgetId,
+        descendant: WidgetId,
+    ) -> Option<teksilo_core::accesskit::NodeId> {
+        self.at.redirect(self_id, descendant)
     }
 
     fn clips_children(&self) -> bool {
