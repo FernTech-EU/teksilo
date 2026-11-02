@@ -70,6 +70,9 @@ pub(crate) struct GridBodyPane<T: 'static> {
     /// enclosing scroll areas. Shares the `GridView`'s `viewport_origin` cell
     /// (`None` until this pane lays out at least once).
     pub(crate) viewport_origin: Rc<Cell<Option<teksilo_canvas::Point>>>,
+    /// The offset this pane places its content at, published each
+    /// `place_children` pass for `GridView`'s answer to `ScrollIntoView`.
+    pub(crate) laid_out_scroll_y: Rc<Cell<Option<f32>>>,
     /// Live column count, written by `GridView::place_children`. Drives a
     /// rebuild when the window resize changes how many columns fit.
     pub(crate) column_count: Signal<usize>,
@@ -742,6 +745,7 @@ impl<T: 'static> Widget for GridBodyPane<T> {
 
         self.strategy.set_rtl(ctx.is_rtl());
         let scroll_y = self.scroll_y.get();
+        self.laid_out_scroll_y.set(Some(scroll_y));
         let vp_w = bounds.width;
         let measures = self.strategy.measures_tiles();
 

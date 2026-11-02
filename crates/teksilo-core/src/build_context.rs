@@ -912,6 +912,28 @@ impl<'a> BuildContext<'a> {
         }
     }
 
+    /// The widget being built judges a
+    /// [`ScrollIntoView`](crate::event::WidgetEvent::ScrollIntoView) against
+    /// its **live** viewport (its offset now, or where a running glide is
+    /// heading), moves only as far as the target needs and answers `Ignored`
+    /// when it does not move. The reveal walk then always asks it, rather
+    /// than first testing the target against bounds from the last layout,
+    /// which a scroll since (a wheel notch, an offset the application wrote, a
+    /// glide, an earlier reveal of the same turn) has made stale. A container
+    /// not so marked keeps that test. `ScrollArea` and `GridView` set it; a
+    /// `SceneView` does not need it, since the walk tests its target through
+    /// the live camera transform.
+    ///
+    /// Plumbing, hidden pending the maintainer's decision on the public API
+    /// for it.
+    #[doc(hidden)]
+    pub fn judge_reveals_live(&mut self) {
+        let id = self.self_id();
+        if let Some(node) = self.tree.arena.get_mut(id) {
+            node.judges_reveals_live = true;
+        }
+    }
+
     /// Attach a tooltip to a widget.
     pub fn attach_tooltip(
         &mut self,

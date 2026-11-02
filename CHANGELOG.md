@@ -905,6 +905,19 @@ by crate for clarity, not because crates version independently.
   area. A calendar's cell, a chart's datum and a transform handle are not,
   since their keys do not scroll either. Before, it left the cursor where it
   was.
+- **A `ScrollArea` or a `GridView` asked to reveal two things in one turn
+  shows the second.** Focus moving to a list out of the page's view, which
+  then revealed its current row, scrolled past the row, or, for a list taller
+  than the page, left it out of view. A reveal after a scroll not laid out
+  yet, of a target that scroll left out of view, no longer overshoots it, and
+  an instant reveal made during a smooth one lands where it was aimed instead
+  of being carried on by the glide. A target that a scroll not laid out yet
+  (a wheel notch, an offset the application wrote, a glide, an earlier
+  reveal) took out of a `ScrollArea` or `GridView` is revealed
+  again; it looked visible from the last layout and was skipped. A
+  third-party scroll container is asked as before.
+- **A `ScrollArea`'s smooth reveal follows the reduced-motion preference**:
+  it jumps where the wheel's own tween already did.
 
 #### Automation
 

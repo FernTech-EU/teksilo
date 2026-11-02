@@ -3443,6 +3443,113 @@ fn focus_entering_a_band_below_the_viewport_scrolls_it_into_view() {
     }
 }
 
+/// A reveal asked of the grid after its offset moved without a layout is
+/// placed from the offset the band was laid out at: here the grid already
+/// shows the control, and moves nothing. Placed from the live offset, the
+/// grid scrolled past it.
+#[test]
+fn a_reveal_after_the_grid_scrolled_without_layout_is_placed_from_the_layout() {
+    let (mut tree, id, _model, expanded) =
+        band_grid(30, 400.0, 300.0, |g| g.detail_row(band_with_a_button));
+    expanded.set(Some(13));
+    settle(&mut tree, 400.0, 300.0);
+    let band = band_of(&tree, id);
+    let button = tree
+        .first_focusable_descendant(band)
+        .expect("the band's control");
+    let laid_out = tree.bounds(button);
+    assert!(
+        laid_out.bottom() > 300.0,
+        "the control ends under the viewport: {laid_out:?}"
+    );
+    // Scrolled so far that the control shows near the top, with no layout
+    // since.
+    let offset = laid_out.y - 10.0;
+    the_grid(&tree, id).scroll_y.set(offset);
+
+    tree.focus(button);
+    assert!(
+        (the_grid(&tree, id).scroll_y.get() - offset).abs() < 0.01,
+        "the control already shows: no move, got {}",
+        the_grid(&tree, id).scroll_y.get()
+    );
+    settle(&mut tree, 400.0, 300.0);
+    assert!(
+        within(tree.bounds(button), 0.0, 300.0),
+        "the control is on screen, at {:?}",
+        tree.bounds(button)
+    );
+}
+
+/// A control the grid showed at its last layout, which an offset written
+/// since took out of view: focusing it reveals it again. Its rectangle from
+/// that layout lies inside the grid, so the walk would skip the grid if the
+/// grid did not judge reveals against its live offset.
+#[test]
+fn a_control_an_unlaid_scroll_took_out_of_view_is_revealed_on_focus() {
+    let (mut tree, id, _model, expanded) =
+        band_grid(30, 400.0, 300.0, |g| g.detail_row(band_with_a_button));
+    expanded.set(Some(13));
+    settle(&mut tree, 400.0, 300.0);
+    let band = band_of(&tree, id);
+    let button = tree
+        .first_focusable_descendant(band)
+        .expect("the band's control");
+    // Shown near the grid's top, laid out there.
+    let offset = tree.bounds(button).y - 10.0;
+    the_grid(&tree, id).scroll_y.set(offset);
+    settle(&mut tree, 400.0, 300.0);
+    assert!(
+        within(tree.bounds(button), 0.0, 300.0),
+        "precondition: the control shows, at {:?}",
+        tree.bounds(button)
+    );
+    // Back to the top, not laid out: the control is under the viewport now.
+    the_grid(&tree, id).scroll_y.set(0.0);
+
+    tree.focus(button);
+    settle(&mut tree, 400.0, 300.0);
+    assert!(
+        within(tree.bounds(button), 0.0, 300.0),
+        "the control is on screen, at {:?}",
+        tree.bounds(button)
+    );
+}
+
+/// An instant reveal asked of the grid while it glides replaces the glide:
+/// a plain write was overtaken by the glide and the control carried off.
+#[test]
+fn an_instant_reveal_during_a_glide_lands_where_it_was_aimed() {
+    let (mut tree, id, _model, expanded) =
+        band_grid(30, 400.0, 300.0, |g| g.detail_row(band_with_a_button));
+    expanded.set(Some(13));
+    settle(&mut tree, 400.0, 300.0);
+    let band = band_of(&tree, id);
+    let button = tree
+        .first_focusable_descendant(band)
+        .expect("the band's control");
+    let laid_out = tree.bounds(button);
+    assert!(
+        laid_out.bottom() > 300.0,
+        "the control ends under the viewport"
+    );
+    // A glide past the control, under way.
+    the_grid(&tree, id).scroll_y.animate_to(
+        laid_out.y + 150.0,
+        std::time::Duration::from_millis(200),
+        teksilo_tokens::Easing::Linear,
+    );
+
+    tree.focus(button);
+    tree.tick_animations(std::time::Duration::from_millis(500));
+    settle(&mut tree, 400.0, 300.0);
+    assert!(
+        within(tree.bounds(button), 0.0, 300.0),
+        "the control is on screen, at {:?}",
+        tree.bounds(button)
+    );
+}
+
 /// Opening a band under the last visible row scrolls it into view, by Enter
 /// as by a double click, and keeps its tile on screen.
 #[test]

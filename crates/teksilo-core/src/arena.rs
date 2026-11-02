@@ -322,6 +322,10 @@ pub struct WidgetNode {
     /// once a modal has opened over it. See
     /// [`BuildContext::receive_every_key_release`](crate::build_context::BuildContext::receive_every_key_release).
     pub(crate) receives_every_key_release: bool,
+    /// The node judges a `ScrollIntoView` against its live viewport, so the
+    /// reveal walk always asks it. See
+    /// [`BuildContext::judge_reveals_live`](crate::build_context::BuildContext::judge_reveals_live).
+    pub(crate) judges_reveals_live: bool,
     /// When `Some`, this node is a focus region (an F6 stop) with this name.
     /// See [`HandlerSet::focus_region`](crate::widget_builder::HandlerSet::focus_region).
     pub focus_region: Option<crate::signal::Prop<String>>,
@@ -582,6 +586,7 @@ impl WidgetNode {
             carried_tap_streak: None,
             keyboard_capture: false,
             receives_every_key_release: false,
+            judges_reveals_live: false,
             focus_region: None,
             focus_region_last_focus: None,
             hit_transparent: false,

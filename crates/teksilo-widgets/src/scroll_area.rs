@@ -187,6 +187,14 @@ pub struct ScrollArea {
     /// in absolute tree coords) into content-relative coordinates.
     /// Shared via `Rc` for the same reason as `viewport_size`.
     viewport_origin: Rc<Cell<Point>>,
+    /// The offset (x, y) the content was last placed at, `None` before the
+    /// first placement. A `ScrollIntoView` target is a rectangle from that
+    /// layout, so it is converted to content space with this offset, not the
+    /// live one: a reveal earlier in the same turn (the focus follow ahead of
+    /// a handler's own `ensure_visible`) has moved the live offset already,
+    /// and adding it to a rectangle that does not reflect it put the target
+    /// that much further down and scrolled past it.
+    laid_out_scroll: Rc<Cell<Option<Point>>>,
 
     // --- one-shot restore ---
     /// A vertical offset waiting for a range long enough to hold it. See
@@ -283,6 +291,7 @@ impl ScrollArea {
             content_size: Cell::new(Size::ZERO),
             viewport_size: Rc::new(Cell::new(Size::ZERO)),
             viewport_origin: Rc::new(Cell::new(Point::ZERO)),
+            laid_out_scroll: Rc::new(Cell::new(None)),
             pending_restore_y: Rc::new(Cell::new(None)),
             restore_wrote_y: Rc::new(Cell::new(None)),
             scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
@@ -740,6 +749,10 @@ impl Widget for ScrollArea {
         let max_scroll_x = self.max_scroll_x.clone();
         let viewport_size = self.viewport_size.clone();
         let viewport_origin = self.viewport_origin.clone();
+        let laid_out_scroll = self.laid_out_scroll.clone();
+        // A reveal glides only where motion is welcome, as the wheel's tween
+        // (`ScrollableBehavior::reduced_motion` below) and `GridView` do.
+        let reveal_glides = self.smooth_scrolling && !ctx.prefers_reduced_motion();
         let line_height = self.line_height;
         let smooth_scrolling = self.smooth_scrolling;
         let smooth_scroll_duration = self.smooth_scroll_duration;
@@ -830,6 +843,7 @@ impl Widget for ScrollArea {
             let max_scroll_x = max_scroll_x.clone();
             let viewport_size = viewport_size.clone();
             let viewport_origin = viewport_origin.clone();
+            let laid_out_scroll = laid_out_scroll.clone();
             // Anything that scrolls this area on purpose outranks a restore that has
             // not landed yet: a reader who has started scrolling, or a caret being
             // revealed, has said where they want to be. Without this, a pending
@@ -881,18 +895,28 @@ impl Widget for ScrollArea {
                         motion,
                         applied_scroll,
                     } => {
-                        pending_restore_y.set(None);
-                        restore_wrote_y.set(None);
                         // `target_bounds` is in absolute tree coordinates (the
-                        // arena stores screen-space rects). Convert to the
-                        // content's local frame by subtracting the viewport's
-                        // absolute origin and adding the current scroll offset:
-                        // a child whose absolute top equals the viewport's
-                        // absolute top is at content-space y = scroll_y.
+                        // arena stores screen-space rects, as the last layout
+                        // placed them). Convert to the content's local frame by
+                        // subtracting the viewport's absolute origin and adding
+                        // the offset that layout placed the content at: a child
+                        // whose absolute top equals the viewport's absolute top
+                        // is at content-space y = that offset. The live offset
+                        // differs when something scrolled this area since, in
+                        // this same turn (see `laid_out_scroll`); the viewport
+                        // the target is compared against is the live one, or,
+                        // while a tween runs, the one it is heading for: a target
+                        // visible at the current frame and not where the tween
+                        // lands would be left alone and carried off screen.
                         let vp = viewport_size.get();
                         let vo = viewport_origin.get();
-                        let sy = scroll_y.get();
-                        let sx = scroll_x.get();
+                        let sy = scroll_y
+                            .animation_target()
+                            .unwrap_or_else(|| scroll_y.get());
+                        let sx = scroll_x
+                            .animation_target()
+                            .unwrap_or_else(|| scroll_x.get());
+                        let placed = laid_out_scroll.get().unwrap_or(Point::new(sx, sy));
 
                         // Reveal on each axis independently, but leave an axis
                         // untouched when the (margin-expanded) target already spans
@@ -903,7 +927,7 @@ impl Widget for ScrollArea {
                         // horizontally-scrolled ancestor on a vertical-only nav.
                         let viewport_top = sy;
                         let viewport_bottom = viewport_top + vp.height;
-                        let target_top = target_bounds.y - vo.y + sy - margin;
+                        let target_top = target_bounds.y - vo.y + placed.y - margin;
                         let target_bottom = target_top + target_bounds.height + margin * 2.0;
 
                         let mut new_y = sy;
@@ -914,7 +938,7 @@ impl Widget for ScrollArea {
                             // names an exact position, and padding it would only
                             // shift the pin by an amount the caller did not ask for.
                             teksilo_core::event::ScrollAlign::Fraction(f) => {
-                                let target_top = target_bounds.y - vo.y + sy;
+                                let target_top = target_bounds.y - vo.y + placed.y;
                                 new_y = target_top - (vp.height - target_bounds.height) * f;
                             }
                             teksilo_core::event::ScrollAlign::Minimal => {
@@ -931,7 +955,7 @@ impl Widget for ScrollArea {
 
                         let viewport_left = sx;
                         let viewport_right = viewport_left + vp.width;
-                        let target_left = target_bounds.x - vo.x + sx - margin;
+                        let target_left = target_bounds.x - vo.x + placed.x - margin;
                         let target_right = target_left + target_bounds.width + margin * 2.0;
 
                         let mut new_x = sx;
@@ -950,25 +974,50 @@ impl Widget for ScrollArea {
                         let new_y = new_y.clamp(0.0, max_scroll_y.get());
                         let new_x = new_x.clamp(0.0, max_scroll_x.get());
 
-                        match motion {
-                            teksilo_core::event::ScrollMotion::Smooth if smooth_scrolling => {
-                                scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
-                                scroll_x.animate_to(new_x, smooth_scroll_duration, Easing::EaseOut);
-                            }
-                            _ => {
-                                scroll_y.set(new_y);
-                                scroll_x.set(new_x);
-                            }
-                        }
                         // Report the applied scroll delta so a nested outer
                         // container can re-target the same rect. Computed from the
                         // clamped *targets*, not the live signal, so an animated
                         // scroll reports where it is heading rather than the single
-                        // frame it has travelled so far.
+                        // frame it has travelled so far; and against the offset
+                        // the rect was laid out at, which is where it moves from,
+                        // so a move earlier in the turn counts even when this one
+                        // moves nothing.
                         if let Some(cell) = applied_scroll
                             && let Ok(mut d) = cell.lock()
                         {
-                            *d = teksilo_canvas::Point::new(new_x - sx, new_y - sy);
+                            *d = teksilo_canvas::Point::new(new_x - placed.x, new_y - placed.y);
+                        }
+                        // Already showing it: no move, no layout pass. The
+                        // reveal walk asks an area a scroll moved this turn
+                        // whatever the stale bounds say, so this is the common
+                        // answer, and a restore still waiting keeps its claim.
+                        if (new_y - sy).abs() <= f32::EPSILON && (new_x - sx).abs() <= f32::EPSILON
+                        {
+                            return Some(EventResponse::Ignored);
+                        }
+                        // Anything that scrolls this area on purpose outranks a
+                        // restore that has not landed yet.
+                        pending_restore_y.set(None);
+                        restore_wrote_y.set(None);
+                        match motion {
+                            teksilo_core::event::ScrollMotion::Smooth if reveal_glides => {
+                                scroll_y.animate_to(new_y, smooth_scroll_duration, Easing::EaseOut);
+                                scroll_x.animate_to(new_x, smooth_scroll_duration, Easing::EaseOut);
+                            }
+                            _ => {
+                                // A tween in flight would carry on to its own
+                                // target over a plain write; a zero-length one
+                                // replaces it and lands at once.
+                                let jump = |offset: &Signal<f32>, to: f32| {
+                                    if offset.animation_target().is_some() {
+                                        offset.animate_to(to, Duration::ZERO, Easing::Linear);
+                                    } else {
+                                        offset.set(to);
+                                    }
+                                };
+                                jump(&scroll_y, new_y);
+                                jump(&scroll_x, new_x);
+                            }
                         }
                         Some(EventResponse::Handled)
                     }
@@ -1067,6 +1116,9 @@ impl Widget for ScrollArea {
         }
 
         ctx.apply_self_handlers(handlers);
+        // The `ScrollIntoView` arm above judges against the live offset (or a
+        // glide's landing), so the reveal walk may always ask this area.
+        ctx.judge_reveals_live();
 
         ids
     }
@@ -1340,6 +1392,8 @@ impl Widget for ScrollArea {
         self.clamp_and_set_scroll();
         let scroll_y = self.scroll_y.get();
         let scroll_x = self.scroll_x.get();
+        self.laid_out_scroll
+            .set(Some(Point::new(scroll_x, scroll_y)));
 
         // --- Step 3: Place content ---
         // RTL: anchor the content at the trailing (right) edge of the
@@ -2576,6 +2630,341 @@ mod tests {
             t.bottom(),
             outer_bounds.y,
             outer_bounds.bottom()
+        );
+    }
+
+    // --- Reveals against a laid-out rectangle, after a move in the same turn
+
+    /// Window-space rectangles a key handler asks to reveal, in order.
+    type Reveals = Rc<std::cell::RefCell<Vec<Rect>>>;
+
+    /// A `FixedLeaf` actor that, on any key, asks to reveal each queued rect
+    /// in turn (rects taken from the last layout, as callers build them).
+    fn revealing_actor(tree: &mut WidgetTree, w: f32, h: f32, reveals: Reveals) -> WidgetId {
+        tree.add(FixedLeaf(w, h).focusable(true).on_key(move |_ev, ctx| {
+            for rect in reveals.borrow().iter() {
+                ctx.ensure_visible(*rect);
+            }
+            EventResponse::Handled
+        }))
+    }
+
+    fn press(tree: &mut WidgetTree) {
+        tree.dispatch_event(WidgetEvent::KeyDown {
+            key: teksilo_core::event::Key::ArrowDown,
+            modifiers: Default::default(),
+            text: None,
+        });
+    }
+
+    /// Two reveals from one handler, both built from the last layout: the
+    /// second is placed from where the first scrolled to, not past it.
+    #[test]
+    fn a_second_reveal_in_one_turn_lands_from_where_the_first_scrolled() {
+        let reveals: Reveals = Rc::default();
+        let mut tree = WidgetTree::new();
+        let actor = revealing_actor(&mut tree, 200.0, 1000.0, reveals.clone());
+        let sa = ScrollArea::from_id(actor).smooth_scrolling(false);
+        let y = sa.scroll_y_signal().clone();
+        tree.add(sa);
+        let size = SizeProposal::exact(200.0, 100.0);
+        tree.layout(size);
+        tree.focus(actor);
+        tree.layout(size);
+        y.set(0.0);
+        tree.layout(size);
+
+        *reveals.borrow_mut() = vec![
+            Rect::new(0.0, 500.0, 200.0, 20.0),
+            Rect::new(0.0, 540.0, 200.0, 20.0),
+        ];
+        press(&mut tree);
+        assert_eq!(
+            y.get(),
+            460.0,
+            "the second target's bottom at the viewport's"
+        );
+    }
+
+    /// The same, a reveal that the first leaves already visible: the walk
+    /// still asks the area, which has moved since the bounds were laid out,
+    /// and it does not move again.
+    #[test]
+    fn a_second_reveal_already_shown_by_the_first_does_not_move() {
+        let reveals: Reveals = Rc::default();
+        let mut tree = WidgetTree::new();
+        let actor = revealing_actor(&mut tree, 200.0, 1000.0, reveals.clone());
+        let sa = ScrollArea::from_id(actor).smooth_scrolling(false);
+        let y = sa.scroll_y_signal().clone();
+        tree.add(sa);
+        let size = SizeProposal::exact(200.0, 100.0);
+        tree.layout(size);
+        tree.focus(actor);
+        tree.layout(size);
+        y.set(0.0);
+        tree.layout(size);
+
+        *reveals.borrow_mut() = vec![
+            Rect::new(0.0, 500.0, 200.0, 20.0),
+            Rect::new(0.0, 480.0, 200.0, 20.0),
+        ];
+        press(&mut tree);
+        assert_eq!(y.get(), 420.0, "both show at 420");
+    }
+
+    /// An offset written without a layout since, then a reveal of a rectangle
+    /// from that layout: placed from the laid-out offset.
+    #[test]
+    fn a_reveal_after_an_offset_written_without_layout_is_placed_from_the_layout() {
+        let reveals: Reveals = Rc::default();
+        let mut tree = WidgetTree::new();
+        let actor = revealing_actor(&mut tree, 200.0, 1000.0, reveals.clone());
+        let sa = ScrollArea::from_id(actor).smooth_scrolling(false);
+        let y = sa.scroll_y_signal().clone();
+        tree.add(sa);
+        let size = SizeProposal::exact(200.0, 100.0);
+        tree.layout(size);
+        tree.focus(actor);
+        tree.layout(size);
+        y.set(0.0);
+        tree.layout(size);
+
+        y.set(300.0);
+        // Content 100..120, laid out at offset 0.
+        *reveals.borrow_mut() = vec![Rect::new(0.0, 100.0, 200.0, 20.0)];
+        press(&mut tree);
+        assert_eq!(y.get(), 100.0, "its top at the viewport's top");
+    }
+
+    /// Nested areas: the inner one moved by an earlier reveal of the turn
+    /// reports its whole move since the layout, so the outer one is aimed at
+    /// where the target lands.
+    #[test]
+    fn an_inner_area_moved_earlier_in_the_turn_re_targets_the_outer_one() {
+        use crate::primitives::FixedSize;
+        let reveals: Reveals = Rc::default();
+        let mut tree = WidgetTree::new();
+        let actor = revealing_actor(&mut tree, 200.0, 1000.0, reveals.clone());
+        let inner = ScrollArea::from_id(actor).smooth_scrolling(false);
+        let inner_y = inner.scroll_y_signal().clone();
+        let inner = tree.add(inner);
+        let inner_box = tree.add(FixedSize::new().width(200.0).height(100.0).child(inner));
+        let spacer = tree.add(TallLeaf::new(200.0, 200.0));
+        let tail = tree.add(TallLeaf::new(200.0, 200.0));
+        let page = tree.add(VStack::new().child(spacer).child(inner_box).child(tail));
+        let outer = ScrollArea::from_id(page).smooth_scrolling(false);
+        let outer_y = outer.scroll_y_signal().clone();
+        tree.add(outer);
+        let size = SizeProposal::exact(200.0, 100.0);
+        tree.layout(size);
+        tree.focus(actor);
+        tree.layout(size);
+        inner_y.set(0.0);
+        outer_y.set(0.0);
+        tree.layout(size);
+
+        // The inner area's content starts at window y 200.
+        *reveals.borrow_mut() = vec![
+            Rect::new(0.0, 700.0, 200.0, 20.0),
+            Rect::new(0.0, 740.0, 200.0, 20.0),
+        ];
+        press(&mut tree);
+        assert_eq!(inner_y.get(), 460.0, "the inner shows the second target");
+        assert_eq!(
+            outer_y.get(),
+            200.0,
+            "the outer shows the inner area's viewport, where the target is"
+        );
+    }
+
+    /// A reveal after a glide started earlier in the turn is judged where the
+    /// glide lands, not at its current frame: a target visible now and not
+    /// there is revealed, rather than carried off screen.
+    #[test]
+    fn a_reveal_during_a_glide_is_judged_where_the_glide_lands() {
+        let reveals: Rc<std::cell::RefCell<Vec<(Rect, bool)>>> = Rc::default();
+        let mut tree = WidgetTree::new();
+        let queued = reveals.clone();
+        let actor = tree.add(
+            FixedLeaf(200.0, 1000.0)
+                .focusable(true)
+                .on_key(move |_ev, ctx| {
+                    for &(rect, glide) in queued.borrow().iter() {
+                        if glide {
+                            ctx.ensure_visible_aligned(
+                                rect,
+                                0.0,
+                                teksilo_core::event::ScrollMotion::Smooth,
+                            );
+                        } else {
+                            ctx.ensure_visible(rect);
+                        }
+                    }
+                    EventResponse::Handled
+                }),
+        );
+        let sa = ScrollArea::from_id(actor).smooth_scrolling(true);
+        let y = sa.scroll_y_signal().clone();
+        tree.add(sa);
+        let size = SizeProposal::exact(200.0, 100.0);
+        tree.layout(size);
+        tree.focus(actor);
+        tree.layout(size);
+        y.set(0.0);
+        tree.layout(size);
+
+        *reveals.borrow_mut() = vec![
+            // Glide to put content 500 at the top.
+            (Rect::new(0.0, 500.0, 200.0, 20.0), true),
+            // Content 20..40: on screen at the glide's first frame, not at 500.
+            (Rect::new(0.0, 20.0, 200.0, 20.0), false),
+        ];
+        press(&mut tree);
+        assert_eq!(
+            y.animation_target().unwrap_or_else(|| y.get()),
+            20.0,
+            "the second target is where the area is heading"
+        );
+        tree.tick_animations(std::time::Duration::from_millis(500));
+        tree.layout(size);
+        assert_eq!(y.get(), 20.0, "and where it ends up");
+    }
+
+    /// A reveal fixture: a 1000 dp tall focusable actor in a 100 dp area,
+    /// laid out at offset 0, the actor focused, and the queue it reveals.
+    fn reverse_fixture(smooth: bool) -> (WidgetTree, Signal<f32>, Reveals) {
+        let reveals: Reveals = Rc::default();
+        let mut tree = WidgetTree::new();
+        let actor = revealing_actor(&mut tree, 200.0, 1000.0, reveals.clone());
+        let sa = ScrollArea::from_id(actor).smooth_scrolling(smooth);
+        let y = sa.scroll_y_signal().clone();
+        tree.add(sa);
+        let size = SizeProposal::exact(200.0, 100.0);
+        tree.layout(size);
+        tree.focus(actor);
+        tree.layout(size);
+        y.set(0.0);
+        tree.layout(size);
+        (tree, y, reveals)
+    }
+
+    /// The reverse of the tests above: a target that looks visible at the
+    /// offset the bounds were laid out at, and is not at the live one. The
+    /// walk would skip it on the stale bounds; the area judges live, so it is
+    /// asked. After a wheel notch not laid out yet.
+    #[test]
+    fn a_reveal_after_a_wheel_notch_shows_a_target_the_notch_took_away() {
+        let (mut tree, y, reveals) = reverse_fixture(false);
+        tree.pointer_move(Point::new(50.0, 50.0));
+        tree.dispatch_event(WidgetEvent::scroll(
+            ScrollDelta::Pixels { x: 0.0, y: 300.0 },
+            Default::default(),
+        ));
+        assert_eq!(y.get(), 300.0, "the notch moved the area, not laid out");
+        // Content 20..40, at window 20..40 in the last layout.
+        *reveals.borrow_mut() = vec![Rect::new(0.0, 20.0, 200.0, 20.0)];
+        press(&mut tree);
+        assert_eq!(y.get(), 20.0, "the target is shown again");
+    }
+
+    /// The same after an offset the application wrote.
+    #[test]
+    fn a_reveal_after_a_written_offset_shows_a_target_it_took_away() {
+        let (mut tree, y, reveals) = reverse_fixture(false);
+        y.set(300.0);
+        *reveals.borrow_mut() = vec![Rect::new(0.0, 20.0, 200.0, 20.0)];
+        press(&mut tree);
+        assert_eq!(y.get(), 20.0, "the target is shown again");
+    }
+
+    /// The same during a glide started in an earlier frame: the target is in
+    /// view at the frame laid out, not where the glide lands.
+    #[test]
+    fn a_reveal_during_an_earlier_glide_shows_a_target_the_glide_takes_away() {
+        let (mut tree, y, reveals) = reverse_fixture(true);
+        let size = SizeProposal::exact(200.0, 100.0);
+        y.animate_to(
+            400.0,
+            std::time::Duration::from_millis(1000),
+            teksilo_tokens::Easing::Linear,
+        );
+        tree.layout(size);
+        tree.tick_animations(std::time::Duration::from_millis(100));
+        tree.layout(size);
+        let laid_out = y.get();
+        assert!(
+            laid_out < 100.0 && y.animation_target() == Some(400.0),
+            "a glide under way: at {laid_out}, heading for {:?}",
+            y.animation_target()
+        );
+        // Content laid_out + 20 .. + 40: in view at this frame.
+        *reveals.borrow_mut() = vec![Rect::new(0.0, 20.0, 200.0, 20.0)];
+        let content = laid_out + 20.0;
+        press(&mut tree);
+        assert_eq!(
+            y.animation_target().unwrap_or_else(|| y.get()),
+            content,
+            "the area ends with the target at its top"
+        );
+    }
+
+    /// Under reduced motion a smooth reveal jumps, as the wheel's tween does.
+    #[test]
+    fn a_smooth_reveal_jumps_under_reduced_motion() {
+        let mut tree = WidgetTree::new();
+        tree.set_accessibility_preferences(false, true, 1.0);
+        let actor = tree.add(
+            FixedLeaf(200.0, 1000.0)
+                .focusable(true)
+                .on_key(move |_ev, ctx| {
+                    ctx.ensure_visible_aligned(
+                        Rect::new(0.0, 500.0, 200.0, 20.0),
+                        0.0,
+                        teksilo_core::event::ScrollMotion::Smooth,
+                    );
+                    EventResponse::Handled
+                }),
+        );
+        let sa = ScrollArea::from_id(actor).smooth_scrolling(true);
+        let y = sa.scroll_y_signal().clone();
+        tree.add(sa);
+        let size = SizeProposal::exact(200.0, 100.0);
+        tree.layout(size);
+        tree.focus(actor);
+        tree.layout(size);
+        y.set(0.0);
+        tree.layout(size);
+
+        press(&mut tree);
+        assert_eq!(y.animation_target(), None, "no glide");
+        assert_eq!(y.get(), 500.0, "the target at the top at once");
+    }
+
+    /// The horizontal axis, as the first test.
+    #[test]
+    fn a_second_horizontal_reveal_in_one_turn_lands_from_where_the_first_scrolled() {
+        let reveals: Reveals = Rc::default();
+        let mut tree = WidgetTree::new();
+        let actor = revealing_actor(&mut tree, 1000.0, 100.0, reveals.clone());
+        let sa = ScrollArea::from_id(actor).smooth_scrolling(false);
+        let x = sa.scroll_x_signal().clone();
+        tree.add(sa);
+        let size = SizeProposal::exact(200.0, 100.0);
+        tree.layout(size);
+        tree.focus(actor);
+        tree.layout(size);
+        x.set(0.0);
+        tree.layout(size);
+
+        *reveals.borrow_mut() = vec![
+            Rect::new(500.0, 0.0, 20.0, 20.0),
+            Rect::new(540.0, 0.0, 20.0, 20.0),
+        ];
+        press(&mut tree);
+        assert_eq!(
+            x.get(),
+            360.0,
+            "the second target's right at the viewport's"
         );
     }
 

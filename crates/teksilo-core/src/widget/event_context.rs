@@ -2252,10 +2252,14 @@ impl<'ops> EventContext<'ops> {
     /// container, walking outward from the widget whose handler is running.
     ///
     /// `rect` is in **absolute tree (window) coordinates** — the same space
-    /// the arena stores widget bounds in. After the handler returns, the
-    /// framework walks the current widget's ancestors and, for each
-    /// `clips_children` scroll container whose viewport does not already
-    /// fully contain `rect`, dispatches
+    /// the arena stores widget bounds in. It is where the **last layout** put
+    /// the target: built from arena bounds, or from a widget's own laid-out
+    /// origin plus its own interior scroll. Not from an ancestor container's
+    /// live offset, which a scroll since that layout may have moved. After the
+    /// handler returns, the framework walks the current widget's ancestors and,
+    /// for each `clips_children` scroll container whose viewport does not
+    /// already fully contain `rect`, or that a scroll or a reveal has moved
+    /// since the last layout, dispatches
     /// [`WidgetEvent::ScrollIntoView`](crate::event::WidgetEvent::ScrollIntoView)
     /// so the container adjusts its offset. Nested scroll areas each get a
     /// turn (outermost included), exactly like the focus-driven path.

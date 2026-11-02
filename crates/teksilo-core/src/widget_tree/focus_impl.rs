@@ -191,6 +191,20 @@ impl WidgetTree {
     /// camera had gone, and anything further out received a rectangle from a
     /// coordinate system it had never heard of.
     ///
+    /// **Containers that judge live.** The test above compares `rect`, where
+    /// the last layout put the target, with the container's bounds, where the
+    /// last layout put its viewport: visibility at the offset that layout
+    /// used. A scroll since then (a wheel notch, an offset the application
+    /// wrote, a glide, an earlier reveal of the same turn such as the focus
+    /// follow ahead of a handler's own `ensure_visible`) puts the container at
+    /// another offset, so a target that looks visible here may not be. A
+    /// container marked with
+    /// [`BuildContext::judge_reveals_live`](crate::build_context::BuildContext::judge_reveals_live)
+    /// compares the target with its live viewport itself, so it is asked
+    /// whatever the test says (`ScrollArea` and `GridView` are marked). An
+    /// unmarked container keeps the test, as before; for a `SceneView` the
+    /// test is already live, through its camera transform.
+    ///
     /// **Alignment applies to the innermost scrolling ancestor only.** A
     /// [`ScrollAlign::Fraction`] request names a height in *one* viewport; the
     /// containers further out have their own, differently-sized viewports and no
@@ -279,8 +293,12 @@ impl WidgetTree {
                 let align =
                     std::mem::replace(&mut pending_align, crate::event::ScrollAlign::Minimal);
                 // A pin must re-assert itself every time, so it never consults
-                // whether the target already happens to be on screen.
+                // whether the target already happens to be on screen. Nor is a
+                // container that judges against its live viewport tested here,
+                // against bounds from the last layout: see "Containers that
+                // judge live".
                 let needs_scroll = matches!(align, crate::event::ScrollAlign::Fraction(_))
+                    || node.judges_reveals_live
                     || against.y - margin < viewport.y
                     || against.bottom() + margin > viewport.bottom()
                     || against.x - margin < viewport.x

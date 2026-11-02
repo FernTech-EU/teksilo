@@ -827,6 +827,21 @@ pub enum WidgetEvent {
     /// gains focus but is outside the viewport. The scroll area adjusts
     /// its offset to make the target bounds visible, with an optional
     /// margin around the target.
+    ///
+    /// `target_bounds` is where the **last layout** put the target (arena
+    /// bounds), so a handler converts it to content space with the offset
+    /// that layout placed its content at, and compares it with its **live**
+    /// viewport (or the offset a running tween is heading for). The two differ
+    /// when something scrolled the container since that layout: the focus
+    /// follow ahead of a handler's own `ensure_visible`, a wheel notch, an
+    /// offset written by the application, a glide. A container that marks
+    /// itself with `BuildContext::judge_reveals_live` is sent the event even
+    /// when the target looks visible from the laid-out bounds, so it must
+    /// move only as far as the target needs, and answer `Ignored` when it
+    /// does not move. `ScrollArea` and `GridView` are marked. A `SceneView`
+    /// is not: the walk tests its target through the live camera transform
+    /// already. The horizontal conversion assumes left-to-right placement;
+    /// `ScrollArea` does not mirror it for right-to-left content.
     ScrollIntoView {
         target_bounds: Rect,
         /// Extra margin (in logical pixels) to keep around the target
@@ -842,7 +857,10 @@ pub enum WidgetEvent {
         /// See [`ScrollMotion`].
         motion: ScrollMotion,
         /// Optional back-channel for the handling scroll container to report
-        /// how far it actually scrolled (`(dx, dy)` in content pixels). When
+        /// how far the target moves from where `target_bounds` puts it
+        /// (`(dx, dy)` in content pixels): the move from the offset the last
+        /// layout placed its content at, which includes a move earlier in the
+        /// same turn even when this one moves nothing. When
         /// several nested scroll containers must each reveal the same target,
         /// the ancestor walk (`scroll_rect_into_view`) reads this after
         /// dispatching to an inner container and shifts `target_bounds` by the

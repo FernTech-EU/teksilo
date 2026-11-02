@@ -4385,6 +4385,125 @@ fn set_scroll_x(tree: &WidgetTree, table: WidgetId, x: f32) {
         .set(x);
 }
 
+/// An assistive `Focus` on a realized cell right of the Middle pane's
+/// viewport scrolls the columns to it, as Ctrl+ArrowRight onto it would.
+#[test]
+fn an_assistive_focus_on_a_cell_right_of_the_viewport_scrolls_the_columns() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    use teksilo_core::accessibility::widget_id_to_node_id;
+    let (mut tree, table) = build_wide_unpinned_table(200.0, 3, 300.0);
+    focus_at(&mut tree, table, 0, 0);
+    tree.layout(SizeProposal {
+        width: Some(300.0),
+        height: Some(200.0),
+    });
+    assert!(scroll_x_of(&tree, table).abs() < 0.01);
+    let cell = realized_cell(&tree, table, (0, 2)).expect("the third column is realized");
+    assert!(assistive_focus(&mut tree, widget_id_to_node_id(cell)));
+    assert_eq!(read_focused_cell(&tree, table), Some((0, 2)));
+    let scrolled = scroll_x_of(&tree, table);
+    assert!(
+        (scrolled - max_scroll_x_of(&tree, table)).abs() < 0.01 && scrolled > 0.0,
+        "the columns scrolled to the last one: {scrolled}"
+    );
+}
+
+/// A table below a page's view, above it or partly in it: an assistive `Focus`
+/// on one of its cells shows the cell's row in the page, not short of it nor
+/// past it, whether the table had focus already or takes it with the action
+/// (the focus follow reveals the table first, then the row's chase runs with
+/// a rectangle from before that scroll), and whether the table fits the page
+/// or is taller than it.
+#[test]
+fn an_assistive_focus_on_a_cell_of_a_table_in_a_page_shows_it_there() {
+    use crate::ScrollArea;
+    use crate::common::item_focus::test_support::assistive_focus;
+    use crate::primitives::{FixedSize, VStack};
+    use teksilo_core::accessibility::widget_id_to_node_id;
+
+    let size = SizeProposal::exact(400.0, 250.0);
+    for table_height in [200.0_f32, 500.0] {
+        // Where the page starts: at its top (the view below it), at its
+        // bottom (the view above it), or with the view's top 100 dp down the
+        // page, its first rows in sight. The last is the one where the row
+        // shows until the focus follow, revealing the whole view, scrolls
+        // the page on and takes it out of sight.
+        for place in ["below the page", "above the page", "partly in view"] {
+            let from_below = place != "above the page";
+            for focused in [false, true] {
+                let case = format!("a {table_height} dp table {}, focused {focused}", place);
+                let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+                let table = tree.add(
+                    TableView::new(rows(100))
+                        .add_column(id_col())
+                        .add_column(name_col())
+                        .row_height(20.0),
+                );
+                let page = tree.add(
+                    VStack::new()
+                        .child(FixedSize::new().width(400.0).height(300.0))
+                        .child(
+                            FixedSize::new()
+                                .width(400.0)
+                                .height(table_height)
+                                .child(table),
+                        )
+                        .child(FixedSize::new().width(400.0).height(300.0)),
+                );
+                let outer = ScrollArea::from_id(page).smooth_scrolling(false);
+                let outer_y = outer.scroll_y_signal().clone();
+                let max_y = outer.max_scroll_y_signal().clone();
+                let outer_id = tree.add(outer);
+                tree.layout(size);
+                if focused {
+                    tree.focus(table);
+                    tree.layout(size);
+                }
+                outer_y.set(match place {
+                    "below the page" => 0.0,
+                    "above the page" => max_y.get(),
+                    _ => 200.0,
+                });
+                tree.layout(size);
+                // A row near the table's near edge, realized in its viewport
+                // (below the header).
+                let index = if from_below {
+                    1
+                } else {
+                    (table_height / 20.0) as usize - 4
+                };
+                let cell_of = |tree: &WidgetTree| {
+                    realized_cell(tree, table, (index, 0))
+                        .unwrap_or_else(|| panic!("{case}: row {index} is realized"))
+                };
+                let view = tree.bounds(outer_id);
+                let before = tree.bounds(cell_of(&tree));
+                let out_of_view =
+                    before.y + before.height <= view.y || before.y >= view.y + view.height;
+                assert_eq!(
+                    out_of_view,
+                    place != "partly in view",
+                    "{case}: row {index} {before:?} against the page {view:?}"
+                );
+                let node = widget_id_to_node_id(cell_of(&tree));
+                assert!(
+                    assistive_focus(&mut tree, node),
+                    "{case}: the table took it"
+                );
+                tree.layout(size);
+                tree.layout(size);
+                assert_eq!(tree.focused(), Some(table), "{case}");
+                let cell = tree.bounds(cell_of(&tree));
+                assert!(
+                    cell.y >= view.y - 0.5 && cell.y + cell.height <= view.y + view.height + 0.5,
+                    "{case}: row {index} {cell:?} shows in the page {view:?} (scroll {})",
+                    outer_y.get()
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn scroll_x_clamps_after_the_pane_widens() {
     // Three unpinned Fixed columns totalling 600px in a narrow 300px table

@@ -355,3 +355,97 @@ fn an_assistive_focus_on_a_row_below_the_viewport_scrolls_it_into_view() {
     );
     assert_eq!(sel.selected_indices(), vec![0], "the selection stayed");
 }
+
+/// A list below a page's view, above it or partly in it: an assistive `Focus` on
+/// one of its rows shows the row in the page, not short of it nor past it,
+/// whether the list had focus already (the row's chase alone) or takes it
+/// with the action (the focus follow reveals the list first, then the row's
+/// chase runs with a rectangle from before that scroll), and whether the
+/// list fits the page or is taller than it.
+#[test]
+fn an_assistive_focus_on_a_row_of_a_list_in_a_page_shows_it_there() {
+    use crate::ScrollArea;
+    use crate::common::item_focus::test_support::assistive_focus;
+    use crate::primitives::{FixedSize, VStack};
+
+    let size = SizeProposal::exact(400.0, 250.0);
+    for list_height in [200.0_f32, 500.0] {
+        // Where the page starts: at its top (the view below it), at its
+        // bottom (the view above it), or with the view's top 100 dp down the
+        // page, its first rows in sight. The last is the one where the row
+        // shows until the focus follow, revealing the whole view, scrolls
+        // the page on and takes it out of sight.
+        for place in ["below the page", "above the page", "partly in view"] {
+            let from_below = place != "above the page";
+            for focused in [false, true] {
+                let case = format!("a {list_height} dp list {}, focused {focused}", place);
+                let model = ListModel::from_vec((0..60).collect::<Vec<usize>>());
+                let view = ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 20.0)))
+                    .item_height(20.0)
+                    .selection(SelectionModel::new(SelectionMode::Single));
+                let mut tree = WidgetTree::new();
+                let lv = tree.add(view);
+                let page = tree.add(
+                    VStack::new()
+                        .child(FixedSize::new().width(400.0).height(300.0))
+                        .child(FixedSize::new().width(400.0).height(list_height).child(lv))
+                        .child(FixedSize::new().width(400.0).height(300.0)),
+                );
+                let outer = ScrollArea::from_id(page).smooth_scrolling(false);
+                let outer_y = outer.scroll_y_signal().clone();
+                let max_y = outer.max_scroll_y_signal().clone();
+                let outer_id = tree.add(outer);
+                tree.layout(size);
+                if focused {
+                    tree.focus(lv);
+                    tree.layout(size);
+                }
+                // The page at its top or its bottom: the list below or above.
+                outer_y.set(match place {
+                    "below the page" => 0.0,
+                    "above the page" => max_y.get(),
+                    _ => 200.0,
+                });
+                tree.layout(size);
+                // A row near the list's near edge, realized in its viewport.
+                let index = if from_below {
+                    1
+                } else {
+                    (list_height / 20.0) as usize - 2
+                };
+                let row_of = |tree: &WidgetTree| {
+                    tree.widget_as_any(lv)
+                        .and_then(|any| any.downcast_ref::<ListView<usize>>())
+                        .and_then(|view| {
+                            view.realized_row_ids()
+                                .borrow()
+                                .iter()
+                                .find(|&&(i, _)| i == index)
+                                .map(|&(_, id)| id)
+                        })
+                        .unwrap_or_else(|| panic!("{case}: row {index} is realized"))
+                };
+                let view = tree.bounds(outer_id);
+                let before = tree.bounds(row_of(&tree));
+                let out_of_view =
+                    before.y + before.height <= view.y || before.y >= view.y + view.height;
+                assert_eq!(
+                    out_of_view,
+                    place != "partly in view",
+                    "{case}: row {index} {before:?} against the page {view:?}"
+                );
+                let node = teksilo_core::accessibility::widget_id_to_node_id(row_of(&tree));
+                assert!(assistive_focus(&mut tree, node), "{case}: the list took it");
+                tree.layout(size);
+                tree.layout(size);
+                assert_eq!(tree.focused(), Some(lv), "{case}");
+                let row = tree.bounds(row_of(&tree));
+                assert!(
+                    row.y >= view.y - 0.5 && row.y + row.height <= view.y + view.height + 0.5,
+                    "{case}: row {index} {row:?} shows in the page {view:?} (scroll {})",
+                    outer_y.get()
+                );
+            }
+        }
+    }
+}

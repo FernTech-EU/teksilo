@@ -512,6 +512,10 @@ pub struct GridView<T: 'static> {
     /// keyboard handler so it can chase the focused tile into any enclosing
     /// scroll area (`ctx.ensure_visible`).
     viewport_origin: Rc<Cell<Option<Point>>>,
+    /// The offset the body pane last placed its content at (`None` until laid
+    /// out). A `ScrollIntoView` target is a rectangle from that layout, so it
+    /// is converted with this offset, as `ScrollArea` does.
+    laid_out_scroll_y: Rc<Cell<Option<f32>>>,
     /// Remembered scrollbar decision so each layout queries the strategy at a
     /// single, stable body width — querying at two widths per frame would
     /// thrash a variable strategy's per-row measurement cache.
@@ -678,6 +682,7 @@ impl<T: 'static> GridView<T> {
             viewport_height: Rc::new(Cell::new(400.0)),
             scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
             viewport_origin: Rc::new(Cell::new(None)),
+            laid_out_scroll_y: Rc::new(Cell::new(None)),
             last_needs_scrollbar: Cell::new(false),
             body_pane_id: None,
             empty_id: None,
@@ -1762,8 +1767,13 @@ fn band_content<T: 'static>(
 /// Scroll `target`, in window coordinates, into a viewport whose top edge is
 /// at `viewport_top`, the way `ScrollArea` answers
 /// `WidgetEvent::ScrollIntoView`: the least scroll that shows it, or the pin
-/// `align` asks for, gliding over `glide` when given. Returns how far the
-/// content scrolled.
+/// `align` asks for, gliding over `glide` when given. Returns whether it
+/// moved, and how far the target moves from where the last layout put it.
+///
+/// `target` is a rectangle from the last layout, placed at `placed` (the
+/// live offset when `None`), so it is converted with that offset; the
+/// viewport it is compared against is the live one, or where a running tween
+/// is heading. See `ScrollArea`'s answer to the same event.
 #[allow(clippy::too_many_arguments)]
 fn reveal_in_viewport(
     target: Rect,
@@ -1772,12 +1782,16 @@ fn reveal_in_viewport(
     glide: Option<Duration>,
     scroll_y: &Signal<f32>,
     max_scroll_y: &Signal<f32>,
+    placed: Option<f32>,
     viewport_top: f32,
     viewport_height: f32,
-) -> f32 {
-    let current = scroll_y.get();
-    // In content coordinates: an edge at the viewport's top is at `current`.
-    let top = target.y - viewport_top + current;
+) -> (bool, f32) {
+    let current = scroll_y
+        .animation_target()
+        .unwrap_or_else(|| scroll_y.get());
+    let placed = placed.unwrap_or(current);
+    // In content coordinates: an edge at the viewport's top was at `placed`.
+    let top = target.y - viewport_top + placed;
     let new_y = match align {
         // A pin names an exact place, so the margin does not pad it.
         teksilo_core::event::ScrollAlign::Fraction(f) => {
@@ -1799,13 +1813,18 @@ fn reveal_in_viewport(
     }
     .clamp(0.0, max_scroll_y.get());
     if (new_y - current).abs() <= 0.001 {
-        return 0.0;
+        return (false, current - placed);
     }
     match glide {
         Some(duration) => scroll_y.animate_to(new_y, duration, teksilo_tokens::Easing::EaseOut),
+        // A glide in flight would carry on to its own target over a plain
+        // write; a zero-length one replaces it and lands at once.
+        None if scroll_y.animation_target().is_some() => {
+            scroll_y.animate_to(new_y, Duration::ZERO, teksilo_tokens::Easing::Linear)
+        }
         None => scroll_y.set(new_y),
     }
-    new_y - current
+    (true, new_y - placed)
 }
 
 /// The scroll offset that brings tile `index` into view per `anchor`, or
@@ -2191,6 +2210,7 @@ impl<T: 'static> Widget for GridView<T> {
                 let max_scroll_y = self.max_scroll_y.clone();
                 let viewport_height = self.viewport_height.clone();
                 let viewport_origin = self.viewport_origin.clone();
+                let laid_out_scroll_y = self.laid_out_scroll_y.clone();
                 let glide = (self.smooth_scrolling && !ctx.prefers_reduced_motion())
                     .then_some(self.smooth_scroll_duration);
                 move |event, _ctx| {
@@ -2209,13 +2229,14 @@ impl<T: 'static> Widget for GridView<T> {
                     };
                     let glide =
                         glide.filter(|_| *motion == teksilo_core::event::ScrollMotion::Smooth);
-                    let delta = reveal_in_viewport(
+                    let (moved, delta) = reveal_in_viewport(
                         *target_bounds,
                         *margin,
                         *align,
                         glide,
                         &scroll_y,
                         &max_scroll_y,
+                        laid_out_scroll_y.get(),
                         origin.y,
                         viewport_height.get(),
                     );
@@ -2224,7 +2245,12 @@ impl<T: 'static> Widget for GridView<T> {
                     {
                         *applied = Point::new(0.0, delta);
                     }
-                    Some(EventResponse::Handled)
+                    // Nothing moved: no layout pass for it.
+                    Some(if moved {
+                        EventResponse::Handled
+                    } else {
+                        EventResponse::Ignored
+                    })
                 }
             });
             handlers = behavior.install(handlers);
@@ -2626,6 +2652,10 @@ impl<T: 'static> Widget for GridView<T> {
             ));
         }
         ctx.apply_self_handlers(handlers);
+        // Its `ScrollIntoView` answer (`reveal_in_viewport`) judges against
+        // the live offset (or a glide's landing), so the reveal walk may
+        // always ask the grid.
+        ctx.judge_reveals_live();
 
         // Children: body pane (or empty view), scrollbar, overlay.
         // (Incremental loading — `request_window` / `fetch_more` — lives in the
@@ -2708,6 +2738,7 @@ impl<T: 'static> Widget for GridView<T> {
                 viewport_width: self.viewport_width.clone(),
                 viewport_height: self.viewport_height.clone(),
                 viewport_origin: self.viewport_origin.clone(),
+                laid_out_scroll_y: self.laid_out_scroll_y.clone(),
                 column_count: self.column_count.clone(),
                 scroll_y: self.scroll_y.clone(),
                 selection: self.selection.clone(),
