@@ -944,6 +944,10 @@ Import from `teksilo::widgets`. The main families:
   module path, `use teksilo::widgets::rich_text::RichTextEditor;`. Call
   `RichTextEditor::read_only(doc)` for a read-only viewer (there is no separate
   `RichTextViewer` type; `RichTextEditor::editor(doc)` is the editable constructor).
+  An editable `RichTextEditor`, `CodeEditor` or `PlainTextEditor` keeps Tab for editing
+  and tells screen readers that Ctrl+Tab and Ctrl+Shift+Tab leave it. For a
+  single-purpose field (a title, a synopsis, a comment) pass
+  `.tab_key(teksilo::widgets::TabKey::MoveFocus)`, so Tab and Shift+Tab move focus.
   Text the platform's input system inserts (macOS Dictation, Writing Tools, the emoji
   viewer, an IME) reaches a field on its own. `.on_text_inserted(|EditSource, chars| ..)`
   says by which channel each insertion came (`teksilo::widgets::EditSource`, exhaustive), and

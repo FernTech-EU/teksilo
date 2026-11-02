@@ -557,6 +557,17 @@ pub(crate) struct EditorState {
     /// [`RichTextEditor::typewriter`](crate::rich_text::RichTextEditor::typewriter).
     pub typewriter: Option<f32>,
 
+    /// What the Tab key does: a mode of the host, like `typewriter`, rather
+    /// than a dimension of the construction preset. Set from
+    /// [`RichTextEditor::tab_key`](crate::rich_text::RichTextEditor::tab_key).
+    pub tab_key: crate::common::editor_runtime::TabKey,
+
+    /// Bumped by every change of the command filter or of `tab_key` on a
+    /// mounted editor. The body binds it at `AccessibilityOnly`, because the
+    /// description that says how to leave the editor depends on both, and
+    /// neither changes the document.
+    pub a11y_policy_version: Signal<u64>,
+
     /// Whether the caret was last placed by the **pointer**. While set, the
     /// typewriter pin stands down and the click position becomes the new
     /// resting place; the next keystroke clears it and pinning resumes.
@@ -842,6 +853,24 @@ impl EditorState {
         self.writing_tools.get()
     }
 
+    /// Whether Tab and Shift+Tab edit here (next cell, indent, nest, a
+    /// literal tab) rather than move focus. The one predicate the keys and
+    /// the accessibility description both ask, so the hint and the key
+    /// cannot drift.
+    pub(crate) fn tab_consumed(&self) -> bool {
+        self.tab_key == crate::common::editor_runtime::TabKey::Edit
+            && self
+                .policy
+                .command_filter
+                .accepts(super::policy::EditCommandKind::NavigateTableCell)
+    }
+
+    /// Tell the accessibility walk that the policy it describes changed.
+    pub(crate) fn bump_a11y_policy(&self) {
+        let v = self.a11y_policy_version.get();
+        self.a11y_policy_version.set(v.wrapping_add(1));
+    }
+
     pub fn new(
         document: TextDocument,
         engine: RichTextEngine,
@@ -963,6 +992,8 @@ impl EditorState {
             last_chase_pos: None,
             last_chase_y: None,
             typewriter: None,
+            tab_key: crate::common::editor_runtime::TabKey::Edit,
+            a11y_policy_version: Signal::new(0),
             mouse_anchored: false,
             last_ime_area: None,
             // `Debounce::new` starts already-expired so the first tick

@@ -173,6 +173,7 @@ impl crate::common::editor_runtime::EditorCommand for EditCommandKind {
 // rich-text-specific. Re-exported here because these are their public names.
 pub use crate::common::editor_runtime::{
     AccessibilityRole, CaretPolicy, CommandFilter, EDITOR_PRESET, PolicyBundle, READ_ONLY_PRESET,
+    TabKey,
 };
 
 #[cfg(test)]

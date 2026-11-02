@@ -24,8 +24,8 @@
 //!   that, pressing Home with two carets on one line silently leaves two carets
 //!   stacked at column 0, and the next keystroke types every character twice.
 
-use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
-use teksilo_core::shortcut::{KeyStroke, StandardEdit};
+use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::shortcut::StandardEdit;
 
 use crate::common::composition::position_after_commit;
 use crate::editor_shortcuts::CodeShortcut;
@@ -43,7 +43,6 @@ use super::state::{CodeEditorState, SharedState};
 use super::sync_cursor_signals;
 use crate::common::editor_runtime::CaretPolicy;
 use crate::common::text_nav::{CaretStep, LineStep, caret_step, deletes_word, line_step};
-use crate::keystroke_format::format_keystroke;
 
 /// What the dispatch decided, so the epilogue knows what to preserve.
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -216,11 +215,11 @@ pub(super) fn handle_key(
                 semantics::move_lines(&mut st, semantics::MoveDir::Down);
                 KeyAction::ClearPreferredX
             }
-            Key::Tab if !shift && filter.accepts(CodeCommand::IndentLines) => {
+            Key::Tab if !shift && st.tab_consumed(false) => {
                 semantics::indent_or_tab(&mut st);
                 KeyAction::ClearPreferredX
             }
-            Key::Tab if shift && filter.accepts(CodeCommand::DedentLines) => {
+            Key::Tab if shift && st.tab_consumed(true) => {
                 semantics::dedent(&mut st);
                 KeyAction::ClearPreferredX
             }
@@ -601,8 +600,7 @@ fn finish_key_action(
 /// description, which AT-SPI, UIA and macOS all read; none of the three
 /// adapters exports `keyboard_shortcut`.
 pub(super) fn tab_escape_hint() -> String {
-    let next = format_keystroke(KeyStroke::new(Key::Tab, Modifiers::CTRL));
-    let previous = format_keystroke(KeyStroke::new(Key::Tab, Modifiers::CTRL | Modifiers::SHIFT));
+    let (next, previous) = crate::common::editor_runtime::tab_escape_chords();
     tr_widget!(code_editor_tab_escape_hint(
         next = next,
         previous = previous

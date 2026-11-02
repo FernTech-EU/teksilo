@@ -406,6 +406,7 @@ grid-view-detail-name = { $position }. öğenin ayrıntıları
 # Kod düzenleyici. Tam bağlam için en-US.ftl ve şu dosyaya bakın:
 # crates/teksilo-widgets/src/code_editor/keyboard.rs
 code-editor-tab-escape-hint = Sekme girinti ekler. { $next } sonraki denetime, { $previous } önceki denetime geçer.
+rich-text-tab-escape-hint = Sekme girinti ekler, sekme karakteri ekler ya da tablonun sonraki hücresine geçer. { $next } sonraki denetime, { $previous } önceki denetime geçer.
 
 list-view-row-actions-hint = Satırı düzenlemek için { $enter } tuşuna basın. { $exit } listeye döner.
 

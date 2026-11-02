@@ -161,6 +161,46 @@ impl CommandFilter {
     }
 }
 
+/// What the Tab key does in a text editor.
+///
+/// For [`RichTextEditor`](crate::rich_text::RichTextEditor),
+/// [`CodeEditor`](crate::code_editor::CodeEditor) and
+/// [`PlainTextEditor`](crate::code_editor::PlainTextEditor); not for a
+/// `TableView`, whose cells are reached with the arrow keys.
+///
+/// A mode of the host, like the typewriter anchor, rather than a dimension of
+/// the construction preset: it is set with the editor's `tab_key` builder or
+/// changed on a mounted editor with its handle's `set_tab_key`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum TabKey {
+    /// Tab edits: indents, nests, moves between table cells or inserts a tab.
+    /// Ctrl+Tab and Ctrl+Shift+Tab move focus, and the editor tells screen
+    /// readers so in its description.
+    #[default]
+    Edit,
+    /// Tab and Shift+Tab move focus, everywhere in the editor, tables included
+    /// (cells are reached with the arrow keys). For single-purpose fields: a
+    /// title, a synopsis, a comment reply.
+    ///
+    /// No key indents a list item then; a host that offers indenting calls the
+    /// editor handle's `indent` from a toolbar button.
+    MoveFocus,
+}
+
+/// The two chords that move focus out of an editor that keeps Tab, as the
+/// platform writes them: (next, previous).
+pub(crate) fn tab_escape_chords() -> (String, String) {
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::shortcut::KeyStroke;
+    let next = crate::keystroke_format::format_keystroke(KeyStroke::new(Key::Tab, Modifiers::CTRL));
+    let previous = crate::keystroke_format::format_keystroke(KeyStroke::new(
+        Key::Tab,
+        Modifiers::CTRL | Modifiers::SHIFT,
+    ));
+    (next, previous)
+}
+
 /// Drives the AccessKit role a text surface reports.
 ///
 /// Deliberately only two values. Both map to roles that

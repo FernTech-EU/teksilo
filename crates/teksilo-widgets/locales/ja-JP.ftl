@@ -411,6 +411,7 @@ grid-view-detail-name = 項目 { $position } の詳細
 # コードエディター。詳しい経緯は en-US.ftl と次のファイルを参照。
 # crates/teksilo-widgets/src/code_editor/keyboard.rs
 code-editor-tab-escape-hint = Tab キーでインデントします。{ $next } で次のコントロールへ、{ $previous } で前のコントロールへ移動します。
+rich-text-tab-escape-hint = Tab キーでインデント、タブ文字の挿入、または表の次のセルへの移動を行います。{ $next } で次のコントロールへ、{ $previous } で前のコントロールへ移動します。
 
 list-view-row-actions-hint = { $enter } キーで行を編集します。{ $exit } キーでリストに戻ります。
 

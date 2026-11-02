@@ -415,6 +415,7 @@ grid-view-detail-name = Сведения об элементе { $position }
 # Редактор кода. Полный контекст см. в en-US.ftl и
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab добавляет отступ. { $next } переходит к следующему элементу управления, { $previous } к предыдущему.
+rich-text-tab-escape-hint = Tab добавляет отступ, вставляет символ табуляции или переходит к следующей ячейке таблицы. { $next } переходит к следующему элементу управления, { $previous } к предыдущему.
 
 list-view-row-actions-hint = Нажмите { $enter }, чтобы изменить строку. { $exit } возвращает к списку.
 

@@ -110,8 +110,9 @@ impl WalkAcc {
 pub(crate) fn build_editor_a11y(st: &CodeEditorState, builder: &mut AccessNodeBuilder) {
     set_role(st, builder);
     // An editor that takes Tab says how to leave it (WCAG 2.1.2). A viewer's
-    // filter rejects indenting, so Tab already leaves it and it says nothing.
-    if st.policy.command_filter.accepts(CodeCommand::IndentLines) {
+    // filter rejects indenting, and `TabKey::MoveFocus` hands Tab to focus
+    // traversal, so Tab already leaves those and they say nothing.
+    if st.tab_consumed(false) {
         builder.set_description(super::keyboard::tab_escape_hint());
     }
 

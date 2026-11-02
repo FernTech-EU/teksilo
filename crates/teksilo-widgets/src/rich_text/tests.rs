@@ -11451,3 +11451,203 @@ fn a_forward_only_editor_refuses_its_own_drag_and_takes_another_editors() {
     handle.set_command_filter(super::policy::CommandFilter::All);
     assert!(!super::mouse::refuses_text_drop(&state, &drag));
 }
+
+// ── How to leave the editor (`TabKey`) ───────────────────────────────
+
+/// `editor` between a "Before" and an "After" button, focus Tabbed into it as
+/// a keyboard user reaches it, and a reader attached.
+fn tabbed_into_rich(
+    editor: impl teksilo_core::widget::Widget + 'static,
+) -> (WidgetTree, crate::common::heard_test::Listener) {
+    use crate::button::Button;
+    use crate::primitives::VStack;
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_i18n::lit;
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(
+        VStack::new()
+            .child(Button::new(lit!("Before")))
+            .child(editor)
+            .child(Button::new(lit!("After"))),
+    );
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let _ = tree.render();
+    let reader = crate::common::heard_test::Listener::attach(&mut tree);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    (tree, reader)
+}
+
+fn rich_doc(markdown: &str) -> TextDocument {
+    let doc = TextDocument::new();
+    doc.set_markdown(markdown).unwrap().wait().unwrap();
+    doc
+}
+
+/// The description a reader gets for the editable rich editor.
+fn rich_hint(
+    reader: &mut crate::common::heard_test::Listener,
+    tree: &mut WidgetTree,
+) -> Option<String> {
+    reader.heard(tree);
+    reader.description_of(teksilo_core::accesskit::Role::MultilineTextInput)
+}
+
+/// An editor that keeps Tab tells a reader what Tab does there and how to
+/// leave it (WCAG 2.1.2), in the description every platform reads on focus.
+#[test]
+fn a_rich_editor_tells_a_reader_how_to_leave_it() {
+    let (mut tree, mut reader) = tabbed_into_rich(RichTextEditor::editor(rich_doc("prose")));
+    let (next, previous) = crate::common::editor_runtime::tab_escape_chords();
+    let description = rich_hint(&mut reader, &mut tree).expect("the editor carries a description");
+    assert!(
+        description.contains(&next) && description.contains(&previous),
+        "the description must name {next} and {previous}: {description:?}"
+    );
+    assert!(description.contains("table cell"), "{description:?}");
+}
+
+/// A viewer does not take Tab (its filter refuses table navigation), so it says
+/// nothing about leaving.
+#[test]
+fn a_rich_viewer_describes_no_way_out() {
+    let (mut tree, mut reader) = tabbed_into_rich(RichTextEditor::read_only(rich_doc("prose")));
+    reader.heard(&mut tree);
+    assert_eq!(
+        reader.description_of(teksilo_core::accesskit::Role::Document),
+        None
+    );
+}
+
+/// An app's own description replaces the hint, as every scalar override does.
+#[test]
+fn an_apps_description_replaces_the_rich_editors_hint() {
+    use teksilo_core::widget_builder::WidgetBuilder as _;
+    use teksilo_i18n::lit;
+    let (mut tree, mut reader) = tabbed_into_rich(
+        RichTextEditor::editor(rich_doc("prose")).access_description(lit!("Synopsis.")),
+    );
+    assert_eq!(
+        rich_hint(&mut reader, &mut tree).as_deref(),
+        Some("Synopsis.")
+    );
+}
+
+/// `TabKey::MoveFocus`: Tab leaves the editor for the next control and
+/// Shift+Tab for the previous one, the text untouched, and the editor says
+/// nothing about leaving, since Tab does it.
+#[test]
+fn move_focus_lets_tab_and_shift_tab_leave_the_rich_editor() {
+    use crate::common::heard_test::Heard;
+    use teksilo_core::event::{Key, Modifiers};
+    let doc = rich_doc("prose");
+    let (mut tree, mut reader) = tabbed_into_rich(
+        RichTextEditor::editor(doc.clone()).tab_key(super::policy::TabKey::MoveFocus),
+    );
+    assert_eq!(rich_hint(&mut reader, &mut tree), None);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    let heard = reader.heard(&mut tree);
+    assert!(heard.contains(&Heard::Focus("After".into())), "{heard:?}");
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    let heard = reader.heard(&mut tree);
+    assert!(heard.contains(&Heard::Focus("Before".into())), "{heard:?}");
+    assert_eq!(doc.to_plain_text().unwrap_or_default(), "prose");
+}
+
+/// …in a list item and in a table cell too, where Tab would otherwise nest the
+/// item or move to the next cell.
+#[test]
+fn move_focus_leaves_from_a_list_item_and_a_table_cell() {
+    use crate::common::heard_test::Heard;
+    use teksilo_core::event::{Key, Modifiers};
+    for markdown in ["- one\n- two", "| a | b |\n|---|---|\n| c | d |"] {
+        let doc = rich_doc(markdown);
+        let editor = RichTextEditor::editor(doc.clone()).tab_key(super::policy::TabKey::MoveFocus);
+        let handle = editor.handle();
+        let (mut tree, mut reader) = tabbed_into_rich(editor);
+        handle.select_range(1, 1);
+        let before = doc.to_markdown().unwrap_or_default();
+        reader.heard(&mut tree);
+        tree.press_key(Key::Tab, Modifiers::NONE);
+        let heard = reader.heard(&mut tree);
+        assert!(
+            heard.contains(&Heard::Focus("After".into())),
+            "{markdown:?}: {heard:?}"
+        );
+        assert_eq!(
+            doc.to_markdown().unwrap_or_default(),
+            before,
+            "{markdown:?}"
+        );
+    }
+}
+
+/// The mode changes on a mounted editor: the description goes with the next
+/// frame, with no key pressed in between, and the next Tab leaves.
+#[test]
+fn set_tab_key_on_a_mounted_editor_drops_the_hint_and_lets_tab_leave() {
+    use crate::common::heard_test::Heard;
+    use teksilo_core::event::{Key, Modifiers};
+    let editor = RichTextEditor::editor(rich_doc("prose"));
+    let handle = editor.handle();
+    let (mut tree, mut reader) = tabbed_into_rich(editor);
+    assert!(rich_hint(&mut reader, &mut tree).is_some());
+    handle.set_tab_key(super::policy::TabKey::MoveFocus);
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    assert_eq!(rich_hint(&mut reader, &mut tree), None);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    let heard = reader.heard(&mut tree);
+    assert!(heard.contains(&Heard::Focus("After".into())), "{heard:?}");
+}
+
+/// A host that narrows the filter to `ReadOnly` hands Tab to focus traversal,
+/// and the description follows on the next frame.
+#[test]
+fn narrowing_the_filter_drops_the_rich_editors_hint() {
+    let editor = RichTextEditor::editor(rich_doc("prose"));
+    let handle = editor.handle();
+    let (mut tree, mut reader) = tabbed_into_rich(editor);
+    assert!(rich_hint(&mut reader, &mut tree).is_some());
+    handle.set_command_filter(super::policy::CommandFilter::ReadOnly);
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    assert_eq!(rich_hint(&mut reader, &mut tree), None);
+}
+
+/// A text the app links with `access_described_by` is heard after the hint,
+/// which keeps its place first.
+#[test]
+fn the_rich_editors_hint_comes_before_a_described_by_text() {
+    use crate::button::Button;
+    use crate::primitives::{TextWidget, VStack};
+    use teksilo_core::event::{Key, Modifiers};
+    use teksilo_core::widget_builder::WidgetBuilder as _;
+    use teksilo_i18n::lit;
+
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let note = tree.add(TextWidget::new(lit!("Shown on the cover.")));
+    tree.add(
+        VStack::new()
+            .child(Button::new(lit!("Before")))
+            .child(RichTextEditor::editor(rich_doc("prose")).access_described_by(note))
+            .child(note)
+            .child(Button::new(lit!("After"))),
+    );
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let _ = tree.render();
+    let mut reader = crate::common::heard_test::Listener::attach(&mut tree);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let description = rich_hint(&mut reader, &mut tree).expect("a description");
+    assert!(
+        description.starts_with(&super::keyboard::tab_escape_hint()),
+        "{description:?}"
+    );
+    assert!(
+        description.contains("Shown on the cover."),
+        "{description:?}"
+    );
+}

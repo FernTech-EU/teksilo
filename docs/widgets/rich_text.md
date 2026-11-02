@@ -54,6 +54,7 @@ Rich text editor and viewer widget.
 | `Self` | [`scroll_policy(policy: ScrollPolicy)`](#richtexteditor-scroll_policy) |
 | `Self` | [`follow_caret_in_page(follow: bool)`](#richtexteditor-follow_caret_in_page) |
 | `Self` | [`typewriter(anchor: Option<f32>)`](#richtexteditor-typewriter) |
+| `Self` | [`tab_key(tab_key: TabKey)`](#richtexteditor-tab_key) |
 | `Self` | [`overscroll_behavior(behavior: OverscrollBehavior)`](#richtexteditor-overscroll_behavior) |
 | `Self` | [`min_lines(n: u32)`](#richtexteditor-min_lines) |
 | `Self` | [`max_lines(n: u32)`](#richtexteditor-max_lines) |
@@ -237,6 +238,7 @@ Rich text editor and viewer widget.
 | `Option<f32>` | [`get_typewriter()`](#editorhandle-get_typewriter) |
 |  | [`set_command_filter(filter: policy::CommandFilter)`](#editorhandle-set_command_filter) |
 | `policy::CommandFilter` | [`command_filter()`](#editorhandle-command_filter) |
+|  | [`set_tab_key(tab_key: TabKey)`](#editorhandle-set_tab_key) |
 |  | [`set_caret_highlight(highlight: Option<caret_highlight::CaretHighlight>)`](#editorhandle-set_caret_highlight) |
 | `Option<caret_highlight::CaretHighlight>` | [`get_caret_highlight()`](#editorhandle-get_caret_highlight) |
 | `Option<teksilo_canvas::Rect>` | [`caret_window_rect()`](#editorhandle-caret_window_rect) |
@@ -764,6 +766,26 @@ reach the pin.
 Takes a plain value, like `typography_defaults`;
 to follow a setting live, push changes onto the handle with
 `EditorHandle::set_typewriter`.
+
+<a id="richtexteditor-tab_key"></a>
+
+#### `pub fn tab_key(self, tab_key: TabKey) -> Self`
+
+What the Tab key does (default `TabKey::Edit`).
+
+With `Edit`, Tab and Shift+Tab move between table cells, indent or
+dedent a list item, nest or unnest a quote, and otherwise insert a tab;
+Ctrl+Tab and Ctrl+Shift+Tab move focus out of the editor, and the
+editor's accessibility description says so. An app that sets its own
+description with `access_description` replaces that text, and should
+say how to leave the editor in it.
+
+`TabKey::MoveFocus` is for a single-purpose field (a title, a
+synopsis, a comment reply): Tab and Shift+Tab move focus everywhere in
+the editor, tables included, and no key indents a list item; a host
+that offers indenting calls `EditorHandle::indent` from a toolbar.
+
+Change it on a mounted editor with `EditorHandle::set_tab_key`.
 
 <a id="richtexteditor-overscroll_behavior"></a>
 
@@ -2644,6 +2666,14 @@ construction, is listed there.
 #### `pub fn command_filter(&self) -> policy::CommandFilter`
 
 The filter currently in force on this editor.
+
+<a id="editorhandle-set_tab_key"></a>
+
+#### `pub fn set_tab_key(&self, tab_key: TabKey)`
+
+Change what the Tab key does on the mounted editor: the handle
+counterpart of `RichTextEditor::tab_key`. Takes effect on the next
+key, and the accessibility description follows on the next frame.
 
 <a id="editorhandle-set_caret_highlight"></a>
 

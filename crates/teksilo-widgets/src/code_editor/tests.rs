@@ -3287,3 +3287,123 @@ fn two_code_editors_agree_once_a_composition_is_committed_or_cancelled() {
         assert!(!states[0].borrow().document.has_transient_edits());
     }
 }
+
+// --- `TabKey::MoveFocus` ----------------------------------------------------
+
+/// `TabKey::MoveFocus`: Tab and Shift+Tab move focus out of the code editor,
+/// the text untouched, and its description says nothing about leaving.
+#[test]
+fn move_focus_lets_tab_and_shift_tab_leave_the_code_editor() {
+    use crate::common::editor_runtime::TabKey;
+    let (mut tree, st, mut reader) =
+        tabbed_into(CodeEditor::new(doc("    x")).tab_key(TabKey::MoveFocus));
+    set_caret(&st, 5);
+    reader.heard(&mut tree);
+    assert_eq!(reader.description_of(Role::MultilineTextInput), None);
+
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    let heard = reader.heard(&mut tree);
+    assert!(heard.contains(&Heard::Focus("After".into())), "{heard:?}");
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    let heard = reader.heard(&mut tree);
+    assert!(heard.contains(&Heard::Focus("Before".into())), "{heard:?}");
+    assert_eq!(text_of(&st), "    x", "neither key may indent or dedent");
+}
+
+/// The same through a `PlainTextEditor`, the natural home of the mode.
+#[test]
+fn move_focus_lets_tab_leave_a_plain_text_editor() {
+    use crate::button::Button;
+    use crate::common::editor_runtime::TabKey;
+    use crate::primitives::VStack;
+    use teksilo_i18n::lit;
+
+    let document = doc("a comment");
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.add(
+        VStack::new()
+            .child(Button::new(lit!("Before")))
+            .child(PlainTextEditor::new(document.clone()).tab_key(TabKey::MoveFocus))
+            .child(Button::new(lit!("After"))),
+    );
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let mut reader = Listener::attach(&mut tree);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    reader.heard(&mut tree);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    let heard = reader.heard(&mut tree);
+    assert!(heard.contains(&Heard::Focus("After".into())), "{heard:?}");
+    assert_eq!(document.to_plain_text().unwrap_or_default(), "a comment");
+}
+
+/// The mode changes on a mounted editor through its handle: the description
+/// goes on the next frame with no key in between, and Tab then leaves.
+#[test]
+fn set_tab_key_on_a_mounted_code_editor_drops_the_hint() {
+    use crate::common::editor_runtime::TabKey;
+    let editor = CodeEditor::new(doc("fn main() {}"));
+    let handle = editor.handle();
+    let (mut tree, st, mut reader) = tabbed_into(editor);
+    reader.heard(&mut tree);
+    assert!(reader.description_of(Role::MultilineTextInput).is_some());
+    handle.set_tab_key(TabKey::MoveFocus);
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    reader.heard(&mut tree);
+    assert_eq!(reader.description_of(Role::MultilineTextInput), None);
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    assert!(!st.borrow().has_focus, "Tab must have left the editor");
+}
+
+/// A code editor in `MoveFocus` with its completion popup open on "pre",
+/// between the Before and After buttons.
+fn move_focus_with_open_completion() -> (WidgetTree, SharedState, Listener) {
+    use crate::common::editor_runtime::TabKey;
+    let (mut tree, st, reader) = tabbed_into(
+        CodeEditor::new(doc("pr"))
+            .completion_provider(provider_of(&["prefix"]))
+            .tab_key(TabKey::MoveFocus),
+    );
+    ime_frame(&mut tree);
+    set_caret(&st, 2);
+    type_keys(&mut tree, "e");
+    let labels = st.borrow().completion.test_labels();
+    assert!(
+        st.borrow().completion.is_open(),
+        "setup: the popup is open, text {:?}, candidates {labels:?}",
+        text_of(&st)
+    );
+    (tree, st, reader)
+}
+
+/// With the completion popup open, Tab still accepts the suggestion in
+/// `MoveFocus` and focus stays; Ctrl+Tab leaves as it always does.
+#[test]
+fn move_focus_keeps_tab_accepting_an_open_completion() {
+    let (mut tree, st, _reader) = move_focus_with_open_completion();
+    tree.press_key(Key::Tab, Modifiers::NONE);
+    assert_eq!(text_of(&st), "prefix", "Tab accepts the suggestion");
+    assert!(st.borrow().has_focus, "and focus stays");
+
+    let (mut tree, st, mut reader) = move_focus_with_open_completion();
+    reader.heard(&mut tree);
+    tree.press_key(Key::Tab, Modifiers::CTRL);
+    let heard = reader.heard(&mut tree);
+    assert!(heard.contains(&Heard::Focus("After".into())), "{heard:?}");
+    assert_eq!(text_of(&st), "pre");
+}
+
+/// Shift+Tab is not the popup's key: in `MoveFocus` it leaves with the popup
+/// open, and the blur closes the popup.
+#[test]
+fn move_focus_shift_tab_leaves_and_closes_an_open_completion() {
+    let (mut tree, st, _reader) = move_focus_with_open_completion();
+    tree.press_key(Key::Tab, Modifiers::SHIFT);
+    assert!(!st.borrow().has_focus, "Shift+Tab leaves");
+    assert!(
+        !st.borrow().completion.is_open(),
+        "and the blur closes the popup"
+    );
+    assert_eq!(text_of(&st), "pre");
+}

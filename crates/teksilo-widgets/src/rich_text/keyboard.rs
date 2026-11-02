@@ -287,6 +287,8 @@ pub(super) fn handle_key(
             super::frame_loop::flush_pending_chars(&mut st);
         }
         let filter = st.policy.command_filter;
+        // One predicate for Tab, shared with the accessibility description.
+        let tab_consumed = st.tab_consumed();
         match key {
             Key::ArrowLeft if filter.accepts(EditCommandKind::MoveLeft) => {
                 // Shift+Arrow at a cell boundary activates / extends a
@@ -528,9 +530,7 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::Tab
-                if !tab_escape && shift && filter.accepts(EditCommandKind::NavigateTableCell) =>
-            {
+            Key::Tab if !tab_escape && shift && tab_consumed => {
                 // Shift+Tab (no Ctrl): previous table cell when
                 // inside a table; dedent the current list item when
                 // the caret sits anywhere inside it (matches standard
@@ -562,9 +562,7 @@ pub(super) fn handle_key(
                 }
                 KeyAction::ClearPreferredX
             }
-            Key::Tab
-                if !tab_escape && !shift && filter.accepts(EditCommandKind::NavigateTableCell) =>
-            {
+            Key::Tab if !tab_escape && !shift && tab_consumed => {
                 // Tab (no Ctrl, no Shift):
                 //  * Inside a table cell → next cell (wraps to next row;
                 //    at last cell, insert a new row below).
@@ -2568,6 +2566,16 @@ fn start_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
         column.max(target_col),
     );
     true
+}
+
+/// What a reader is told about an editor that keeps Tab: what Tab does here,
+/// and the two chords that leave it, named as this platform and locale name
+/// keys. The accessibility walk puts it in the editor node's description,
+/// which AT-SPI, UIA and macOS all read on focus.
+pub(super) fn tab_escape_hint() -> String {
+    let (next, previous) = crate::common::editor_runtime::tab_escape_chords();
+    teksilo_i18n::tr_widget!(rich_text_tab_escape_hint(next = next, previous = previous))
+        .resolve_now()
 }
 
 #[cfg(test)]

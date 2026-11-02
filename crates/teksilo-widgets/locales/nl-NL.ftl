@@ -414,6 +414,7 @@ grid-view-detail-name = Details van item { $position }
 # Code-editor. Zie en-US.ftl voor de volledige context en
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab springt in. { $next } gaat naar het volgende besturingselement, { $previous } naar het vorige.
+rich-text-tab-escape-hint = Tab springt in, voegt een tab in of gaat naar de volgende tabelcel. { $next } gaat naar het volgende besturingselement, { $previous } naar het vorige.
 
 list-view-row-actions-hint = Druk op { $enter } om de rij te bewerken. { $exit } keert terug naar de lijst.
 

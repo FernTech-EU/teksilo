@@ -109,7 +109,12 @@ is driven by injected configuration and is a single atomic undo step:
   move focus out of the editor, forward and back, and write nothing (Control on
   macOS too, where ⌘⇥ is the application switcher). The editor's text node
   names both chords in its description, which AT-SPI, UIA and macOS all
-  read. A read-only viewer does not take Tab, so Tab leaves it.
+  read. A read-only viewer does not take Tab, so Tab leaves it. A field that
+  has no use for indenting (a comment box, a commit message) is built with
+  `.tab_key(TabKey::MoveFocus)`, on `CodeEditor` or `PlainTextEditor`: Tab and
+  Shift+Tab then move focus, and the description says nothing about leaving.
+  Tab still accepts the completion popup while it is open. Switch it on a
+  mounted editor with `CodeEditorHandle::set_tab_key`.
 - **Ctrl+/** toggles the configured line comment on the caret's line or selection.
 - **Ctrl+D** duplicates the selection, or the caret's whole line when there is
   none; **Alt+↑ / Alt+↓** move the line.

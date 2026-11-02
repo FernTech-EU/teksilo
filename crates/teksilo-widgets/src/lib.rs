@@ -33,7 +33,7 @@ pub mod checkbox;
 pub mod code_editor;
 pub use code_editor::{
     BracketPair, COMMON_BRACKETS, CodeConfig, CodeEditor, CodeEditorHandle, CompletionContext,
-    CompletionItem, CompletionKind, IndentStyle, LogView, LogViewHandle, PlainTextEditor,
+    CompletionItem, CompletionKind, IndentStyle, LogView, LogViewHandle, PlainTextEditor, TabKey,
 };
 pub mod color_edit;
 pub mod color_picker;

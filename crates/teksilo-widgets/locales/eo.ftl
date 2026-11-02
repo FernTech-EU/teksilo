@@ -372,6 +372,7 @@ grid-view-selection-count =
 grid-view-detail-name = Detaloj de ero { $position }
 
 code-editor-tab-escape-hint = Tab enŝovas. { $next } movas al la sekva regilo, { $previous } al la antaŭa.
+rich-text-tab-escape-hint = Tab enŝovas, enmetas tabon aŭ movas al la sekva tabelĉelo. { $next } movas al la sekva regilo, { $previous } al la antaŭa.
 
 list-view-row-actions-hint = Premu { $enter } por redakti la vicon. { $exit } revenas al la listo.
 

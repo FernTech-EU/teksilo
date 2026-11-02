@@ -412,6 +412,7 @@ grid-view-detail-name = Szczegóły elementu { $position }
 # Edytor kodu. Pełny kontekst: en-US.ftl oraz
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab wstawia wcięcie. { $next } przechodzi do następnej kontrolki, { $previous } do poprzedniej.
+rich-text-tab-escape-hint = Tab wstawia wcięcie lub znak tabulacji albo przechodzi do następnej komórki tabeli. { $next } przechodzi do następnej kontrolki, { $previous } do poprzedniej.
 
 list-view-row-actions-hint = Naciśnij { $enter }, aby edytować wiersz. { $exit } wraca do listy.
 

@@ -408,6 +408,7 @@ grid-view-detail-name = { $position }. elem részletei
 # Kódszerkesztő. A teljes háttérért lásd az en-US.ftl fájlt és a
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = A Tab behúz. A { $next } a következő vezérlőre lép, a { $previous } az előzőre.
+rich-text-tab-escape-hint = A Tab behúz, tabulátort szúr be, vagy a táblázat következő cellájára lép. A { $next } a következő vezérlőre lép, a { $previous } az előzőre.
 
 list-view-row-actions-hint = A sor szerkesztéséhez nyomja meg a { $enter } billentyűt. A { $exit } visszavisz a listához.
 

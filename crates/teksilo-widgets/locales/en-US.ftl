@@ -474,6 +474,13 @@ code-editor-tab-escape-hint = Tab indents. { $next } moves to the next control, 
 # crates/teksilo-widgets/src/list_item_a11y.rs.
 list-view-row-actions-hint = Press { $enter } to edit the row. { $exit } returns to the list.
 
+# The description of a RichTextEditor that takes Tab, telling a reader what
+# Tab does there and how to leave it (WCAG 2.1.2). $next and $previous are
+# key chords written for the platform and the locale, as in
+# code-editor-tab-escape-hint. See
+# crates/teksilo-widgets/src/rich_text/keyboard.rs.
+rich-text-tab-escape-hint = Tab indents, inserts a tab or moves to the next table cell. { $next } moves to the next control, { $previous } to the previous one.
+
 # ShortcutSettings: the header of the group holding every shortcut that
 # declared no category. See crates/teksilo-widgets/src/shortcut_settings.rs.
 shortcut-settings-uncategorized = General

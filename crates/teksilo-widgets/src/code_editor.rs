@@ -66,6 +66,7 @@ mod tests;
 #[cfg(test)]
 mod touch_tests;
 
+pub use crate::common::editor_runtime::TabKey;
 pub use completion::{CompletionContext, CompletionItem, CompletionKind};
 pub use config::{BracketPair, COMMON_BRACKETS, CodeConfig, IndentStyle};
 pub use log_view::{LogView, LogViewHandle};
@@ -166,6 +167,10 @@ impl Widget for CodeEditorBody {
         // A caret added or removed changes what is drawn but not the layout.
         st.caret_count
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        // The description says how to leave the editor, which depends on the
+        // Tab key mode; a change of it changes no document.
+        st.a11y_policy_version
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
 
         Vec::new()
     }
@@ -625,6 +630,17 @@ impl CodeEditorHandle {
     /// Is this editor refusing edits?
     pub fn is_read_only(&self) -> bool {
         self.state.borrow().policy.is_read_only()
+    }
+
+    /// Change what the Tab key does on the mounted editor: the handle
+    /// counterpart of [`CodeEditor::tab_key`] and [`PlainTextEditor::tab_key`].
+    /// Takes effect on the next key, and the accessibility description follows
+    /// on the next frame.
+    pub fn set_tab_key(&self, tab_key: TabKey) {
+        let mut st = self.state.borrow_mut();
+        st.tab_key = tab_key;
+        let v = st.a11y_policy_version.get();
+        st.a11y_policy_version.set(v.wrapping_add(1));
     }
 
     pub fn can_redo(&self) -> teksilo_core::Signal<bool> {

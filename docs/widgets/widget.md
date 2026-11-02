@@ -25,6 +25,7 @@ The public editing surfaces: `CodeEditor` and `PlainTextEditor`.
 | `Self` | [`label(label: impl Into<teksilo_i18n::LocalizedString>)`](#codeeditor-label) |
 | `Self` | [`context_menu(factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static)`](#codeeditor-context_menu) |
 | `Self` | [`default_context_menu(enabled: bool)`](#codeeditor-default_context_menu) |
+| `Self` | [`tab_key(tab_key: TabKey)`](#codeeditor-tab_key) |
 | `Self` | [`wrap_mode(mode: WrapMode)`](#codeeditor-wrap_mode) |
 | `Self` | [`v_scroll_policy(policy: ScrollPolicy)`](#codeeditor-v_scroll_policy) |
 | `Self` | [`h_scroll_policy(policy: ScrollPolicy)`](#codeeditor-h_scroll_policy) |
@@ -67,6 +68,7 @@ The public editing surfaces: `CodeEditor` and `PlainTextEditor`.
 | `Self` | [`min_lines(lines: u32)`](#plaintexteditor-min_lines) |
 | `Self` | [`max_lines(lines: u32)`](#plaintexteditor-max_lines) |
 | `Self` | [`wrap_mode(mode: WrapMode)`](#plaintexteditor-wrap_mode) |
+| `Self` | [`tab_key(tab_key: TabKey)`](#plaintexteditor-tab_key) |
 | `Self` | [`font_family(family: impl Into<String>)`](#plaintexteditor-font_family) |
 | `Self` | [`follow_text_scale(follow: bool)`](#plaintexteditor-follow_text_scale) |
 | `Self` | [`show_transient_edits(show: bool)`](#plaintexteditor-show_transient_edits) |
@@ -190,6 +192,19 @@ The **touch** selection toolbar is *not* affected. It is raised by the
 controller rather than by a right-click, its rows are the same four
 commands, and a surface with no menu still has to be usable by a finger —
 which has no second button and no chord.
+
+<a id="codeeditor-tab_key"></a>
+
+#### `pub fn tab_key(self, tab_key: TabKey) -> Self`
+
+What the Tab key does (default `TabKey::Edit`).
+
+With `Edit`, Tab indents and Shift+Tab dedents; Ctrl+Tab and
+Ctrl+Shift+Tab move focus out of the editor, and its accessibility
+description says so. With `TabKey::MoveFocus`, Tab and Shift+Tab
+move focus and no key indents, except that Tab still accepts the
+completion popup while it is open. Change it on a mounted editor with
+`CodeEditorHandle::set_tab_key`.
 
 <a id="codeeditor-wrap_mode"></a>
 
@@ -456,6 +471,14 @@ Cap intrinsic growth at `lines`.
 #### `pub fn wrap_mode(mut self, mode: WrapMode) -> Self`
 
 Set the line-wrap mode (default `Word`).
+
+<a id="plaintexteditor-tab_key"></a>
+
+#### `pub fn tab_key(mut self, tab_key: TabKey) -> Self`
+
+What the Tab key does (default `TabKey::Edit`).
+`TabKey::MoveFocus` suits a comment box or a synopsis: Tab and
+Shift+Tab move focus. See `CodeEditor::tab_key`.
 
 <a id="plaintexteditor-font_family"></a>
 

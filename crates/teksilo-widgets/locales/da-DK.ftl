@@ -404,6 +404,7 @@ grid-view-detail-name = Detaljer for element { $position }
 # Kodeeditor. Se en-US.ftl for den fulde kontekst og
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab indrykker. { $next } flytter til næste kontrolelement, { $previous } til det forrige.
+rich-text-tab-escape-hint = Tab indrykker, indsætter et tabulatortegn eller flytter til næste tabelcelle. { $next } flytter til næste kontrolelement, { $previous } til det forrige.
 
 list-view-row-actions-hint = Tryk på { $enter } for at redigere rækken. { $exit } vender tilbage til listen.
 

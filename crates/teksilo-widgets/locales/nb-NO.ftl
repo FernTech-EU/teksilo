@@ -420,6 +420,7 @@ grid-view-detail-name = Detaljer for element { $position }
 # Koderedigering. Se en-US.ftl for full kontekst og
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab rykker inn. { $next } går til neste kontroll, { $previous } til forrige.
+rich-text-tab-escape-hint = Tab rykker inn, setter inn et tabulatortegn eller går til neste tabellcelle. { $next } går til neste kontroll, { $previous } til forrige.
 
 list-view-row-actions-hint = Trykk { $enter } for å redigere raden. { $exit } går tilbake til listen.
 

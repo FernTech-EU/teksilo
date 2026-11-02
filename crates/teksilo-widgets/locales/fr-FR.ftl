@@ -404,6 +404,7 @@ grid-view-detail-name = Détails de l'élément { $position }
 # Éditeur de code. Voir en-US.ftl pour le contexte complet et
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab indente. { $next } passe au contrôle suivant, { $previous } au précédent.
+rich-text-tab-escape-hint = Tab indente, insère une tabulation ou passe à la cellule suivante d'un tableau. { $next } passe au contrôle suivant, { $previous } au précédent.
 
 list-view-row-actions-hint = Appuyez sur { $enter } pour modifier la ligne. { $exit } revient à la liste.
 

@@ -218,6 +218,18 @@ impl Widget for RichTextEditorBody {
             );
         }
 
+        // The description says how to leave the editor, which depends on the
+        // command filter and the Tab key mode. Neither changes the document,
+        // so a change of either is told to the walk through its own signal.
+        {
+            let version = self.state.borrow().a11y_policy_version.clone();
+            version.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::binding::BindingLevel::AccessibilityOnly,
+            );
+        }
+
         // An editor sized to its content measures itself from the laid-out
         // height, so it is re-measured whenever that height moves. Only then: a
         // greedy editor takes its proposal whatever the text does, and binding it
@@ -812,6 +824,12 @@ impl Widget for RichTextEditorBody {
         builder.set_role(role);
         if st.policy.is_read_only() {
             builder.set_read_only();
+        }
+        // An editor that takes Tab says how to leave it (WCAG 2.1.2). One that
+        // does not (a viewer, or `TabKey::MoveFocus`) is left with Tab, and
+        // says nothing. An app's `access_description` replaces this.
+        if st.tab_consumed() {
+            builder.set_description(super::keyboard::tab_escape_hint());
         }
 
         // Walk the cached flow snapshot (or rebuild it if the last edit

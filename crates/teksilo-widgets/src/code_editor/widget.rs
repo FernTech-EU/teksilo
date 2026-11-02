@@ -51,7 +51,7 @@ use super::config::{BracketPair, CodeConfig, IndentStyle};
 use super::gutter::CodeGutter;
 use super::policy::{CODE_EDITOR_PRESET, CODE_READ_ONLY_PRESET};
 use super::state::SharedState;
-use super::{CodeEditorHandle, adopt_shared_typesetter, body_for, construct};
+use super::{CodeEditorHandle, TabKey, adopt_shared_typesetter, body_for, construct};
 use crate::common::editor_runtime::CaretPolicy;
 use crate::common::scroll::OverscrollBehavior;
 use crate::rich_text::ScrollPolicy;
@@ -215,6 +215,19 @@ impl CodeEditor {
     /// which has no second button and no chord.
     pub fn default_context_menu(mut self, enabled: bool) -> Self {
         self.default_context_menu_enabled = enabled;
+        self
+    }
+
+    /// What the Tab key does (default [`TabKey::Edit`]).
+    ///
+    /// With `Edit`, Tab indents and Shift+Tab dedents; Ctrl+Tab and
+    /// Ctrl+Shift+Tab move focus out of the editor, and its accessibility
+    /// description says so. With [`TabKey::MoveFocus`], Tab and Shift+Tab
+    /// move focus and no key indents, except that Tab still accepts the
+    /// completion popup while it is open. Change it on a mounted editor with
+    /// [`CodeEditorHandle::set_tab_key`].
+    pub fn tab_key(self, tab_key: TabKey) -> Self {
+        self.state.borrow_mut().tab_key = tab_key;
         self
     }
 
@@ -1200,6 +1213,14 @@ impl PlainTextEditor {
     /// Set the line-wrap mode (default `Word`).
     pub fn wrap_mode(mut self, mode: WrapMode) -> Self {
         self.map(|e| e.wrap_mode(mode));
+        self
+    }
+
+    /// What the Tab key does (default [`TabKey::Edit`]).
+    /// [`TabKey::MoveFocus`] suits a comment box or a synopsis: Tab and
+    /// Shift+Tab move focus. See [`CodeEditor::tab_key`].
+    pub fn tab_key(mut self, tab_key: TabKey) -> Self {
+        self.map(|e| e.tab_key(tab_key));
         self
     }
 

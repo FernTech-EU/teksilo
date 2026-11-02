@@ -405,6 +405,7 @@ grid-view-detail-name = 항목 { $position } 세부 정보
 # 코드 편집기. 전체 맥락은 en-US.ftl 및 다음 파일을 참조하세요.
 # crates/teksilo-widgets/src/code_editor/keyboard.rs
 code-editor-tab-escape-hint = Tab 키는 들여쓰기합니다. { $next } 키는 다음 컨트롤로, { $previous } 키는 이전 컨트롤로 이동합니다.
+rich-text-tab-escape-hint = Tab 키는 들여쓰기하거나 탭 문자를 넣거나 표의 다음 셀로 이동합니다. { $next } 키는 다음 컨트롤로, { $previous } 키는 이전 컨트롤로 이동합니다.
 
 list-view-row-actions-hint = { $enter } 키를 눌러 행을 편집합니다. { $exit } 키를 누르면 목록으로 돌아갑니다.
 

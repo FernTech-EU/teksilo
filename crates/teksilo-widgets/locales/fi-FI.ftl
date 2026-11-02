@@ -410,6 +410,7 @@ grid-view-detail-name = Kohteen { $position } tiedot
 # Koodieditori. Katso koko konteksti en-US.ftl-tiedostosta ja
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Sarkain sisentää. { $next } siirtyy seuraavaan ohjausobjektiin, { $previous } edelliseen.
+rich-text-tab-escape-hint = Sarkain sisentää, lisää sarkainmerkin tai siirtyy taulukon seuraavaan soluun. { $next } siirtyy seuraavaan ohjausobjektiin, { $previous } edelliseen.
 
 list-view-row-actions-hint = Muokkaa riviä painamalla { $enter }. { $exit } palaa luetteloon.
 

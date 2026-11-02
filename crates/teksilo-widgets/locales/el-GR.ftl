@@ -411,6 +411,7 @@ grid-view-detail-name = Λεπτομέρειες στοιχείου { $position 
 # Επεξεργαστής κώδικα. Δείτε το en-US.ftl για το πλήρες πλαίσιο και
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Το Tab προσθέτει εσοχή. Το { $next } μεταβαίνει στο επόμενο στοιχείο ελέγχου, το { $previous } στο προηγούμενο.
+rich-text-tab-escape-hint = Το Tab προσθέτει εσοχή, εισάγει χαρακτήρα στηλοθέτη ή μεταβαίνει στο επόμενο κελί του πίνακα. Το { $next } μεταβαίνει στο επόμενο στοιχείο ελέγχου, το { $previous } στο προηγούμενο.
 
 list-view-row-actions-hint = Πατήστε { $enter } για επεξεργασία της γραμμής. Το { $exit } επιστρέφει στη λίστα.
 

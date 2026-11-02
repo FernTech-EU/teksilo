@@ -423,6 +423,7 @@ grid-view-detail-name = Detalles del elemento { $position }
 # Editor de código. Consulte en-US.ftl para el contexto completo y
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab aplica sangría. { $next } pasa al control siguiente y { $previous }, al anterior.
+rich-text-tab-escape-hint = Tab aplica sangría, inserta una tabulación o pasa a la siguiente celda de la tabla. { $next } pasa al control siguiente y { $previous }, al anterior.
 
 list-view-row-actions-hint = Pulse { $enter } para editar la fila. { $exit } vuelve a la lista.
 

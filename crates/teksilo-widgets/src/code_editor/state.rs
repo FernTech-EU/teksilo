@@ -66,6 +66,16 @@ pub(crate) struct CodeEditorState {
     pub policy: PolicyBundle,
     pub config: CodeConfig,
 
+    /// What the Tab key does: a mode of the host rather than a dimension of
+    /// the construction preset. Set from
+    /// [`CodeEditor::tab_key`](crate::code_editor::CodeEditor::tab_key).
+    pub tab_key: crate::common::editor_runtime::TabKey,
+
+    /// Bumped by every change of `tab_key` on a mounted editor. The body binds
+    /// it at `AccessibilityOnly`, because the description that says how to
+    /// leave the editor depends on it and the document does not change.
+    pub a11y_policy_version: Signal<u64>,
+
     /// Completion provider, session, and the reactive surface the popup binds.
     pub completion: super::completion::CompletionState,
 
@@ -289,6 +299,19 @@ pub struct SyntheticElementRef {
 }
 
 impl CodeEditorState {
+    /// Whether Tab (`shift == false`) or Shift+Tab indents or dedents here
+    /// rather than moving focus. The keys and the accessibility description
+    /// both ask it, so the hint and the key cannot drift.
+    pub(crate) fn tab_consumed(&self, shift: bool) -> bool {
+        use super::policy::CodeCommand;
+        self.tab_key == crate::common::editor_runtime::TabKey::Edit
+            && self.policy.command_filter.accepts(if shift {
+                CodeCommand::DedentLines
+            } else {
+                CodeCommand::IndentLines
+            })
+    }
+
     pub fn new(
         document: TextDocument,
         engine: RichTextEngine,
@@ -332,6 +355,8 @@ impl CodeEditorState {
             extra_carets: Vec::new(),
             policy,
             config,
+            tab_key: crate::common::editor_runtime::TabKey::Edit,
+            a11y_policy_version: Signal::new(0),
             completion: super::completion::CompletionState::new(),
             log: None,
             document_version: Signal::new(0),

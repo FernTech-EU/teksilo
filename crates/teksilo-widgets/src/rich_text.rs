@@ -133,7 +133,7 @@ pub use find_session::FindSession;
 pub use hit_test::ContextTarget;
 pub use policy::{
     AccessibilityRole, CaretPolicy, CommandFilter, EDITOR_PRESET, EditCommandKind, PolicyBundle,
-    READ_ONLY_PRESET,
+    READ_ONLY_PRESET, TabKey,
 };
 
 use std::cell::Cell;
@@ -698,6 +698,26 @@ impl RichTextEditor {
     /// [`EditorHandle::set_typewriter`].
     pub fn typewriter(self, anchor: Option<f32>) -> Self {
         self.state.borrow_mut().typewriter = anchor.map(|f| f.clamp(0.0, 1.0));
+        self
+    }
+
+    /// What the Tab key does (default [`TabKey::Edit`]).
+    ///
+    /// With `Edit`, Tab and Shift+Tab move between table cells, indent or
+    /// dedent a list item, nest or unnest a quote, and otherwise insert a tab;
+    /// Ctrl+Tab and Ctrl+Shift+Tab move focus out of the editor, and the
+    /// editor's accessibility description says so. An app that sets its own
+    /// description with `access_description` replaces that text, and should
+    /// say how to leave the editor in it.
+    ///
+    /// [`TabKey::MoveFocus`] is for a single-purpose field (a title, a
+    /// synopsis, a comment reply): Tab and Shift+Tab move focus everywhere in
+    /// the editor, tables included, and no key indents a list item; a host
+    /// that offers indenting calls [`EditorHandle::indent`] from a toolbar.
+    ///
+    /// Change it on a mounted editor with [`EditorHandle::set_tab_key`].
+    pub fn tab_key(self, tab_key: TabKey) -> Self {
+        self.state.borrow_mut().tab_key = tab_key;
         self
     }
 
@@ -2149,7 +2169,9 @@ impl RichTextEditor {
     /// no input method; build it with [`editor`](Self::editor) for a surface
     /// that is meant to be written in.
     pub fn set_command_filter(&self, filter: policy::CommandFilter) {
-        self.state.borrow_mut().policy.command_filter = filter;
+        let mut st = self.state.borrow_mut();
+        st.policy.command_filter = filter;
+        st.bump_a11y_policy();
     }
 
     /// The filter currently in force (see
@@ -3150,12 +3172,23 @@ impl EditorHandle {
     /// is mounted. Which gates follow the filter, and which are fixed at
     /// construction, is listed there.
     pub fn set_command_filter(&self, filter: policy::CommandFilter) {
-        self.state.borrow_mut().policy.command_filter = filter;
+        let mut st = self.state.borrow_mut();
+        st.policy.command_filter = filter;
+        st.bump_a11y_policy();
     }
 
     /// The filter currently in force on this editor.
     pub fn command_filter(&self) -> policy::CommandFilter {
         self.state.borrow().policy.command_filter
+    }
+
+    /// Change what the Tab key does on the mounted editor: the handle
+    /// counterpart of [`RichTextEditor::tab_key`]. Takes effect on the next
+    /// key, and the accessibility description follows on the next frame.
+    pub fn set_tab_key(&self, tab_key: TabKey) {
+        let mut st = self.state.borrow_mut();
+        st.tab_key = tab_key;
+        st.bump_a11y_policy();
     }
 
     /// Draw an ambient band behind the caret's sentence or paragraph — the [`EditorHandle`]

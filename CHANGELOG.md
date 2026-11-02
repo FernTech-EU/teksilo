@@ -123,6 +123,12 @@ by crate for clarity, not because crates version independently.
   `RichTextEngine::set_shows_transient_edits`.
 - The `rich_text_editor` example has an Edit menu, a Title field, a line per
   source counting arrivals and a Writing Tools checkbox.
+- **`TabKey`** and **`.tab_key(TabKey)`** on `RichTextEditor`, `CodeEditor`
+  and `PlainTextEditor`, with `EditorHandle::set_tab_key` and
+  `CodeEditorHandle::set_tab_key` for a mounted editor. `TabKey::Edit` (the
+  default) keeps Tab for indenting, table cells and tabs; `TabKey::MoveFocus`
+  makes Tab and Shift+Tab move focus, for a title, a synopsis or a comment
+  box.
 
 #### Automation
 
@@ -403,6 +409,10 @@ by crate for clarity, not because crates version independently.
   `DockingLayout` accordion pane.
 - **A `Splitter` sized to its content no longer counts hidden panes, nor a
   collapsed pane's content.**
+- **An editable `RichTextEditor` tells screen readers how to leave it.** Its
+  description says what Tab does there and that Ctrl+Tab and Ctrl+Shift+Tab
+  move to the next and the previous control, as the `CodeEditor`'s already
+  did.
 - **A `RichTextEditor`'s command filter decides its clipboard everywhere.**
   An editor whose filter a host widened with `set_command_filter` (a
   `read_only()` viewer set to `CommandFilter::All`) offers Cut and Paste in

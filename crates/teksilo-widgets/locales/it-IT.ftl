@@ -427,6 +427,7 @@ grid-view-detail-name = Dettagli dell'elemento { $position }
 # Editor di codice. Vedere en-US.ftl per il contesto completo e
 # crates/teksilo-widgets/src/code_editor/keyboard.rs.
 code-editor-tab-escape-hint = Tab aumenta il rientro. { $next } passa al controllo successivo, { $previous } a quello precedente.
+rich-text-tab-escape-hint = Tab aumenta il rientro, inserisce una tabulazione o passa alla cella successiva della tabella. { $next } passa al controllo successivo, { $previous } a quello precedente.
 
 list-view-row-actions-hint = Premi { $enter } per modificare la riga. { $exit } torna all'elenco.
 

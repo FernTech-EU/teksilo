@@ -40,6 +40,7 @@ Multi-line plain-text and code editing surfaces.
 |  | [`paste(ctx: &teksilo_core::widget::EventContext<'_>)`](#codeeditorhandle-paste) |
 |  | [`select_all()`](#codeeditorhandle-select_all) |
 | `bool` | [`is_read_only()`](#codeeditorhandle-is_read_only) |
+|  | [`set_tab_key(tab_key: TabKey)`](#codeeditorhandle-set_tab_key) |
 | `teksilo_core::Signal<bool>` | [`can_redo()`](#codeeditorhandle-can_redo) |
 | `teksilo_core::Signal<u64>` | [`document_version()`](#codeeditorhandle-document_version) |
 | `teksilo_core::Signal<f32>` | [`scroll_y()`](#codeeditorhandle-scroll_y) |
@@ -225,6 +226,15 @@ Select the whole document.
 #### `pub fn is_read_only(&self) -> bool`
 
 Is this editor refusing edits?
+
+<a id="codeeditorhandle-set_tab_key"></a>
+
+#### `pub fn set_tab_key(&self, tab_key: TabKey)`
+
+Change what the Tab key does on the mounted editor: the handle
+counterpart of `CodeEditor::tab_key` and `PlainTextEditor::tab_key`.
+Takes effect on the next key, and the accessibility description follows
+on the next frame.
 
 <a id="codeeditorhandle-can_redo"></a>
 
