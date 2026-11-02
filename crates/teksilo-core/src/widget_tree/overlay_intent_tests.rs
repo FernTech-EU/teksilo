@@ -346,6 +346,21 @@ fn a_rows_intent_from_focus_starts_where_closing_its_menu_put_focus() {
     );
 }
 
+/// `dismiss_all_overlays` gives focus back to where the menu took it from,
+/// so the row's intent sent from focus starts at the editor, as with a row
+/// that closes its own menu chain.
+#[test]
+fn a_rows_intent_from_focus_after_dismiss_all_starts_where_focus_went_back() {
+    let mut window = Window::new();
+    menu_over_the_editor(
+        &mut window,
+        row_sending_from_focus(|ctx| ctx.dismiss_all_overlays()),
+    );
+    window.tree.press_key(Key::Enter, Modifiers::NONE);
+    assert_eq!(window.tree.focused(), Some(window.editor));
+    assert_eq!(window.calls(), ["editor"]);
+}
+
 #[test]
 fn with_no_focus_left_a_rows_intent_from_focus_crosses_its_closed_menu() {
     let mut window = Window::new();

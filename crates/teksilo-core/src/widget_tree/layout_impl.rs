@@ -586,6 +586,10 @@ impl WidgetTree {
         // before the idle early return below, which its marks defeat.
         self.poll_off_thread();
 
+        // Restore targets set straight on the overlay manager (teksilo-app's
+        // modal presentation) get their fallback record now, while the
+        // ancestors it names still exist.
+        self.sync_focus_returns();
         self.process_state_changes(&mut *ops);
         // A drag owns the pointer. `handle_pointer_move` is short-circuited for
         // the duration, so a dwell armed just before the drag started would sit
@@ -641,6 +645,9 @@ impl WidgetTree {
             // Nothing to lay out, so nothing left to wake: a focus request
             // waiting on a dormant node is decided now, as at the tail below.
             self.settle_pending_focus_request(&mut *ops);
+            // A pass with nothing to lay out still processed state changes,
+            // and one of them may have disabled the focused control.
+            self.move_focus_off_disabled(&mut *ops);
             return;
         }
 
@@ -935,8 +942,11 @@ impl WidgetTree {
         // the meantime, only into a subtree that is still active (a rebuild that
         // also went dormant, e.g. a popover closing, must NOT drag focus back
         // into hidden content — its own dismiss path restores focus to the
-        // trigger), and only if it still has somewhere to put it. Otherwise focus
-        // stays `None`, exactly as before.
+        // trigger). When the subtree is still active but nothing in it can
+        // take focus (the focused node was not focusable itself, a tree row a
+        // screen reader acted on), the nearest focusable above it takes it,
+        // else the scope's first Tab stop (`rebuild_focus_fallback`); with the
+        // subtree gone dormant, focus stays `None`.
         //
         // An explicit request that was waiting for its target to wake goes
         // first. Activation is settled — the `visible_when` sweep and the
@@ -945,23 +955,44 @@ impl WidgetTree {
         // rebuild's guess never overrides what a handler asked for.
         self.settle_pending_focus_request(&mut *ops);
         let restore = std::mem::take(&mut self.pending_focus_restore);
+        // Into the rebuilt subtree at the position focus had: the same widget
+        // restored, so `Restored`. The fallback below lands on another widget,
+        // so `Programmatic`.
+        let mut origin = crate::focus::FocusOrigin::Restored;
         if self.focused.is_none()
-            && let Some(target) = restore.into_iter().find_map(|(root, position)| {
-                if !self.arena.is_active(root) {
-                    return None;
-                }
-                // The node at the position focus had. A rebuild that left
-                // fewer focusables than that takes the last one: the nearest
-                // to where the user was.
-                let focusables = self.focusable_descendants(root);
-                focusables.get(position).or(focusables.last()).copied()
-            })
+            && let Some(target) = restore
+                .iter()
+                .find_map(|&(root, position)| {
+                    if !self.arena.is_active(root) {
+                        return None;
+                    }
+                    // The node at the position focus had. A rebuild that left
+                    // fewer focusables than that takes the last one: the
+                    // nearest to where the user was.
+                    let focusables = self.focusable_descendants(root);
+                    focusables.get(position).or(focusables.last()).copied()
+                })
+                // Nothing focusable left inside: the node that had focus was
+                // not a focusable itself (a tree row a screen reader acted
+                // on), or its whole subtree went. The nearest focusable above
+                // the innermost surviving root then, else the scope's first
+                // Tab stop, rather than nothing.
+                .or_else(|| {
+                    let roots: Vec<WidgetId> = restore.iter().map(|&(root, _)| root).collect();
+                    origin = crate::focus::FocusOrigin::Programmatic;
+                    (!roots.is_empty())
+                        .then(|| self.rebuild_focus_fallback(&roots))
+                        .flatten()
+                })
         {
             // `Restored`, not `Programmatic`: nobody moved focus, the rebuild
             // replaced the widget that had it. A text field takes this as the
             // same edit going on, not as a new arrival.
-            self.focus_with_origin_ops(target, crate::focus::FocusOrigin::Restored, &mut *ops);
+            self.focus_with_origin_ops(target, origin, &mut *ops);
         }
+        // Last, once every rebuild, park and restore of the pass has settled:
+        // a focused control that has become disabled hands focus on.
+        self.move_focus_off_disabled(&mut *ops);
 
         // A widget that changed size may have re-wrapped its text, and a
         // wrapped label carries one accessibility text run per visual line

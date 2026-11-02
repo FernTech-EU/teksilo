@@ -582,6 +582,11 @@ pub(crate) struct ActiveOverlay {
     /// Widget that had focus before this overlay was shown.
     /// Used to restore focus when the overlay is dismissed.
     pub focus_restore: Option<WidgetId>,
+    /// Where focus goes instead when [`focus_restore`](Self::focus_restore)
+    /// can no longer take it. Recorded by the tree together with the restore
+    /// target (`WidgetTree::record_top_focus_restore`), or the first time the
+    /// tree sees a target set straight on the manager. `None` until then.
+    pub focus_return: Option<FocusReturn>,
     /// [`OverlayRequest::command_source`].
     pub command_source: Option<WidgetId>,
     /// When pointer-leave dismissal started (real time).
@@ -780,6 +785,47 @@ pub struct OverlayManager {
     /// `on_dismiss` always had (fires during dismissal, before focus returns
     /// to the trigger) is unchanged.
     pending_dismiss: Vec<(OverlayDismissCallback, DismissReason)>,
+    /// The overlays most recently taken off the stack, oldest first, kept
+    /// so the tree can still find where focus should go after a dismissal
+    /// whose public return value carries only the restore target. Bounded by
+    /// [`REMOVED_OVERLAY_MEMORY`]; read with [`removed_since`](Self::removed_since).
+    removed: std::collections::VecDeque<RemovedOverlay>,
+    /// Sequence number of the next entry pushed onto `removed`.
+    removed_seq: u64,
+}
+
+/// How many removed overlays [`OverlayManager`] remembers for the focus
+/// fallback. A dismissal reads its own entries right after it runs, so this
+/// only has to cover the overlays one dismissal takes down together.
+const REMOVED_OVERLAY_MEMORY: usize = 64;
+
+/// Where focus goes when an overlay is dismissed and its restore target can
+/// no longer take focus: recorded with the target, while everything it names
+/// still exists.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FocusReturn {
+    /// The restore target this record was made for. A record whose target is
+    /// not the overlay's current `focus_restore` is stale.
+    pub target: Option<WidgetId>,
+    /// The target's strict ancestors when it was recorded, innermost first.
+    pub ancestors: Vec<WidgetId>,
+    /// When the target lay inside the content of another open overlay (a
+    /// menu row that opened a dialog), that overlay's own restore target and
+    /// its ancestors, then the same for the overlay holding that target, and
+    /// so on: where focus was before the overlays the target lives in opened.
+    /// Each link names the overlay holding the previous target; the chain is
+    /// followed only through overlays that have gone.
+    pub forward: Vec<(OverlayId, WidgetId, Vec<WidgetId>)>,
+}
+
+/// An overlay as it left the stack. See [`OverlayManager::removed_since`].
+#[derive(Debug, Clone)]
+pub(crate) struct RemovedOverlay {
+    /// Position in the manager's removal sequence.
+    pub seq: u64,
+    pub anchor: WidgetId,
+    pub focus_restore: Option<WidgetId>,
+    pub focus_return: Option<FocusReturn>,
 }
 
 impl OverlayManager {
@@ -791,7 +837,47 @@ impl OverlayManager {
             sim_clock: Instant::now(),
             version: Signal::new(0),
             pending_dismiss: Vec::new(),
+            removed: std::collections::VecDeque::new(),
+            removed_seq: 0,
         }
+    }
+
+    /// Record every entry `leaving` selects, in stack order, as removed.
+    /// Every path that takes entries off the stack calls this first, with the
+    /// predicate it is about to remove by.
+    fn note_removed(&mut self, mut leaving: impl FnMut(&ActiveOverlay) -> bool) {
+        let first_of_this_call = self.removed_seq;
+        for overlay in self.stack.iter().filter(|o| leaving(o)) {
+            self.removed.push_back(RemovedOverlay {
+                seq: self.removed_seq,
+                anchor: overlay.anchor,
+                focus_restore: overlay.focus_restore,
+                focus_return: overlay.focus_return.clone(),
+            });
+            self.removed_seq += 1;
+        }
+        // Forget the oldest, but never an entry of this removal: a dismissal
+        // of many overlays reads its own entries right after.
+        while self.removed.len() > REMOVED_OVERLAY_MEMORY
+            && self
+                .removed
+                .front()
+                .is_some_and(|entry| entry.seq < first_of_this_call)
+        {
+            self.removed.pop_front();
+        }
+    }
+
+    /// The mark to pass to [`removed_since`](Self::removed_since): taken
+    /// before a dismissal, it selects what that dismissal removed.
+    pub(crate) fn removal_mark(&self) -> u64 {
+        self.removed_seq
+    }
+
+    /// The overlays removed since `mark` was taken, in removal order (stack
+    /// order, bottom first, within one dismissal).
+    pub(crate) fn removed_since(&self, mark: u64) -> impl Iterator<Item = &RemovedOverlay> {
+        self.removed.iter().filter(move |r| r.seq >= mark)
     }
 
     /// Reactive handle bumped on every overlay mutation (show /
@@ -870,6 +956,7 @@ impl OverlayManager {
             parent_overlay: request.parent_overlay,
             bounds: Rect::ZERO,
             focus_restore: None,
+            focus_return: None,
             command_source: request.command_source,
             pointer_leave_started_real: None,
             pointer_leave_started_sim: None,
@@ -1177,6 +1264,7 @@ impl OverlayManager {
             .filter(|overlay| to_dismiss.contains(&overlay.id))
             .filter_map(|overlay| overlay.on_dismiss.clone())
             .collect();
+        self.note_removed(|overlay| to_dismiss.contains(&overlay.id));
         self.stack
             .retain(|overlay| !to_dismiss.contains(&overlay.id));
         // Everything here is, by construction, a descendant going away with
@@ -1302,6 +1390,7 @@ impl OverlayManager {
             .filter(|o| to_dismiss.contains(&o.id))
             .filter_map(|o| o.on_dismiss.clone())
             .collect();
+        self.note_removed(|o| to_dismiss.contains(&o.id));
         self.stack.retain(|o| !to_dismiss.contains(&o.id));
         if !to_dismiss.is_empty() {
             self.bump_version();
@@ -1532,6 +1621,7 @@ impl OverlayManager {
             .iter()
             .filter_map(|o| o.on_dismiss.clone())
             .collect();
+        self.note_removed(|_| true);
         self.stack.clear();
         self.bump_version();
         self.pending_dismiss
@@ -1569,6 +1659,7 @@ impl OverlayManager {
             .filter(|o| !keep.contains(&o.content_id))
             .filter_map(|o| o.on_dismiss.clone())
             .collect();
+        self.note_removed(|o| !keep.contains(&o.content_id));
         self.stack.retain(|o| keep.contains(&o.content_id));
         self.bump_version();
         self.pending_dismiss

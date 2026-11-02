@@ -715,15 +715,12 @@ impl WidgetTree {
         self.focus_visible.clone()
     }
 
-    /// Cycle focus to the next/previous focusable widget (Tab/Shift-Tab),
-    /// honoring nested **traversal scopes** (`FocusScope`).
-    ///
-    /// Builds a scope tree on demand (depth-first; `tab_index` scoped per
-    /// scope), then walks it with [`navigate_scope`]. The root is an implicit
-    /// `Cycle` scope (whole-tree last↔first wrap). A centered modal overlay
-    /// folds into the same mechanism: its content subtree becomes the root
-    /// `Cycle` scope, so Tab is confined to the modal.
-    pub(super) fn cycle_focus(&mut self, reverse: bool, ops: &mut dyn crate::window::WindowOps) {
+    /// The scope Tab walks: the topmost modal's content when a modal is up,
+    /// else every root of the window, each sticky tooltip next to its anchor.
+    /// [`cycle_focus`](Self::cycle_focus) and
+    /// [`first_tab_stop_in_scope`](Self::first_tab_stop_in_scope) both read
+    /// it, so the first Tab stop a fallback lands on is the one Tab would.
+    fn focus_scope_root(&self) -> ScopeNode {
         let mut entries = Vec::new();
         if let Some(modal_overlay) = self.overlay_manager.topmost_modal() {
             let content_id = modal_overlay.content_id;
@@ -783,10 +780,119 @@ impl WidgetTree {
         }
         sort_scope_entries(&mut entries);
         self.splice_sticky_tooltips_after_anchors(&mut entries);
-        let root_scope = ScopeNode {
+        ScopeNode {
             policy: crate::focus::TraversalScopePolicy::Cycle,
             entries,
+        }
+    }
+
+    /// The first Tab stop of the current focus scope (the topmost modal, else
+    /// the window): where focus goes when nothing nearer can take it.
+    pub(super) fn first_tab_stop_in_scope(&self) -> Option<WidgetId> {
+        enter_scope_edge(&self.focus_scope_root(), false)
+    }
+
+    /// Where focus goes from `marker`, a focused node that has just become
+    /// disabled: the first enabled Tab stop after it, else the last one before
+    /// it.
+    ///
+    /// The walk is confined to the scope the marker lives in: the content of
+    /// the overlay holding it (a popover, a modal), else the topmost modal,
+    /// else the window's roots that are neither tooltips nor overlays; and
+    /// inside that, to the innermost `Cycle` traversal scope holding it, so a
+    /// dialog-like region is never left. It does not wrap. `None` when there is
+    /// nowhere to go, or the marker is not in that scope.
+    pub(super) fn enabled_stop_around(&self, marker: WidgetId) -> Option<WidgetId> {
+        let mut entries = Vec::new();
+        let holder = self
+            .overlay_manager
+            .stack
+            .iter()
+            .rev()
+            .find(|o| self.is_descendant_of(marker, o.content_id))
+            .map(|o| o.content_id);
+        if let Some(content) = holder.or_else(|| {
+            self.overlay_manager
+                .topmost_modal()
+                .map(|modal| modal.content_id)
+        }) {
+            self.collect_marked(content, marker, false, &mut entries);
+        } else {
+            for root in self.arena.roots() {
+                if self.tooltip_content_root(root).is_some()
+                    || self.overlay_manager.find_by_content(root).is_some()
+                {
+                    continue;
+                }
+                self.collect_marked(root, marker, false, &mut entries);
+            }
+        }
+        sort_marked(&mut entries);
+        let scope = innermost_cycle_holding_marker(&entries).unwrap_or(&entries);
+        let mut flat = Vec::new();
+        flatten_marked(scope, &mut flat);
+        let at = flat.iter().position(Option::is_none)?;
+        flat[at + 1..]
+            .iter()
+            .find_map(|stop| *stop)
+            .or_else(|| flat[..at].iter().rev().find_map(|stop| *stop))
+    }
+
+    /// [`collect_scope_entries`](Self::collect_scope_entries) that also
+    /// records `marker` at its place, though it is disabled, and walks a
+    /// disabled subtree only to find it, never offering a node in one.
+    fn collect_marked(
+        &self,
+        id: WidgetId,
+        marker: WidgetId,
+        disabled_above: bool,
+        out: &mut Vec<(Option<i32>, Marked)>,
+    ) {
+        if !self.arena.is_active(id) {
+            return;
+        }
+        let Some(node) = self.arena.get(id) else {
+            return;
         };
+        if id == marker {
+            out.push((node.node_tab_index, Marked::Marker));
+            return;
+        }
+        let disabled = disabled_above
+            || node
+                .enabled_state
+                .as_ref()
+                .is_some_and(|state| !state.get());
+        if disabled && !self.is_descendant_of(marker, id) {
+            return;
+        }
+        if let Some(policy) = node.node_traversal_scope {
+            let mut child_entries = Vec::new();
+            for &child in &node.children {
+                self.collect_marked(child, marker, disabled, &mut child_entries);
+            }
+            sort_marked(&mut child_entries);
+            out.push((node.node_tab_index, Marked::Scope(policy, child_entries)));
+            return;
+        }
+        if !disabled && self.is_node_focusable(node) && self.tab_stop_effective(id) {
+            out.push((node.node_tab_index, Marked::Stop(id)));
+        }
+        for &child in &node.children {
+            self.collect_marked(child, marker, disabled, out);
+        }
+    }
+
+    /// Cycle focus to the next/previous focusable widget (Tab/Shift-Tab),
+    /// honoring nested **traversal scopes** (`FocusScope`).
+    ///
+    /// Builds a scope tree on demand (depth-first; `tab_index` scoped per
+    /// scope), then walks it with [`navigate_scope`]. The root is an implicit
+    /// `Cycle` scope (whole-tree last↔first wrap). A centered modal overlay
+    /// folds into the same mechanism: its content subtree becomes the root
+    /// `Cycle` scope, so Tab is confined to the modal.
+    pub(super) fn cycle_focus(&mut self, reverse: bool, ops: &mut dyn crate::window::WindowOps) {
+        let root_scope = self.focus_scope_root();
 
         if let StepResult::Found(next_id) = navigate_scope(&root_scope, self.focused, reverse, true)
         {
@@ -1327,6 +1433,64 @@ fn navigate_scope(
     }
 
     step_to_sibling(scope, from, reverse, is_root)
+}
+
+/// One entry of the walk [`WidgetTree::enabled_stop_around`] makes.
+enum Marked {
+    /// An enabled Tab stop.
+    Stop(WidgetId),
+    /// The disabled node focus has to leave.
+    Marker,
+    /// A traversal scope, with its entries.
+    Scope(
+        crate::focus::TraversalScopePolicy,
+        Vec<(Option<i32>, Marked)>,
+    ),
+}
+
+/// [`sort_scope_entries`] for the marked walk.
+fn sort_marked(entries: &mut [(Option<i32>, Marked)]) {
+    entries.sort_by(|a, b| match (a.0, b.0) {
+        (Some(ia), Some(ib)) => ia.cmp(&ib),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+}
+
+fn marked_holds_marker(entry: &Marked) -> bool {
+    match entry {
+        Marked::Stop(_) => false,
+        Marked::Marker => true,
+        Marked::Scope(_, entries) => entries.iter().any(|(_, e)| marked_holds_marker(e)),
+    }
+}
+
+/// The entries of the innermost `Cycle` scope holding the marker, or `None`
+/// when no nested `Cycle` scope holds it (the caller's own scope applies).
+fn innermost_cycle_holding_marker(
+    entries: &[(Option<i32>, Marked)],
+) -> Option<&[(Option<i32>, Marked)]> {
+    entries.iter().find_map(|(_, entry)| match entry {
+        Marked::Scope(policy, inner) if marked_holds_marker(entry) => {
+            innermost_cycle_holding_marker(inner).or_else(|| {
+                matches!(policy, crate::focus::TraversalScopePolicy::Cycle)
+                    .then_some(inner.as_slice())
+            })
+        }
+        _ => None,
+    })
+}
+
+/// The walk in order, each Tab stop as `Some`, the marker as `None`.
+fn flatten_marked(entries: &[(Option<i32>, Marked)], out: &mut Vec<Option<WidgetId>>) {
+    for (_, entry) in entries {
+        match entry {
+            Marked::Stop(id) => out.push(Some(*id)),
+            Marked::Marker => out.push(None),
+            Marked::Scope(_, inner) => flatten_marked(inner, out),
+        }
+    }
 }
 
 /// Step from entry `from` to the next/previous *non-empty* sibling, applying

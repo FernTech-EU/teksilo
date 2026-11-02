@@ -525,7 +525,7 @@ impl WidgetTree {
                 self.show_overlay(request)
             };
             if by_focus && let Some(focused) = self.focused {
-                self.overlay_manager.set_top_focus_restore(focused);
+                self.record_top_focus_restore(focused);
             }
             if let Some(entry) = self
                 .tooltips
@@ -639,7 +639,7 @@ impl WidgetTree {
             let current_focus = self.focused;
             self.overlay_manager.show(pending.request);
             if let Some(focus_id) = current_focus {
-                self.overlay_manager.set_top_focus_restore(focus_id);
+                self.record_top_focus_restore(focus_id);
             }
             self.arena.mark_needs_paint(content_id);
             // The target is named outright, like `WidgetTree::focus`, so it
@@ -757,15 +757,12 @@ impl WidgetTree {
         if let Some(parent_overlay) = self.overlay_ancestor_for_widget(source_widget) {
             let preserve_overlay = preserve_content
                 .and_then(|content_id| self.overlay_manager.find_by_content(content_id));
+            let mark = self.dismissal_mark();
             let (dismissed, focus_restore) = self
                 .overlay_manager
                 .dismiss_descendants_of(parent_overlay, preserve_overlay);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore
-                && self.arena.is_active(restore_id)
-            {
-                self.focus_ops(restore_id, &mut *ops);
-            }
+            self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
             return;
         }
 
@@ -790,14 +787,11 @@ impl WidgetTree {
             .collect();
 
         for overlay_id in overlay_ids {
+            let mark = self.dismissal_mark();
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore
-                && self.arena.is_active(restore_id)
-            {
-                self.focus_ops(restore_id, &mut *ops);
-            }
+            self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
         }
     }
 
@@ -835,14 +829,11 @@ impl WidgetTree {
         }
 
         if let Some(target) = topmost_to_dismiss {
+            let mark = self.dismissal_mark();
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(target);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore
-                && self.arena.is_active(restore_id)
-            {
-                self.focus_ops(restore_id, &mut *ops);
-            }
+            self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
         }
     }
 
@@ -1103,7 +1094,9 @@ impl WidgetTree {
         // as Escape would give it back, rather than being left nowhere: a
         // menu bar's menu replaced by its neighbour, or closed from its
         // title, comes through here.
-        let focus_before = self.focused;
+        // The fallback chain then belongs to that same lowest overlay: the
+        // removed entry it reads is the first whose target is `restore`.
+        let mark = self.dismissal_mark();
         let mut restore = None;
         for overlay_id in to_dismiss {
             let (dismissed, focus_restore) =
@@ -1111,12 +1104,10 @@ impl WidgetTree {
             self.dormant_dismissed_content(&dismissed, &mut *ops);
             restore = restore.or(focus_restore);
         }
-        if focus_before.is_some()
-            && self.focused.is_none()
-            && let Some(restore_id) = restore
-            && self.arena.is_active(restore_id)
-        {
-            self.focus_ops(restore_id, &mut *ops);
+        // As before this used the chain: only when something held focus
+        // before the dismissal and nothing live holds it now.
+        if mark.focused_before().is_some() && self.focus_left_nowhere() {
+            self.return_focus_after_dismissal(restore, mark, &mut *ops);
         }
     }
 
@@ -1177,15 +1168,12 @@ impl WidgetTree {
             return false;
         };
 
+        let mark = self.dismissal_mark();
         let (dismissed, focus_restore) = self
             .overlay_manager
             .dismiss_with_focus_restore(modal_overlay);
         self.dormant_dismissed_content(&dismissed, &mut *ops);
-        if let Some(restore_id) = focus_restore
-            && self.arena.is_active(restore_id)
-        {
-            self.focus_ops(restore_id, &mut *ops);
-        }
+        self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
         true
     }
 
@@ -2101,7 +2089,7 @@ impl WidgetTree {
         self.cancel_pointers_for_modal(is_modal);
         self.a11y_dirty = true;
         if let Some(focus_id) = current_focus {
-            self.overlay_manager.set_top_focus_restore(focus_id);
+            self.record_top_focus_restore(focus_id);
         }
         if let Some(duration) = fade_duration {
             self.attach_overlay_fade(id, content_id, duration);
@@ -2185,8 +2173,10 @@ impl WidgetTree {
         reason: crate::overlay::DismissReason,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        let mark = self.dismissal_mark();
         let dismissed = self.overlay_manager.dismiss_all_because(reason);
         self.dormant_dismissed_content(&dismissed, &mut *ops);
+        self.return_focus_after_dismissal(None, mark, &mut *ops);
     }
 
     /// Dispatch-path variant that threads `ops` through to the
@@ -2196,8 +2186,10 @@ impl WidgetTree {
         id: crate::overlay::OverlayId,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        let mark = self.dismissal_mark();
         let dismissed = self.overlay_manager.dismiss(id);
         self.dormant_dismissed_content(&dismissed, &mut *ops);
+        self.return_focus_after_dismissal(None, mark, &mut *ops);
     }
 
     /// A modal just opened. Every live pointer loses its interaction: the

@@ -32,6 +32,9 @@ mod context_menu_contribution_tests;
 #[cfg(test)]
 mod device_scale_tests;
 mod drag_drop_impl;
+mod focus_fallback_impl;
+#[cfg(test)]
+mod focus_fallback_tests;
 mod focus_impl;
 #[cfg(test)]
 mod focus_on_click_tests;
@@ -1923,10 +1926,11 @@ impl WidgetTree {
         ops: &mut dyn crate::window::WindowOps,
     ) {
         let now = std::time::Instant::now();
+        let mark = self.dismissal_mark();
         let pending = self.overlay_manager.process_pending_fade_dismissals(now);
         for (_id, dismissed, focus_restore) in pending {
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            self.restore_focus_left_behind(focus_restore, &mut *ops);
+            self.restore_focus_left_behind(focus_restore, mark, &mut *ops);
         }
     }
 
@@ -1935,12 +1939,13 @@ impl WidgetTree {
     /// but reads `dismissing_started_sim`.
     pub(crate) fn process_overlay_fade_dismissals_sim(&mut self) {
         let mut noop = crate::window::NoopWindowOps;
+        let mark = self.dismissal_mark();
         let pending = self
             .overlay_manager
             .process_pending_fade_dismissals_sim(self.sim_clock);
         for (_id, dismissed, focus_restore) in pending {
             self.dormant_dismissed_content(&dismissed, &mut noop);
-            self.restore_focus_left_behind(focus_restore, &mut noop);
+            self.restore_focus_left_behind(focus_restore, mark, &mut noop);
         }
     }
 
@@ -1952,17 +1957,16 @@ impl WidgetTree {
     /// moved elsewhere since the overlay opened stays where they put it. A tip
     /// that focus summoned holds its anchor as `restore`, and restoring that
     /// whatever held focus sent a reader who had Tabbed on back to the control
-    /// they had just left.
+    /// they had just left. When `restore` cannot take focus, the fallback
+    /// chain of `return_focus_after_dismissal` runs, under the same rule.
     fn restore_focus_left_behind(
         &mut self,
         restore: Option<WidgetId>,
+        mark: focus_fallback_impl::DismissMark,
         ops: &mut dyn crate::window::WindowOps,
     ) {
-        if let Some(restore) = restore
-            && self.arena.is_active(restore)
-            && self.focused.is_none_or(|id| !self.arena.is_active(id))
-        {
-            self.focus_ops(restore, ops);
+        if self.focus_left_nowhere() {
+            self.return_focus_after_dismissal(restore, mark, ops);
         }
     }
 
@@ -1993,10 +1997,11 @@ impl WidgetTree {
         }
 
         for overlay_id in to_dismiss {
+            let mark = self.dismissal_mark();
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            self.restore_focus_left_behind(focus_restore, &mut *ops);
+            self.restore_focus_left_behind(focus_restore, mark, &mut *ops);
         }
     }
 
@@ -2071,14 +2076,11 @@ impl WidgetTree {
         }
 
         for overlay_id in to_dismiss {
+            let mark = self.dismissal_mark();
             let (dismissed, focus_restore) =
                 self.overlay_manager.dismiss_with_focus_restore(overlay_id);
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore
-                && self.arena.is_active(restore_id)
-            {
-                self.focus_ops(restore_id, &mut *ops);
-            }
+            self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
         }
     }
 

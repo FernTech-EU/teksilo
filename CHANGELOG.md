@@ -468,6 +468,20 @@ by crate for clarity, not because crates version independently.
 - **A standard edit shortcut stays bound when the widget that re-registered
   it goes away.** Before, Ctrl+V and the others stopped working everywhere
   once that widget was destroyed.
+- **Closing a dialog or menu whose return target is gone puts focus on the
+  nearest control instead of on nothing**: where focus was before the menu
+  the dialog was opened from, the overlay's anchor, a control near the old
+  target, or the first control of the window or of the dialog beneath.
+- **Activating a tree row from a screen reader no longer leaves focus on
+  nothing** when the rebuild that follows replaces the row focus was on.
+- **A focused control that becomes disabled hands focus to the next
+  control**, or the previous one when it was the last, so Tab goes on from
+  where the user was. It is told it lost focus first, so a text field
+  disabled while focused commits its edit. Focus does not come back when it
+  is enabled again.
+- **A command a menu or popup row sends from focus after closing it with
+  `dismiss_overlay` or `dismiss_all_overlays` starts at the widget focus
+  went back to**, as rows closing their own menu already did.
 
 #### Text
 

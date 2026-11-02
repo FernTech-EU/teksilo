@@ -557,9 +557,9 @@ fn present_in_tree_modal_request(
     let modal_overlay = tree.show_overlay(request);
     // The modal is now the topmost overlay; record where focus should
     // return when it dismisses. Mirrors `show_overlay_from_source`'s
-    // capture-then-set-top pattern. The `is_active` guard on the restore
-    // side makes a stale id (e.g. a menu trigger that went dormant) a
-    // graceful no-op.
+    // capture-then-set-top pattern. A stale id (a menu trigger that went
+    // dormant) hands over to the tree's focus fallback, whose record for
+    // this target is filled in at the next layout pass.
     if let Some(restore) = focus_before_modal {
         tree.overlay_manager_mut().set_top_focus_restore(restore);
     }
@@ -9201,6 +9201,50 @@ mod tests {
             focus_restore,
             Some(source),
             "dismissing the modal must restore focus to the trigger that opened it",
+        );
+    }
+
+    /// The modal's restore target is set straight on the overlay manager here,
+    /// so its fallback record is filled at the next layout pass. The target is
+    /// then destroyed while the dialog is up: Escape lands focus inside the
+    /// group that held it, not on nothing.
+    #[test]
+    fn present_in_tree_modal_falls_back_when_its_trigger_is_gone() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(
+            teksilo_widgets::VStack::new()
+                .child(Button::new(lit!("Other")))
+                .child(
+                    teksilo_widgets::VStack::new()
+                        .child(Button::new(lit!("Rename")))
+                        .child(Button::new(lit!("Keep"))),
+                ),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let source = tree.find_by_label("Rename").expect("the Rename button");
+        let keep = tree.find_by_label("Keep").expect("the Keep button");
+        tree.focus(source);
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(|tree| {
+                tree.add(ModalContainer::new(Button::new(lit!("Continue"))))
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.destroy_subtree_for_testing(source);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        tree.press_key(
+            teksilo_core::event::Key::Escape,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        let focused = tree.focused().expect("focus is not left on nothing");
+        assert!(
+            focused == keep || tree.is_descendant_of(focused, keep),
+            "focus went into the group that held the trigger"
         );
     }
 

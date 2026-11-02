@@ -195,3 +195,52 @@ fn cursor_signal_notifies_every_move() {
     assert_eq!(*seen.borrow(), vec![Some(3), Some(4)]);
     assert_eq!(signal.get(), Some(4));
 }
+
+/// The first realized row wrapper, the node that answers a screen reader's
+/// `Click` (rows sit under the body pane, the view's first child).
+fn first_row(tree: &WidgetTree, tv: WidgetId) -> WidgetId {
+    let pane = tree.children(tv)[0];
+    tree.children(pane)[0]
+}
+
+fn click(tree: &mut WidgetTree, row: WidgetId) {
+    let mut noop = teksilo_core::window::NoopWindowOps;
+    tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(row),
+        teksilo_core::accesskit::Action::Click,
+        None,
+        &mut noop,
+    );
+    tree.layout(viewport());
+}
+
+/// A screen reader's `Click` on a row while the view holds focus leaves focus
+/// on the view.
+#[test]
+fn an_at_click_on_a_row_keeps_focus_on_the_view() {
+    let (view, _, _) = make(3, SelectionMode::Single);
+    let (mut tree, tv) = mount(view);
+    let row = first_row(&tree, tv);
+    click(&mut tree, row);
+    assert_eq!(tree.focused(), Some(tv));
+}
+
+/// Focus on the row node itself (where a screen reader's focus can put it):
+/// the `Click` selects, the selection rebuild may replace the row, and focus
+/// must not be left on nothing.
+#[test]
+fn an_at_click_on_a_focused_row_node_does_not_leave_focus_on_nothing() {
+    let (view, _, _) = make(3, SelectionMode::Single);
+    let (mut tree, tv) = mount(view);
+    let row = first_row(&tree, tv);
+    tree.focus(row);
+    click(&mut tree, row);
+    let focused = tree.focused().expect("focus is somewhere");
+    assert!(
+        focused == tv || tree.is_active(focused),
+        "focus is on a live node"
+    );
+    if !tree.is_active(row) {
+        assert_eq!(focused, tv, "the row went: focus is on the view");
+    }
+}

@@ -1092,7 +1092,7 @@ Focus is a single `Option<WidgetId>` stored on the tree. Tab / Shift+Tab moves i
 
 Programmatic focus transfer goes through `ctx.request_focus(id)`. The framework also exposes `first_focusable_descendant(id)` for modal openers (dialogs that should land focus on the primary action button, it returns the widget Tab would land on *first*, respecting the scope rules below) and `ScrollIntoView` synthesized on focus change so that tab-focusing an offscreen widget scrolls the nearest clipping ancestor to reveal it.
 
-Focus cleanup on destroy is automatic: destroying a focused widget clears focus; the next input event that requires focus routes to the nearest focusable ancestor or root.
+Focus cleanup on destroy is automatic: destroying a focused widget clears focus. A rebuild that replaced it puts focus back into the rebuilt subtree, and an overlay dismissal gives it back where the overlay took it from (see "When the focused widget goes away" below). A focused widget parked dormant by a `Switcher` or `visible_when`, or destroyed outside a rebuild, leaves focus on nothing until something takes it.
 
 **A request into a hidden page waits for the page.** A handler that shows a
 `Switcher` page or a `visible_when` branch and asks for focus inside it makes
@@ -1187,6 +1187,19 @@ An overlay's **anchor counts as part of it.** A non-searchable `ComboBox` keeps 
 Nested overlays close as a cascade: the walk goes *up* `parent_overlay` and dismisses the outermost eligible level, which takes every level below it, APG's plural "all menus and submenus", while stopping at a host surface so a menu never drags its hosting dialog, composite tooltip or revealed menubar down with it.
 
 Implemented in [`dismiss_overlays_left_by_focus`](../crates/teksilo-core/src/widget_tree/overlay_impl.rs), called from `focus_with_origin_ops`, the single funnel every focus change passes through, so Tab, click-to-focus, AccessKit and `ctx.request_focus` are all covered by one mechanism.
+
+### 6.1.1 When the focused widget goes away
+
+When an overlay is dismissed, focus goes back to the widget that had it when the overlay opened. When that widget can no longer take it (destroyed, parked, disabled), focus is not left on nothing; it goes to the first of:
+
+1. where focus was before the overlay holding that widget opened, when that overlay has gone too: a dialog opened from a menu row returns to where the menu was opened from;
+2. the overlay's anchor, or the nearest focusable above it;
+3. inside the innermost surviving ancestor of the old target, its first Tab stop, else the nearest focusable above it;
+4. the first Tab stop of the current scope: the dialog beneath, else the window.
+
+The fallback runs only when the dismissal took focus away. Focus the user or a handler put elsewhere stays where it is, and an overlay opened while nothing was focused leaves nothing focused. A rebuild that replaces the node focus was on puts focus back inside the rebuilt subtree, and when nothing there can take it, on the nearest focusable above it, else the first Tab stop of the scope.
+
+A focused widget that becomes disabled, itself or through an ancestor, hands focus to the next enabled Tab stop, or the previous one when there is none after it; a disabled ancestor is stepped over whole, to the stop after it. It is first sent `FocusLost`, although disabled, so a text field commits its edit and a button drops its focused look. The new focus is `Programmatic` (a text field it lands on keeps its caret). The search stays inside the overlay or modal holding it and inside its innermost `Cycle` traversal scope, and does not wrap (Qt wraps round its focus chain, and clears focus when an ancestor is disabled); with nowhere to go, focus stays. It runs at the end of every layout pass, so a handler that disables its own button is repaired before the next key press. Focus does not come back when the widget is enabled again.
 
 ### 6.2 Focus regions (F6)
 

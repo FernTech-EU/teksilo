@@ -237,3 +237,37 @@ fn an_apps_on_commit_fn_runs_before_the_command_and_once() {
     tick(&mut tree);
     assert_eq!(*log.borrow(), ["commit", "command"], "the blur adds none");
 }
+
+/// A field disabled while it holds focus (a form disabled during a submit)
+/// is told it lost focus, so its edit is committed, and focus moves on to
+/// the next control.
+#[test]
+fn a_field_disabled_while_focused_commits_its_edit() {
+    let committed = Rc::new(Cell::new(0_u32));
+    let text = Signal::new(String::new());
+    let enabled = Signal::new(true);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let input = tree.add(
+        TextInput::new(text.clone())
+            .enabled(enabled.clone())
+            .on_commit_fn({
+                let committed = committed.clone();
+                move |_| committed.set(committed.get() + 1)
+            }),
+    );
+    let next = tree.add(Button::new(lit!("next")).on_activate_fn(|_| {}));
+    tree.add(HStack::new().child(input).child(next));
+    tick(&mut tree);
+    let field = tree.first_focusable_descendant(input).unwrap();
+    let next = tree.first_focusable_descendant(next).unwrap();
+
+    tree.focus(field);
+    tree.type_text(field, "hello");
+    tick(&mut tree);
+    assert_eq!(committed.get(), 0, "nothing committed while typing");
+
+    enabled.set(false);
+    tick(&mut tree);
+    assert_eq!(tree.focused(), Some(next), "focus moved on");
+    assert_eq!(committed.get(), 1, "the edit was committed");
+}

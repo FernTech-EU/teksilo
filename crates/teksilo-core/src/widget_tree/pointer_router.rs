@@ -560,17 +560,14 @@ impl WidgetTree {
     /// give the focus back to where that overlay took it from. `false` when
     /// nothing was dismissed.
     fn dismiss_top_on_escape(&mut self, ops: &mut dyn crate::window::WindowOps) -> bool {
+        let mark = self.dismissal_mark();
         let Some((_id, content_ids, focus_restore)) =
             self.overlay_manager.try_dismiss_top_on_escape()
         else {
             return false;
         };
         self.dormant_dismissed_content(&content_ids, ops);
-        if let Some(restore_id) = focus_restore
-            && self.arena.is_active(restore_id)
-        {
-            self.focus_ops(restore_id, ops);
-        }
+        self.return_focus_after_dismissal(focus_restore, mark, ops);
         true
     }
 
@@ -707,17 +704,14 @@ impl WidgetTree {
                 && top_is_back_navigable
                 && let Some(top_id) = top_id
             {
+                let mark = self.dismissal_mark();
                 let (content_ids, focus_restore) =
                     self.overlay_manager.dismiss_with_focus_restore_because(
                         top_id,
                         crate::overlay::DismissReason::Escape,
                     );
                 self.dormant_dismissed_content(&content_ids, &mut *ops);
-                if let Some(restore_id) = focus_restore
-                    && self.arena.is_active(restore_id)
-                {
-                    self.focus_ops(restore_id, &mut *ops);
-                }
+                self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
                 return;
             }
         }
@@ -1695,7 +1689,7 @@ impl WidgetTree {
                 crate::overlay::DismissBehavior::EscapeOrClickOutside,
             ));
         if let Some(focus_id) = prev_focus {
-            self.overlay_manager.set_top_focus_restore(focus_id);
+            self.record_top_focus_restore(focus_id);
         }
         self.focus_ops(content_id, &mut *ops);
         // Flush intents the factory queued so they take effect on the
@@ -1769,6 +1763,7 @@ impl WidgetTree {
                 .suppress_beneath;
         }
 
+        let mark = self.dismissal_mark();
         let (dismissed, focus_restore, toggle_anchors) = self
             .overlay_manager
             .dismiss_outside_press_toggles(position, &busy);
@@ -1776,11 +1771,7 @@ impl WidgetTree {
             return false;
         }
         self.dormant_dismissed_content(&dismissed, &mut *ops);
-        if let Some(restore_id) = focus_restore
-            && self.arena.is_active(restore_id)
-        {
-            self.focus_ops(restore_id, &mut *ops);
-        }
+        self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
         // The press dismissed one or more overlays. By default it
         // now ALSO falls through to the widget under the cursor,
         // so a single click both closes the menu/popover and
@@ -1889,15 +1880,12 @@ impl WidgetTree {
         if !self.overlay_manager.has_armed_dismiss(pointer) {
             return false;
         }
+        let mark = self.dismissal_mark();
         let (dismissed, focus_restore, _anchors) =
             self.overlay_manager.commit_dismiss(pointer, position);
         if !dismissed.is_empty() {
             self.dormant_dismissed_content(&dismissed, &mut *ops);
-            if let Some(restore_id) = focus_restore
-                && self.arena.is_active(restore_id)
-            {
-                self.focus_ops(restore_id, &mut *ops);
-            }
+            self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
         }
         true
     }
@@ -2533,7 +2521,12 @@ impl WidgetTree {
         event: &WidgetEvent,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
-        if !self.arena.is_enabled(target) {
+        // A disabled widget takes no input, but `FocusLost` is not input: it
+        // tells a widget that held focus that it no longer does, and one that
+        // loses focus because it was disabled must still hear it (Qt sends
+        // FocusOut to the widget it disables), or a button keeps its focused
+        // look and a text field never commits its edit.
+        if !self.arena.is_enabled(target) && !matches!(event, WidgetEvent::FocusLost) {
             return false;
         }
 
@@ -2721,7 +2714,9 @@ impl WidgetTree {
         event: &WidgetEvent,
         ops: &mut dyn crate::window::WindowOps,
     ) -> bool {
-        if !self.arena.is_enabled(target) {
+        // `FocusLost` reaches a disabled widget too: see
+        // `dispatch_to_widget_returning_handled`.
+        if !self.arena.is_enabled(target) && !matches!(event, WidgetEvent::FocusLost) {
             return false;
         }
 
@@ -3358,8 +3353,12 @@ impl WidgetTree {
                     request,
                 }
             }));
-        // `send_intent_from_focus` falls back to the handler's widget when
-        // the dismissals below leave nothing focused. Its walk is noted
+        // `send_intent_from_focus` starts from the widget focused after the
+        // dismissals below: they give focus back to where the overlay took
+        // it from (or the fallback chain's choice), so a row that closes its
+        // popup and sends from focus reaches the editor the user was in. It
+        // falls back to the handler's widget only when they leave nothing
+        // focused (nothing was, when the overlay opened). Its walk is noted
         // before they close the overlay it may be in, so it still goes on
         // from the widget that overlay was attached to; and the modal it
         // stopped at, which, once closed, sends it to the content root.
@@ -3378,8 +3377,10 @@ impl WidgetTree {
         }
         match ctx.dismiss_scope {
             Some(crate::widget::DismissScope::All) => {
+                let mark = self.dismissal_mark();
                 let dismissed = self.overlay_manager.dismiss_all();
                 self.dormant_dismissed_content(&dismissed, &mut *ops);
+                self.return_focus_after_dismissal(None, mark, &mut *ops);
             }
             Some(crate::widget::DismissScope::AllExceptHosts) => {
                 self.dismiss_all_overlays_except_hosts(&mut *ops);
@@ -3388,20 +3389,19 @@ impl WidgetTree {
                 self.dismiss_self_overlay_chain_for_source(source_widget, &mut *ops);
             }
             Some(crate::widget::DismissScope::Top) => {
+                let mark = self.dismissal_mark();
                 if let Some((_id, content_ids, focus_restore)) = self.overlay_manager.dismiss_top()
                 {
                     self.dormant_dismissed_content(&content_ids, &mut *ops);
-                    if let Some(restore_id) = focus_restore
-                        && self.arena.is_active(restore_id)
-                    {
-                        self.focus_ops(restore_id, &mut *ops);
-                    }
+                    self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
                 }
             }
             None => {
                 for id in ctx.overlay_dismissals {
+                    let mark = self.dismissal_mark();
                     let dismissed = self.overlay_manager.dismiss(id);
                     self.dormant_dismissed_content(&dismissed, &mut *ops);
+                    self.return_focus_after_dismissal(None, mark, &mut *ops);
                 }
             }
         }
@@ -3413,8 +3413,10 @@ impl WidgetTree {
         // tracking the `OverlayId`.
         for content_id in ctx.overlay_content_dismissals {
             if let Some(overlay_id) = self.overlay_manager.find_by_content(content_id) {
+                let mark = self.dismissal_mark();
                 let dismissed = self.overlay_manager.dismiss(overlay_id);
                 self.dormant_dismissed_content(&dismissed, &mut *ops);
+                self.return_focus_after_dismissal(None, mark, &mut *ops);
             }
         }
         // Apply pause/resume queue (ToastHost hover-pause). Drained
@@ -3499,7 +3501,7 @@ impl WidgetTree {
             // (`dismiss_overlay_with_ops`) already flips this.
             self.a11y_dirty = true;
             if let Some(focus_id) = current_focus {
-                self.overlay_manager.set_top_focus_restore(focus_id);
+                self.record_top_focus_restore(focus_id);
             }
         }
         for (mut req, band) in ctx.overlay_band_requests {
@@ -3551,7 +3553,7 @@ impl WidgetTree {
                 .set_shown_at_sim(overlay_id, self.sim_clock);
             self.a11y_dirty = true;
             if let Some(focus_id) = current_focus {
-                self.overlay_manager.set_top_focus_restore(focus_id);
+                self.record_top_focus_restore(focus_id);
             }
         }
         for (mut req, progress, duration) in ctx.reveal_overlay_requests {
@@ -3572,7 +3574,7 @@ impl WidgetTree {
                 .set_shown_at_sim(overlay_id, self.sim_clock);
             self.a11y_dirty = true;
             if let Some(focus_id) = current_focus {
-                self.overlay_manager.set_top_focus_restore(focus_id);
+                self.record_top_focus_restore(focus_id);
             }
             // Drive the caller's progress signal 0 → 1, and register it
             // as the overlay's fade-state signal so every dismiss path
