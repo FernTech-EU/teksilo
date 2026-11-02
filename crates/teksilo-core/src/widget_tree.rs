@@ -5797,6 +5797,28 @@ impl WidgetTree {
         }
     }
 
+    /// Gate Tab traversal over the whole subtree of `id`: while `gate` reads
+    /// `false`, Tab and `first_focusable_descendant` find nothing in it,
+    /// whatever Tab-stop props its nodes carry, so a roving group inside it
+    /// (a toolbar's current item) is held out too. The subtree stays active,
+    /// focusable by a direct request, and present to assistive technology.
+    ///
+    /// For a container that keeps a part of itself out of the Tab order until
+    /// the user steps into it (a `ListView` row in action mode).
+    #[doc(hidden)]
+    pub fn set_tab_gate(&mut self, id: WidgetId, gate: impl Into<crate::signal::Prop<bool>>) {
+        let prop = gate.into();
+        // Read on each Tab press, like `tab_stop`.
+        prop.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::RepaintOnly,
+        );
+        if let Some(node) = self.arena.get_mut(id) {
+            node.tab_gate = Some(prop);
+        }
+    }
+
     /// Current Tab-key participation for a widget. Returns the value
     /// of the `tab_stop` prop if bound, or `true` (the default) when
     /// no binding is present. Mirrors the filter used by

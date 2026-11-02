@@ -114,8 +114,8 @@ pub enum TraversalScopePolicy {
     /// with sibling panels).
     Continue,
     /// Tab *wraps* within the scope and never exits via keyboard navigation.
-    /// Use for modal dialogs — the one surface whose pattern (ARIA's Dialog
-    /// (Modal)) actually calls for containing focus.
+    /// Use for modal dialogs, whose pattern (ARIA's Dialog (Modal)) calls for
+    /// containing focus.
     ///
     /// **Not for popovers or menus.** Those implement Disclosure and Menu,
     /// which mandate the opposite: Tab is an exit gesture there, and the
@@ -124,5 +124,11 @@ pub enum TraversalScopePolicy {
     /// `Cycle` scope defeats that — focus can no longer leave, so the
     /// dismissal never fires and the panel becomes keyboard-inescapable except
     /// via Escape.
+    ///
+    /// The other fit is an **embedded edit scope** with an exit key it
+    /// advertises: a list row the user stepped into (`ListView` in action
+    /// mode), whose controls Tab cycles through until Escape returns to the
+    /// list. That is not an overlay that leaving focus must dismiss, and WCAG
+    /// 2.1.2 allows a keyboard trap whose way out the user is told.
     Cycle,
 }

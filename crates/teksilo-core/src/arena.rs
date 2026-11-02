@@ -118,6 +118,13 @@ pub struct WidgetNode {
     /// when focusable" — the default. The selected `TabHeader` is the
     /// canonical user.
     pub(crate) tab_stop: Option<Prop<bool>>,
+    /// A Tab gate over this node's whole subtree: while it reads `false`,
+    /// Tab traversal collects nothing from the subtree, whatever Tab-stop
+    /// props the nodes in it carry. Unlike `tab_stop`, which a nearer prop
+    /// overrides, this dominates. Nothing else is affected: the subtree stays
+    /// active, focusable by a request, and present to assistive technology.
+    /// `None` means no gate.
+    pub(crate) tab_gate: Option<Prop<bool>>,
     /// What a data view's `Space` should do when the row containing this node
     /// holds the keyboard cursor.
     ///
@@ -527,6 +534,7 @@ impl WidgetNode {
             visible_state: None,
             enabled_state: None,
             tab_stop: None,
+            tab_gate: None,
             keyboard_toggle: None,
             focus_within_signal: None,
             view_focus_signal: None,

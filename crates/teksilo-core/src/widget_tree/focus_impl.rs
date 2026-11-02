@@ -524,6 +524,30 @@ impl WidgetTree {
     }
 
     /// Every widget within a subtree, `root` included, that can take focus
+    /// now (active, enabled, declared focusable), in **Tab order**: the order
+    /// Tab would visit them if each were a Tab stop. Tab-stop flags are not
+    /// consulted and nothing is changed, so a roving item out of the Tab
+    /// order still has its place. See
+    /// [`BuildContext::focusables_in_tab_order`](crate::build_context::BuildContext::focusables_in_tab_order).
+    #[doc(hidden)]
+    pub fn focusables_in_tab_order(&self, root: WidgetId) -> Vec<WidgetId> {
+        fn flatten(entries: &[ScopeEntry], out: &mut Vec<WidgetId>) {
+            for entry in entries {
+                match &entry.kind {
+                    ScopeEntryKind::Focusable(id) => out.push(*id),
+                    ScopeEntryKind::Scope(scope) => flatten(&scope.entries, out),
+                }
+            }
+        }
+        let mut entries = Vec::new();
+        self.collect_scope_entries_with(root, &mut entries, false);
+        sort_scope_entries(&mut entries);
+        let mut out = Vec::new();
+        flatten(&entries, &mut out);
+        out
+    }
+
+    /// Every widget within a subtree, `root` included, that can take focus
     /// now, in depth-first tree order: active, under no disabled ancestor,
     /// declared focusable. Tab-stop flags are not consulted, so a node that
     /// holds focus without being a Tab stop (a roving-focus item) still has
@@ -789,6 +813,13 @@ impl WidgetTree {
     /// (`tab_stop_effective`) is applied here at collection time rather than as
     /// a post-pass `retain`.
     fn collect_scope_entries(&self, id: WidgetId, out: &mut Vec<ScopeEntry>) {
+        self.collect_scope_entries_with(id, out, true);
+    }
+
+    /// [`collect_scope_entries`](Self::collect_scope_entries), with the
+    /// Tab-stop test made optional: `tab_stops == false` keeps every enabled
+    /// focusable node in its Tab-order place, a Tab stop now or not.
+    fn collect_scope_entries_with(&self, id: WidgetId, out: &mut Vec<ScopeEntry>, tab_stops: bool) {
         if !self.arena.is_active(id) {
             return;
         }
@@ -803,13 +834,18 @@ impl WidgetTree {
         {
             return;
         }
+        // A closed Tab gate holds its whole subtree out of Tab traversal. The
+        // listing that ignores Tab stops sees through it.
+        if tab_stops && node.tab_gate.as_ref().is_some_and(|gate| !gate.get()) {
+            return;
+        }
 
         // A traversal-scope boundary: collect its subtree as an independent,
         // internally-ordered group; do not descend past it into `out`.
         if let Some(policy) = node.node_traversal_scope {
             let mut child_entries = Vec::new();
             for &child in &node.children {
-                self.collect_scope_entries(child, &mut child_entries);
+                self.collect_scope_entries_with(child, &mut child_entries, tab_stops);
             }
             sort_scope_entries(&mut child_entries);
             out.push(ScopeEntry {
@@ -823,14 +859,14 @@ impl WidgetTree {
         }
 
         // A normal node: a Tab stop iff focusable and not tab_stop-suppressed.
-        if self.is_node_focusable(node) && self.tab_stop_effective(id) {
+        if self.is_node_focusable(node) && (!tab_stops || self.tab_stop_effective(id)) {
             out.push(ScopeEntry {
                 tab_index: node.node_tab_index,
                 kind: ScopeEntryKind::Focusable(id),
             });
         }
         for &child in &node.children {
-            self.collect_scope_entries(child, out);
+            self.collect_scope_entries_with(child, out, tab_stops);
         }
     }
 
@@ -2238,6 +2274,78 @@ mod tests_scope {
     }
     fn shift_tab(tree: &mut WidgetTree) {
         tree.press_key(Key::Tab, Modifiers::SHIFT);
+    }
+
+    #[test]
+    fn a_closed_tab_gate_holds_its_subtree_out_of_tab_whatever_its_props_say() {
+        // root[a, gated[inner (its own tab_stop(true))], b]
+        use crate::signal::Signal;
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().focusable());
+        let inner = tree.add(FillWidget::new().focusable());
+        let gated = tree.add(StackWidget::new().child(inner));
+        let b = tree.add(FillWidget::new().focusable());
+        let root = tree.add(StackWidget::new().child(a).child(gated).child(b));
+        tree.set_tab_stop(inner, true);
+        let open = Signal::new(false);
+        tree.set_tab_gate(gated, open.clone());
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        assert_eq!(tree.tab_stops_within(root), vec![a, b]);
+        assert_eq!(tree.first_focusable_descendant(gated), None);
+        tab(&mut tree);
+        tab(&mut tree);
+        assert_eq!(tree.focused(), Some(b), "Tab steps over the gated subtree");
+        assert_eq!(
+            tree.focusables_in_tab_order(gated),
+            vec![inner],
+            "the listing that ignores Tab stops sees through the gate"
+        );
+        let snapshot = tree.accessibility_tree_snapshot();
+        let node = crate::accessibility::widget_id_to_node_id(inner);
+        assert!(
+            snapshot.nodes.iter().any(|(id, _)| *id == node),
+            "and assistive technology still sees the control"
+        );
+        tree.focus(inner);
+        assert_eq!(tree.focused(), Some(inner), "a direct request still lands");
+
+        open.set(true);
+        assert_eq!(tree.tab_stops_within(root), vec![a, inner, b]);
+    }
+
+    #[test]
+    fn focusables_in_tab_order_keeps_roving_items_and_changes_nothing() {
+        // root[scope(Continue)[a2, a1], off, disabled[d], b]: Tab order is
+        // a1, a2 (scoped tab_index), off (not a Tab stop, still listed), b;
+        // the disabled one is left out.
+        use crate::signal::Signal;
+        let mut tree = WidgetTree::new();
+        let a2 = indexed(&mut tree, 2);
+        let a1 = indexed(&mut tree, 1);
+        let scope = tree.add(StackWidget::new().child(a2).child(a1));
+        let off = tree.add(FillWidget::new().focusable());
+        let d = tree.add(FillWidget::new().focusable());
+        let disabled = tree.add(StackWidget::new().child(d));
+        let b = tree.add(FillWidget::new().focusable());
+        let root = tree.add(
+            StackWidget::new()
+                .child(scope)
+                .child(off)
+                .child(disabled)
+                .child(b),
+        );
+        tree.set_traversal_scope(scope, Continue);
+        tree.set_tab_stop(off, false);
+        tree.enabled_when(disabled, Signal::new(false));
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+
+        assert_eq!(tree.focusables_in_tab_order(root), vec![a1, a2, off, b]);
+        assert_eq!(
+            tree.tab_stops_within(root),
+            vec![a2, a1, b],
+            "and the Tab stops are as they were"
+        );
     }
 
     #[test]

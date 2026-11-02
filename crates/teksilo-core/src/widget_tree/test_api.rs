@@ -888,6 +888,10 @@ impl WidgetTree {
         {
             return;
         }
+        // A closed Tab gate: likewise.
+        if node.tab_gate.as_ref().is_some_and(|gate| !gate.get()) {
+            return;
+        }
         if self.is_node_focusable(node) && self.tab_stop_effective(id) {
             out.push(id);
         }

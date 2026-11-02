@@ -851,6 +851,13 @@ impl<'a> BuildContext<'a> {
         self.tree.set_tab_stop(id, state);
     }
 
+    /// Gate Tab traversal over the whole subtree of `id`. See
+    /// [`WidgetTree::set_tab_gate`](crate::widget_tree::WidgetTree::set_tab_gate).
+    #[doc(hidden)]
+    pub fn set_tab_gate(&mut self, id: WidgetId, gate: impl Into<crate::signal::Prop<bool>>) {
+        self.tree.set_tab_gate(id, gate);
+    }
+
     /// Publish what a data view's `Space` should do when the row containing
     /// `id` holds the keyboard cursor.
     ///
@@ -876,11 +883,13 @@ impl<'a> BuildContext<'a> {
     /// - [`TraversalScopePolicy::Continue`](crate::focus::TraversalScopePolicy::Continue)
     ///   — Tab flows out into the enclosing scope's next member (groups
     ///   numbering only).
-    /// - [`TraversalScopePolicy::Cycle`](crate::focus::TraversalScopePolicy::Cycle)
-    ///   — Tab wraps within the scope, never exits. For **modal dialogs only**:
-    ///   a popover or menu is non-modal, and the framework closes one the
-    ///   keyboard walks out of rather than containing focus in it. Trapping such
-    ///   an overlay stops that dismissal from ever firing.
+    /// - [`TraversalScopePolicy::Cycle`](crate::focus::TraversalScopePolicy::Cycle):
+    ///   Tab wraps within the scope, never exits. For **modal dialogs**, and
+    ///   for an embedded edit scope that advertises its exit key (a list row
+    ///   in action mode, left with Escape). Not for a popover or menu: those
+    ///   are non-modal, and the framework closes one the keyboard walks out of
+    ///   rather than containing focus in it. Trapping such an overlay stops
+    ///   that dismissal from ever firing.
     ///
     /// This node is automatically excluded from being a Tab stop itself.
     /// Prefer the `FocusScope` wrapper widget in `teksilo-widgets` over
@@ -1090,6 +1099,18 @@ impl<'a> BuildContext<'a> {
     /// have the wrapper add a focus stop of its own beside it.
     pub fn first_focus_capable_descendant(&self, root: WidgetId) -> Option<WidgetId> {
         self.tree.first_focus_capable_descendant(root)
+    }
+
+    /// Every widget within the subtree rooted at `root`, `root` included, that
+    /// can take focus now (active, enabled, declared focusable), in the order
+    /// Tab visits them, whether or not each is a Tab stop now. Reads only.
+    ///
+    /// For a container that steps the keyboard into a part of itself and must
+    /// name its controls without disturbing a roving group's Tab stop among
+    /// them (a `ListView` row in action mode).
+    #[doc(hidden)]
+    pub fn focusables_in_tab_order(&self, root: WidgetId) -> Vec<WidgetId> {
+        self.tree.focusables_in_tab_order(root)
     }
 
     /// Move keyboard focus **into** the subtree rooted at `id`: its first
