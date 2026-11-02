@@ -588,13 +588,18 @@ on a non-sticky tooltip would otherwise dismiss it via `PointerLeave`).
 ## Keyboard / a11y promotion
 
 Pointer users reach the rich-tooltip interactive surface via the 2-second
-dwell. Keyboard and screen-reader users get the same access via *focus
-promotion*, `WidgetTree::tooltip_focus_enter` is called when a widget
-gains keyboard focus and immediately shows + promotes any rich tooltip
-whose `anchor_id` is in the focused subtree (in either direction,
-composite widgets like `Button` attach the tooltip to an inner subtree
-root but keep focus on the outer node, so the check accepts an
-ancestor-or-descendant relationship).
+dwell, and touch users via a hold. Dwell-to-sticky is for those two only.
+`WidgetTree::tooltip_focus_enter` is called when a widget gains keyboard
+focus and arms the show delay of any rich tooltip whose `anchor_id` is in
+the focused subtree (in either direction, composite widgets like `Button`
+attach the tooltip to an inner subtree root but keep focus on the outer
+node, so the check accepts an ancestor-or-descendant relationship). When
+focus rests, the tip is shown and stays a tooltip: it is read through the
+anchor's description, takes no Tab stop and shows no dwell countdown,
+however long focus rests. A keyboard or screen-reader user enters it by
+its Focus action; a pointer coming to rest on the anchor makes it sticky
+as a pointer dwell would, counted from its arrival (a pointer that only
+passes over does not).
 
 Plain tooltips are deliberately **not** auto-shown on focus, their text
 reaches assistive tech through the described control's accessible
@@ -633,7 +638,7 @@ which is where the description sat before any of this and so is always safe:
   (`MenuItem::trailing_hint`) is specific where a tooltip's is
   supplementary, and both land in the one scalar field. The specific wins.
 
-Overlay placement, hover hit-testing, dwell, focus promotion and retirement
+Overlay placement, hover hit-testing, dwell, focus showing and retirement
 all go on reading `anchor_id`. Only the accessibility walk reads the owner.
 
 The AccessKit pass emits one of two forms, depending on whether the tooltip
@@ -657,7 +662,7 @@ with no screen-reader path at all. The text is read at walk time, so a locale
 change or a `Signal<String>` swap is picked up by the same AT re-walk that
 already tracks both.
 
-When focus moves away from a focus-promoted tooltip,
+When focus moves away from a focus-shown tooltip,
 `tooltip_focus_leave_outside` dismisses it unless the new focus is
 inside either the anchor's subtree or the tooltip-content subtree (so
 Tab-into the tooltip to click an inline link keeps it open). Pointer-

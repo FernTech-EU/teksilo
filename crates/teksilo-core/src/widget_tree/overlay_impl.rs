@@ -218,6 +218,7 @@ impl WidgetTree {
             shown_at_real: None,
             shown_at_sink,
             promoted_by_focus: false,
+            dwell_promotes: false,
             armed_by_focus: false,
             armed_by_hold: false,
             suppressed_until_focus_leaves: false,
@@ -536,8 +537,11 @@ impl WidgetTree {
                 entry.shown_at_sim = Some(sim_now);
                 entry.shown_at_real = Some(real_now);
                 entry.promoted_by_focus = by_focus;
+                // A focus rest shows the tip but never pins it, so its dwell
+                // indicator has no countdown to show.
+                entry.dwell_promotes = !by_focus;
                 if let Some(sink) = entry.shown_at_sink.as_ref() {
-                    sink.set(Some(real_now));
+                    sink.set((!by_focus).then_some(real_now));
                 }
             }
         }
@@ -561,7 +565,7 @@ impl WidgetTree {
             let Some(sticky_after) = entry.sticky_after else {
                 continue;
             };
-            if entry.overlay_id.is_none() || entry.is_sticky {
+            if entry.overlay_id.is_none() || entry.is_sticky || !entry.dwell_promotes {
                 continue;
             }
             let elapsed = entry
@@ -1203,24 +1207,21 @@ impl WidgetTree {
 
     /// Called when a widget gains keyboard focus. For any *rich* tooltip (one
     /// with `sticky_after` set) whose anchor contains `widget_id`, **arm** the
-    /// tooltip's ordinary show delay — it appears only if focus comes to rest,
-    /// and even then it is not promoted. Promotion is left to the dwell sweep,
-    /// on the same `sticky_after` clock and the same visible `DwellIndicator`
-    /// the pointer path uses.
+    /// tooltip's ordinary show delay: it appears only if focus comes to rest,
+    /// and it is never promoted by that rest. Only a pointer resting on the
+    /// anchor (or a hold) makes it sticky, through the dwell sweep, and the
+    /// explicit routes (the tip's Focus action, its keys) stay.
     ///
     /// Both halves mirror the pointer deliberately. A tip that appeared the
     /// instant focus arrived strobed across a row of tooltipped buttons as the
     /// user Tabbed through, the same way a tip on pointer-*enter* (rather than
     /// pointer-*pause*) would flicker across a toolbar.
     ///
-    /// Focus arriving is not a statement of intent: Tab passes through
-    /// controls constantly, and a tip that promoted on arrival turned every
-    /// such pass into a persistent `Role::Dialog` that assistive tech
-    /// announces and that claims a slot in the Tab cycle. Sustained focus is
-    /// the keyboard's equivalent of a stationary pointer, so it earns
-    /// stickiness the same way and over the same window — which also leaves
-    /// the user a couple of seconds to move on if they did not want the
-    /// panel. Until then the surface stays an ephemeral `Role::Tooltip`,
+    /// Focus arriving, or resting, is not a statement of intent to enter the
+    /// tip: Tab passes through controls constantly, and a reader resting on
+    /// one to hear it is listening, not asking for a panel. A tip promoted by
+    /// a focus rest turned that into a persistent `Role::Dialog` that took the
+    /// next Tab stop. The surface stays an ephemeral `Role::Tooltip`,
     /// reachable to screen readers through the anchor's own description, and
     /// out of the Tab order (see `cycle_focus`).
     ///
@@ -1536,8 +1537,20 @@ impl WidgetTree {
         let Some(index) = self.tooltip_index_for(widget_id) else {
             return;
         };
-        // Don't restart a timer for a tip that is already showing.
+        // Don't restart a timer for a tip that is already showing. A tip focus
+        // showed does become a pointer dwell, though: the pointer resting on
+        // its anchor earns stickiness over the usual window, from now.
         if self.tooltips[index].overlay_id.is_some() {
+            let entry = &mut self.tooltips[index];
+            if entry.promoted_by_focus && !entry.is_sticky && !entry.dwell_promotes {
+                let real_now = std::time::Instant::now();
+                entry.dwell_promotes = true;
+                entry.shown_at_sim = Some(self.sim_clock);
+                entry.shown_at_real = Some(real_now);
+                if let Some(sink) = entry.shown_at_sink.as_ref() {
+                    sink.set(Some(real_now));
+                }
+            }
             return;
         }
         self.tooltips[index].hover_start = Some(self.sim_clock);
@@ -1801,6 +1814,16 @@ impl WidgetTree {
             .map(|(index, _)| index)
             .collect();
         for index in matching {
+            // A pointer that only passed over the anchor of a tip focus showed
+            // does not leave it to ripen into a sticky one: the tip goes back
+            // to not promoting.
+            let entry = &mut self.tooltips[index];
+            if entry.promoted_by_focus && !entry.is_sticky && entry.dwell_promotes {
+                entry.dwell_promotes = false;
+                if let Some(sink) = entry.shown_at_sink.as_ref() {
+                    sink.set(None);
+                }
+            }
             // Cancel any pending (not-yet-shown) dwell so re-hovering restarts
             // the delay timer.
             self.tooltips[index].hover_start = None;
@@ -1878,7 +1901,7 @@ impl WidgetTree {
             .filter_map(|entry| {
                 let sticky_after = entry.sticky_after?;
                 let shown_at = entry.shown_at_real?;
-                if entry.overlay_id.is_none() || entry.is_sticky {
+                if entry.overlay_id.is_none() || entry.is_sticky || !entry.dwell_promotes {
                     return None;
                 }
                 let dwell_step = sticky_after / super::TOOLTIP_DWELL_STEPS;

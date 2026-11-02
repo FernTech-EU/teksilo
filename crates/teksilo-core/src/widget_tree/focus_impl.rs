@@ -916,8 +916,9 @@ impl WidgetTree {
     ///   paused or focus arrived — not because the user asked to enter it — so
     ///   it takes no Tab stop, matching the ARIA tooltip pattern (its text
     ///   reaches assistive tech through the anchor's description instead).
-    /// * A *promoted* one was earned, by a 2 s dwell in either modality, and
-    ///   its whole point is that its content is reachable. It belongs directly
+    /// * A *promoted* one was earned, by a 2 s pointer dwell, a hold or the
+    ///   tip's Focus action (never by a focus rest), and its whole point is
+    ///   that its content is reachable. It belongs directly
     ///   after the control it describes, the way a disclosure's panel follows
     ///   its button — never at some position decided by arena insertion order.
     ///

@@ -488,6 +488,9 @@ by crate for clarity, not because crates version independently.
   with `ModalRequest::in_tree` is still kept.
 - **Context menus are destroyed after they close** instead of accumulating
   in the widget tree with every right-click.
+- **A rich tooltip shown because keyboard focus rested on its control no
+  longer takes a Tab stop**: only a pointer resting on the control, or a
+  hold, makes it stay open as a panel; its Focus action still enters it.
 
 #### Text
 

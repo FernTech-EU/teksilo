@@ -72,6 +72,8 @@ mod rendering_impl;
 #[cfg(test)]
 mod repaint_trigger_tests;
 mod test_api;
+#[cfg(test)]
+mod tooltip_dwell_tests;
 pub mod touch_route;
 #[cfg(test)]
 mod window_chrome_tests;
@@ -1024,17 +1026,27 @@ struct TooltipEntry {
     /// to drive the dwell indicator without relying on a fragile
     /// paint-gap heuristic.
     shown_at_sink: Option<std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>>,
-    /// True when the tooltip was shown by the keyboard-focus path
-    /// rather than the pointer-hover path. Focus-promoted tooltips
-    /// dismiss when focus moves outside both the anchor and the
-    /// tooltip content subtree (preventing accumulation as the user
-    /// Tabs through a form); pointer-dwelled stickies survive
-    /// focus changes and only dismiss via Escape or click-outside.
+    /// True when the tooltip was *shown* by the keyboard-focus path rather
+    /// than the pointer-hover path (the name is historical: such a tip is no
+    /// longer promoted by its focus rest, see `dwell_promotes`). Focus-shown
+    /// tooltips dismiss when focus moves outside both the anchor and the
+    /// tooltip content subtree (preventing accumulation as the user Tabs
+    /// through a form); pointer-dwelled stickies survive focus changes and
+    /// only dismiss via Escape or click-outside.
     promoted_by_focus: bool,
+    /// Whether the dwell sweep may promote this shown tip to sticky once
+    /// `sticky_after` has run. True for a tip a pointer rest or a hold
+    /// showed; false for one focus showed, until a pointer comes over its
+    /// anchor (and false again when it leaves before the dwell ends). A
+    /// focus rest is not a request to enter the tip: its text reaches a
+    /// screen reader through the anchor's description, and it takes no Tab
+    /// stop.
+    dwell_promotes: bool,
     /// Set while this entry's pending delay was started by keyboard focus
     /// rather than by the pointer. Decides, at show time, that the surface
     /// dismisses on `Escape`/click-outside rather than on pointer-leave (there
-    /// is no pointer in the story), and that it counts as focus-shown.
+    /// is no pointer in the story), that it counts as focus-shown, and that
+    /// its dwell does not promote it.
     armed_by_focus: bool,
     /// Set while this entry's pending delay was started by a **hold** — the
     /// tree-owned long-press route in [`touch_route`].
