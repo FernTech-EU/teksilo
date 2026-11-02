@@ -1075,7 +1075,6 @@ impl RichTextEditor {
             frame_loop::flush_pending_chars(&mut st);
             st.cursor.select(SelectionType::Document);
             st.select_all_level = 0;
-            st.select_all_anchor_cell = None;
         }
         sync_cursor_signals(&self.state);
     }
@@ -1089,7 +1088,6 @@ impl RichTextEditor {
             frame_loop::flush_pending_chars(&mut st);
             st.cursor.clear_selection();
             st.select_all_level = 0;
-            st.select_all_anchor_cell = None;
         }
         sync_cursor_signals(&self.state);
     }
@@ -3729,7 +3727,6 @@ impl EditorHandle {
             frame_loop::flush_pending_chars(&mut st);
             st.cursor.select(SelectionType::Document);
             st.select_all_level = 0;
-            st.select_all_anchor_cell = None;
         }
         sync_cursor_signals(&self.state);
     }

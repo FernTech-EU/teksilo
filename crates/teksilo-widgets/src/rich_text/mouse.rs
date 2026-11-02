@@ -564,7 +564,6 @@ pub(super) fn handle_pointer_event(
                         };
                         st.preferred_x = None;
                         st.select_all_level = 0;
-                        st.select_all_anchor_cell = None;
                         st.mouse_anchored = true;
                     }
                     ctx.request_frame();
@@ -612,7 +611,6 @@ pub(super) fn handle_pointer_event(
                 // Click resets the Ctrl+A ladder so a follow-up
                 // Ctrl+A starts fresh at level 1.
                 st.select_all_level = 0;
-                st.select_all_anchor_cell = None;
                 // The pointer now owns the caret: stand the typewriter pin down
                 // so this click *becomes* the resting position instead of the
                 // page lurching to re-centre on it. Cleared by the next
@@ -771,7 +769,6 @@ pub(super) fn handle_pointer_event(
                         st.cursor_affinity = hit.affinity;
                         st.preferred_x = None;
                         st.select_all_level = 0;
-                        st.select_all_anchor_cell = None;
                     }
                 }
                 sync_cursor_signals(state);
@@ -945,7 +942,6 @@ fn handle_direct_pointer_event(
                 st.cursor_affinity = hit.affinity;
                 st.preferred_x = None;
                 st.select_all_level = 0;
-                st.select_all_anchor_cell = None;
                 st.mouse_anchored = true;
             }
             sync_cursor_signals(state);
@@ -1091,7 +1087,6 @@ pub(super) fn reposition_caret_for_context_menu(state: &SharedState, window_posi
         st.cursor_affinity = hit.affinity;
         st.preferred_x = None;
         st.select_all_level = 0;
-        st.select_all_anchor_cell = None;
     }
     sync_cursor_signals(state);
 }

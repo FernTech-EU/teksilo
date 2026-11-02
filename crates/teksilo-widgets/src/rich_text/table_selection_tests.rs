@@ -646,6 +646,155 @@ fn ctrl_a_in_a_cell_paints_the_cell_then_the_table() {
     }
 }
 
+/// The id of the table the caret stands in, then the table removed through
+/// the document itself, as an application editing its shared document would.
+fn remove_the_caret_table_from_outside(m: &Mounted) {
+    let table_id = m
+        .state
+        .borrow()
+        .cursor
+        .current_table_cell()
+        .expect("setup: the caret must be in a cell")
+        .table
+        .id();
+    m.doc
+        .cursor()
+        .remove_table(table_id)
+        .expect("the table is removed");
+}
+
+/// What `Select All` on the document alone selects: `(anchor, position)`.
+fn whole_document(m: &Mounted) -> (usize, usize) {
+    let probe = m.doc.cursor();
+    probe.select(teksilo_text::text_document::SelectionType::Document);
+    (probe.anchor(), probe.position())
+}
+
+/// The ladder re-reads the caret's cell at every press. A table the
+/// application removed after the first press leaves nothing to widen to, so
+/// the second press selects the document and sets no cell selection.
+#[test]
+fn ctrl_a_after_the_application_removed_the_table_selects_the_document() {
+    let mut m = mount(TABLE_BETWEEN);
+    m.caret(m.at("a1", 1));
+    m.press(Key::A, Modifiers::COMMAND);
+    assert_eq!(m.state.borrow().select_all_level, 1, "setup: level 1");
+
+    remove_the_caret_table_from_outside(&m);
+    m.press(Key::A, Modifiers::COMMAND);
+
+    assert!(
+        !matches!(m.kind(), SelectionKind::Cells(_)),
+        "no cell selection may name the removed table: {:?}",
+        m.kind()
+    );
+    assert_eq!(m.selection(), whole_document(&m));
+    assert_eq!(m.state.borrow().select_all_level, 0);
+}
+
+/// The same between the second and third press, where the ladder widens from
+/// the cell to the whole table.
+#[test]
+fn ctrl_a_after_the_application_removed_the_table_at_the_third_press_selects_the_document() {
+    let mut m = mount(TABLE_BETWEEN);
+    m.caret(m.at("a1", 1));
+    m.press(Key::A, Modifiers::COMMAND);
+    m.press(Key::A, Modifiers::COMMAND);
+    assert!(
+        matches!(m.kind(), SelectionKind::Cells(_)),
+        "setup: level 2 selects the cell"
+    );
+    assert_eq!(m.state.borrow().select_all_level, 2, "setup: level 2");
+
+    // Level 2 left the caret's position where level 1 put it, in the table.
+    remove_the_caret_table_from_outside(&m);
+    m.press(Key::A, Modifiers::COMMAND);
+
+    assert!(
+        !matches!(m.kind(), SelectionKind::Cells(_)),
+        "no cell selection may name the removed table: {:?}",
+        m.kind()
+    );
+    assert_eq!(m.selection(), whole_document(&m));
+    assert_eq!(m.state.borrow().select_all_level, 0);
+}
+
+/// Three Ctrl+A presses from `caret` in the cell at `(row, column)` of the
+/// two by two table: the paragraph (the caret stays in the cell, at the block
+/// edge the selection leaves it on), the cell, then the whole table.
+fn ladder_up_to_the_table(m: &mut Mounted, caret: usize, row: usize, column: usize) {
+    m.caret(caret);
+    m.press(Key::A, Modifiers::COMMAND);
+    assert_eq!(m.state.borrow().select_all_level, 1);
+    assert_eq!(
+        m.caret_cell(),
+        Some((row, column)),
+        "level 1 leaves the caret in the cell"
+    );
+
+    m.press(Key::A, Modifiers::COMMAND);
+    let SelectionKind::Cells(cell) = m.kind() else {
+        panic!("level 2 selects the cell, not {:?}", m.kind());
+    };
+    assert_eq!(
+        (cell.start_row, cell.start_col, cell.end_row, cell.end_col),
+        (row, column, row, column),
+        "level 2 selects the caret's own cell"
+    );
+
+    m.press(Key::A, Modifiers::COMMAND);
+    let SelectionKind::Cells(table) = m.kind() else {
+        panic!("level 3 selects the table, not {:?}", m.kind());
+    };
+    assert_eq!(
+        (
+            table.start_row,
+            table.start_col,
+            table.end_row,
+            table.end_col
+        ),
+        (0, 0, 1, 1),
+        "level 3 selects every cell"
+    );
+}
+
+/// The table's last cell is followed by a paragraph outside the table: the
+/// block edge level 1 leaves the caret on is the boundary between the two.
+#[test]
+fn ctrl_a_from_the_table_last_cell_climbs_cell_then_table() {
+    let mut m = mount(TABLE_BETWEEN);
+    let end_of_d1 = m.at("d1", 2);
+    ladder_up_to_the_table(&mut m, end_of_d1, 1, 1);
+}
+
+/// The same from an empty last cell.
+#[test]
+fn ctrl_a_from_an_empty_last_cell_climbs_cell_then_table() {
+    let mut m = mount(EMPTY_LAST_CELL);
+    let empty = m.at("", 0);
+    ladder_up_to_the_table(&mut m, empty, 1, 1);
+}
+
+/// The fourth press selects the document, which puts the caret at its end,
+/// outside the table: the fifth press finds no cell and selects the document
+/// again, with the level at 0.
+#[test]
+fn ctrl_a_in_a_cell_ends_at_the_document_and_stays_there() {
+    let mut m = mount(TABLE_BETWEEN);
+    let end_of_d1 = m.at("d1", 2);
+    ladder_up_to_the_table(&mut m, end_of_d1, 1, 1);
+
+    m.press(Key::A, Modifiers::COMMAND);
+    assert_eq!(m.selection(), whole_document(&m), "level 4 is the document");
+    assert!(!matches!(m.kind(), SelectionKind::Cells(_)));
+    assert_eq!(m.state.borrow().select_all_level, 0);
+
+    m.press(Key::A, Modifiers::COMMAND);
+    assert_eq!(m.selection(), whole_document(&m), "the fifth stays there");
+    assert!(!matches!(m.kind(), SelectionKind::Cells(_)));
+    assert_eq!(m.state.borrow().select_all_level, 0);
+}
+
 /// A selection holding a table paints the table's cells whole, as the cell
 /// selection it holds, and the text on either side as text.
 #[test]

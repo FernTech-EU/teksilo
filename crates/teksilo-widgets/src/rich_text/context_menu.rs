@@ -309,7 +309,6 @@ fn row_select_all(state: &SharedState) -> MenuItem {
                 st.cursor
                     .select(teksilo_text::text_document::SelectionType::Document);
                 st.select_all_level = 0;
-                st.select_all_anchor_cell = None;
             }
             super::sync_cursor_signals(&state);
             evt_ctx.request_frame();

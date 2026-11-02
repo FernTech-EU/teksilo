@@ -698,31 +698,6 @@ pub(crate) struct EditorState {
     pub on_image_activated: Option<
         std::rc::Rc<dyn Fn(&super::ImageActivation, &mut teksilo_core::widget::EventContext)>,
     >,
-
-    /// `(table_id, row, column, rows, columns)` remembered from the
-    /// Ctrl+A ladder's level-1 call. After `select(BlockUnderCursor)`
-    /// the cursor's position lands on the boundary between the
-    /// selected block and the next, which for a single-block cell's
-    /// last block means `current_table_cell()` would return `None`
-    /// on the following Ctrl+A press — skipping the cell / table
-    /// levels and jumping straight to document. Caching the full
-    /// cell reference at level 1 keeps the ladder stable across
-    /// mid-sequence boundary movement. Cleared whenever
-    /// `select_all_level` resets.
-    pub select_all_anchor_cell: Option<SelectAllAnchorCell>,
-}
-
-/// Cached snapshot of the table cell the caret sat inside at Ctrl+A
-/// level 1. Used by levels 2 and 3 to dodge the boundary-ambiguity
-/// issue where `TextCursor::current_table_cell()` returns `None`
-/// when the cursor is at a block edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SelectAllAnchorCell {
-    pub table_id: usize,
-    pub row: usize,
-    pub column: usize,
-    pub table_rows: usize,
-    pub table_columns: usize,
 }
 
 /// Per-synthetic-NodeId element reference populated during the
@@ -1009,7 +984,6 @@ impl EditorState {
             on_image_resized: None,
             on_image_activated: None,
             select_all_level: 0,
-            select_all_anchor_cell: None,
             accessibility_flow_snapshot: RefCell::new(None),
             synthetic_to_element: RefCell::new(std::collections::HashMap::new()),
         }))

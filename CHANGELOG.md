@@ -418,6 +418,9 @@ by crate for clarity, not because crates version independently.
   next goes after it, as in TextEdit and Word. Typing `abc def`, undoing,
   redoing and typing `Y` gave `abc Ydef`. An undo of a deletion now leaves
   the caret after the text it brings back, where it landed in front of it.
+- **Ctrl+A in a table cell no longer acts on a table the application
+  removed between two presses.** The `RichTextEditor` selects the document
+  instead of a cell of a table that is gone.
 - **The `password-field` example's Username field has an accessible name.**
   A screen reader announced it as an unnamed edit field.
 

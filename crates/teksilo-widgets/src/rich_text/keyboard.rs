@@ -277,7 +277,6 @@ pub(super) fn handle_key(
     let action: KeyAction = {
         let mut st = state.borrow_mut();
         st.select_all_level = 0;
-        st.select_all_anchor_cell = None;
         // A key that types text joins the batch below. Any other acts at
         // once, so what was typed before it in this frame goes in first.
         let types_text = !ctrl
@@ -773,7 +772,6 @@ pub(super) fn run_standard_edit(
         // anything else in between starts it again at level 1.
         if command != StandardEdit::SelectAll {
             st.select_all_level = 0;
-            st.select_all_anchor_cell = None;
         }
         if declines(&st, command, empty_history_passes_on) {
             crate::common::input_trace::trace(format_args!("{command:?} declined"));
@@ -847,7 +845,6 @@ pub(super) fn run_format_shortcut(
         super::frame_loop::flush_pending_chars(&mut st);
         // Not select-all, so the select-all ladder starts again at level 1.
         st.select_all_level = 0;
-        st.select_all_anchor_cell = None;
         let filter = st.policy.command_filter;
         match command {
             FormatShortcut::Bold if filter.accepts(EditCommandKind::ToggleBold) => {
@@ -1246,62 +1243,41 @@ pub(super) fn chase_caret_into_view_with(
 
 /// Ctrl+A escalation ladder. Mirrors the godot reference's `select_all`.
 /// When the caret sits inside a table cell, four consecutive presses
-/// widen the selection: paragraph → cell → table → document, then
-/// wrap back to paragraph on the fifth. Outside a table Ctrl+A is
-/// single-shot `SelectionType::Document` with `select_all_level = 0`.
+/// widen the selection: paragraph -> cell -> table -> document. The document
+/// selection leaves the caret at the document's end, so the fifth press starts
+/// the ladder again at the paragraph only when that end is inside a table; at
+/// the end of a document that finishes outside one it selects the document
+/// again. Outside a table Ctrl+A is single-shot `SelectionType::Document`
+/// with `select_all_level = 0`.
 ///
-/// **Mid-ladder boundary stability**: after level 1 applies
-/// `select(BlockUnderCursor)`, the cursor's `position` lands at the
-/// end of the selected block, which for a single-block cell's last
-/// block is the boundary between the cell and whatever follows —
-/// `current_table_cell()` may then return `None` and the ladder
-/// would skip cell/table levels and jump straight to document. To
-/// prevent that we cache the cell reference on the first ladder
-/// call (`select_all_anchor_cell`) and reuse it for levels 2 and 3.
-/// The cache is cleared whenever `select_all_level` resets.
+/// The ladder reads the caret's cell again at every press. On
+/// text-document 1.12.3 and later `current_table_cell()` answers with the
+/// caret's cell at a block edge too, which is where level 1's
+/// `select(BlockUnderCursor)` leaves the position, and levels 2 and 3 leave
+/// position and anchor where level 1 put them. Nothing is remembered between
+/// presses, so a table the application removed in between ends the ladder
+/// at the document instead of aiming at a table that is gone.
 pub(super) fn apply_select_all_ladder(st: &mut EditorState) {
-    use super::state::SelectAllAnchorCell;
     let next_level = st.select_all_level + 1;
 
-    // Resolve the cell snapshot for this ladder step. At level 1 we
-    // read everything fresh from the cursor and cache it. At levels
-    // 2 and 3 we reuse the cached snapshot so a boundary-adjacent
-    // cursor (produced by level 1's `select(BlockUnderCursor)`)
-    // doesn't short-circuit the ladder via a stale
-    // `current_table_cell() == None` result.
-    let cell_info: Option<SelectAllAnchorCell> = if next_level == 1 {
-        st.cursor.current_table_cell().map(|c| SelectAllAnchorCell {
-            table_id: c.table.id(),
-            row: c.row,
-            column: c.column,
-            table_rows: c.table.rows(),
-            table_columns: c.table.columns(),
-        })
-    } else {
-        st.select_all_anchor_cell
-    };
-
-    let Some(cell) = cell_info else {
+    let Some(cell) = st.cursor.current_table_cell() else {
         st.cursor.select(SelectionType::Document);
         st.select_all_level = 0;
-        st.select_all_anchor_cell = None;
         return;
     };
-
-    if next_level == 1 {
-        st.select_all_anchor_cell = Some(cell);
-    }
+    let (table_id, row, column) = (cell.table.id(), cell.row, cell.column);
+    let (table_rows, table_columns) = (cell.table.rows(), cell.table.columns());
 
     match next_level {
         1 => st.cursor.select(SelectionType::BlockUnderCursor),
-        2 => st.select_table_cell(cell.table_id, cell.row, cell.column),
+        2 => st.select_table_cell(table_id, row, column),
         3 => {
             st.select_cell_range(
-                cell.table_id,
+                table_id,
                 0,
                 0,
-                cell.table_rows.saturating_sub(1),
-                cell.table_columns.saturating_sub(1),
+                table_rows.saturating_sub(1),
+                table_columns.saturating_sub(1),
             );
         }
         _ => {
@@ -1309,9 +1285,6 @@ pub(super) fn apply_select_all_ladder(st: &mut EditorState) {
         }
     }
     st.select_all_level = if next_level >= 4 { 0 } else { next_level };
-    if st.select_all_level == 0 {
-        st.select_all_anchor_cell = None;
-    }
 }
 
 /// Enter: a paragraph break at the caret, as LibreOffice Writer makes it.
