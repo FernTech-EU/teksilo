@@ -188,8 +188,10 @@ impl WidgetTree {
             use std::collections::HashMap;
 
             // Row roles that take their name from content. A row inside a
-            // row (never emitted today, but cheap to be correct about) owns
-            // its own name and terminates the search.
+            // row (a `TreeView` nests each row under its parent row on
+            // Windows and Linux) owns its own name: the search stops there
+            // and does not descend, which is what keeps a parent row's name
+            // its own content's rather than its first child row's.
             fn names_from_content(role: Role) -> bool {
                 matches!(role, Role::TreeItem | Role::ListBoxOption)
             }
@@ -574,33 +576,20 @@ impl WidgetTree {
         //   Exclude  — neither push nor recurse: descendants vanish from AT
         //   Merge    — collect descendants' label/description/value/actions
         //              into THIS node, then prune (no push, no recurse)
+        // The children this node will recurse into: every active child it
+        // pushed or a redirect claimed (a claimed child is still built, under
+        // the node the claimer attaches it to), and never a duplicate. Since
+        // `accessibility_children` may name any descendant, two parents can
+        // claim one id; building it twice would emit its node twice.
+        let mut to_recurse: Vec<WidgetId> = Vec::new();
         match subtree_mode {
             AccessSubtreeMode::Inherit => {
                 for &child_id in children {
                     if self.arena.is_active(child_id) {
                         let child_nid = widget_id_to_node_id(child_id);
-                        // AT-redirect hook (scene logical-tree auto-graft):
-                        // walk up the arena from `id` asking every
-                        // opted-in ancestor whether it claims this
-                        // descendant. First `Some(_)` wins, scanned
-                        // bottom-up so closest ancestor takes
-                        // priority. The immediate parent is queried
-                        // first if it opts in — direct-child
-                        // relocation is the special case of an
-                        // ancestor walk of length zero.
-                        //
-                        // Performance: most widgets default
-                        // `wants_descendant_redirects = false` and
-                        // are skipped without calling the hook, so
-                        // the walk is O(opted-in ancestors) per
-                        // child push, typically 0 or 1 for a
-                        // SceneView-rooted subtree.
-                        if self.ancestor_chain_redirects(id, child_id) {
-                            // Still record so a sibling can't
-                            // double-claim the same descendant.
-                            seen_children.insert(child_nid, id);
-                            continue;
-                        }
+                        // Checked before the redirect, so a child claimed
+                        // twice is reported and built once whichever way
+                        // either claim came.
                         if let Some(&prior_parent) = seen_children.get(&child_nid) {
                             eprintln!(
                                 "Teksilo bug: duplicate accessibility child {:?}: \
@@ -610,7 +599,27 @@ impl WidgetTree {
                             );
                             continue;
                         }
+                        // AT-redirect hook (scene logical-tree auto-graft):
+                        // walk up the arena from `id` asking every
+                        // opted-in ancestor whether it claims this
+                        // descendant. First `Some(_)` wins, scanned
+                        // bottom-up so closest ancestor takes
+                        // priority. The immediate parent is queried
+                        // first if it opts in, direct-child
+                        // relocation being the special case of an
+                        // ancestor walk of length zero.
+                        //
+                        // Performance: most widgets default
+                        // `wants_descendant_redirects = false` and
+                        // are skipped without calling the hook, so
+                        // the walk is O(opted-in ancestors) per
+                        // child push, typically 0 or 1 for a
+                        // SceneView-rooted subtree.
                         seen_children.insert(child_nid, id);
+                        to_recurse.push(child_id);
+                        if self.ancestor_chain_redirects(id, child_id) {
+                            continue;
+                        }
                         builder.inner_mut().push_child(child_nid);
                     }
                 }
@@ -765,7 +774,7 @@ impl WidgetTree {
             } else {
                 teksilo_canvas::Transform2D::IDENTITY
             };
-            for &child_id in children {
+            for &child_id in &to_recurse {
                 self.build_accessibility_recursive(
                     child_id,
                     child_space,

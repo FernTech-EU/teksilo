@@ -198,6 +198,12 @@ by crate for clarity, not because crates version independently.
 - **A drag handed to the platform on Wayland, X11 and Windows stays an in-app
   drag until the platform has started it.** A release before that ends the
   drag as `Cancelled`, with no drop.
+- **`Widget::accessibility_children` may name any active descendant**, not
+  only a child, to place it elsewhere in the accessibility tree; each id is
+  emitted once, and a second claim is skipped. New
+  `SyntheticKind::TreeAncestor`, accepted by `push_scene_child` and
+  `push_scene_child_under` (an exhaustive `match` on `SyntheticKind` needs
+  a new arm).
 - **Breaking.** `WidgetEvent::ImeCommit` is `{ text, origin, replacement }`
   where it was `{ text }`: `origin` is an `ImeOrigin` and `replacement` an
   optional character range of the field's text to replace. A `match` on it

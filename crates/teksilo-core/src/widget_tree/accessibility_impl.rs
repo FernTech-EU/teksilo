@@ -2308,6 +2308,145 @@ mod tests {
         assert_a11y_tree_valid(&update);
     }
 
+    /// A container whose AT children are set after the ids exist, and which
+    /// may claim descendants through the redirect hook, attaching them under
+    /// a synthetic group of its own.
+    #[derive(Debug)]
+    struct AtParent {
+        kids: Vec<WidgetId>,
+        at: std::rc::Rc<std::cell::RefCell<Option<Vec<WidgetId>>>>,
+        claims: std::rc::Rc<std::cell::RefCell<Vec<WidgetId>>>,
+    }
+
+    impl AtParent {
+        fn new(kids: Vec<WidgetId>) -> Self {
+            Self {
+                kids,
+                at: Default::default(),
+                claims: Default::default(),
+            }
+        }
+    }
+
+    impl crate::widget::Widget for AtParent {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+        fn children(&self) -> Vec<WidgetId> {
+            self.kids.clone()
+        }
+        fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+            self.at.borrow().clone()
+        }
+        fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
+            builder.set_role(accesskit::Role::Group);
+            let claims = self.claims.borrow();
+            if claims.is_empty() {
+                return;
+            }
+            let group =
+                builder.push_scene_child(1, crate::accessibility::SyntheticKind::SceneGroup, |b| {
+                    b.set_role(accesskit::Role::Group)
+                });
+            for &c in claims.iter() {
+                builder
+                    .attach_scene_child_under(group, crate::accessibility::widget_id_to_node_id(c));
+            }
+        }
+        fn wants_descendant_redirects(&self) -> bool {
+            !self.claims.borrow().is_empty()
+        }
+        fn a11y_redirect_descendant(
+            &self,
+            _self_id: WidgetId,
+            descendant: WidgetId,
+        ) -> Option<accesskit::NodeId> {
+            self.claims.borrow().contains(&descendant).then(|| {
+                crate::accessibility::synthetic_node_id(
+                    _self_id,
+                    1,
+                    crate::accessibility::SyntheticKind::SceneGroup,
+                )
+            })
+        }
+    }
+
+    fn node_count(update: &accesskit::TreeUpdate, id: WidgetId) -> usize {
+        let nid = crate::accessibility::widget_id_to_node_id(id);
+        update.nodes.iter().filter(|(n, _)| *n == nid).count()
+    }
+
+    fn parents_of(update: &accesskit::TreeUpdate, id: WidgetId) -> Vec<accesskit::NodeId> {
+        let nid = crate::accessibility::widget_id_to_node_id(id);
+        update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.children().contains(&nid))
+            .map(|(p, _)| *p)
+            .collect()
+    }
+
+    /// `accessibility_children` may name a descendant that is not a child:
+    /// it is emitted once, under the widget that named it.
+    #[test]
+    fn an_accessibility_child_may_be_a_deeper_descendant() {
+        let mut tree = WidgetTree::new();
+        let c = tree.add(FillWidget::new().label("C"));
+        let a_widget = AtParent::new(vec![c]);
+        // A hands C to its ancestor: it lists no AT child of its own.
+        *a_widget.at.borrow_mut() = Some(Vec::new());
+        let a = tree.add(a_widget);
+        let b = tree.add(FillWidget::new().label("B"));
+        let r_widget = AtParent::new(vec![a, b]);
+        let r_at = r_widget.at.clone();
+        let r = tree.add(r_widget);
+        *r_at.borrow_mut() = Some(vec![a, b, c]);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let update = tree.sync_accessibility();
+        assert_eq!(node_count(&update, c), 1);
+        assert_eq!(
+            parents_of(&update, c),
+            vec![crate::accessibility::widget_id_to_node_id(r)]
+        );
+        assert_a11y_tree_valid(&update);
+    }
+
+    /// A descendant claimed twice is built once, whether the second claim
+    /// names it again or a redirect claimed it first.
+    #[test]
+    fn a_child_claimed_twice_is_built_once() {
+        // The same id twice in one list.
+        let mut tree = WidgetTree::new();
+        let a = tree.add(FillWidget::new().label("A"));
+        let r_widget = AtParent::new(vec![a]);
+        *r_widget.at.borrow_mut() = Some(vec![a, a]);
+        tree.add(r_widget);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let update = tree.sync_accessibility();
+        assert_eq!(node_count(&update, a), 1);
+        assert_a11y_tree_valid(&update);
+
+        // A redirect claims C (from R's own list) and C's arena parent A
+        // lists it too: the walk reaches C twice.
+        let mut tree = WidgetTree::new();
+        let c = tree.add(FillWidget::new().label("C"));
+        let a = tree.add(AtParent::new(vec![c]));
+        let r_widget = AtParent::new(vec![a]);
+        let r_at = r_widget.at.clone();
+        r_widget.claims.borrow_mut().push(c);
+        tree.add(r_widget);
+        *r_at.borrow_mut() = Some(vec![c, a]);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        let update = tree.sync_accessibility();
+        assert_eq!(node_count(&update, c), 1, "C is built once");
+        assert_eq!(parents_of(&update, c).len(), 1, "and has one parent");
+        assert_a11y_tree_valid(&update);
+    }
+
     #[test]
     fn no_dangling_relationships_in_basic_tree() {
         let mut tree = WidgetTree::new();

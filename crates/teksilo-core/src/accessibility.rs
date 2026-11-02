@@ -310,6 +310,17 @@ pub enum SyntheticKind {
     RichTextList = 19,
     /// One item of a [`SyntheticKind::RichTextList`], keyed by its block id.
     RichTextListItem = 20,
+    /// A stand-in for an ancestor row of a tree that virtualization has not
+    /// realized, emitted by a tree view's body pane.
+    ///
+    /// A screen reader counts a tree row's level from the tree items above
+    /// it, and reads its "N of M" from the node it hangs from. When the
+    /// realized window starts inside a branch, the rows whose parent is
+    /// scrolled away hang from one of these instead, so they keep their true
+    /// ancestor count and their own sibling set size. Keyed by the ancestor's
+    /// flat index, which no scroll within the branch changes. It has no
+    /// visual counterpart and is not focusable.
+    TreeAncestor = 21,
 }
 
 /// A live-region announcement every platform adapter would have made.
@@ -1368,11 +1379,13 @@ impl AccessNodeBuilder {
     /// `kind` must be one of the synthetic kinds this path
     /// allocates: [`SyntheticKind::SceneItem`],
     /// [`SyntheticKind::SceneGroup`], [`SyntheticKind::SceneMagnet`],
-    /// [`SyntheticKind::SceneHandle`], [`SyntheticKind::ChartMark`] or
-    /// [`SyntheticKind::LaneMark`];
-    /// passing any other variant panics in debug. The last two are
-    /// how a chart or a margin lane emits one node per datum from
-    /// its own `accessibility()`.
+    /// [`SyntheticKind::SceneHandle`], [`SyntheticKind::ChartMark`],
+    /// [`SyntheticKind::LaneMark`], [`SyntheticKind::WebPageNode`] or
+    /// [`SyntheticKind::TreeAncestor`];
+    /// passing any other variant panics in debug. `ChartMark` and
+    /// `LaneMark` are how a chart or a margin lane emits one node per
+    /// datum from its own `accessibility()`; `TreeAncestor` is how a tree
+    /// view stands in for an ancestor row it has not realized.
     ///
     /// Any further synthetic children the closure pushes (a
     /// `SceneGroup` containing nested `SceneItem`s) are forwarded into the parent's
@@ -1396,8 +1409,9 @@ impl AccessNodeBuilder {
                     | SyntheticKind::ChartMark
                     | SyntheticKind::LaneMark
                     | SyntheticKind::WebPageNode
+                    | SyntheticKind::TreeAncestor
             ),
-            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark or ::WebPageNode"
+            "push_scene_child requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark, ::WebPageNode or ::TreeAncestor"
         );
         let Some(owner) = self.owner else {
             debug_assert!(
@@ -1479,8 +1493,9 @@ impl AccessNodeBuilder {
                     | SyntheticKind::ChartMark
                     | SyntheticKind::LaneMark
                     | SyntheticKind::WebPageNode
+                    | SyntheticKind::TreeAncestor
             ),
-            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark or ::WebPageNode"
+            "push_scene_child_under requires SyntheticKind::SceneItem, ::SceneGroup, ::SceneMagnet, ::SceneHandle, ::ChartMark, ::LaneMark, ::WebPageNode or ::TreeAncestor"
         );
         let Some(owner) = self.owner else {
             debug_assert!(
