@@ -328,16 +328,17 @@ impl WidgetTree {
             .or_else(|| self.tooltip_route(path))
     }
 
-    /// The innermost context-menu factory at or above the pressed node, and the
-    /// node carrying it — which is the node `show_context_menu_for` will reach,
-    /// since it walks up from the target the same way.
+    /// The innermost context-menu factory or contribution at or above the
+    /// pressed node, and the node carrying it, which is the closest node
+    /// `show_context_menu_for` asks, since it walks up from the target the
+    /// same way.
     fn context_menu_route(&self, path: &[WidgetId]) -> Option<(Route, WidgetId)> {
         path.iter()
             .copied()
             .find(|&id| {
-                self.arena
-                    .get(id)
-                    .is_some_and(|node| node.context_menu_factory.is_some())
+                self.arena.get(id).is_some_and(|node| {
+                    node.context_menu_factory.is_some() || node.context_menu_contribution.is_some()
+                })
             })
             .map(|owner| (Route::ContextMenu, owner))
     }

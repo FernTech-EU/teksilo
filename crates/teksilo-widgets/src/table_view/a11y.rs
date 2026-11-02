@@ -89,6 +89,9 @@ pub(crate) struct CellA11y {
     /// How many columns the cell covers, when it covers more than its own.
     /// See `with_column_span`.
     column_span: Option<usize>,
+    /// Where a keyboard menu request on this cell starts, when that is not
+    /// `child`: the delegate inside the tree column's indent and twist arrow.
+    menu_target: Option<WidgetId>,
 }
 
 impl CellA11y {
@@ -110,6 +113,7 @@ impl CellA11y {
             level_1based: None,
             expanded: None,
             column_span: None,
+            menu_target: None,
         }
     }
 
@@ -211,9 +215,23 @@ impl CellA11y {
         self.column_span = span;
         self
     }
+
+    /// Start a keyboard menu request on this cell at `target`, the cell
+    /// delegate's root, when chrome wraps it (the tree column's indent).
+    pub(crate) fn with_menu_target(mut self, target: WidgetId) -> Self {
+        self.menu_target = Some(target);
+        self
+    }
 }
 
 impl Widget for CellA11y {
+    /// The cell's content: a keyboard menu request starts at the cell
+    /// delegate's root, where an application's per-cell `.context_menu(..)`
+    /// sits.
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        Some(self.menu_target.unwrap_or(self.child))
+    }
+
     fn layout_response(
         &self,
         proposal: SizeProposal,
@@ -286,6 +304,9 @@ impl Widget for CellA11y {
 #[derive(Debug)]
 pub(crate) struct TreeRowA11y {
     child: WidgetId,
+    /// Where the menu key and a screen reader's "show menu" on this row
+    /// start. See [`RowMenuTarget`].
+    menu_target: Option<RowMenuTarget>,
     row_index_1based: usize,
     /// 1-based hierarchy level (root rows are 1).
     level_1based: usize,
@@ -319,6 +340,7 @@ impl TreeRowA11y {
     ) -> Self {
         Self {
             child,
+            menu_target: None,
             row_index_1based,
             level_1based,
             expanded,
@@ -349,7 +371,57 @@ impl TreeRowA11y {
     }
 }
 
+impl TreeRowA11y {
+    pub(crate) fn menu_target(mut self, target: RowMenuTarget) -> Self {
+        self.menu_target = Some(target);
+        self
+    }
+}
+
+/// Where a table row sends the menu key and a screen reader's "show menu"
+/// action: the focused cell when it is in this row, else the row's first
+/// displayed cell, so the menu a cell delegate carries opens with the row's
+/// Move submenu merged in, as a right click on the cell does. Without it a
+/// `ShowContextMenu` on the row node opened the row's Move rows alone.
+#[derive(Debug, Clone)]
+pub(crate) struct RowMenuTarget {
+    focused: teksilo_core::signal::Signal<Option<(usize, usize)>>,
+    row: usize,
+    /// The row's cells by display position.
+    cells: Vec<(usize, WidgetId)>,
+}
+
+impl RowMenuTarget {
+    pub(crate) fn new(
+        focused: teksilo_core::signal::Signal<Option<(usize, usize)>>,
+        row: usize,
+        cells: Vec<(usize, WidgetId)>,
+    ) -> Self {
+        Self {
+            focused,
+            row,
+            cells,
+        }
+    }
+
+    pub(crate) fn resolve(&self) -> Option<WidgetId> {
+        let column = self
+            .focused
+            .get()
+            .filter(|(row, _)| *row == self.row)
+            .map(|(_, column)| column);
+        column
+            .and_then(|column| self.cells.iter().find(|(at, _)| *at == column))
+            .or_else(|| self.cells.iter().min_by_key(|(at, _)| *at))
+            .map(|(_, id)| *id)
+    }
+}
+
 impl Widget for TreeRowA11y {
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        self.menu_target.as_ref()?.resolve()
+    }
+
     fn layout_response(
         &self,
         proposal: SizeProposal,

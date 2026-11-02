@@ -531,3 +531,20 @@ chart-pie-summary =
        *[other] { $slices } sektoroj
     }
 chart-legend-name = Legendo de la diagramo
+
+
+data-view-move-submenu = Movi
+data-view-move-up = Movi supren
+data-view-move-down = Movi suben
+data-view-move-to-top = Movi al la supro
+data-view-move-to-bottom = Movi al la malsupro
+data-view-move-left = Movi maldekstren
+data-view-move-right = Movi dekstren
+data-view-move-to-start = Movi al la komenco
+data-view-move-to-end = Movi al la fino
+data-view-move-into-previous = Movi en la antaŭan
+data-view-move-out-one-level = Movi unu nivelon eksteren
+a11y-data-view-moved-to-position = { $name } movita al { $position } el { $count }
+a11y-data-view-moved-to-position-unnamed = Movita al { $position } el { $count }
+a11y-data-view-moved-to-level = { $name } movita al nivelo { $level }
+a11y-data-view-moved-to-level-unnamed = Movita al nivelo { $level }

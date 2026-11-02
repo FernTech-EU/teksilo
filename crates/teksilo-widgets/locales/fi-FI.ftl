@@ -569,3 +569,20 @@ chart-pie-summary =
        *[other] { $slices } sektoria
     }
 chart-legend-name = Kaavion selite
+
+
+data-view-move-submenu = Siirrä
+data-view-move-up = Siirrä ylös
+data-view-move-down = Siirrä alas
+data-view-move-to-top = Siirrä ylimmäksi
+data-view-move-to-bottom = Siirrä alimmaksi
+data-view-move-left = Siirrä vasemmalle
+data-view-move-right = Siirrä oikealle
+data-view-move-to-start = Siirrä alkuun
+data-view-move-to-end = Siirrä loppuun
+data-view-move-into-previous = Siirrä edellisen sisään
+data-view-move-out-one-level = Siirrä taso ylemmäs
+a11y-data-view-moved-to-position = { $name } siirretty kohtaan { $position }/{ $count }
+a11y-data-view-moved-to-position-unnamed = Siirretty kohtaan { $position }/{ $count }
+a11y-data-view-moved-to-level = { $name } siirretty tasolle { $level }
+a11y-data-view-moved-to-level-unnamed = Siirretty tasolle { $level }

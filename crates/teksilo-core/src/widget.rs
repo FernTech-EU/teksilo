@@ -569,10 +569,32 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
     /// about. The dispatcher then walks up from there, so a view whose rows
     /// carry no factory of their own still finds the container's.
     ///
+    /// Followed from hop to hop, so each widget names only its next one: a
+    /// view names its current row, the row names the delegate inside it (a
+    /// table's row its cell, the cell its delegate). The keyboard then reaches
+    /// the factory a right click on the row reaches when it is on the widget
+    /// the delegate returns; one on a deeper descendant is reached by a right
+    /// click only. A screen reader's `ShowContextMenu` on any of these nodes
+    /// starts at the same place.
+    ///
     /// Default: `None` — the focused widget is the target, which is right for
     /// every widget that is itself the thing the user is pointing at.
     fn context_menu_key_target(&self) -> Option<WidgetId> {
         None
+    }
+
+    /// Take a section another node adds to this context menu (see
+    /// [`ContextMenuContribution`](crate::widget_builder::ContextMenuContribution)),
+    /// appending it after this menu's own rows. Called once per section,
+    /// before the menu is built, innermost contributor first.
+    ///
+    /// `MenuList` takes any section. The default refuses it and hands it back,
+    /// and the menu opens without it.
+    fn append_context_menu_section(
+        &mut self,
+        section: Box<dyn Widget>,
+    ) -> Result<(), Box<dyn Widget>> {
+        Err(section)
     }
 
     /// Return the child widget IDs that this widget manages.
@@ -1045,6 +1067,13 @@ impl<W: Widget + ?Sized> Widget for Box<W> {
 
     fn context_menu_key_target(&self) -> Option<WidgetId> {
         (**self).context_menu_key_target()
+    }
+
+    fn append_context_menu_section(
+        &mut self,
+        section: Box<dyn Widget>,
+    ) -> Result<(), Box<dyn Widget>> {
+        (**self).append_context_menu_section(section)
     }
 
     fn children(&self) -> Vec<WidgetId> {

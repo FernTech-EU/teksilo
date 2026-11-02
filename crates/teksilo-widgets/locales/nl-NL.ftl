@@ -573,3 +573,20 @@ chart-pie-summary =
        *[other] { $slices } segmenten
     }
 chart-legend-name = Legenda van de grafiek
+
+
+data-view-move-submenu = Verplaatsen
+data-view-move-up = Omhoog verplaatsen
+data-view-move-down = Omlaag verplaatsen
+data-view-move-to-top = Naar boven verplaatsen
+data-view-move-to-bottom = Naar onder verplaatsen
+data-view-move-left = Naar links verplaatsen
+data-view-move-right = Naar rechts verplaatsen
+data-view-move-to-start = Naar het begin verplaatsen
+data-view-move-to-end = Naar het einde verplaatsen
+data-view-move-into-previous = In vorige verplaatsen
+data-view-move-out-one-level = Eén niveau omhoog verplaatsen
+a11y-data-view-moved-to-position = { $name } verplaatst naar positie { $position } van { $count }
+a11y-data-view-moved-to-position-unnamed = Verplaatst naar positie { $position } van { $count }
+a11y-data-view-moved-to-level = { $name } verplaatst naar niveau { $level }
+a11y-data-view-moved-to-level-unnamed = Verplaatst naar niveau { $level }

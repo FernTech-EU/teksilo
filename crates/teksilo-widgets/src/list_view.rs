@@ -982,11 +982,10 @@ impl<T: 'static> ListView<T> {
     /// honest answer — there is no widget for it, so there is no node to point
     /// at and nothing on screen for a menu or an announcement to be about.
     fn current_row_widget(&self) -> Option<WidgetId> {
-        let index = self.focused_index.get().or_else(|| {
-            self.row_selection
-                .as_ref()
-                .and_then(|s| s.selected_indices().first().copied())
-        })?;
+        let index = self
+            .focused_index
+            .get()
+            .or_else(|| self.row_selection.as_ref().and_then(|s| s.first_selected()))?;
         let map = self.row_map.borrow();
         map.iter()
             .find(|(i, _)| *i == index)

@@ -600,3 +600,20 @@ chart-pie-summary =
        *[other] { $slices } قطاع
     }
 chart-legend-name = وسيلة إيضاح المخطط
+
+
+data-view-move-submenu = نقل
+data-view-move-up = نقل لأعلى
+data-view-move-down = نقل لأسفل
+data-view-move-to-top = نقل إلى الأعلى
+data-view-move-to-bottom = نقل إلى الأسفل
+data-view-move-left = نقل لليسار
+data-view-move-right = نقل لليمين
+data-view-move-to-start = نقل إلى البداية
+data-view-move-to-end = نقل إلى النهاية
+data-view-move-into-previous = نقل إلى داخل السابق
+data-view-move-out-one-level = نقل مستوى واحد للخارج
+a11y-data-view-moved-to-position = نُقل { $name } إلى الموضع { $position } من { $count }
+a11y-data-view-moved-to-position-unnamed = نُقل إلى الموضع { $position } من { $count }
+a11y-data-view-moved-to-level = نُقل { $name } إلى المستوى { $level }
+a11y-data-view-moved-to-level-unnamed = نُقل إلى المستوى { $level }

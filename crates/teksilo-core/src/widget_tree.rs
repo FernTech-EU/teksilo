@@ -28,6 +28,8 @@ mod announcer_tests;
 #[cfg(test)]
 mod can_handle_tests;
 #[cfg(test)]
+mod context_menu_contribution_tests;
+#[cfg(test)]
 mod device_scale_tests;
 mod drag_drop_impl;
 mod focus_impl;
@@ -5136,6 +5138,9 @@ impl WidgetTree {
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
                         }
+                        if handler_set.context_menu_contribution.is_some() {
+                            node.context_menu_contribution = handler_set.context_menu_contribution;
+                        }
                         if let Some(sig) = handler_set.focus_within {
                             node.focus_within_signal = Some(sig);
                         }
@@ -5338,6 +5343,9 @@ impl WidgetTree {
                         }
                         if handler_set.context_menu_factory.is_some() {
                             node.context_menu_factory = handler_set.context_menu_factory;
+                        }
+                        if handler_set.context_menu_contribution.is_some() {
+                            node.context_menu_contribution = handler_set.context_menu_contribution;
                         }
                         if let Some(sig) = handler_set.focus_within {
                             node.focus_within_signal = Some(sig);

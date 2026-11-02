@@ -42,7 +42,7 @@
 
 use teksilo_core::event::{Key, Modifiers};
 use teksilo_core::widget_id::WidgetId;
-use teksilo_i18n::{LocalizedString, lit};
+use teksilo_i18n::{LocalizedString, tr_widget};
 
 /// Which way a move goes within an ordered collection.
 ///
@@ -99,8 +99,8 @@ impl TreeMove {
     /// What this move is called.
     pub fn label(self) -> LocalizedString {
         match self {
-            Self::Indent => lit!("Move Into Previous"),
-            Self::Outdent => lit!("Move Out One Level"),
+            Self::Indent => tr_widget!(data_view_move_into_previous()),
+            Self::Outdent => tr_widget!(data_view_move_out_one_level()),
         }
     }
 
@@ -257,14 +257,14 @@ impl OrderedMove {
     /// What this move is called on the given axis.
     pub fn label(self, axis: MoveAxis) -> LocalizedString {
         match (self, axis) {
-            (Self::Prev, MoveAxis::Vertical) => lit!("Move Up"),
-            (Self::Next, MoveAxis::Vertical) => lit!("Move Down"),
-            (Self::First, MoveAxis::Vertical) => lit!("Move to Top"),
-            (Self::Last, MoveAxis::Vertical) => lit!("Move to Bottom"),
-            (Self::Prev, MoveAxis::Horizontal) => lit!("Move Left"),
-            (Self::Next, MoveAxis::Horizontal) => lit!("Move Right"),
-            (Self::First, MoveAxis::Horizontal) => lit!("Move to Start"),
-            (Self::Last, MoveAxis::Horizontal) => lit!("Move to End"),
+            (Self::Prev, MoveAxis::Vertical) => tr_widget!(data_view_move_up()),
+            (Self::Next, MoveAxis::Vertical) => tr_widget!(data_view_move_down()),
+            (Self::First, MoveAxis::Vertical) => tr_widget!(data_view_move_to_top()),
+            (Self::Last, MoveAxis::Vertical) => tr_widget!(data_view_move_to_bottom()),
+            (Self::Prev, MoveAxis::Horizontal) => tr_widget!(data_view_move_left()),
+            (Self::Next, MoveAxis::Horizontal) => tr_widget!(data_view_move_right()),
+            (Self::First, MoveAxis::Horizontal) => tr_widget!(data_view_move_to_start()),
+            (Self::Last, MoveAxis::Horizontal) => tr_widget!(data_view_move_to_end()),
         }
     }
 
@@ -316,10 +316,17 @@ impl OrderedMove {
 pub fn move_announcement(name: Option<&str>, destination: usize, count: usize) -> String {
     let position = destination + 1;
     match name {
-        Some(name) if !name.is_empty() => {
-            lit!(format!("{name} moved to {position} of {count}")).resolve_now()
-        }
-        _ => lit!(format!("Moved to {position} of {count}")).resolve_now(),
+        Some(name) if !name.is_empty() => tr_widget!(a11y_data_view_moved_to_position(
+            name = name.to_owned(),
+            position = position,
+            count = count
+        ))
+        .resolve_now(),
+        _ => tr_widget!(a11y_data_view_moved_to_position_unnamed(
+            position = position,
+            count = count
+        ))
+        .resolve_now(),
     }
 }
 
@@ -535,12 +542,16 @@ impl RowCommands {
         Some(list)
     }
 
-    /// Install the AccessKit custom actions and the context menu on `row_id`.
+    /// Install the AccessKit custom actions and the Move rows on `row_id`.
     ///
-    /// The menu goes on the row rather than on the view because the row is what
-    /// the command is *about*, and because the framework's factory is then the
-    /// one an application's own per-row menu shadows — a factory closer to the
-    /// click wins the walk, and an application that writes a row menu owns it.
+    /// The rows go on the row rather than on the view because the row is what
+    /// the command is *about*. They are a context-menu
+    /// [contribution](teksilo_core::widget_builder::ContextMenuContribution),
+    /// not a menu: with no application menu closer to the row they open alone,
+    /// as the row's flat menu; with one (a delegate's, a cell's, a tile's
+    /// `.context_menu(..)`, or the row's own), they join it as a "Move"
+    /// submenu. A menu on the view itself is farther than the row, so the
+    /// row's Move rows still open there.
     pub fn install(self, ctx: &mut teksilo_core::build_context::BuildContext, row_id: WidgetId) {
         if self.is_empty() {
             return;
@@ -557,10 +568,11 @@ impl RowCommands {
             handlers = handlers.access_custom_action(label.clone(), move |ctx| run(ctx));
         }
         let menu_source = self;
-        handlers = handlers.context_menu(move |_pos, _ctx| {
-            menu_source
-                .menu()
-                .map(|list| Box::new(list) as Box<dyn teksilo_core::widget::Widget>)
+        handlers = handlers.context_menu_contribution(move |_ctx| {
+            menu_source.menu().map(|list| {
+                Box::new(list.section_title(tr_widget!(data_view_move_submenu())))
+                    as Box<dyn teksilo_core::widget::Widget>
+            })
         });
         ctx.apply_handlers(row_id, handlers);
     }
@@ -574,10 +586,12 @@ impl RowCommands {
 /// AccessKit's own `level`.
 pub fn reparent_announcement(name: Option<&str>, level: usize) -> String {
     match name {
-        Some(name) if !name.is_empty() => {
-            lit!(format!("{name} moved to level {level}")).resolve_now()
-        }
-        _ => lit!(format!("Moved to level {level}")).resolve_now(),
+        Some(name) if !name.is_empty() => tr_widget!(a11y_data_view_moved_to_level(
+            name = name.to_owned(),
+            level = level
+        ))
+        .resolve_now(),
+        _ => tr_widget!(a11y_data_view_moved_to_level_unnamed(level = level)).resolve_now(),
     }
 }
 
@@ -585,6 +599,38 @@ pub fn reparent_announcement(name: Option<&str>, level: usize) -> String {
 mod tests {
     use super::*;
     use teksilo_data::DropPosition;
+
+    /// The Move rows and what a move says are in the user's language, and in
+    /// English with no translation (no manager, or a language not shipped).
+    #[test]
+    fn the_move_rows_and_announcements_follow_the_language() {
+        use crate::common::locale_switch_test::speaking;
+        let (mgr, _tree) = speaking("fr-FR");
+        assert_eq!(
+            OrderedMove::Prev.label(MoveAxis::Vertical).resolve_now(),
+            "Déplacer vers le haut"
+        );
+        assert_eq!(
+            TreeMove::Outdent.label().resolve_now(),
+            "Remonter d'un niveau"
+        );
+        assert_eq!(
+            move_announcement(Some("beta"), 3, 37),
+            "beta déplacé en position 4 sur 37"
+        );
+        assert_eq!(reparent_announcement(None, 2), "Déplacé au niveau 2");
+        mgr.set_locale("en-US".parse().unwrap());
+        assert_eq!(
+            move_announcement(Some("beta"), 2, 5),
+            "beta moved to 3 of 5"
+        );
+        teksilo_i18n::thread_local::clear();
+        assert_eq!(
+            OrderedMove::Last.label(MoveAxis::Horizontal).resolve_now(),
+            "Move to End"
+        );
+        assert_eq!(move_announcement(None, 0, 2), "Moved to 1 of 2");
+    }
 
     #[test]
     fn a_move_that_changes_nothing_is_not_offered() {

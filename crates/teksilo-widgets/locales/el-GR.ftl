@@ -570,3 +570,20 @@ chart-pie-summary =
        *[other] { $slices } τομείς
     }
 chart-legend-name = Υπόμνημα γραφήματος
+
+
+data-view-move-submenu = Μετακίνηση
+data-view-move-up = Μετακίνηση πάνω
+data-view-move-down = Μετακίνηση κάτω
+data-view-move-to-top = Μετακίνηση στην κορυφή
+data-view-move-to-bottom = Μετακίνηση στο τέλος της λίστας
+data-view-move-left = Μετακίνηση αριστερά
+data-view-move-right = Μετακίνηση δεξιά
+data-view-move-to-start = Μετακίνηση στην αρχή
+data-view-move-to-end = Μετακίνηση στο τέλος
+data-view-move-into-previous = Μετακίνηση μέσα στο προηγούμενο
+data-view-move-out-one-level = Μετακίνηση ένα επίπεδο πάνω
+a11y-data-view-moved-to-position = { $name }: μετακινήθηκε στη θέση { $position } από { $count }
+a11y-data-view-moved-to-position-unnamed = Μετακινήθηκε στη θέση { $position } από { $count }
+a11y-data-view-moved-to-level = { $name }: μετακινήθηκε στο επίπεδο { $level }
+a11y-data-view-moved-to-level-unnamed = Μετακινήθηκε στο επίπεδο { $level }

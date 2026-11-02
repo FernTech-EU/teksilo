@@ -584,3 +584,20 @@ chart-pie-summary =
        *[other] { $slices } de sectoare
     }
 chart-legend-name = Legenda diagramei
+
+
+data-view-move-submenu = Mută
+data-view-move-up = Mută în sus
+data-view-move-down = Mută în jos
+data-view-move-to-top = Mută sus de tot
+data-view-move-to-bottom = Mută jos de tot
+data-view-move-left = Mută la stânga
+data-view-move-right = Mută la dreapta
+data-view-move-to-start = Mută la început
+data-view-move-to-end = Mută la sfârșit
+data-view-move-into-previous = Mută în cel anterior
+data-view-move-out-one-level = Mută un nivel mai sus
+a11y-data-view-moved-to-position = { $name } mutat pe poziția { $position } din { $count }
+a11y-data-view-moved-to-position-unnamed = Mutat pe poziția { $position } din { $count }
+a11y-data-view-moved-to-level = { $name } mutat la nivelul { $level }
+a11y-data-view-moved-to-level-unnamed = Mutat la nivelul { $level }

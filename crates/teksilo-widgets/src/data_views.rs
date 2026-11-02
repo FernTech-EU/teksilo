@@ -423,6 +423,9 @@ pub(crate) struct RowSelection {
     extend_additive_fn: Rc<dyn Fn(usize)>,
     select_all_fn: Rc<dyn Fn(usize)>,
     selected_indices_fn: Rc<dyn Fn() -> Vec<usize>>,
+    /// The first selected index, without materialising the selection: asked
+    /// on every accessibility walk, for where the menu key would start.
+    first_selected_fn: Rc<dyn Fn() -> Option<usize>>,
     /// Cheap (O(selected count), never O(visible)) emptiness check for the
     /// container-focus-ring gate — paint runs every frame and only needs to
     /// know "is anything selected", not the set itself.
@@ -477,6 +480,10 @@ impl RowSelection {
             },
             select_all_fn: Rc::new(move |count| s_all.select_all(count)),
             selected_indices_fn: Rc::new(move || s_idx.selected_indices()),
+            first_selected_fn: {
+                let s = sel.clone();
+                Rc::new(move || s.selection_signal().get_ref().first().copied())
+            },
             has_selection_fn: Rc::new(move || s_has.count() > 0),
             count_fn: {
                 let s = sel.clone();
@@ -656,6 +663,10 @@ impl RowSelection {
                         .collect()
                 })
             },
+            first_selected_fn: {
+                let (k, ka, l) = (keyed.clone(), key_at.clone(), len.clone());
+                Rc::new(move || (0..l()).find(|&i| ka(i).is_some_and(|key| k.is_selected(&key))))
+            },
             has_selection_fn: {
                 let k = keyed.clone();
                 Rc::new(move || k.count() > 0)
@@ -717,6 +728,10 @@ impl RowSelection {
     }
     pub(crate) fn selected_indices(&self) -> Vec<usize> {
         (self.selected_indices_fn)()
+    }
+    /// The first selected index, without materialising the selection.
+    pub(crate) fn first_selected(&self) -> Option<usize> {
+        (self.first_selected_fn)()
     }
     /// Whether anything is selected. Prefer this over
     /// `!selected_indices().is_empty()` when only the emptiness matters (e.g.

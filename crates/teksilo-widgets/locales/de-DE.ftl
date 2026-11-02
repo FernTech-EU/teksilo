@@ -569,3 +569,20 @@ chart-pie-summary =
        *[other] { $slices } Segmente
     }
 chart-legend-name = Diagrammlegende
+
+
+data-view-move-submenu = Verschieben
+data-view-move-up = Nach oben verschieben
+data-view-move-down = Nach unten verschieben
+data-view-move-to-top = Ganz nach oben verschieben
+data-view-move-to-bottom = Ganz nach unten verschieben
+data-view-move-left = Nach links verschieben
+data-view-move-right = Nach rechts verschieben
+data-view-move-to-start = An den Anfang verschieben
+data-view-move-to-end = An das Ende verschieben
+data-view-move-into-previous = In das vorherige verschieben
+data-view-move-out-one-level = Eine Ebene höher verschieben
+a11y-data-view-moved-to-position = { $name } an Position { $position } von { $count } verschoben
+a11y-data-view-moved-to-position-unnamed = An Position { $position } von { $count } verschoben
+a11y-data-view-moved-to-level = { $name } auf Ebene { $level } verschoben
+a11y-data-view-moved-to-level-unnamed = Auf Ebene { $level } verschoben

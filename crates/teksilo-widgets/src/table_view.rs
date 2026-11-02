@@ -1506,7 +1506,7 @@ impl<T: 'static> TableView<T> {
     /// here is told nothing at all. Worse, the first arrow press steps *past*
     /// that row, because the cursor was somewhere the user was never shown.
     ///
-    /// The row resolves the way `widget_impl`'s `context_menu_key_target` resolves it:
+    /// The row resolves as the row of `widget_impl`'s `context_menu_key_target`:
     /// the focused cell's row if the user has navigated, else the first
     /// selected row. Both are "the row this table is currently about", and a
     /// session restored into a selection has no focused cell yet.

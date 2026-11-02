@@ -567,3 +567,20 @@ chart-pie-summary =
        *[other] { $slices } körcikk
     }
 chart-legend-name = Diagram jelmagyarázata
+
+
+data-view-move-submenu = Áthelyezés
+data-view-move-up = Mozgatás felfelé
+data-view-move-down = Mozgatás lefelé
+data-view-move-to-top = Mozgatás a tetejére
+data-view-move-to-bottom = Mozgatás az aljára
+data-view-move-left = Mozgatás balra
+data-view-move-right = Mozgatás jobbra
+data-view-move-to-start = Mozgatás az elejére
+data-view-move-to-end = Mozgatás a végére
+data-view-move-into-previous = Áthelyezés az előzőbe
+data-view-move-out-one-level = Áthelyezés egy szinttel feljebb
+a11y-data-view-moved-to-position = { $name } áthelyezve: { $position }. / { $count }
+a11y-data-view-moved-to-position-unnamed = Áthelyezve: { $position }. / { $count }
+a11y-data-view-moved-to-level = { $name } áthelyezve a(z) { $level }. szintre
+a11y-data-view-moved-to-level-unnamed = Áthelyezve a(z) { $level }. szintre

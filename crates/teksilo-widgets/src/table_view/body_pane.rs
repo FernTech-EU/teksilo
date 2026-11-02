@@ -339,6 +339,7 @@ impl<T: 'static> Widget for BodyPane<T> {
             let loading = !resident && (self.row_state_fn)(row_idx) == RowState::Loading;
 
             let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
+            let row_cells_from = cell_entries.len();
             for (display_pos, &col_idx) in display_indices.iter().enumerate() {
                 let col = &columns[col_idx];
                 let is_editing = editing_state == Some((row_idx, display_pos));
@@ -595,7 +596,15 @@ impl<T: 'static> Widget for BodyPane<T> {
                 self.pane_boundaries,
                 self.scroll_x.clone(),
             )
-            .with_live_selected(live_row_selected);
+            .with_live_selected(live_row_selected)
+            .menu_target(super::a11y::RowMenuTarget::new(
+                self.focused_cell.clone(),
+                row_idx,
+                cell_entries[row_cells_from..]
+                    .iter()
+                    .map(|&((_, at), id)| (at, id))
+                    .collect(),
+            ));
             let row_id = ctx.add(row_widget);
 
             // A grid is *one* Tab stop — the cell cursor is the navigation, and

@@ -91,6 +91,8 @@ pub(crate) struct BodyRow {
     /// in `TreeRowA11y` and wants the outer wrapper to carry `Role::Row`
     /// instead.
     announce_a11y: bool,
+    /// Where the menu key and "show menu" on this row start.
+    menu_target: Option<super::a11y::RowMenuTarget>,
 
     // Build state — populated by `build()`.
     bands: Option<[Option<WidgetId>; 3]>,
@@ -116,6 +118,7 @@ impl BodyRow {
             pane_boundaries,
             scroll_x,
             announce_a11y: true,
+            menu_target: None,
             bands: None,
         }
     }
@@ -131,6 +134,11 @@ impl BodyRow {
         self
     }
 
+    pub(crate) fn menu_target(mut self, target: super::a11y::RowMenuTarget) -> Self {
+        self.menu_target = Some(target);
+        self
+    }
+
     pub(crate) fn a11y_hidden(mut self) -> Self {
         self.announce_a11y = false;
         self
@@ -142,6 +150,10 @@ impl BodyRow {
 }
 
 impl Widget for BodyRow {
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        self.menu_target.as_ref()?.resolve()
+    }
+
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         if !self.has_pinning() {
             // Flat shape — cells are direct children (see module docs).

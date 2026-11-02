@@ -574,3 +574,20 @@ chart-pie-summary =
        *[other] { $slices } פלחים
     }
 chart-legend-name = מקרא התרשים
+
+
+data-view-move-submenu = העברה
+data-view-move-up = העברה למעלה
+data-view-move-down = העברה למטה
+data-view-move-to-top = העברה לראש
+data-view-move-to-bottom = העברה לתחתית
+data-view-move-left = העברה שמאלה
+data-view-move-right = העברה ימינה
+data-view-move-to-start = העברה להתחלה
+data-view-move-to-end = העברה לסוף
+data-view-move-into-previous = העברה לתוך הקודם
+data-view-move-out-one-level = העברה רמה אחת החוצה
+a11y-data-view-moved-to-position = { $name } הועבר למקום { $position } מתוך { $count }
+a11y-data-view-moved-to-position-unnamed = הועבר למקום { $position } מתוך { $count }
+a11y-data-view-moved-to-level = { $name } הועבר לרמה { $level }
+a11y-data-view-moved-to-level-unnamed = הועבר לרמה { $level }

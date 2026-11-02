@@ -581,3 +581,20 @@ chart-pie-summary =
        *[other] { $slices } wycinka
     }
 chart-legend-name = Legenda wykresu
+
+
+data-view-move-submenu = Przenieś
+data-view-move-up = Przenieś w górę
+data-view-move-down = Przenieś w dół
+data-view-move-to-top = Przenieś na górę
+data-view-move-to-bottom = Przenieś na dół
+data-view-move-left = Przenieś w lewo
+data-view-move-right = Przenieś w prawo
+data-view-move-to-start = Przenieś na początek
+data-view-move-to-end = Przenieś na koniec
+data-view-move-into-previous = Przenieś do poprzedniego
+data-view-move-out-one-level = Przenieś poziom wyżej
+a11y-data-view-moved-to-position = { $name } przeniesiono na pozycję { $position } z { $count }
+a11y-data-view-moved-to-position-unnamed = Przeniesiono na pozycję { $position } z { $count }
+a11y-data-view-moved-to-level = { $name } przeniesiono na poziom { $level }
+a11y-data-view-moved-to-level-unnamed = Przeniesiono na poziom { $level }

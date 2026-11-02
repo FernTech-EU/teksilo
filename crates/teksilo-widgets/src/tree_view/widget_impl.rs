@@ -20,11 +20,10 @@ impl<T: 'static> TreeView<T> {
     /// `focused_index` and `row_map` are keyed on, so a collapsed branch's
     /// descendants simply are not in it.
     fn current_row_widget(&self) -> Option<WidgetId> {
-        let index = self.focused_index.get().or_else(|| {
-            self.row_selection
-                .as_ref()
-                .and_then(|s| s.selected_indices().first().copied())
-        })?;
+        let index = self
+            .focused_index
+            .get()
+            .or_else(|| self.row_selection.as_ref().and_then(|s| s.first_selected()))?;
         let map = self.row_map.borrow();
         map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
     }

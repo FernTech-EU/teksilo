@@ -73,6 +73,7 @@ pub fn is_widget_builder_method(name: &str) -> bool {
             | "event_pass_through"
             | "hit_transparent"
             | "context_menu"
+            | "context_menu_contribution"
             | "focus_within"
             | "hover_within"
             | "visible_when"

@@ -151,6 +151,13 @@ impl Widget for QueryProbe {
         Some(WidgetId::default())
     }
 
+    fn append_context_menu_section(
+        &mut self,
+        _section: Box<dyn Widget>,
+    ) -> Result<(), Box<dyn Widget>> {
+        Ok(())
+    }
+
     fn children(&self) -> Vec<WidgetId> {
         vec![WidgetId::default()]
     }
@@ -234,6 +241,13 @@ fn query_hooks_lost(widget: &mut dyn Widget) -> Vec<&'static str> {
         .is_none()
     {
         lost.push("as_any_mut");
+    }
+    // The other `&mut self` query: the default refuses the section.
+    if widget
+        .append_context_menu_section(Box::new(QueryProbe))
+        .is_err()
+    {
+        lost.push("append_context_menu_section");
     }
 
     let widget: &dyn Widget = widget;

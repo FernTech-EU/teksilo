@@ -1535,18 +1535,38 @@ impl<T: 'static> Widget for TreeTableView<T> {
     /// where a per-row menu matters most.
     ///
     /// The row the user means is the focused cell's row if they have navigated,
-    /// else the first selected row. Only realized rows have a widget, so a
+    /// else the first selected row, and within it the focused cell, else its
+    /// first displayed cell. Only realized rows have a widget, so a
     /// cursor scrolled outside the virtualization window resolves to nothing
     /// and the menu falls back to the view — right, because there is no row on
     /// screen for it to be about.
     fn context_menu_key_target(&self) -> Option<WidgetId> {
-        let index = self.focused_cell.get().map(|(row, _col)| row).or_else(|| {
-            self.row_selection
-                .as_ref()
-                .and_then(|s| s.selected_indices().first().copied())
-        })?;
-        let map = self.row_map.borrow();
-        map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
+        let focused = self.focused_cell.get();
+        let index = focused
+            .map(|(row, _col)| row)
+            .or_else(|| self.row_selection.as_ref().and_then(|s| s.first_selected()))?;
+        // The focused cell, else the row's first displayed cell, so the
+        // menu a cell delegate carries opens; the row when neither is
+        // realized.
+        let cells = self.cell_map.borrow();
+        let cell = focused
+            .and_then(|(row, col)| {
+                cells
+                    .iter()
+                    .find(|((r, c), _)| *r == row && *c == col)
+                    .map(|(_, id)| *id)
+            })
+            .or_else(|| {
+                cells
+                    .iter()
+                    .filter(|((r, _), _)| *r == index)
+                    .min_by_key(|((_, c), _)| *c)
+                    .map(|(_, id)| *id)
+            });
+        cell.or_else(|| {
+            let map = self.row_map.borrow();
+            map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
+        })
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {

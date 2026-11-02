@@ -582,3 +582,20 @@ chart-pie-summary =
        *[other] { $slices } výsečí
     }
 chart-legend-name = Legenda grafu
+
+
+data-view-move-submenu = Přesunout
+data-view-move-up = Přesunout nahoru
+data-view-move-down = Přesunout dolů
+data-view-move-to-top = Přesunout úplně nahoru
+data-view-move-to-bottom = Přesunout úplně dolů
+data-view-move-left = Přesunout doleva
+data-view-move-right = Přesunout doprava
+data-view-move-to-start = Přesunout na začátek
+data-view-move-to-end = Přesunout na konec
+data-view-move-into-previous = Přesunout do předchozího
+data-view-move-out-one-level = Přesunout o úroveň výš
+a11y-data-view-moved-to-position = { $name } přesunuto na pozici { $position } z { $count }
+a11y-data-view-moved-to-position-unnamed = Přesunuto na pozici { $position } z { $count }
+a11y-data-view-moved-to-level = { $name } přesunuto na úroveň { $level }
+a11y-data-view-moved-to-level-unnamed = Přesunuto na úroveň { $level }

@@ -1435,9 +1435,13 @@ impl WidgetTree {
                             if self.dispatch_to_widget_returning_handled(id, &event, &mut *ops) {
                                 true
                             } else {
-                                let position = self.arena.bounds(id).center();
+                                // Where the keyboard's menu key would start:
+                                // a data view's row, or the cell or delegate
+                                // inside it that carries the app's menu.
+                                let target = self.resolve_context_menu_target(id);
+                                let position = self.arena.bounds(target).center();
                                 self.show_context_menu_for(
-                                    id,
+                                    target,
                                     position,
                                     crate::widget_builder::ContextMenuTrigger::Accessibility,
                                     &mut *ops,
@@ -1498,12 +1502,7 @@ impl WidgetTree {
         let Some(focused) = self.focused else {
             return false;
         };
-        let target = self
-            .arena
-            .get(focused)
-            .and_then(|node| node.widget.context_menu_key_target())
-            .filter(|id| self.arena.is_active(*id))
-            .unwrap_or(focused);
+        let target = self.resolve_context_menu_target(focused);
 
         // The menu belongs where the thing it is about is. A keyboard user has
         // no pointer position, and the stale one is worse than useless: it
@@ -1521,8 +1520,53 @@ impl WidgetTree {
         )
     }
 
+    /// Follow [`context_menu_key_target`](crate::widget::Widget::context_menu_key_target)
+    /// from `start` while it names an active node: a view names its current
+    /// row, the row the delegate (or the cell) inside it, so each widget
+    /// states only its own next hop. Stops after a few hops, or at a node
+    /// already passed, on the last good one (a cycle is a widget bug, which
+    /// a debug build reports).
+    ///
+    /// Asked for every node on every accessibility walk (to advertise the
+    /// action), so it allocates nothing.
+    pub(super) fn resolve_context_menu_target(&self, start: WidgetId) -> WidgetId {
+        const MAX_HOPS: usize = 8;
+        let next_of = |id: WidgetId| {
+            self.arena
+                .get(id)
+                .and_then(|node| node.widget.context_menu_key_target())
+                .filter(|next| self.arena.is_active(*next))
+        };
+        let mut passed = [start; MAX_HOPS + 1];
+        let mut target = start;
+        for hop in 0..MAX_HOPS {
+            let Some(next) = next_of(target) else {
+                break;
+            };
+            if passed[..=hop].contains(&next) {
+                debug_assert!(
+                    false,
+                    "context_menu_key_target cycle through {next:?}: a widget names an ancestor's target"
+                );
+                break;
+            }
+            passed[hop + 1] = next;
+            target = next;
+        }
+        target
+    }
+
     /// Ask the factories from `target` up for a menu, and mount the first one
     /// offered at `position`.
+    ///
+    /// The closest claimer wins: at each node the factory is asked first,
+    /// and a node whose factory declines (or that has none) but carries a
+    /// [contribution](crate::widget_builder::ContextMenuContribution) claims
+    /// the menu with that section alone. Then the contributions on the owner
+    /// and above it, up to (and excluding) the first focusable node above it,
+    /// are appended to the menu, innermost first, unless the owner is itself
+    /// a focusable control. So a contribution on a data view itself (which is
+    /// focusable) is never merged into its rows' menus.
     ///
     /// `trigger` reaches each factory through
     /// [`EventContext::context_menu_trigger`](crate::widget::EventContext::context_menu_trigger):
@@ -1544,55 +1588,67 @@ impl WidgetTree {
         let mut ctx = self.make_event_context(&mut *ops);
         ctx.context_menu_trigger = Some(trigger);
         let mut walker = Some(target);
-        let menu_decision: Option<(WidgetId, Box<dyn Widget>)> = loop {
-            // Walk to the next ancestor (including `walker` itself)
-            // that owns a factory.
-            let owner_id = {
-                let mut probe = walker;
-                loop {
-                    match probe {
-                        None => break None,
-                        Some(id) => {
-                            if self
-                                .arena
-                                .get(id)
-                                .is_some_and(|node| node.context_menu_factory.is_some())
-                            {
-                                break Some(id);
-                            }
-                            probe = self.arena.get(id).and_then(|node| node.parent);
-                        }
-                    }
-                }
-            };
-            let Some(owner_id) = owner_id else {
-                break None;
+        // The owner, its menu, and whether a factory made it (rather than a
+        // contribution standing in for one).
+        let mut menu_decision: Option<(WidgetId, Box<dyn Widget>, bool)> = None;
+        while let Some(id) = walker {
+            let Some(node) = self.arena.get(id) else {
+                break;
             };
             // Invoke the factory with the click position and a real
-            // EventContext. The factory is `Fn` (not FnMut), so we
-            // can call it through an immutable borrow on the node.
-            // `ctx` is a local — its `&mut WindowOps` lifetime is
-            // disjoint from `self.arena`, so the immutable arena
-            // borrow doesn't conflict with the mutable ctx borrow.
-            let outcome: Option<Box<dyn Widget>> = {
-                let node = self
-                    .arena
-                    .get(owner_id)
-                    .expect("owner_id from active arena walk");
-                let factory = node
-                    .context_menu_factory
-                    .as_ref()
-                    .expect("owner_id only set when factory present");
-                factory(position, &mut ctx)
-            };
-            match outcome {
-                Some(menu) => break Some((owner_id, menu)),
-                None => {
-                    // Decline → keep walking up from the parent.
-                    walker = self.arena.get(owner_id).and_then(|n| n.parent);
+            // EventContext. The factory is `Fn`, so it is called through an
+            // immutable borrow on the node; `ctx` is a local whose
+            // `&mut WindowOps` is disjoint from `self.arena`.
+            if let Some(factory) = node.context_menu_factory.as_ref()
+                && let Some(menu) = factory(position, &mut ctx)
+            {
+                menu_decision = Some((id, menu, true));
+                break;
+            }
+            // No factory claimed here: a contribution on this node is the
+            // closest offer, mounted as the menu.
+            if let Some(contribution) = node.context_menu_contribution.as_ref()
+                && let Some(section) = contribution(&mut ctx)
+            {
+                menu_decision = Some((id, section, false));
+                break;
+            }
+            walker = node.parent;
+        }
+
+        // The sections the owner and the nodes above it add, innermost first,
+        // up to the first focusable node above the owner (a data view: a view
+        // nested in another view's row adds only its own). A menu a focusable
+        // control owns (a text field, a cell editor) is about that control
+        // and gains none.
+        if let Some((owner_id, menu, by_factory)) = menu_decision.as_mut() {
+            let sealed = *by_factory && self.is_focusable_control(*owner_id);
+            if !sealed {
+                // A contribution that claimed the menu already gave its
+                // section; its node's is not asked again.
+                let mut probe = if *by_factory {
+                    Some(*owner_id)
+                } else {
+                    self.arena.get(*owner_id).and_then(|node| node.parent)
+                };
+                while let Some(id) = probe {
+                    let Some(node) = self.arena.get(id) else {
+                        break;
+                    };
+                    if id != *owner_id && self.is_focusable_control(id) {
+                        break;
+                    }
+                    if let Some(contribution) = node.context_menu_contribution.as_ref()
+                        && let Some(section) = contribution(&mut ctx)
+                        && menu.append_context_menu_section(section).is_err()
+                    {
+                        note_refused_section(*owner_id);
+                    }
+                    probe = node.parent;
                 }
             }
-        };
+        }
+        let menu_decision = menu_decision.map(|(owner, menu, _)| (owner, menu));
 
         // Drain ctx side effects regardless of whether a menu showed —
         // a factory that returns `None` may still have queued intents,
@@ -1648,6 +1704,32 @@ impl WidgetTree {
         // its own drain — fire ours here.
         self.drain_pending_intents(&mut *ops);
         true
+    }
+
+    /// Whether `id` is a control that takes focus itself: a focusable node,
+    /// a composite whose root stands for a focusable inner leaf through its
+    /// accessibility proxy (a `SpinBox`, a `DateEdit`, a `TimeEdit`, whose
+    /// root is not focusable), or a body a focusable composite stands for.
+    fn is_focusable_control(&self, id: WidgetId) -> bool {
+        let focusable = |id: WidgetId| {
+            self.arena
+                .get(id)
+                .is_some_and(|node| self.is_node_focusable(node))
+        };
+        if focusable(id) || self.focusable_composite_behind(id).is_some() {
+            return true;
+        }
+        let mut current = id;
+        for _ in 0..8 {
+            let Some(proxy) = self.live_accessibility_proxy(current) else {
+                return false;
+            };
+            if focusable(proxy) {
+                return true;
+            }
+            current = proxy;
+        }
+        false
     }
 
     // -----------------------------------------------------------------
@@ -9503,4 +9585,25 @@ mod pass_through_overlay_tests {
         );
         let _ = field;
     }
+}
+
+/// Say once per owner, in a debug build, that its menu refused a section a
+/// node added to it (its widget does not implement
+/// `Widget::append_context_menu_section`), so the section was left out.
+fn note_refused_section(owner: WidgetId) {
+    #[cfg(debug_assertions)]
+    {
+        thread_local! {
+            static NOTED: std::cell::RefCell<std::collections::HashSet<WidgetId>> =
+                std::cell::RefCell::new(std::collections::HashSet::new());
+        }
+        if NOTED.with(|noted| noted.borrow_mut().insert(owner)) {
+            eprintln!(
+                "teksilo: the context menu of {owner:?} takes no section \
+                 (Widget::append_context_menu_section), so a contribution was left out"
+            );
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = owner;
 }

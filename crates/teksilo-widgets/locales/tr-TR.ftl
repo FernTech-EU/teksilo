@@ -565,3 +565,20 @@ chart-pie-summary =
        *[other] { $slices } dilim
     }
 chart-legend-name = Grafik açıklaması
+
+
+data-view-move-submenu = Taşı
+data-view-move-up = Yukarı taşı
+data-view-move-down = Aşağı taşı
+data-view-move-to-top = En üste taşı
+data-view-move-to-bottom = En alta taşı
+data-view-move-left = Sola taşı
+data-view-move-right = Sağa taşı
+data-view-move-to-start = Başa taşı
+data-view-move-to-end = Sona taşı
+data-view-move-into-previous = Öncekinin içine taşı
+data-view-move-out-one-level = Bir düzey yukarı taşı
+a11y-data-view-moved-to-position = { $name } { $count } öğeden { $position }. konuma taşındı
+a11y-data-view-moved-to-position-unnamed = { $count } öğeden { $position }. konuma taşındı
+a11y-data-view-moved-to-level = { $name } { $level }. düzeye taşındı
+a11y-data-view-moved-to-level-unnamed = { $level }. düzeye taşındı

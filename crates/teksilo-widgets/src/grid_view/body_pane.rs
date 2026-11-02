@@ -597,10 +597,10 @@ impl<T: 'static> Widget for GridBodyPane<T> {
             // the same rows, both calling the grid's own commit closure. See
             // `common::ordered_move`.
             //
-            // Installed BEFORE `extra`, so an application's own
-            // `tile_context_menu` — which rides in `extra` — replaces this menu
-            // rather than being replaced by it. The custom actions survive
-            // either way: `extra` sets no accessibility overrides.
+            // The Move rows are a contribution, a slot of their own beside the
+            // factory slot an application's `tile_context_menu` fills (it
+            // rides in `extra`), so both survive: the application's tile menu
+            // ends with a Move submenu, and with none the rows open alone.
             if let Some(ref perform) = self.reorder_perform {
                 let count = (self.len_fn)();
                 let perform = perform.clone();

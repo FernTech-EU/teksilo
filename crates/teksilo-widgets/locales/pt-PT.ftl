@@ -580,3 +580,20 @@ chart-pie-summary =
        *[other] { $slices } setores
     }
 chart-legend-name = Legenda do gráfico
+
+
+data-view-move-submenu = Mover
+data-view-move-up = Mover para cima
+data-view-move-down = Mover para baixo
+data-view-move-to-top = Mover para o topo
+data-view-move-to-bottom = Mover para o fundo
+data-view-move-left = Mover para a esquerda
+data-view-move-right = Mover para a direita
+data-view-move-to-start = Mover para o início
+data-view-move-to-end = Mover para o fim
+data-view-move-into-previous = Mover para dentro do anterior
+data-view-move-out-one-level = Subir um nível
+a11y-data-view-moved-to-position = { $name } movido para a posição { $position } de { $count }
+a11y-data-view-moved-to-position-unnamed = Movido para a posição { $position } de { $count }
+a11y-data-view-moved-to-level = { $name } movido para o nível { $level }
+a11y-data-view-moved-to-level-unnamed = Movido para o nível { $level }

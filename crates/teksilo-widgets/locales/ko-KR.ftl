@@ -559,3 +559,20 @@ chart-pie-summary =
        *[other] 조각 { $slices }개
     }
 chart-legend-name = 차트 범례
+
+
+data-view-move-submenu = 이동
+data-view-move-up = 위로 이동
+data-view-move-down = 아래로 이동
+data-view-move-to-top = 맨 위로 이동
+data-view-move-to-bottom = 맨 아래로 이동
+data-view-move-left = 왼쪽으로 이동
+data-view-move-right = 오른쪽으로 이동
+data-view-move-to-start = 처음으로 이동
+data-view-move-to-end = 끝으로 이동
+data-view-move-into-previous = 이전 항목 안으로 이동
+data-view-move-out-one-level = 한 단계 위로 이동
+a11y-data-view-moved-to-position = { $name }을(를) { $count }개 중 { $position }번째로 이동함
+a11y-data-view-moved-to-position-unnamed = { $count }개 중 { $position }번째로 이동함
+a11y-data-view-moved-to-level = { $name }을(를) { $level }단계로 이동함
+a11y-data-view-moved-to-level-unnamed = { $level }단계로 이동함

@@ -290,6 +290,7 @@ Plus a handful of flag-like attachments that don't take event-data closures:
 | `.cursor(CursorIcon::Pointer)` | Cursor when pointer is over the widget |
 | `.clips_children_on(true)` | Scissor clipping to bounds (ScrollArea, MaxSize). The `WidgetBuilder` trait spells it `clips_children_on` because `Widget::clips_children` is already the `&self` query; `HandlerSet` and `WidgetWithHandlers` also accept `.clips_children(true)` |
 | `.context_menu(factory)` | Right-click overlay factory, see §3.1.4 |
+| `.context_menu_contribution(f)` | A section added to the menu opened at or below the node, see §3.1.4 |
 
 `.cursor(..)` is a **declaration**, and the tree applies it on the
 `PointerEnter` / `PointerLeave` pair alone, never on the moves in between. The
@@ -361,6 +362,10 @@ The factory is `Fn` (re-entrant) and called fresh on every right-click, the menu
 ```rust
 .context_menu(|_, _| if disabled.get() { None } else { Some(build_menu()) })
 ```
+
+**Contributions.** A node can add a *section* to the menu instead of a menu of its own, `.context_menu_contribution(|ctx| Some(section))`: a data view's row adds its Move rows this way. The walk up from the target asks each node's factory first; a node whose factory declines, or that has none, but carries a contribution claims the menu with that section alone (the closest claimer wins). Once a menu is claimed, the contributions on its owner and above it, up to and excluding the first focusable node above the owner (the data view, so a view nested in another view's row adds only its own section, and a contribution on the view itself is never merged into its rows' menus), are handed to the menu, innermost first, through `Widget::append_context_menu_section`. `MenuList` takes them: a section titled by its contributor becomes a submenu ("Move"), another goes in after a separator. A menu owned by a focusable control (a text field, a cell editor, a `ComboBox`, or a `SpinBox` / `DateEdit` / `TimeEdit` through the field its root stands for) gains no section: it is about that control, not about the row it sits in.
+
+**Where the keyboard starts.** The Menu key and Shift+F10 start at the focused widget's `context_menu_key_target`, and the `ShowContextMenu` action at its target node's, followed transitively: a data view names its current row, the row names the delegate (or, in a table, the focused cell, whose wrapper names the cell delegate). So they reach the factory a right click on the row reaches, as long as it is on the widget the delegate returns: a factory on a deeper descendant (a label inside the row's stack) is reached by a right click and not by the keyboard.
 
 If every factory on the chain returns `None`, no menu opens and the press falls through to normal dispatch (any intents or signal writes the factories queued are still applied; the intents start at the widget the menu was asked for, so every factory's widget is on their way to the root). The intents a factory sends when it returns a menu start at that factory's widget, and so do the menu's own rows': the menu is attached to that widget, and a walk from an overlay goes on from the widget it is attached to.
 

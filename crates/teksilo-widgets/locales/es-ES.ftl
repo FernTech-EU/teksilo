@@ -582,3 +582,20 @@ chart-pie-summary =
        *[other] { $slices } sectores
     }
 chart-legend-name = Leyenda del gráfico
+
+
+data-view-move-submenu = Mover
+data-view-move-up = Mover arriba
+data-view-move-down = Mover abajo
+data-view-move-to-top = Mover al principio
+data-view-move-to-bottom = Mover al final
+data-view-move-left = Mover a la izquierda
+data-view-move-right = Mover a la derecha
+data-view-move-to-start = Mover al inicio
+data-view-move-to-end = Mover al final
+data-view-move-into-previous = Mover dentro del anterior
+data-view-move-out-one-level = Subir un nivel
+a11y-data-view-moved-to-position = { $name } movido a la posición { $position } de { $count }
+a11y-data-view-moved-to-position-unnamed = Movido a la posición { $position } de { $count }
+a11y-data-view-moved-to-level = { $name } movido al nivel { $level }
+a11y-data-view-moved-to-level-unnamed = Movido al nivel { $level }

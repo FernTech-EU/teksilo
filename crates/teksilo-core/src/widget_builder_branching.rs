@@ -145,6 +145,13 @@ macro_rules! impl_widget_for_branch {
                 match self { $($branch::$arm(w) => w.context_menu_key_target()),+ }
             }
 
+            fn append_context_menu_section(
+                &mut self,
+                section: Box<dyn Widget>,
+            ) -> Result<(), Box<dyn Widget>> {
+                match self { $($branch::$arm(w) => w.append_context_menu_section(section)),+ }
+            }
+
             fn children(&self) -> Vec<WidgetId> {
                 match self { $($branch::$arm(w) => w.children()),+ }
             }

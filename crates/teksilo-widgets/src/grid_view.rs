@@ -3093,11 +3093,10 @@ impl<T: 'static> Widget for GridView<T> {
     /// the grid — which is right, since there is no tile on screen for it to be
     /// about.
     fn context_menu_key_target(&self) -> Option<WidgetId> {
-        let index = self.focused_index.get().or_else(|| {
-            self.selection
-                .as_ref()
-                .and_then(|s| s.selected_indices().first().copied())
-        })?;
+        let index = self
+            .focused_index
+            .get()
+            .or_else(|| self.selection.as_ref().and_then(|s| s.first_selected()))?;
         let map = self.tile_map.borrow();
         map.iter().find(|(i, _)| *i == index).map(|(_, id)| *id)
     }

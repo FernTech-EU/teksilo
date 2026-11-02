@@ -586,3 +586,20 @@ chart-pie-summary =
        *[other] { $slices } spicchi
     }
 chart-legend-name = Legenda del grafico
+
+
+data-view-move-submenu = Sposta
+data-view-move-up = Sposta su
+data-view-move-down = Sposta giù
+data-view-move-to-top = Sposta in cima
+data-view-move-to-bottom = Sposta in fondo
+data-view-move-left = Sposta a sinistra
+data-view-move-right = Sposta a destra
+data-view-move-to-start = Sposta all'inizio
+data-view-move-to-end = Sposta alla fine
+data-view-move-into-previous = Sposta nel precedente
+data-view-move-out-one-level = Sposta su di un livello
+a11y-data-view-moved-to-position = { $name } spostato in posizione { $position } di { $count }
+a11y-data-view-moved-to-position-unnamed = Spostato in posizione { $position } di { $count }
+a11y-data-view-moved-to-level = { $name } spostato al livello { $level }
+a11y-data-view-moved-to-level-unnamed = Spostato al livello { $level }

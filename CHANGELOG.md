@@ -66,6 +66,11 @@ by crate for clarity, not because crates version independently.
   **`BuildContext::is_descendant_of(id, ancestor)`**: the focused widget as a
   signal, and the subtree test, for a container that puts focus back where it
   was inside it.
+- **`context_menu_contribution`** (on `WidgetBuilder` and `HandlerSet`) adds
+  a section to the context menu opened at or below a node, and
+  **`Widget::append_context_menu_section`** is how a menu takes it
+  (`MenuList` does). `Widget::context_menu_key_target` is now followed from
+  hop to hop.
 - **F6 and Shift+F6 move focus between the regions of a window and announce
   the region's name.** Mark a region with `.focus_region(name)` (on
   `WidgetBuilder` and `HandlerSet`). The two commands (`focus.next_region`,
@@ -343,6 +348,9 @@ by crate for clarity, not because crates version independently.
   outside leave the value as it was. After a range is picked, focus returns
   to its start field. The field now announces a dialog popup
   (`HasPopup::Dialog`) and names the dialog while it is open.
+- On a reorderable data view or `GridView`, an application's row, cell or
+  tile menu now ends with a "Move" submenu instead of hiding the Move rows. A
+  menu on the view itself no longer hides a row's Move rows either.
 - **Breaking.** `EditSource` moved from `teksilo_widgets::rich_text` to
   `teksilo_widgets::EditSource` (also `teksilo::widgets::EditSource`) and has
   two new variants, so an exhaustive `match` over it needs the two arms.
@@ -637,6 +645,14 @@ by crate for clarity, not because crates version independently.
   reader hears a row and Enter has one to run; a menu opened again no
   longer starts on the row chosen last time, and one opened by a click
   highlights nothing.
+- **Shift+F10, the Menu key and a screen reader's "show menu" on a
+  `ListView`, `TreeView`, `TableView` or `TreeTableView` row open the
+  application's own row menu, as a right click does** (in a table, the
+  focused cell's, else the row's first cell's). Before, they opened the
+  view's menu, or nothing.
+- **The Move menu rows of data views and tab strips, and what a move
+  announces ("moved to 3 of 5", "moved to level 2"), are translated**, in
+  every language Teksilo ships.
 - **In a `CodeEditor`, the completion list follows text the input system
   commits.** After the accent popup replaced a typed `e` with `é`, or an
   emoji or dictated text was inserted, the list stayed open on the old word;

@@ -565,3 +565,20 @@ chart-pie-summary =
        *[other] { $slices } sektorer
     }
 chart-legend-name = Diagramförklaring
+
+
+data-view-move-submenu = Flytta
+data-view-move-up = Flytta upp
+data-view-move-down = Flytta ned
+data-view-move-to-top = Flytta överst
+data-view-move-to-bottom = Flytta nederst
+data-view-move-left = Flytta åt vänster
+data-view-move-right = Flytta åt höger
+data-view-move-to-start = Flytta till början
+data-view-move-to-end = Flytta till slutet
+data-view-move-into-previous = Flytta in i föregående
+data-view-move-out-one-level = Flytta ut en nivå
+a11y-data-view-moved-to-position = { $name } flyttad till plats { $position } av { $count }
+a11y-data-view-moved-to-position-unnamed = Flyttad till plats { $position } av { $count }
+a11y-data-view-moved-to-level = { $name } flyttad till nivå { $level }
+a11y-data-view-moved-to-level-unnamed = Flyttad till nivå { $level }

@@ -581,3 +581,20 @@ chart-pie-summary =
        *[other] { $slices } сектора
     }
 chart-legend-name = Легенда діаграми
+
+
+data-view-move-submenu = Перемістити
+data-view-move-up = Перемістити вгору
+data-view-move-down = Перемістити вниз
+data-view-move-to-top = Перемістити на початок списку
+data-view-move-to-bottom = Перемістити в кінець списку
+data-view-move-left = Перемістити ліворуч
+data-view-move-right = Перемістити праворуч
+data-view-move-to-start = Перемістити на початок
+data-view-move-to-end = Перемістити в кінець
+data-view-move-into-previous = Перемістити всередину попереднього
+data-view-move-out-one-level = Перемістити на рівень вище
+a11y-data-view-moved-to-position = { $name } переміщено на позицію { $position } з { $count }
+a11y-data-view-moved-to-position-unnamed = Переміщено на позицію { $position } з { $count }
+a11y-data-view-moved-to-level = { $name } переміщено на рівень { $level }
+a11y-data-view-moved-to-level-unnamed = Переміщено на рівень { $level }

@@ -323,6 +323,10 @@ pub struct MenuList {
     inset: f32,
     /// Per-list surface override; wins over the theme's popover slot.
     surface_style: Option<SharedPopoverStyle>,
+    /// Set on a menu handed to another as a section
+    /// ([`Widget::append_context_menu_section`]): the title of the submenu its
+    /// rows go into there. A section without one is appended inline.
+    section_title: Option<teksilo_i18n::LocalizedString>,
 }
 
 /// The rows of one [`MenuList`], as assistive technology counts them.
@@ -417,7 +421,21 @@ impl MenuList {
             opener: None,
             inset: DEFAULT_INSET,
             surface_style: None,
+            section_title: None,
         }
+    }
+
+    /// Title this menu for when it is handed to another context menu as a
+    /// section: merged, its rows go into a submenu of this name; mounted as a
+    /// menu of its own, it shows its rows directly and the title is unused.
+    pub(crate) fn section_title(mut self, title: teksilo_i18n::LocalizedString) -> Self {
+        self.section_title = Some(title);
+        self
+    }
+
+    /// Whether the menu has any row, separator or header yet.
+    fn has_entries(&self) -> bool {
+        !self.entries.is_empty()
     }
 
     /// Name this menu after the widget that opened it: a menu-bar trigger,
@@ -626,6 +644,48 @@ impl std::fmt::Debug for MenuList {
 }
 
 impl Widget for MenuList {
+    /// Take a section another node adds to this menu: after a separator
+    /// (none when this menu has no row yet), a titled `MenuList` goes in as a
+    /// submenu of that title, an untitled one inline, and any other widget as
+    /// one more row. Always accepted.
+    fn append_context_menu_section(
+        &mut self,
+        mut section: Box<dyn Widget>,
+    ) -> Result<(), Box<dyn Widget>> {
+        let mut list = std::mem::take(self);
+        // One separator between the host's rows and the section: none when
+        // the host ends with one already.
+        if list.has_entries() && !matches!(list.entries.last(), Some(MenuEntry::Separator)) {
+            list = list.separator();
+        }
+        let inner = section
+            .as_any_mut()
+            .and_then(|any| any.downcast_mut::<MenuList>());
+        list = match inner {
+            Some(inner) => match inner.section_title.take() {
+                Some(title) => {
+                    // The submenu builds its content once, when the row is
+                    // built, so the section is handed over once.
+                    let content = RefCell::new(Some(section));
+                    list.item(crate::menu_item::MenuItem::submenu(title, move || {
+                        content
+                            .borrow_mut()
+                            .take()
+                            .unwrap_or_else(|| Box::new(MenuList::new()))
+                    }))
+                }
+                None => {
+                    list.entries.append(&mut inner.entries);
+                    list.submenu_flags.append(&mut inner.submenu_flags);
+                    list
+                }
+            },
+            None => list.item(section),
+        };
+        *self = list;
+        Ok(())
+    }
+
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let _theme_signal = ctx.theme_signal();
 
@@ -1861,6 +1921,22 @@ mod tests {
         // ArrowLeft is inline-forward under RTL — opens the submenu.
         tree.press_key(Key::ArrowLeft, Modifiers::NONE);
         assert_eq!(tree.active_overlays().len(), 1);
+    }
+
+    /// A section appended after a host that ends with a separator gets no
+    /// second one.
+    #[test]
+    fn a_section_after_a_trailing_separator_adds_none() {
+        use teksilo_core::widget::Widget as _;
+        let mut host = MenuList::new().item(MenuItem::new(lit!("Cut"))).separator();
+        let section: Box<dyn Widget> = Box::new(MenuList::new().item(MenuItem::new(lit!("Up"))));
+        assert!(host.append_context_menu_section(section).is_ok());
+        let separators = host
+            .entries
+            .iter()
+            .filter(|entry| matches!(entry, MenuEntry::Separator))
+            .count();
+        assert_eq!(separators, 1);
     }
 
     #[test]

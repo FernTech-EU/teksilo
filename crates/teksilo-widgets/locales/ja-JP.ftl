@@ -565,3 +565,20 @@ chart-pie-summary =
        *[other] { $slices } 項目
     }
 chart-legend-name = グラフの凡例
+
+
+data-view-move-submenu = 移動
+data-view-move-up = 上へ移動
+data-view-move-down = 下へ移動
+data-view-move-to-top = 先頭へ移動
+data-view-move-to-bottom = 末尾へ移動
+data-view-move-left = 左へ移動
+data-view-move-right = 右へ移動
+data-view-move-to-start = 最初へ移動
+data-view-move-to-end = 最後へ移動
+data-view-move-into-previous = 前の項目の中へ移動
+data-view-move-out-one-level = 1 つ上の階層へ移動
+a11y-data-view-moved-to-position = { $name } を { $count } 件中 { $position } 番目に移動しました
+a11y-data-view-moved-to-position-unnamed = { $count } 件中 { $position } 番目に移動しました
+a11y-data-view-moved-to-level = { $name } をレベル { $level } に移動しました
+a11y-data-view-moved-to-level-unnamed = レベル { $level } に移動しました

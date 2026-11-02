@@ -97,6 +97,14 @@ impl std::fmt::Debug for CellBody {
 }
 
 impl Widget for CellBody {
+    /// The delegate's widget: a keyboard menu request on the cell goes on to
+    /// where an application's per-cell `.context_menu(..)` sits, as a right
+    /// click on the cell does. The cell node names this body as its next hop,
+    /// and only the body knows the widget its latest build made.
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        self.child
+    }
+
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // A persistent field rather than `ctx.signal`, so the observers
         // installed below survive into the build they trigger.

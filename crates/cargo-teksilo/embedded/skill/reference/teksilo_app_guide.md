@@ -960,7 +960,11 @@ Import from `teksilo::widgets`. The main families:
   a status bar outside the dock with `.focus_region(tr!(...))` to add it.
 - **Menus:** MenuBar, MenuList, MenuItem (Plain/Check/Radio modes, `&`-mnemonics). Context
   menus are wired via `.context_menu(...)` builder methods / `ContextMenuFactory`, plus the
-  declarative `MenuModel` (shared by the in-window bar and the native OS menu bar).
+  declarative `MenuModel` (shared by the in-window bar and the native OS menu bar). Put a
+  data view's per-row menu on the widget the delegate returns (a table's on the cell
+  delegate): the Menu key, Shift+F10 and a screen reader reach it there, and on a
+  reorderable view it ends with a "Move" submenu. `.context_menu_contribution(|ctx| ..)`
+  adds a section to the menu opened at or below a node instead of a menu of its own.
 - **Chrome:** Toolbar, StatusBar, TitleBar, GroupHeader.
 - **Data-driven:** ListView, TreeView, Repeater, GridView, TableView (multi-column,
   virtualized, sort/filter, drag-resize/reorder columns, pinned columns, keyboard nav, cell

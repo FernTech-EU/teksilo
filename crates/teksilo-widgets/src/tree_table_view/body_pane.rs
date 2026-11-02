@@ -588,6 +588,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 }
                 _ => None,
             };
+            let row_cells_from = cell_entries.len();
             let mut cell_ids: Vec<WidgetId> = Vec::with_capacity(display_indices.len());
             if let Some(band) = band {
                 cell_entries.extend((0..display_indices.len()).map(|c| ((flat_idx, c), band)));
@@ -717,6 +718,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                 let cell_a11y =
                     CellA11y::new(leading_id, flat_idx + 2, display_pos + 1, is_selected)
                         .with_live_selected(LiveFlag::new(move || flags().selected))
+                        .with_menu_target(inner_id)
                         .with_grid_cell_role(selection_mode.is_cell_mode())
                         // The row publishes the level too, but the row is an
                         // ancestor of the node this view puts the AT cursor on,
@@ -844,7 +846,15 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     _ => false,
                 })
             })
-            .with_rows_below(cell_count, row_at.clone());
+            .with_rows_below(cell_count, row_at.clone())
+            .menu_target(crate::table_view::a11y::RowMenuTarget::new(
+                self.focused_cell.clone(),
+                flat_idx,
+                cell_entries[row_cells_from..]
+                    .iter()
+                    .map(|&((_, at), id)| (at, id))
+                    .collect(),
+            ));
             // A row that declares `set_expanded` already advertises UIA's
             // ExpandCollapse pattern — `accesskit_consumer` derives support
             // from the property, not from the action list — so Windows will

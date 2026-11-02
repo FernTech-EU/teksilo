@@ -563,3 +563,20 @@ chart-pie-summary =
        *[other] { $slices } sektorer
     }
 chart-legend-name = Diagramforklaring
+
+
+data-view-move-submenu = Flyt
+data-view-move-up = Flyt op
+data-view-move-down = Flyt ned
+data-view-move-to-top = Flyt øverst
+data-view-move-to-bottom = Flyt nederst
+data-view-move-left = Flyt til venstre
+data-view-move-right = Flyt til højre
+data-view-move-to-start = Flyt til starten
+data-view-move-to-end = Flyt til slutningen
+data-view-move-into-previous = Flyt ind i forrige
+data-view-move-out-one-level = Flyt ét niveau ud
+a11y-data-view-moved-to-position = { $name } flyttet til plads { $position } af { $count }
+a11y-data-view-moved-to-position-unnamed = Flyttet til plads { $position } af { $count }
+a11y-data-view-moved-to-level = { $name } flyttet til niveau { $level }
+a11y-data-view-moved-to-level-unnamed = Flyttet til niveau { $level }

@@ -376,6 +376,24 @@ impl AccessibilityOverrides {
 ///   without uninstalling the factory.
 pub type ContextMenuFactory = Box<dyn Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>>>;
 
+/// A **section** a node adds to the context menu opened at or below it,
+/// rather than a menu of its own: the Move rows a data view's row adds to the
+/// application's row menu.
+///
+/// When a menu opens, the closest claimer wins, as for factories: walking up
+/// from the target, a node's factory is asked first, and a node with no
+/// factory (or one that declines) but a contribution claims the menu with its
+/// section alone, mounted as the menu. Once a menu is claimed, the
+/// contributions on the owning node and above it are asked, innermost first,
+/// up to and excluding the first focusable node above the owner (a data
+/// view, so a view nested in another view's row adds only its own section,
+/// and a contribution on the view itself is never merged), and each section
+/// is handed to the menu through
+/// [`Widget::append_context_menu_section`]. A menu owned by a focusable
+/// control (a text field, a cell editor) gains no section: it is about that
+/// control, not about the row it sits in. Return `None` to add nothing.
+pub type ContextMenuContribution = Box<dyn Fn(&mut EventContext) -> Option<Box<dyn Widget>>>;
+
 /// What asked for a context menu, as a [`ContextMenuFactory`] reads it from
 /// [`EventContext::context_menu_trigger`].
 ///
@@ -473,6 +491,7 @@ pub struct HandlerSet {
     /// [`HandlerSet::no_hit_slop`].
     pub(crate) no_hit_slop: Option<bool>,
     pub(crate) context_menu_factory: Option<ContextMenuFactory>,
+    pub(crate) context_menu_contribution: Option<ContextMenuContribution>,
     /// User-bound signal that the framework writes whenever the
     /// focused widget is a strict descendant of this node. See
     /// [`HandlerSet::focus_within`].
@@ -539,6 +558,7 @@ impl HandlerSet {
             hit_slop,
             no_hit_slop,
             context_menu_factory,
+            context_menu_contribution,
             focus_within,
             hover_within,
             visible_when,
@@ -586,6 +606,7 @@ impl HandlerSet {
             hit_slop: None,
             no_hit_slop: None,
             context_menu_factory: None,
+            context_menu_contribution: None,
             focus_within: None,
             hover_within: None,
             visible_when: None,
@@ -1160,6 +1181,17 @@ impl HandlerSet {
         self
     }
 
+    /// Add a section to the context menu opened at or below this node, rather
+    /// than a menu of its own. See [`ContextMenuContribution`] for when it is
+    /// asked and where the section goes.
+    pub fn context_menu_contribution(
+        mut self,
+        contribution: impl Fn(&mut EventContext) -> Option<Box<dyn Widget>> + 'static,
+    ) -> Self {
+        self.context_menu_contribution = Some(Box::new(contribution));
+        self
+    }
+
     /// Set the drag hover handler. Called when a drag payload hovers over this widget.
     /// Return `DropFeedback` to indicate acceptance and visual feedback.
     pub fn on_drag_hover(
@@ -1650,6 +1682,16 @@ impl<W: Widget> WidgetWithHandlers<W> {
         factory: impl Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>> + 'static,
     ) -> Self {
         self.handler_set.context_menu_factory = Some(Box::new(factory));
+        self
+    }
+
+    /// Add a section to the context menu opened at or below this node. See
+    /// [`HandlerSet::context_menu_contribution`].
+    pub fn context_menu_contribution(
+        mut self,
+        contribution: impl Fn(&mut EventContext) -> Option<Box<dyn Widget>> + 'static,
+    ) -> Self {
+        self.handler_set.context_menu_contribution = Some(Box::new(contribution));
         self
     }
 
@@ -2201,6 +2243,13 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.context_menu_key_target()
     }
 
+    fn append_context_menu_section(
+        &mut self,
+        section: Box<dyn Widget>,
+    ) -> Result<(), Box<dyn Widget>> {
+        self.widget.append_context_menu_section(section)
+    }
+
     fn children(&self) -> Vec<crate::widget_id::WidgetId> {
         self.widget.children()
     }
@@ -2607,6 +2656,15 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
         factory: impl Fn(Point, &mut EventContext) -> Option<Box<dyn Widget>> + 'static,
     ) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).context_menu(factory)
+    }
+
+    /// Add a section to the context menu opened at or below this node. See
+    /// [`HandlerSet::context_menu_contribution`].
+    fn context_menu_contribution(
+        self,
+        contribution: impl Fn(&mut EventContext) -> Option<Box<dyn Widget>> + 'static,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).context_menu_contribution(contribution)
     }
 
     /// Bind a `Signal<bool>` the framework writes when a strict

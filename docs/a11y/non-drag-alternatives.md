@@ -92,16 +92,18 @@ advertising a move to the top.
 
 ## Where the menu rows live
 
-The framework installs its own context menu on the thing being moved — the row,
-the tile, the tab header. Two consequences worth knowing:
+The framework adds the Move rows to the thing being moved: the row, the tile,
+the tab header. Two consequences worth knowing:
 
-- An application's own per-row, per-tile or per-tab menu **wins**: an application
-  that writes one owns that surface's menu. The custom actions and the chord are
-  unaffected, so the command stays reachable by two other routes. How the
-  precedence is arranged differs by widget and is stated at each site — a factory
-  nearer the click wins the context-menu walk, and where the framework and the
-  application would install on the *same* node the framework installs first so
-  the application's replaces it.
+- On a data view (a row or a tile), the rows are a context-menu
+  *contribution*: with no application menu nearer than the row they open alone,
+  as a flat menu; an application's own per-row, per-cell or per-tile menu (a
+  delegate's `.context_menu(..)`, a `tile_context_menu`) ends with them as a
+  "Move" submenu. A menu on the view itself is farther than the row, so the row
+  keeps its flat Move menu. The keyboard (the Menu key, Shift+F10) and a screen
+  reader's "show menu" open the same menu a right click on the row does. On a
+  tab header an application's own menu still **replaces** the rows. The custom
+  actions and the chord are there in every case.
 - The menu appears only where the drag does. A view that was never made
   reorderable gains nothing: the obligation is to make an existing drag
   reachable, not to add one.

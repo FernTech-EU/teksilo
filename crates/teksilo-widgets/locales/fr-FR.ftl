@@ -563,3 +563,20 @@ chart-pie-summary =
        *[other] { $slices } secteurs
     }
 chart-legend-name = Légende du graphique
+
+
+data-view-move-submenu = Déplacer
+data-view-move-up = Déplacer vers le haut
+data-view-move-down = Déplacer vers le bas
+data-view-move-to-top = Déplacer tout en haut
+data-view-move-to-bottom = Déplacer tout en bas
+data-view-move-left = Déplacer vers la gauche
+data-view-move-right = Déplacer vers la droite
+data-view-move-to-start = Déplacer au début
+data-view-move-to-end = Déplacer à la fin
+data-view-move-into-previous = Déplacer dans le précédent
+data-view-move-out-one-level = Remonter d'un niveau
+a11y-data-view-moved-to-position = { $name } déplacé en position { $position } sur { $count }
+a11y-data-view-moved-to-position-unnamed = Déplacé en position { $position } sur { $count }
+a11y-data-view-moved-to-level = { $name } déplacé au niveau { $level }
+a11y-data-view-moved-to-level-unnamed = Déplacé au niveau { $level }

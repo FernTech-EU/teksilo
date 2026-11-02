@@ -950,10 +950,27 @@ impl WidgetTree {
     }
 
     fn announce_context_menu(&self, id: WidgetId, builder: &mut AccessNodeBuilder) {
-        if self
-            .arena
-            .get(id)
-            .is_some_and(|node| node.context_menu_factory.is_some())
+        let offers = |id: WidgetId| {
+            self.arena.get(id).is_some_and(|node| {
+                node.context_menu_factory.is_some() || node.context_menu_contribution.is_some()
+            })
+        };
+        // A data view's own node offers the menu its current row would open
+        // (the row, or the delegate or cell inside it, carries it).
+        let reaches_one = || {
+            let mut current = Some(self.resolve_context_menu_target(id));
+            while let Some(at) = current {
+                if offers(at) {
+                    return true;
+                }
+                if at == id {
+                    break;
+                }
+                current = self.arena.get(at).and_then(|node| node.parent);
+            }
+            false
+        };
+        if (offers(id) || reaches_one())
             && !builder
                 .actions()
                 .contains(&accesskit::Action::ShowContextMenu)

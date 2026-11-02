@@ -179,6 +179,13 @@ impl std::fmt::Debug for ListItemWrapper {
 }
 
 impl Widget for ListItemWrapper {
+    /// The row widget inside: a keyboard menu request on the row starts where
+    /// a right click on it would, at the delegate's root, where an
+    /// application's per-row `.context_menu(..)` sits.
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        self.child
+    }
+
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // A persistent field rather than `ctx.signal`, so the observer
         // installed below survives into the build it triggers.
@@ -433,6 +440,11 @@ impl Widget for TreeItemWrapper {
             None => (self.body)(ctx, selected),
         };
         self.child.into_iter().collect()
+    }
+
+    /// The row widget inside, as for `ListItemWrapper`.
+    fn context_menu_key_target(&self) -> Option<WidgetId> {
+        self.child
     }
 
     fn layout_response(

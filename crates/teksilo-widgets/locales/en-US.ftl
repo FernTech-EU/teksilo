@@ -655,3 +655,25 @@ chart-pie-summary =
        *[other] { $slices } slices
     }
 chart-legend-name = Chart legend
+
+# Moving a row, a tile or a tab without dragging it (data views, tab strips).
+# The submenu, in a row's or tab's context menu, that holds the commands moving it.
+data-view-move-submenu = Move
+data-view-move-up = Move Up
+data-view-move-down = Move Down
+data-view-move-to-top = Move to Top
+data-view-move-to-bottom = Move to Bottom
+data-view-move-left = Move Left
+data-view-move-right = Move Right
+data-view-move-to-start = Move to Start
+data-view-move-to-end = Move to End
+# Makes a tree row a child of the row above it (indent).
+data-view-move-into-previous = Move Into Previous
+# Makes a tree row the next sibling of its parent (outdent).
+data-view-move-out-one-level = Move Out One Level
+# Announced after a row or tab moved: $name is its text, $position its new place, $count how many there are.
+a11y-data-view-moved-to-position = { $name } moved to { $position } of { $count }
+a11y-data-view-moved-to-position-unnamed = Moved to { $position } of { $count }
+# Announced after a tree row moved in or out: $level is its new depth, 1 at the top.
+a11y-data-view-moved-to-level = { $name } moved to level { $level }
+a11y-data-view-moved-to-level-unnamed = Moved to level { $level }

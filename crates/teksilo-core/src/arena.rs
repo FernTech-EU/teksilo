@@ -494,6 +494,8 @@ pub struct WidgetNode {
     pub(crate) detached: Vec<WidgetId>,
     /// Context menu factory — invoked on right-click to produce overlay content.
     pub(crate) context_menu_factory: Option<crate::widget_builder::ContextMenuFactory>,
+    /// See [`ContextMenuContribution`](crate::widget_builder::ContextMenuContribution).
+    pub(crate) context_menu_contribution: Option<crate::widget_builder::ContextMenuContribution>,
     /// Intent-bound actions attached by this widget during `build()`.
     /// Consulted during intent dispatch (source-widget → root walk).
     /// Cleared on rebuild in the same pass that clears handlers.
@@ -600,6 +602,7 @@ impl WidgetNode {
             subscription_handles: Vec::new(),
             detached: Vec::new(),
             context_menu_factory: None,
+            context_menu_contribution: None,
             actions: Vec::new(),
             access_overrides: None,
             access_subtree: crate::widget_builder::AccessSubtreeMode::default(),
@@ -2330,6 +2333,9 @@ impl WidgetArena {
             }
             if handler_set.context_menu_factory.is_some() {
                 node.context_menu_factory = handler_set.context_menu_factory;
+            }
+            if handler_set.context_menu_contribution.is_some() {
+                node.context_menu_contribution = handler_set.context_menu_contribution;
             }
             if let Some(sig) = handler_set.focus_within {
                 node.focus_within_signal = Some(sig);
