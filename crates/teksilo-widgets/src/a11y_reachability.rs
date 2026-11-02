@@ -1012,7 +1012,7 @@ mod heard {
         // each one inherited the palette's politeness.
         let (mut tree, _) = palette_tree();
         laid_out(&mut tree);
-        let Some(field) = tree.find_by_role(Role::TextInput) else {
+        let Some(field) = tree.find_by_role(Role::SearchInput) else {
             panic!("the palette has a search field");
         };
         tree.focus(field);
@@ -1154,7 +1154,7 @@ mod one_dialog {
             crate::command_palette::CommandPalette::new(),
         ));
         let update = laid_out(&mut tree);
-        let Some(field) = tree.find_by_role(Role::TextInput) else {
+        let Some(field) = tree.find_by_role(Role::SearchInput) else {
             panic!("the palette has a search field");
         };
         let dialogs = dialogs_above(&update, field);

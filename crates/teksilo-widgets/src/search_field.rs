@@ -44,17 +44,32 @@
 //!
 //! ## Accessibility
 //!
-//! The field is `Role::SearchInput` with `HasPopup::Listbox` and
-//! `AutoComplete::List`. When the popup is open it advertises
-//! `set_expanded(true)` and `set_controls(listbox_id)` (mapped to
-//! `accesskit::NodeId` via `widget_id_to_node_id`). Each row is
-//! `Role::ListBoxOption` with `set_selected(is_highlighted)` and
-//! `set_position_in_set(idx + 1)`; the `Role::ListBox` container
-//! carries the matching `set_size_of_set(total)`, since AccessKit
-//! resolves a set size by walking up from the item. Together they
-//! let screen readers announce "Apple, 1 of 5".
+//! A `SearchField` is one node to assistive technology: its editing field,
+//! the node that holds focus, with `Role::SearchInput` and the name given by
+//! [`SearchField::label`]. The `SearchField`'s own node is structure and is
+//! left out of the tree, and what an application attaches to the
+//! `SearchField`'s id (`access_label`, a `FormLayout`'s `labelled_by`,
+//! `access_described_by`) lands on the field. Focusing the `SearchField`
+//! (`ctx.focus(id)`, an `initial_focus_hint`) focuses its field.
+//!
+//! With suggestions ([`SearchField::with_suggestions`]) the field is also
+//! the combobox: `HasPopup::Listbox`, `AutoComplete::List`, `expanded`
+//! (`true` while the popup is open, `false` otherwise), `controls` naming
+//! the popup's `Role::ListBox` while it is open, and `active_descendant`
+//! naming the highlighted row while the popup is open, so arrowing through
+//! the suggestions is announced while focus stays in the field. Without
+//! suggestions it claims no popup. Each row is `Role::ListBoxOption` with
+//! `set_selected(is_highlighted)` and `set_position_in_set(idx + 1)`; the
+//! `Role::ListBox` container carries the matching `set_size_of_set(total)`,
+//! since AccessKit resolves a set size by walking up from the item. Together
+//! they let screen readers announce "Apple, 1 of 5".
+//!
+//! [`SearchField::drives_listbox`] gives the field `controls` and
+//! `active_descendant` for a list its host owns, without a popup. With both,
+//! the built-in popup's row is announced while the popup is open and the
+//! host's list otherwise.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 use teksilo_i18n::lit;
 
@@ -128,33 +143,16 @@ pub struct SearchField {
     external_controls: Option<Signal<Option<WidgetId>>>,
     /// Build state — populated in `build()`.
     root_child_id: Option<WidgetId>,
-    /// Slot the SuggestionPanel writes its inner ListBox WidgetId into,
-    /// so SearchField's `accessibility()` can publish `set_controls`.
-    listbox_id_slot: Rc<Cell<Option<WidgetId>>>,
-    /// Slot the SuggestionPanel writes its current rows' WidgetIds
-    /// into (in display order). `accessibility()` uses it together
-    /// with `highlighted_slot` to publish `set_active_descendant` —
-    /// the ARIA pattern for an editable combobox so screen readers
-    /// announce arrow-key navigation through suggestions while focus
-    /// stays on the field. Rebuilt every time the suggestions list
-    /// changes, in lockstep with `listbox_id_slot`.
-    row_ids_slot: Rc<RefCell<Vec<WidgetId>>>,
-    /// Mirror of the `highlighted` signal, read by `accessibility()`
-    /// to look up the currently-active row id. Stored in a `RefCell`
-    /// because it's populated in `build()` and read from `&self`.
-    highlighted_slot: RefCell<Option<Signal<Option<usize>>>>,
+    /// The inner `TextInput`'s editing field, the node that holds focus and
+    /// stands for this widget to assistive technology (see
+    /// `accessibility_proxy`). Filled in when the `TextInput` builds.
+    field_id: Rc<Cell<Option<WidgetId>>>,
     /// Pre-created suggestions panel content. Inserted as a dormant
     /// arena root in `build()` and shown as an overlay anchored to
     /// the field via `OverlayRequest`. Added detached, so the
     /// framework owns the teardown — the previous panel is reaped on
     /// rebuild and the live one when the field is destroyed.
     panel_content_id: Option<WidgetId>,
-    /// Whether the suggestions overlay is currently shown. Set true
-    /// when the open helper fires `ctx.show_overlay`, set false by the
-    /// dismiss callback registered on every `OverlayRequest`. Read by
-    /// `accessibility()` to drive `set_expanded`. Built in `build()`,
-    /// reused across rebuilds.
-    overlay_open: RefCell<Option<Signal<bool>>>,
     /// Per-call style override.
     style_override: Option<teksilo_core::styles::SharedSearchFieldStyle>,
     /// Optional plain tooltip text shown after a hover delay. Mutually exclusive
@@ -185,11 +183,8 @@ impl SearchField {
             external_active_descendant: None,
             external_controls: None,
             root_child_id: None,
-            listbox_id_slot: Rc::new(Cell::new(None)),
-            row_ids_slot: Rc::new(RefCell::new(Vec::new())),
-            highlighted_slot: RefCell::new(None),
+            field_id: Rc::new(Cell::new(None)),
             panel_content_id: None,
-            overlay_open: RefCell::new(None),
             style_override: None,
             tooltip_text: None,
             rich_tooltip_source: None,
@@ -370,6 +365,19 @@ impl Widget for SearchField {
         // refocuses the field. Reset on focus-gain and on any
         // non-Escape KeyDown.
         let dismissed: Signal<bool> = ctx.signal(false);
+        // `overlay_open` mirrors the live overlay state: set to true by the
+        // open helper before `ctx.show_overlay`, set to false by the dismiss
+        // callback the overlay manager invokes (Escape, outside click,
+        // programmatic dismiss). The field publishes it as `expanded`, so it
+        // exists before the field is built. It is also the panel's reveal
+        // gate: the suggestion list is built the first time the field
+        // actually suggests something, not on every rebuild of the field.
+        let overlay_open: Signal<bool> = ctx.signal(false);
+        // What the suggestion panel publishes when it builds: its `ListBox`
+        // and its rows, in display order. Each has one writer, the panel's
+        // `build`; the field's relations are derived from them below.
+        let panel_listbox: Signal<Option<WidgetId>> = ctx.signal::<Option<WidgetId>>(None);
+        let panel_rows: Signal<Vec<WidgetId>> = ctx.signal(Vec::new());
 
         // ── TextInput with submit hook ──────────────────────────────
         // Built inline (matching DateEdit / TimeEdit / SpinBox) — no
@@ -389,6 +397,7 @@ impl Widget for SearchField {
         let has_suggestions = self.suggestion_provider.is_some();
 
         let mut input = TextInput::new(self.text.clone())
+            .input_purpose(crate::primitives::InputPurpose::Search)
             .placeholder(placeholder)
             .show_clear_button(true)
             .leading_slot(search_glyph(sf::GLYPH_SIZE, sf::GLYPH_SLOT_WIDTH))
@@ -434,12 +443,55 @@ impl Widget for SearchField {
             input = input.on_text_inserted(move |source, chars| (cb)(source, chars));
         }
         input = input.writing_tools(self.writing_tools.clone());
-        if let Some(active) = self.external_active_descendant.clone() {
-            input = input.active_descendant(active);
+        // The combobox wiring goes on the field, the node that holds focus:
+        // a screen reader reads a combobox's popup state and follows its
+        // active descendant on the focused node, never on an ancestor.
+        let external_active = self.external_active_descendant.clone();
+        let external_controls = self.external_controls.clone();
+        if has_suggestions {
+            input = input
+                .has_popup(teksilo_core::accesskit::HasPopup::Listbox)
+                .auto_complete(teksilo_core::accesskit::AutoComplete::List)
+                .expanded(overlay_open.clone());
+            // The popup's highlighted row while it is open. The host's list,
+            // if there is one, while it is closed: the arrow keys drive
+            // whichever list is showing.
+            let built_in = overlay_open.zip3(&highlighted, &panel_rows);
+            let active = match external_active {
+                Some(external) => built_in.zip(&external).map(|((open, at, rows), ext)| {
+                    if *open {
+                        at.and_then(|i| rows.get(i).copied())
+                    } else {
+                        *ext
+                    }
+                }),
+                None => built_in.map(|(open, at, rows)| {
+                    if *open {
+                        at.and_then(|i| rows.get(i).copied())
+                    } else {
+                        None
+                    }
+                }),
+            };
+            // The popup's list, which is in the tree only while it is shown:
+            // the walker drops a relation to a node it did not emit, so a
+            // closed popup leaves `controls` empty.
+            let controls = match external_controls {
+                Some(external) => overlay_open
+                    .zip3(&panel_listbox, &external)
+                    .map(|(open, own, ext)| if *open { *own } else { *ext }),
+                None => panel_listbox.clone(),
+            };
+            input = input.active_descendant(active).controls(controls);
+        } else {
+            if let Some(active) = external_active {
+                input = input.active_descendant(active);
+            }
+            if let Some(listbox) = external_controls {
+                input = input.controls(listbox);
+            }
         }
-        if let Some(listbox) = self.external_controls.clone() {
-            input = input.controls(listbox);
-        }
+        self.field_id = input.field_id();
         let input_id = ctx.add(input);
 
         // ── Suggestions provider effect ─────────────────────────────
@@ -482,30 +534,13 @@ impl Widget for SearchField {
             highlighted: highlighted.clone(),
             on_select: self.on_select.clone(),
             dismissed: dismissed.clone(),
-            listbox_id_slot: self.listbox_id_slot.clone(),
-            row_ids_slot: self.row_ids_slot.clone(),
+            listbox: panel_listbox.clone(),
+            rows: panel_rows.clone(),
             root_child_id: None,
         };
-        // ── Open / dismiss state ────────────────────────────────────
-        // `overlay_open` mirrors the live overlay state: set to true by
-        // the open helper before `ctx.show_overlay`, set to false by
-        // the dismiss callback the overlay manager invokes (Escape,
-        // outside click, programmatic dismiss). Read by
-        // `accessibility()` for `set_expanded`.
-        //
-        // Created before the panel because it is also the panel's reveal gate:
-        // the suggestion list is built the first time the field actually
-        // suggests something, not on every rebuild of the field.
-        let overlay_open = ctx.signal(false);
-        *self.overlay_open.borrow_mut() = Some(overlay_open.clone());
-
         let panel_id = ctx.add_detached_deferred(overlay_open.clone(), panel);
         ctx.set_dormant(panel_id);
         self.panel_content_id = Some(panel_id);
-        // Expose `highlighted` to `accessibility()` so it can publish
-        // `set_active_descendant` pointing at the currently-highlighted
-        // suggestion row.
-        *self.highlighted_slot.borrow_mut() = Some(highlighted.clone());
 
         let dismiss_callback: OverlayDismissCallback = {
             let overlay_open = overlay_open.clone();
@@ -801,39 +836,21 @@ impl Widget for SearchField {
         }
     }
 
+    /// Structure only: the editing field is the `SearchInput` and carries
+    /// the name and the combobox properties (see `build`). A second node
+    /// saying them around it is what made a screen reader stop on an unnamed
+    /// object before the field. `GenericContainer` is what the
+    /// presentational pass collapses.
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        use teksilo_core::accessibility::widget_id_to_node_id;
-        builder.set_role(teksilo_core::accesskit::Role::SearchInput);
-        builder.set_has_popup(teksilo_core::accesskit::HasPopup::Listbox);
-        builder.set_auto_complete(teksilo_core::accesskit::AutoComplete::List);
-        // `set_expanded` so AT clients know the popup is open. Set
-        // both true and false explicitly — without the false branch
-        // the field carries a stale `expanded=true` after dismiss.
-        let is_open = self
-            .overlay_open
-            .borrow()
-            .as_ref()
-            .is_some_and(|sig| sig.get());
-        builder.set_expanded(is_open);
-        if let Some(listbox_id) = self.listbox_id_slot.get() {
-            builder.push_controlled(widget_id_to_node_id(listbox_id));
-        }
-        // ARIA combobox pattern: focus stays on the search input
-        // while arrow keys navigate the listbox; screen readers
-        // follow `aria-activedescendant` to announce the currently-
-        // highlighted option. Without this, ArrowUp/ArrowDown in the
-        // popover are silent to AT users.
-        if is_open
-            && let Some(sig) = self.highlighted_slot.borrow().as_ref()
-            && let Some(idx) = sig.get()
-        {
-            let row_ids = self.row_ids_slot.borrow();
-            if let Some(&row_id) = row_ids.get(idx) {
-                builder
-                    .inner_mut()
-                    .set_active_descendant(widget_id_to_node_id(row_id));
-            }
-        }
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+    }
+
+    /// The editing field stands for the search field, so what an application
+    /// attaches to the `SearchField`'s id (`access_label`, a `FormLayout`'s
+    /// `labelled_by`, `access_described_by`) lands on the node that holds
+    /// focus.
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        self.field_id.get()
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -856,11 +873,11 @@ struct SuggestionPanel {
     highlighted: Signal<Option<usize>>,
     on_select: Option<OnSelect>,
     dismissed: Signal<bool>,
-    listbox_id_slot: Rc<Cell<Option<WidgetId>>>,
-    /// SearchField-side slot we populate with the current row WidgetIds
-    /// in display order, so its `accessibility()` can map `highlighted`
-    /// back to the active row id for `set_active_descendant`.
-    row_ids_slot: Rc<RefCell<Vec<WidgetId>>>,
+    /// Where this panel publishes its `ListBox`, for the field's `controls`.
+    listbox: Signal<Option<WidgetId>>,
+    /// Where this panel publishes its rows in display order, which the field
+    /// maps the highlighted index through for its `active_descendant`.
+    rows: Signal<Vec<WidgetId>>,
     root_child_id: Option<WidgetId>,
 }
 
@@ -958,10 +975,10 @@ impl Widget for SuggestionPanel {
             row_ids.push(row);
             column = column.child(row);
         }
-        // Publish the row ids for SearchField's `accessibility()` to
-        // resolve `highlighted -> active_descendant`. Repopulated on
-        // every rebuild so it tracks the live row WidgetIds.
-        *self.row_ids_slot.borrow_mut() = row_ids;
+        // Publish the row ids for the field to resolve `highlighted ->
+        // active_descendant`. Republished on every rebuild so it tracks the
+        // live row WidgetIds.
+        self.rows.set_if_changed(row_ids);
 
         // Listbox surface — routed through `PopoverStyle` (the
         // `Menu`-flavoured variant), so the panel background, border,
@@ -994,9 +1011,8 @@ impl Widget for SuggestionPanel {
             inner: surface,
             total,
         });
-        // Publish the listbox WidgetId so SearchField's a11y can wire
-        // `aria-controls`.
-        self.listbox_id_slot.set(Some(listbox));
+        // Publish the listbox WidgetId for the field's `controls`.
+        self.listbox.set_if_changed(Some(listbox));
 
         self.root_child_id = Some(listbox);
         vec![listbox]
@@ -1191,7 +1207,14 @@ mod tests {
             width: Some(280.0),
             height: None,
         });
-        let info = tree.accessibility_node(id);
+        // The role is on the editing field, the node focus lands on; the
+        // `SearchField`'s own node is structure.
+        tree.focus(id);
+        let field = tree
+            .focused()
+            .expect("focusing the SearchField focuses its field");
+        assert_ne!(field, id);
+        let info = tree.accessibility_node(field);
         assert_eq!(info.role(), teksilo_core::accesskit::Role::SearchInput);
     }
 
@@ -1279,5 +1302,289 @@ mod tests {
                 && node.label() == Some("alpha")),
             "the row's Text widget must not survive as a duplicate-named AT node",
         );
+    }
+
+    // ── One node to assistive technology ───────────────────────────────
+
+    use teksilo_core::accessibility::widget_id_to_node_id;
+    use teksilo_core::accesskit::{AutoComplete, HasPopup, Node, NodeId, Role};
+
+    fn fruit(prefix: &str) -> Vec<String> {
+        ["apple", "apricot", "avocado"]
+            .iter()
+            .filter(|f| !prefix.is_empty() && f.starts_with(prefix))
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    fn size() -> SizeProposal {
+        SizeProposal::exact(320.0, 240.0)
+    }
+
+    /// A root holding `field`, laid out.
+    fn mounted(field: impl Widget + 'static) -> (WidgetTree, WidgetId) {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(field);
+        tree.layout(size());
+        (tree, id)
+    }
+
+    /// The update's nodes, and the node it names as focus.
+    fn snapshot(tree: &mut WidgetTree) -> (std::collections::HashMap<NodeId, Node>, NodeId) {
+        tree.layout(size());
+        let update = tree.sync_accessibility();
+        (update.nodes.into_iter().collect(), update.focus)
+    }
+
+    fn focused_node(tree: &mut WidgetTree) -> (std::collections::HashMap<NodeId, Node>, Node) {
+        let (nodes, focus) = snapshot(tree);
+        let node = nodes
+            .get(&focus)
+            .cloned()
+            .expect("the focused node is in the update");
+        (nodes, node)
+    }
+
+    fn press(tree: &mut WidgetTree, key: Key) {
+        tree.press_key(key, teksilo_core::event::Modifiers::empty());
+        tree.layout(size());
+    }
+
+    /// What Skribisto's Settings panel does: a host names the `SearchField`
+    /// itself as the place focus goes. Focus lands on the field, which takes
+    /// the keys.
+    #[test]
+    fn focusing_the_search_field_focuses_its_field_and_typing_reaches_it() {
+        let query = Signal::new(String::new());
+        let (mut tree, id) = mounted(SearchField::new(query.clone()).label(lit!("Find")));
+        tree.focus(id);
+        let field = tree.focused().expect("something is focused");
+        assert_ne!(
+            field, id,
+            "focus must not park on the structural outer node"
+        );
+        assert_eq!(tree.accessibility_node(field).role(), Role::SearchInput);
+        tree.type_text(field, "q");
+        tree.layout(size());
+        assert_eq!(query.get(), "q", "the keys reach the field");
+    }
+
+    /// One Tab stop, whatever focused it: the outer node is not one.
+    #[test]
+    fn the_search_field_is_a_single_tab_stop() {
+        let (mut tree, id) =
+            mounted(SearchField::new(Signal::new(String::new())).with_suggestions(fruit));
+        tree.focus(id);
+        let field = tree.focused().unwrap();
+        let stops = tree.tab_stops_within(id);
+        assert_eq!(stops.iter().filter(|s| **s == field).count(), 1);
+        assert!(!stops.contains(&id));
+    }
+
+    /// With suggestions, the combobox is the focused field: one node claims
+    /// the popup, it is the `SearchInput`, it carries the label, and the
+    /// `SearchField`'s own node is not in the tree.
+    #[test]
+    fn with_suggestions_the_focused_field_is_the_named_combobox() {
+        let (mut tree, id) = mounted(
+            SearchField::new(Signal::new(String::new()))
+                .label(lit!("Find"))
+                .with_suggestions(fruit),
+        );
+        tree.focus(id);
+        let (nodes, focused) = focused_node(&mut tree);
+        let claimants: Vec<_> = nodes.values().filter(|n| n.has_popup().is_some()).collect();
+        assert_eq!(claimants.len(), 1, "exactly one node claims the popup");
+        assert_eq!(focused.has_popup(), Some(HasPopup::Listbox));
+        assert_eq!(focused.auto_complete(), Some(AutoComplete::List));
+        assert_eq!(focused.role(), Role::SearchInput);
+        assert_eq!(focused.label(), Some("Find"));
+        assert_eq!(focused.is_expanded(), Some(false), "closed, and said so");
+        assert!(
+            !nodes.contains_key(&widget_id_to_node_id(id)),
+            "the SearchField's own node is structure and is pruned"
+        );
+    }
+
+    /// Typing opens the popup and the field says so; Escape closes it and the
+    /// field says `false`, not nothing.
+    #[test]
+    fn the_field_reports_the_popup_opening_and_closing() {
+        let (mut tree, id) =
+            mounted(SearchField::new(Signal::new(String::new())).with_suggestions(fruit));
+        tree.focus(id);
+        let field = tree.focused().unwrap();
+        tree.type_text(field, "a");
+        tree.layout(size());
+        let (_, focused) = focused_node(&mut tree);
+        assert_eq!(focused.is_expanded(), Some(true));
+        press(&mut tree, Key::Escape);
+        let (_, focused) = focused_node(&mut tree);
+        assert_eq!(focused.is_expanded(), Some(false));
+    }
+
+    /// Arrowing through the suggestions moves the focused field's active
+    /// descendant along the rows, each one a `ListBoxOption` in the update,
+    /// and closing the popup clears it.
+    #[test]
+    fn arrowing_moves_the_fields_active_descendant_along_the_rows() {
+        let (mut tree, id) =
+            mounted(SearchField::new(Signal::new(String::new())).with_suggestions(fruit));
+        tree.focus(id);
+        let field = tree.focused().unwrap();
+        tree.type_text(field, "a");
+        tree.layout(size());
+        press(&mut tree, Key::ArrowDown);
+        let (nodes, focused) = focused_node(&mut tree);
+        let first = focused
+            .active_descendant()
+            .expect("the highlight is announced");
+        assert_eq!(nodes.get(&first).map(Node::role), Some(Role::ListBoxOption));
+        assert_eq!(nodes[&first].label(), Some("apple"));
+        let listbox = focused
+            .controls()
+            .first()
+            .copied()
+            .expect("controls the list");
+        assert_eq!(nodes.get(&listbox).map(Node::role), Some(Role::ListBox));
+        press(&mut tree, Key::ArrowDown);
+        let (nodes, focused) = focused_node(&mut tree);
+        let second = focused.active_descendant().expect("still announced");
+        assert_ne!(first, second, "the active descendant follows the highlight");
+        assert_eq!(nodes[&second].label(), Some("apricot"));
+        press(&mut tree, Key::Escape);
+        let (_, focused) = focused_node(&mut tree);
+        assert_eq!(focused.active_descendant(), None, "cleared on close");
+        assert!(
+            focused.controls().is_empty(),
+            "a closed popup's list is not in the tree, so no relation names it"
+        );
+    }
+
+    /// Without suggestions there is no popup to claim.
+    #[test]
+    fn without_suggestions_the_field_claims_no_popup() {
+        let (mut tree, id) = mounted(SearchField::new(Signal::new(String::new())));
+        tree.focus(id);
+        let (nodes, focused) = focused_node(&mut tree);
+        assert_eq!(focused.role(), Role::SearchInput);
+        assert_eq!(focused.has_popup(), None);
+        assert_eq!(focused.auto_complete(), None);
+        assert_eq!(focused.is_expanded(), None);
+        assert!(nodes.values().all(|n| n.has_popup().is_none()));
+    }
+
+    /// A list the host owns (a command palette): the field follows the host's
+    /// signals and claims no popup, since that list is not one.
+    #[test]
+    fn drives_listbox_follows_the_hosts_list_without_a_popup() {
+        let list = Signal::new(None::<WidgetId>);
+        let active = Signal::new(None::<WidgetId>);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let row = tree.add(TextWidget::new(lit!("row")));
+        let host_list = tree.add(VStack::new().child(row));
+        let id = tree.add(
+            SearchField::new(Signal::new(String::new()))
+                .drives_listbox(list.clone(), active.clone()),
+        );
+        tree.add(VStack::new().child(id).child(host_list));
+        tree.layout(size());
+        tree.focus(id);
+        list.set(Some(host_list));
+        active.set(Some(row));
+        let (_, focused) = focused_node(&mut tree);
+        assert_eq!(focused.controls(), &[widget_id_to_node_id(host_list)]);
+        assert_eq!(focused.active_descendant(), Some(widget_id_to_node_id(row)));
+        assert_eq!(focused.has_popup(), None);
+        assert_eq!(focused.is_expanded(), None);
+        active.set(None);
+        let (_, focused) = focused_node(&mut tree);
+        assert_eq!(focused.active_descendant(), None);
+    }
+
+    /// Both lists: while the popup is open its row is the one announced, and
+    /// once it closes the host's is again.
+    #[test]
+    fn the_open_popups_row_wins_over_the_hosts_list() {
+        let list = Signal::new(None::<WidgetId>);
+        let active = Signal::new(None::<WidgetId>);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let row = tree.add(TextWidget::new(lit!("row")));
+        let host_list = tree.add(VStack::new().child(row));
+        let id = tree.add(
+            SearchField::new(Signal::new(String::new()))
+                .with_suggestions(fruit)
+                .drives_listbox(list.clone(), active.clone()),
+        );
+        tree.add(VStack::new().child(id).child(host_list));
+        tree.layout(size());
+        list.set(Some(host_list));
+        active.set(Some(row));
+        tree.focus(id);
+        let field = tree.focused().unwrap();
+        let (_, focused) = focused_node(&mut tree);
+        assert_eq!(focused.active_descendant(), Some(widget_id_to_node_id(row)));
+        assert_eq!(focused.controls(), &[widget_id_to_node_id(host_list)]);
+        tree.type_text(field, "a");
+        tree.layout(size());
+        press(&mut tree, Key::ArrowDown);
+        let (nodes, focused) = focused_node(&mut tree);
+        let own = focused.active_descendant().expect("the popup's row");
+        assert_eq!(nodes.get(&own).map(Node::role), Some(Role::ListBoxOption));
+        assert_ne!(focused.controls(), &[widget_id_to_node_id(host_list)]);
+        press(&mut tree, Key::Escape);
+        let (_, focused) = focused_node(&mut tree);
+        assert_eq!(focused.active_descendant(), Some(widget_id_to_node_id(row)));
+        assert_eq!(focused.controls(), &[widget_id_to_node_id(host_list)]);
+    }
+
+    /// What an application attaches to the `SearchField`'s id reaches the
+    /// field, the node a screen reader lands on.
+    #[test]
+    fn an_access_label_on_the_search_field_names_its_field() {
+        use teksilo_core::widget_builder::WidgetBuilder;
+        let (mut tree, id) = mounted(
+            SearchField::new(Signal::new(String::new()))
+                .with_suggestions(fruit)
+                .access_label(lit!("Find a setting")),
+        );
+        tree.focus(id);
+        let (_, focused) = focused_node(&mut tree);
+        assert_eq!(focused.label(), Some("Find a setting"));
+    }
+
+    /// A `FormLayout` row label names the field through `labelled_by` on the
+    /// `SearchField`'s id.
+    #[test]
+    fn a_form_row_label_names_the_search_field() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let label = tree.add(TextWidget::new(lit!("Query")));
+        let search = tree.add(SearchField::new(Signal::new(String::new())).with_suggestions(fruit));
+        tree.add(crate::primitives::FormLayout::new().line(label, search));
+        tree.layout(size());
+        tree.focus(search);
+        let (_, focused) = focused_node(&mut tree);
+        assert!(
+            focused.labelled_by().contains(&widget_id_to_node_id(label)),
+            "the row label must reach the focused field"
+        );
+    }
+
+    /// A description attached to the `SearchField`'s id reaches the field.
+    #[test]
+    fn an_access_described_by_on_the_search_field_describes_its_field() {
+        use teksilo_core::widget_builder::WidgetBuilder;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let hint = tree.add(TextWidget::new(lit!("Searches every setting")));
+        let search = tree.add(
+            SearchField::new(Signal::new(String::new()))
+                .with_suggestions(fruit)
+                .access_described_by(hint),
+        );
+        tree.add(VStack::new().child(search).child(hint));
+        tree.layout(size());
+        tree.focus(search);
+        let (_, focused) = focused_node(&mut tree);
+        assert!(focused.described_by().contains(&widget_id_to_node_id(hint)));
     }
 }

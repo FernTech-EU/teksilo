@@ -864,9 +864,11 @@ fn the_search_field_publishes_the_highlighted_row_as_its_active_descendant() {
         .values()
         .find(|n| n.active_descendant() == Some(want))
         .expect("the highlighted row must be published as an active descendant");
+    // The palette's query field is a `SearchField`, so the field is a
+    // `SearchInput`.
     assert_eq!(
         publisher.role(),
-        Role::TextInput,
+        Role::SearchInput,
         "the relation must sit on the focusable text field, not on a composite \
          ancestor: AT follows the focused node's active descendant"
     );

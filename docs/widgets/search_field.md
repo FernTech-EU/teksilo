@@ -76,15 +76,30 @@ API surface tuned to its semantics.
 
 #### Accessibility
 
-The field is `Role::SearchInput` with `HasPopup::Listbox` and
-`AutoComplete::List`. When the popup is open it advertises
-`set_expanded(true)` and `set_controls(listbox_id)` (mapped to
-`accesskit::NodeId` via `widget_id_to_node_id`). Each row is
-`Role::ListBoxOption` with `set_selected(is_highlighted)` and
-`set_position_in_set(idx + 1)`; the `Role::ListBox` container
-carries the matching `set_size_of_set(total)`, since AccessKit
-resolves a set size by walking up from the item. Together they
-let screen readers announce "Apple, 1 of 5".
+A `SearchField` is one node to assistive technology: its editing field,
+the node that holds focus, with `Role::SearchInput` and the name given by
+`SearchField::label`. The `SearchField`'s own node is structure and is
+left out of the tree, and what an application attaches to the
+`SearchField`'s id (`access_label`, a `FormLayout`'s `labelled_by`,
+`access_described_by`) lands on the field. Focusing the `SearchField`
+(`ctx.focus(id)`, an `initial_focus_hint`) focuses its field.
+
+With suggestions (`SearchField::with_suggestions`) the field is also
+the combobox: `HasPopup::Listbox`, `AutoComplete::List`, `expanded`
+(`true` while the popup is open, `false` otherwise), `controls` naming
+the popup's `Role::ListBox` while it is open, and `active_descendant`
+naming the highlighted row while the popup is open, so arrowing through
+the suggestions is announced while focus stays in the field. Without
+suggestions it claims no popup. Each row is `Role::ListBoxOption` with
+`set_selected(is_highlighted)` and `set_position_in_set(idx + 1)`; the
+`Role::ListBox` container carries the matching `set_size_of_set(total)`,
+since AccessKit resolves a set size by walking up from the item. Together
+they let screen readers announce "Apple, 1 of 5".
+
+`SearchField::drives_listbox` gives the field `controls` and
+`active_descendant` for a list its host owns, without a popup. With both,
+the built-in popup's row is announced while the popup is open and the
+host's list otherwise.
 
 ## Density
 

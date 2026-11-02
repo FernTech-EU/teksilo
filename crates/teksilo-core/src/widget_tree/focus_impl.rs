@@ -352,6 +352,10 @@ impl WidgetTree {
     /// node reachable from the keyboard: only
     /// [`tab_stops_within`](Self::tab_stops_within) proves that.
     ///
+    /// An assistive technology's `Focus` action on the same node is refused
+    /// instead, on purpose: the application named this node, the assistive
+    /// technology did not, so the two rules differ.
+    ///
     /// **A dormant target is focused when it wakes, not now.** If `id` sits in
     /// a parked `Switcher` page or a `visible_when(false)` branch, focus stays
     /// where it is and the request is held until the end of the next

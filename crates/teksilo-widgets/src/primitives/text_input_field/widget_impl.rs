@@ -265,6 +265,13 @@ impl Widget for TextInputField {
                 teksilo_core::binding::BindingLevel::AccessibilityOnly,
             );
         }
+        if let Some(open) = self.expanded.as_ref() {
+            open.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::binding::BindingLevel::AccessibilityOnly,
+            );
+        }
 
         // Secure fields: flipping the reveal toggle must repaint AND
         // refresh AT. `RepaintOnly` dirties this node for the render
@@ -1489,6 +1496,15 @@ impl Widget for TextInputField {
             builder
                 .inner_mut()
                 .set_active_descendant(teksilo_core::accessibility::widget_id_to_node_id(active));
+        }
+        if let Some(popup) = self.has_popup {
+            builder.set_has_popup(popup);
+        }
+        if let Some(mode) = self.auto_complete {
+            builder.set_auto_complete(mode);
+        }
+        if let Some(open) = self.expanded.as_ref() {
+            builder.set_expanded(open.get());
         }
     }
 }

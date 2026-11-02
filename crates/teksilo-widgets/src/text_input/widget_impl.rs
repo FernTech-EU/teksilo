@@ -99,6 +99,15 @@ impl Widget for TextInput {
         if let Some(controls) = self.controls.clone() {
             field = field.controls(controls);
         }
+        if let Some(popup) = self.has_popup {
+            field = field.has_popup(popup);
+        }
+        if let Some(mode) = self.auto_complete {
+            field = field.auto_complete(mode);
+        }
+        if let Some(open) = self.expanded.clone() {
+            field = field.expanded(open);
+        }
         let validator_installed = self.validator.is_some();
         if let Some(validator) = self.validator.take() {
             // ValidatorFn is `Rc<dyn Fn(&str) -> ValidationOutcome>`.

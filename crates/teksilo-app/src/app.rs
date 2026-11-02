@@ -9371,6 +9371,83 @@ mod tests {
         );
     }
 
+    /// Content whose `initial_focus_hint` names a `SearchField` behind a
+    /// button, the shape of Skribisto's Settings panel.
+    #[derive(Debug)]
+    struct SearchHintContent {
+        root: Option<WidgetId>,
+        search: Option<WidgetId>,
+        query: teksilo_core::Signal<String>,
+    }
+
+    impl teksilo_core::Widget for SearchHintContent {
+        fn build(&mut self, ctx: &mut teksilo_core::BuildContext) -> Vec<WidgetId> {
+            let first = ctx.add(Button::new(lit!("First")));
+            let search = ctx.add(
+                teksilo_widgets::SearchField::new(self.query.clone())
+                    .label(lit!("Find a setting"))
+                    .with_suggestions(|_| Vec::new()),
+            );
+            let column = ctx.add(teksilo_widgets::VStack::new().child(first).child(search));
+            self.root = Some(column);
+            self.search = Some(search);
+            vec![column]
+        }
+
+        fn layout_response(
+            &self,
+            proposal: teksilo_canvas::SizeProposal,
+            ctx: &teksilo_core::LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            self.root
+                .and_then(|id| ctx.child_size(id, proposal))
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+                .into()
+        }
+
+        fn initial_focus_hint(&self) -> Option<WidgetId> {
+            self.search
+        }
+
+        fn children(&self) -> Vec<WidgetId> {
+            self.root.into_iter().collect()
+        }
+    }
+
+    #[test]
+    fn present_in_tree_modal_hint_naming_a_search_field_focuses_its_field() {
+        // A hint that names a composite lands on the field inside it: focus
+        // left on the `SearchField`'s outer node took no keys and was read as
+        // an unnamed object.
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Trigger")));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let query = teksilo_core::Signal::new(String::new());
+        let content_query = query.clone();
+
+        present_in_tree_modal_request(
+            &mut tree,
+            source,
+            ModalRequest::deferred(move |tree| {
+                tree.add(SearchHintContent {
+                    root: None,
+                    search: None,
+                    query: content_query,
+                })
+            })
+            .presentation(ModalPresentation::InTree),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        let field = tree.focused().expect("the hint is focused");
+        let info = tree.accessibility_node(field);
+        assert_eq!(info.role(), teksilo_core::accesskit::Role::SearchInput);
+        assert_eq!(info.name(), Some("Find a setting"));
+        tree.type_text(field, "z");
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(query.get(), "z", "the keys reach the field");
+    }
+
     #[test]
     fn present_in_tree_modal_falls_back_to_first_focusable_without_hint() {
         // Baseline: content without an initial_focus_hint gets the first

@@ -294,6 +294,11 @@ pub struct TextInputField {
     /// The listbox this field drives, if any — see
     /// [`controls`](Self::controls).
     controls: Option<Signal<Option<WidgetId>>>,
+    /// The rest of the ARIA combobox wiring, for a field that opens a popup of
+    /// its own (a `SearchField` with suggestions). See `has_popup`.
+    has_popup: Option<teksilo_core::accesskit::HasPopup>,
+    auto_complete: Option<teksilo_core::accesskit::AutoComplete>,
+    expanded: Option<Signal<bool>>,
 
     // ── Internal (set during build) ─────────────────────────────────
     state: Option<SharedState>,
@@ -394,6 +399,9 @@ impl TextInputField {
             input_purpose: InputPurpose::Normal,
             active_descendant: None,
             controls: None,
+            has_popup: None,
+            auto_complete: None,
+            expanded: None,
             state: None,
             interaction: Signal::new(InteractionState::Idle),
             caret_position: Signal::new(0),
@@ -795,6 +803,29 @@ impl TextInputField {
     /// The companion of [`active_descendant`](Self::active_descendant).
     pub fn controls(mut self, listbox: Signal<Option<WidgetId>>) -> Self {
         self.controls = Some(listbox);
+        self
+    }
+
+    /// Say that this field opens a popup of the given kind (a suggestion
+    /// list). Published on this node because it is the one that holds focus,
+    /// which is where a screen reader reads a combobox's popup state.
+    pub(crate) fn has_popup(mut self, popup: teksilo_core::accesskit::HasPopup) -> Self {
+        self.has_popup = Some(popup);
+        self
+    }
+
+    /// Say how the popup completes what is typed (`AutoComplete::List`: it
+    /// lists completions).
+    pub(crate) fn auto_complete(mut self, mode: teksilo_core::accesskit::AutoComplete) -> Self {
+        self.auto_complete = Some(mode);
+        self
+    }
+
+    /// Whether the popup is open, published as an explicit `expanded` value,
+    /// `false` included, so closing it leaves no stale `expanded = true`.
+    /// Bound at `AccessibilityOnly`.
+    pub(crate) fn expanded(mut self, open: Signal<bool>) -> Self {
+        self.expanded = Some(open);
         self
     }
 

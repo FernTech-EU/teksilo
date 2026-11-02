@@ -152,6 +152,11 @@ pub struct TextInput {
     /// `TextInputField` (the node that actually holds focus).
     active_descendant: Option<Signal<Option<WidgetId>>>,
     controls: Option<Signal<Option<WidgetId>>>,
+    /// The rest of the combobox wiring, forwarded the same way. Set by a
+    /// composite that opens a popup of its own (`SearchField`).
+    has_popup: Option<teksilo_core::accesskit::HasPopup>,
+    auto_complete: Option<teksilo_core::accesskit::AutoComplete>,
+    expanded: Option<Signal<bool>>,
     /// Optional validator closure. Forwarded 1:1 to
     /// `TextInputField::validator`. Runs on commit (Enter, Tab-out,
     /// blur). Set this AND `validation_feedback` together for
@@ -253,6 +258,9 @@ impl TextInput {
             input_purpose: crate::primitives::text_input_field::InputPurpose::Normal,
             active_descendant: None,
             controls: None,
+            has_popup: None,
+            auto_complete: None,
+            expanded: None,
             validator: None,
             caret_position_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
             caret_setter_slot: std::rc::Rc::new(std::cell::RefCell::new(None)),
@@ -563,6 +571,24 @@ impl TextInput {
     /// Forwarded 1:1 to [`TextInputField::controls`].
     pub fn controls(mut self, listbox: Signal<Option<WidgetId>>) -> Self {
         self.controls = Some(listbox);
+        self
+    }
+
+    /// Forwarded 1:1 to `TextInputField::has_popup`.
+    pub(crate) fn has_popup(mut self, popup: teksilo_core::accesskit::HasPopup) -> Self {
+        self.has_popup = Some(popup);
+        self
+    }
+
+    /// Forwarded 1:1 to `TextInputField::auto_complete`.
+    pub(crate) fn auto_complete(mut self, mode: teksilo_core::accesskit::AutoComplete) -> Self {
+        self.auto_complete = Some(mode);
+        self
+    }
+
+    /// Forwarded 1:1 to `TextInputField::expanded`.
+    pub(crate) fn expanded(mut self, open: Signal<bool>) -> Self {
+        self.expanded = Some(open);
         self
     }
 

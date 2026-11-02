@@ -584,6 +584,17 @@ by crate for clarity, not because crates version independently.
   (`access_label`, `access_labelled_by`, `access_described_by`, a tooltip)
   reaches the field a screen reader lands on**, as it already did for
   `SpinBox` and `DateEdit`.
+- **A `SearchField` is one named field to screen readers.** Its editing
+  field is the `SearchInput`, named by `.label`, and with suggestions it
+  carries the popup state itself: it opens a list box, says whether the list
+  is open (`expanded` is now `false` once it closes) and announces the
+  highlighted suggestion as the arrows move. Before, an unnamed object
+  carrying the popup sat around the field, and focusing the `SearchField`
+  (as an initial-focus hint does) left focus on it. A `SearchField` without
+  suggestions no longer claims a popup. `access_label`, a `FormLayout` row
+  label and `access_described_by` on a `SearchField` now name its field. A
+  `CommandPalette`'s query field is a `SearchInput` too, so a screen reader
+  calls it a search field.
 - **In a `CodeEditor`, the completion list follows text the input system
   commits.** After the accent popup replaced a typed `e` with `é`, or an
   emoji or dictated text was inserted, the list stayed open on the old word;
