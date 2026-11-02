@@ -291,6 +291,17 @@ control is the top or leading panel's, so a fallback that focuses the
 dock's first control (a modal window with no focus hint) lands there;
 give the editor an `initial_focus_hint` to start in the centre.
 
+Each region is also a focus region (`focus_region`): F6 and Shift+F6
+move between the sides and the centre, landing where focus last was in
+the region, else on the first control of a side's panel (of the centre's
+content), and on the side's activity rail only when its panel shows
+nothing focusable, as when the side is collapsed; a screen reader hears
+the region's name. A resize handle the user focused is not where F6
+comes back to. Tab order is unchanged by this. A side is named as its
+landmark is ("Left panel", or the application's `side_label`), the
+centre "Main area", all translated. A status bar or toolbar outside the
+dock is a region only if the application marks it.
+
 ### Revealing and focusing a dock
 
 `DockingModel::reveal_dock` shows a dock and leaves keyboard focus

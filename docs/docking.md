@@ -659,6 +659,17 @@ You get this without asking:
   `Enter`, and AccessKit `Increment` / `Decrement` / `Collapse` / `Expand`.
 - Collapsed and hidden content is dormant, so it is not in the AT tree and Tab
   skips it, there is no phantom focus stop behind a closed panel.
+- F6 and Shift+F6 move focus between the dock's regions: each side and the
+  centre. Focus lands where it last was in the region, else on the first
+  control of a side's panel (not on its activity rail, which Tab meets
+  first), and on the rail only when the panel shows nothing focusable, as
+  when the side is collapsed. It never lands on a side's resize handle while
+  the side has anything else to focus, not even one the user focused to
+  resize (Tab still stops on the handle). A screen reader hears the
+  region's name: the side's landmark
+  name, or "Main area" for the centre, translated. A side region with nothing
+  focusable is skipped. A status bar or toolbar outside the dock is an F6 stop
+  only if you mark it with `.focus_region(tr!(...))`.
 
 Your part is to give each dock a real title (it becomes the tab name, the rail
 tooltip, the landmark name and the menu label) and an icon if you use any

@@ -35,6 +35,8 @@ fn framework() -> KnobSpec {
         .opt_text("visible_when", "Visible when", None)
         .opt_bool("focusable", "Focusable", None)
         .opt_i32("tab_index", "Tab index", None, 0, 999)
+        // The region's name, announced as F6 lands in it.
+        .opt_text("focus_region", "Focus region", None)
         // `CursorIcon` is an external (winit) enum → text.
         .opt_text("cursor", "Cursor", None)
         .opt_bool("clips_children_on", "Clips children", None)

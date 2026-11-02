@@ -458,6 +458,9 @@ pub struct HandlerSet {
     /// *keyboard capture* surface — terminals, game viewports). See
     /// [`super::arena::WidgetNode::keyboard_capture`].
     pub(crate) keyboard_capture: Option<bool>,
+    /// When `Some(..)`, this node is a focus region (an F6 stop) with this
+    /// name. See [`HandlerSet::focus_region`].
+    pub(crate) focus_region: Option<Prop<String>>,
     /// When `Some(true)`, this node and its WHOLE subtree are invisible
     /// to pointer hit-testing (decorative overlays — count badges,
     /// watermarks). See [`super::arena::WidgetNode::hit_transparent`].
@@ -531,6 +534,7 @@ impl HandlerSet {
             drag_activation,
             multi_contact,
             keyboard_capture,
+            focus_region,
             hit_transparent,
             hit_slop,
             no_hit_slop,
@@ -577,6 +581,7 @@ impl HandlerSet {
             overscroll_behavior: None,
             multi_contact: None,
             keyboard_capture: None,
+            focus_region: None,
             hit_transparent: None,
             hit_slop: None,
             no_hit_slop: None,
@@ -1040,6 +1045,30 @@ impl HandlerSet {
     /// [`super::arena::WidgetNode::keyboard_capture`].
     pub fn keyboard_capture(mut self, capture: bool) -> Self {
         self.keyboard_capture = Some(capture);
+        self
+    }
+
+    /// Mark this widget a **focus region** named `name`: one of the large
+    /// parts of a window (a side panel, the centre, a bottom panel, a status
+    /// bar) that F6 and Shift+F6 move focus between, announcing the name.
+    ///
+    /// Not a traversal scope
+    /// ([`TraversalScopePolicy`](crate::focus::TraversalScopePolicy)): a
+    /// traversal scope decides the Tab order inside a subtree, a focus region
+    /// is a stop F6 moves to. F6 lands on the focus the region had last, else on its first
+    /// Tab stop; a region with no Tab stop of its own is skipped, and a
+    /// region nested in another is a stop of its own. Mark the node a screen
+    /// reader lists as a landmark (`Role::Complementary`, `Role::Main`, ...),
+    /// with the same words, so the landmarks and the F6 stops are one set.
+    ///
+    /// The two commands are the shortcuts `focus.next_region` (F6) and
+    /// `focus.previous_region` (Shift+F6), which every tree registers and a
+    /// user can rebind; an `Action` for either on the route runs instead of
+    /// the built-in cycling. In a window with no region they step aside, and
+    /// F6 reaches the focused widget as before. A keyboard capture surface
+    /// (a terminal) keeps F6; Ctrl+Tab leaves it.
+    pub fn focus_region(mut self, name: impl Into<Prop<String>>) -> Self {
+        self.focus_region = Some(name.into());
         self
     }
 
@@ -1583,6 +1612,13 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::keyboard_capture`].
     pub fn keyboard_capture(mut self, capture: bool) -> Self {
         self.handler_set.keyboard_capture = Some(capture);
+        self
+    }
+
+    /// Mark this widget a focus region, an F6 stop named `name`. See
+    /// [`HandlerSet::focus_region`].
+    pub fn focus_region(mut self, name: impl Into<Prop<String>>) -> Self {
+        self.handler_set.focus_region = Some(name.into());
         self
     }
 
@@ -2153,6 +2189,10 @@ impl<W: Widget + 'static> Widget for WidgetWithHandlers<W> {
         self.widget.initial_focus_hint()
     }
 
+    fn focus_region_landing(&self) -> Option<crate::widget_id::WidgetId> {
+        self.widget.focus_region_landing()
+    }
+
     fn accessibility_proxy(&self) -> Option<crate::widget_id::WidgetId> {
         self.widget.accessibility_proxy()
     }
@@ -2533,6 +2573,12 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// See [`HandlerSet::keyboard_capture`].
     fn keyboard_capture(self, capture: bool) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).keyboard_capture(capture)
+    }
+
+    /// Mark this widget a focus region, a part of the window F6 and Shift+F6
+    /// move focus to, announcing `name`. See [`HandlerSet::focus_region`].
+    fn focus_region(self, name: impl Into<Prop<String>>) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).focus_region(name)
     }
 
     /// Make this widget and its whole subtree invisible to pointer

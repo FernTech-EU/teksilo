@@ -318,6 +318,12 @@ pub struct WidgetNode {
     /// check only while an overlay is open, so a capture surface below no
     /// overlay does see Escape. Default `false`.
     pub keyboard_capture: bool,
+    /// When `Some`, this node is a focus region (an F6 stop) with this name.
+    /// See [`HandlerSet::focus_region`](crate::widget_builder::HandlerSet::focus_region).
+    pub focus_region: Option<crate::signal::Prop<String>>,
+    /// The last focus that was one of this region's own focusables, where F6
+    /// lands next. Written by `WidgetTree::set_focused`.
+    pub(crate) focus_region_last_focus: Option<WidgetId>,
     /// When `true`, this widget AND its entire subtree are invisible to
     /// hit-testing: the recursion returns immediately without descending
     /// into children, so the point falls through to whatever sits
@@ -569,6 +575,8 @@ impl WidgetNode {
             multi_contact: MultiContact::First,
             carried_tap_streak: None,
             keyboard_capture: false,
+            focus_region: None,
+            focus_region_last_focus: None,
             hit_transparent: false,
             hit_slop: None,
             no_hit_slop: false,
@@ -660,6 +668,10 @@ pub struct WidgetArena {
     nodes: SlotMap<WidgetId, WidgetNode>,
     /// Number of nodes with theme overrides. When zero, resolve_theme is O(1).
     pub(crate) theme_override_count: usize,
+    /// Whether any node was ever marked a focus region. Never reset: while
+    /// it is false, the region scans (run for command availability every
+    /// pass) answer at once.
+    pub(crate) focus_regions_seen: bool,
     /// Cached root widget IDs (widgets with no parent).
     cached_roots: Vec<WidgetId>,
     /// Whether the cached_roots list needs rebuilding.
@@ -762,6 +774,7 @@ impl WidgetArena {
         Self {
             nodes: SlotMap::with_key(),
             theme_override_count: 0,
+            focus_regions_seen: false,
             cached_roots: Vec::new(),
             roots_dirty: true,
             layout_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
@@ -2242,6 +2255,9 @@ impl WidgetArena {
         handler_set: crate::widget_builder::HandlerSet,
         scope: HandlerScope,
     ) {
+        if handler_set.focus_region.is_some() {
+            self.focus_regions_seen = true;
+        }
         if let Some(node) = self.get_mut(id) {
             let target = match scope {
                 HandlerScope::Own => &mut node.handlers,
@@ -2299,6 +2315,9 @@ impl WidgetArena {
             }
             if let Some(keyboard_capture) = handler_set.keyboard_capture {
                 node.keyboard_capture = keyboard_capture;
+            }
+            if let Some(name) = handler_set.focus_region {
+                node.focus_region = Some(name);
             }
             if let Some(hit_transparent) = handler_set.hit_transparent {
                 node.hit_transparent = hit_transparent;

@@ -478,6 +478,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } اختصار يستخدم { $chord }.
     }
 shortcut-category-edit = تحرير
+shortcut-focus-next-region = المنطقة التالية
+shortcut-focus-previous-region = المنطقة السابقة
+shortcut-category-navigation = التنقل
 shortcut-format-bold = غامق
 shortcut-format-italic = مائل
 shortcut-format-underline = تسطير
@@ -493,6 +496,7 @@ dock-side-left = اللوحة اليسرى
 dock-side-right = اللوحة اليمنى
 dock-side-top = اللوحة العلوية
 dock-side-bottom = اللوحة السفلية
+dock-centre = المنطقة الرئيسية
 dock-rail-left = شريط النشاط الأيسر
 dock-rail-right = شريط النشاط الأيمن
 dock-rail-top = شريط النشاط العلوي

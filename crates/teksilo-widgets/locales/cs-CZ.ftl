@@ -468,6 +468,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $chord } používá { $count } zkratek.
     }
 shortcut-category-edit = Úpravy
+shortcut-focus-next-region = Další oblast
+shortcut-focus-previous-region = Předchozí oblast
+shortcut-category-navigation = Navigace
 shortcut-format-bold = Tučné
 shortcut-format-italic = Kurzíva
 shortcut-format-underline = Podtržení
@@ -483,6 +486,7 @@ dock-side-left = Levý panel
 dock-side-right = Pravý panel
 dock-side-top = Horní panel
 dock-side-bottom = Dolní panel
+dock-centre = Hlavní oblast
 dock-rail-left = Levý panel aktivit
 dock-rail-right = Pravý panel aktivit
 dock-rail-top = Horní panel aktivit

@@ -27,7 +27,9 @@ use crate::primitives::{Padding, TextWidget};
 
 use super::matcher::fuzzy_match;
 use super::row::{PaletteRow, ROW_HIGHLIGHT_INSET, row_height};
-use super::{IncludeFn, PaletteCommand, PaletteState, acts_on_the_focused_editor};
+use super::{
+    IncludeFn, PaletteCommand, PaletteState, acts_on_the_focused_editor, is_region_command,
+};
 
 /// How many rows the list shows before it scrolls.
 pub(super) const MAX_VISIBLE_ROWS: usize = 10;
@@ -65,10 +67,14 @@ pub(super) struct ResultsConfig {
 }
 
 /// Read the registry, filter, match against the query and rank.
+///
+/// `region_commands` lists the focus region commands that have a region to go
+/// to from the focus the palette was opened over; the others are left out.
 pub(super) fn collect_entries(
     ctx: &BuildContext,
     state: &PaletteState,
     config: &ResultsConfig,
+    region_commands: &[&str],
 ) -> Vec<Rc<PaletteEntry>> {
     let needle = state.query.get().trim().to_string();
     let presented = state.presented.get();
@@ -91,6 +97,8 @@ pub(super) fn collect_entries(
         // over. Embedded, the palette keeps the focus, and they would act on
         // its own search field.
         .filter(|cmd| presented || !acts_on_the_focused_editor(cmd.id))
+        // F6 and Shift+F6 in a window with no region would do nothing.
+        .filter(|cmd| !is_region_command(cmd.id) || region_commands.contains(&cmd.id))
         .filter(|cmd| config.include.as_ref().is_none_or(|f| f(cmd)))
         .filter_map(|cmd| {
             let found = fuzzy_match(&needle, &cmd.haystack())?;
@@ -185,7 +193,14 @@ impl Widget for PaletteResults {
             .query
             .bind_to(self_id, ctx.binding_registry(), BindingLevel::Rebuild);
 
-        let entries = collect_entries(ctx, &self.state, &self.config);
+        let region_commands: Vec<&str> = [
+            teksilo_core::shortcut::NEXT_REGION,
+            teksilo_core::shortcut::PREVIOUS_REGION,
+        ]
+        .into_iter()
+        .filter(|&id| ctx.command_available(id).get())
+        .collect();
+        let entries = collect_entries(ctx, &self.state, &self.config, &region_commands);
         let len = entries.len();
         self.row_count = len;
 

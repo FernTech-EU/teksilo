@@ -464,6 +464,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } מקשי קיצור משתמשים ב־{ $chord }.
     }
 shortcut-category-edit = עריכה
+shortcut-focus-next-region = האזור הבא
+shortcut-focus-previous-region = האזור הקודם
+shortcut-category-navigation = ניווט
 shortcut-format-bold = מודגש
 shortcut-format-italic = נטוי
 shortcut-format-underline = קו תחתון
@@ -479,6 +482,7 @@ dock-side-left = לוח שמאלי
 dock-side-right = לוח ימני
 dock-side-top = לוח עליון
 dock-side-bottom = לוח תחתון
+dock-centre = אזור ראשי
 dock-rail-left = סרגל פעילות שמאלי
 dock-rail-right = סרגל פעילות ימני
 dock-rail-top = סרגל פעילות עליון

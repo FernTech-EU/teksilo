@@ -463,6 +463,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } Tastenkombinationen verwenden { $chord }.
     }
 shortcut-category-edit = Bearbeiten
+shortcut-focus-next-region = Nächster Bereich
+shortcut-focus-previous-region = Vorheriger Bereich
+shortcut-category-navigation = Navigation
 shortcut-format-bold = Fett
 shortcut-format-italic = Kursiv
 shortcut-format-underline = Unterstrichen
@@ -478,6 +481,7 @@ dock-side-left = Linker Bereich
 dock-side-right = Rechter Bereich
 dock-side-top = Oberer Bereich
 dock-side-bottom = Unterer Bereich
+dock-centre = Hauptbereich
 dock-rail-left = Linke Aktivitätsleiste
 dock-rail-right = Rechte Aktivitätsleiste
 dock-rail-top = Obere Aktivitätsleiste

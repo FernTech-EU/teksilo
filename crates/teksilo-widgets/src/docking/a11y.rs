@@ -12,7 +12,8 @@
 //! its activity bar and actions are named after it. Every name is resolved
 //! when asked for, so it follows a locale switch.
 
-use teksilo_i18n::tr_widget;
+use teksilo_core::signal::Signal;
+use teksilo_i18n::{localized, tr_widget};
 
 use super::activity_bar::DockActionPlacement;
 use super::geometry::DockSide;
@@ -59,6 +60,26 @@ pub(crate) fn side_label(model: &DockingModel, side: DockSide) -> String {
         ScreenSide::Bottom => tr_widget!(dock_side_bottom()),
     }
     .resolve_now()
+}
+
+/// A side region's name as F6 announces it on moving there: the same words
+/// as its landmark ([`side_label`]), kept current across a locale switch and
+/// a change of direction (`rtl`, written by the layout as it places the
+/// sides).
+pub(crate) fn side_region_name(
+    model: &DockingModel,
+    side: DockSide,
+    rtl: &Signal<bool>,
+) -> Signal<String> {
+    let model = model.clone();
+    localized(move || side_label(&model, side))
+        .also_observing(rtl)
+        .to_signal()
+}
+
+/// The centre region's name as F6 announces it on moving there.
+pub(crate) fn centre_region_name() -> Signal<String> {
+    tr_widget!(dock_centre()).to_signal()
 }
 
 /// The `Role::TabList` name for a side's activity rail.

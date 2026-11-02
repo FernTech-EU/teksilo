@@ -459,6 +459,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $chord } kısayolunu { $count } komut kullanıyor.
     }
 shortcut-category-edit = Düzenle
+shortcut-focus-next-region = Sonraki bölge
+shortcut-focus-previous-region = Önceki bölge
+shortcut-category-navigation = Gezinme
 shortcut-format-bold = Kalın
 shortcut-format-italic = İtalik
 shortcut-format-underline = Altı çizili
@@ -474,6 +477,7 @@ dock-side-left = Sol panel
 dock-side-right = Sağ panel
 dock-side-top = Üst panel
 dock-side-bottom = Alt panel
+dock-centre = Ana alan
 dock-rail-left = Sol etkinlik çubuğu
 dock-rail-right = Sağ etkinlik çubuğu
 dock-rail-top = Üst etkinlik çubuğu

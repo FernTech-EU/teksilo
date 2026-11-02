@@ -122,8 +122,9 @@ fn register_action(
     }));
 }
 
-/// Give the standard edit shortcuts in `registry` their names in the active
-/// language, which follow it from then on.
+/// Give the shortcuts every tree registers, the standard edits and the focus
+/// region commands (F6, Shift+F6), their names in the active language, which
+/// follow it from then on.
 ///
 /// `teksilo-core` registers them with English names because it carries no
 /// translations; `teksilo-app` calls this for every window it opens. A no-op
@@ -140,6 +141,15 @@ pub fn localize_standard_shortcuts(registry: &mut ShortcutRegistry) {
         let mut shortcut = command.shortcut();
         shortcut.name = name.into();
         shortcut.category_label = Some(tr_widget!(shortcut_category_edit()).into());
+        registry.register(shortcut);
+    }
+    let [next, previous] = teksilo_core::shortcut::focus_region_shortcuts();
+    for (mut shortcut, name) in [
+        (next, tr_widget!(shortcut_focus_next_region())),
+        (previous, tr_widget!(shortcut_focus_previous_region())),
+    ] {
+        shortcut.name = name.into();
+        shortcut.category_label = Some(tr_widget!(shortcut_category_navigation()).into());
         registry.register(shortcut);
     }
 }
@@ -207,6 +217,37 @@ mod tests {
             ("Undo".to_string(), Some("Edit".to_string())),
             "the names follow a change of language"
         );
+        teksilo_i18n::thread_local::clear();
+    }
+
+    #[test]
+    fn the_region_commands_are_named_in_the_language_and_keep_a_rebind() {
+        use teksilo_core::shortcut::{NEXT_REGION, PREVIOUS_REGION};
+        let (_mgr, mut tree) = speaking("fr-FR");
+        let f7 = teksilo_core::shortcut::KeyStroke::new(
+            teksilo_core::event::Key::F7,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        tree.shortcut_registry_mut()
+            .rebind_primary(NEXT_REGION, Some(f7));
+        localize_standard_shortcuts(tree.shortcut_registry_mut());
+        let registry = tree.shortcut_registry();
+        let shown = |id: &str| {
+            let effective = registry.effective(id).expect("registered");
+            (
+                effective.shortcut.name.get(),
+                effective.shortcut.category_text(),
+            )
+        };
+        assert_eq!(
+            shown(NEXT_REGION),
+            (
+                "Région suivante".to_string(),
+                Some("Navigation".to_string())
+            )
+        );
+        assert_eq!(shown(PREVIOUS_REGION).0, "Région précédente");
+        assert_eq!(registry.effective(NEXT_REGION).unwrap().primary, Some(f7));
         teksilo_i18n::thread_local::clear();
     }
 

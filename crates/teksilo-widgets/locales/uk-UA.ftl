@@ -467,6 +467,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } команди використовують { $chord }.
     }
 shortcut-category-edit = Редагування
+shortcut-focus-next-region = Наступна область
+shortcut-focus-previous-region = Попередня область
+shortcut-category-navigation = Навігація
 shortcut-format-bold = Жирний
 shortcut-format-italic = Курсив
 shortcut-format-underline = Підкреслений
@@ -482,6 +485,7 @@ dock-side-left = Ліва панель
 dock-side-right = Права панель
 dock-side-top = Верхня панель
 dock-side-bottom = Нижня панель
+dock-centre = Основна область
 dock-rail-left = Ліва панель дій
 dock-rail-right = Права панель дій
 dock-rail-top = Верхня панель дій

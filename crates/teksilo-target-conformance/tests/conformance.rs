@@ -405,7 +405,7 @@ const ALLOW_LIST: &[AllowedViolation] = &[
               bar's Resize command.",
     },
     AllowedViolation {
-        path: "docking: DockingLayout > SideClipPane",
+        path: "docking: DockingLayout > DockRegion > SideClipPane",
         measured: &[PinnedGeometry {
             densities: AT_TOUCH,
             themes: ALL_THEMES,
@@ -1511,7 +1511,7 @@ fn the_dock_gutters_touch_ring_swallows_the_tab_strip_beside_it() {
         touch[0].expanded,
         (0.0, 0.0),
         "the dock tab header is reachable again at Touch — the \
-         `docking: DockingLayout > SideClipPane` allow-list entry is out of date",
+         `docking: DockingLayout > DockRegion > SideClipPane` allow-list entry is out of date",
     );
     assert_eq!(touch[0].rule, Some(TargetRule::MinTargetConformance));
 
@@ -1652,9 +1652,9 @@ fn the_allow_lists_discriminators_narrow_by_size_and_by_density() {
 
     let dock_entry = ALLOW_LIST
         .iter()
-        .find(|e| e.path == "docking: DockingLayout > SideClipPane")
+        .find(|e| e.path == "docking: DockingLayout > DockRegion > SideClipPane")
         .expect("the dock tab-strip finding");
-    let dock = "docking: DockingLayout > SideClipPane > DockSidePanel";
+    let dock = "docking: DockingLayout > DockRegion > SideClipPane > DockSidePanel";
     assert!(
         dock_entry.matches(&violation(
             dock,

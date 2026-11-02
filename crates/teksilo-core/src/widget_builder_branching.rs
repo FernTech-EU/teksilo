@@ -133,6 +133,10 @@ macro_rules! impl_widget_for_branch {
                 match self { $($branch::$arm(w) => w.initial_focus_hint()),+ }
             }
 
+            fn focus_region_landing(&self) -> Option<WidgetId> {
+                match self { $($branch::$arm(w) => w.focus_region_landing()),+ }
+            }
+
             fn accessibility_proxy(&self) -> Option<WidgetId> {
                 match self { $($branch::$arm(w) => w.accessibility_proxy()),+ }
             }

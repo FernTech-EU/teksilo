@@ -130,18 +130,6 @@ impl StandardEdit {
     }
 }
 
-/// Whether `id` names a shortcut the widget tree itself registers, which
-/// applies wherever focus is, a modal included, whoever re-registered it.
-pub(crate) fn is_framework_shortcut_id(id: &str) -> bool {
-    StandardEdit::from_id(id).is_some()
-}
-
-/// The tree's own registration of a framework shortcut id, with its default
-/// chords, scope and English labels; `None` for any other id.
-pub(crate) fn framework_default(id: &str) -> Option<Shortcut> {
-    StandardEdit::from_id(id).map(StandardEdit::shortcut)
-}
-
 /// Register the default shortcut of every [`StandardEdit`] command. User
 /// overrides already in `registry` are kept.
 pub(crate) fn register_standard_shortcuts(registry: &mut super::ShortcutRegistry) {

@@ -459,6 +459,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } kortkommandon använder { $chord }.
     }
 shortcut-category-edit = Redigera
+shortcut-focus-next-region = Nästa område
+shortcut-focus-previous-region = Föregående område
+shortcut-category-navigation = Navigering
 shortcut-format-bold = Fet
 shortcut-format-italic = Kursiv
 shortcut-format-underline = Understruken
@@ -474,6 +477,7 @@ dock-side-left = Vänster panel
 dock-side-right = Höger panel
 dock-side-top = Övre panel
 dock-side-bottom = Nedre panel
+dock-centre = Huvudområde
 dock-rail-left = Vänster aktivitetsfält
 dock-rail-right = Höger aktivitetsfält
 dock-rail-top = Övre aktivitetsfält

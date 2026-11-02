@@ -33,6 +33,9 @@ mod drag_drop_impl;
 mod focus_impl;
 #[cfg(test)]
 mod focus_on_click_tests;
+mod focus_region_impl;
+#[cfg(test)]
+mod focus_region_tests;
 #[cfg(test)]
 mod focus_request_tests;
 pub(crate) use focus_impl::FocusRequestMode;
@@ -1123,6 +1126,7 @@ impl WidgetTree {
             shortcut_registry: {
                 let mut registry = crate::shortcut::ShortcutRegistry::new();
                 crate::shortcut::register_standard_shortcuts(&mut registry);
+                crate::shortcut::register_focus_region_shortcuts(&mut registry);
                 registry
             },
             pending_intents: Vec::new(),
@@ -4548,6 +4552,19 @@ impl WidgetTree {
                 decided.push((action.intent, action.is_available()));
             }
         }
+        // The tree's own focus region commands, when no action decided them.
+        // Either direction has a target exactly when one region in scope has a
+        // focusable of its own, so one walk answers both.
+        let undecided: Vec<&'static str> = [
+            crate::shortcut::NEXT_REGION,
+            crate::shortcut::PREVIOUS_REGION,
+        ]
+        .into_iter()
+        .filter(|name| decided.iter().all(|(decided, _)| decided != name))
+        .collect();
+        if !undecided.is_empty() && self.region_cycle_target_from(Some(source), true).is_some() {
+            decided.extend(undecided.into_iter().map(|name| (name, true)));
+        }
         let mut names: Vec<&'static str> = decided
             .iter()
             .filter_map(|(name, available)| available.then_some(*name))
@@ -4600,10 +4617,15 @@ impl WidgetTree {
             .find(|action| action.intent == name && !action.passes_on())
         {
             Some(action) => action.is_available(),
-            None => self
-                .application_scope
-                .as_ref()
-                .is_some_and(|scope| scope.offers(name)),
+            None => {
+                crate::shortcut::region_direction(name).is_some_and(|forward| {
+                    self.region_cycle_target_from(Some(source), forward)
+                        .is_some()
+                }) || self
+                    .application_scope
+                    .as_ref()
+                    .is_some_and(|scope| scope.offers(name))
+            }
         }
     }
 
@@ -4837,6 +4859,13 @@ impl WidgetTree {
                 return consumed;
             }
         }
+        // F6 / Shift+F6, from a key, a menu row, the palette or a handler:
+        // no action took it, so the tree moves between its focus regions,
+        // before the application tree is offered it. With no region to go
+        // to, it is not consumed.
+        if tap && let Some(forward) = crate::shortcut::region_direction(intent.name) {
+            return self.cycle_focus_region(Some(source), forward, ops);
+        }
         false
     }
 
@@ -5034,6 +5063,9 @@ impl WidgetTree {
             if let Some(mut widget_box) = self.arena.take_widget(id) {
                 if let Some(handler_set) = widget_box.take_handler_set() {
                     self.arena.restore_widget(id, widget_box);
+                    if handler_set.focus_region.is_some() {
+                        self.arena.focus_regions_seen = true;
+                    }
                     if let Some(node) = self.arena.get_mut(id) {
                         // Handlers attached at the widget's creation site
                         // are external from its own perspective — keep
@@ -5088,6 +5120,9 @@ impl WidgetTree {
                         }
                         if let Some(keyboard_capture) = handler_set.keyboard_capture {
                             node.keyboard_capture = keyboard_capture;
+                        }
+                        if let Some(name) = handler_set.focus_region {
+                            node.focus_region = Some(name);
                         }
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;
@@ -5239,6 +5274,9 @@ impl WidgetTree {
             if let Some(mut widget_box) = self.arena.take_widget(id) {
                 if let Some(handler_set) = widget_box.take_handler_set() {
                     self.arena.restore_widget(id, widget_box);
+                    if handler_set.focus_region.is_some() {
+                        self.arena.focus_regions_seen = true;
+                    }
                     if let Some(node) = self.arena.get_mut(id) {
                         // Creation-site handlers are external (persist
                         // across the widget's own rebuilds) — see the
@@ -5285,6 +5323,9 @@ impl WidgetTree {
                         }
                         if let Some(keyboard_capture) = handler_set.keyboard_capture {
                             node.keyboard_capture = keyboard_capture;
+                        }
+                        if let Some(name) = handler_set.focus_region {
+                            node.focus_region = Some(name);
                         }
                         if let Some(hit_transparent) = handler_set.hit_transparent {
                             node.hit_transparent = hit_transparent;

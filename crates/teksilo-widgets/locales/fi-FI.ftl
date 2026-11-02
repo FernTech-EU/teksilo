@@ -463,6 +463,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } pikanäppäintä käyttää yhdistelmää { $chord }.
     }
 shortcut-category-edit = Muokkaa
+shortcut-focus-next-region = Seuraava alue
+shortcut-focus-previous-region = Edellinen alue
+shortcut-category-navigation = Siirtyminen
 shortcut-format-bold = Lihavointi
 shortcut-format-italic = Kursivointi
 shortcut-format-underline = Alleviivaus
@@ -478,6 +481,7 @@ dock-side-left = Vasen paneeli
 dock-side-right = Oikea paneeli
 dock-side-top = Yläpaneeli
 dock-side-bottom = Alapaneeli
+dock-centre = Pääalue
 dock-rail-left = Vasen toimintopalkki
 dock-rail-right = Oikea toimintopalkki
 dock-rail-top = Ylätoimintopalkki

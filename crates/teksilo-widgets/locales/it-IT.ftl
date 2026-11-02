@@ -480,6 +480,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } scelte rapide usano { $chord }.
     }
 shortcut-category-edit = Modifica
+shortcut-focus-next-region = Area successiva
+shortcut-focus-previous-region = Area precedente
+shortcut-category-navigation = Navigazione
 shortcut-format-bold = Grassetto
 shortcut-format-italic = Corsivo
 shortcut-format-underline = Sottolineato
@@ -495,6 +498,7 @@ dock-side-left = Pannello sinistro
 dock-side-right = Pannello destro
 dock-side-top = Pannello superiore
 dock-side-bottom = Pannello inferiore
+dock-centre = Area principale
 dock-rail-left = Barra delle attività sinistra
 dock-rail-right = Barra delle attività destra
 dock-rail-top = Barra delle attività superiore

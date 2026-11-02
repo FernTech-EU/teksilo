@@ -425,6 +425,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } klavkombinoj uzas { $chord }.
     }
 shortcut-category-edit = Redakti
+shortcut-focus-next-region = Sekva regiono
+shortcut-focus-previous-region = Antaŭa regiono
+shortcut-category-navigation = Navigado
 shortcut-format-bold = Grasa
 shortcut-format-italic = Kursiva
 shortcut-format-underline = Substrekita
@@ -440,6 +443,7 @@ dock-side-left = Maldekstra panelo
 dock-side-right = Dekstra panelo
 dock-side-top = Supra panelo
 dock-side-bottom = Malsupra panelo
+dock-centre = Ĉefa areo
 dock-rail-left = Maldekstra agadbreto
 dock-rail-right = Dekstra agadbreto
 dock-rail-top = Supra agadbreto

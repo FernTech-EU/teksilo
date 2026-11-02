@@ -75,7 +75,11 @@ focused editor: the standard edit commands every tree registers
 editors' own (`FormatShortcut`,
 `CodeShortcut`). A palette embedded
 in a surface of the caller's keeps the focus in its own search field, where
-those commands would act on the query, so it leaves them out.
+those commands would act on the query, so it leaves them out. The same goes
+for the focus region commands (F6, Shift+F6, `focus.next_region` and
+`focus.previous_region`), which move from the focus the palette was opened
+over; a presented palette lists them only while the window has a region to
+go to.
 
 ### Presenting it
 

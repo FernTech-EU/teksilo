@@ -539,6 +539,15 @@ a11y-shortcut-settings-find-result =
 # The group holding the standard edit shortcuts every window registers
 # (cut, copy, paste, undo, redo, select all), named from the menu-* rows.
 shortcut-category-edit = Edit
+# The command, rebindable in the shortcut settings, that moves keyboard
+# focus to the next large part of a window (a side panel, the centre, a
+# bottom panel): F6 by default.
+shortcut-focus-next-region = Next Region
+# The same command backwards: Shift+F6 by default.
+shortcut-focus-previous-region = Previous Region
+# The group the two region commands are listed under in the shortcut
+# settings and the command palette.
+shortcut-category-navigation = Navigation
 # The editors' own shortcuts, listed while such an editor exists:
 # RichTextEditor's format.* and CodeEditor's code.* commands.
 shortcut-format-bold = Bold
@@ -556,6 +565,9 @@ dock-side-left = Left panel
 dock-side-right = Right panel
 dock-side-top = Top panel
 dock-side-bottom = Bottom panel
+# The DockingLayout centre (where the editor usually sits), as F6 names it
+# when it moves focus there; the sides are named by the dock-side-* rows.
+dock-centre = Main area
 dock-rail-left = Left activity bar
 dock-rail-right = Right activity bar
 dock-rail-top = Top activity bar

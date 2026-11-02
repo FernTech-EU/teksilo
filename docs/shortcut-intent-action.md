@@ -1022,6 +1022,29 @@ let can_copy = ctx.command_available("doc.copy");
 ctx.add(IconButton::new(icon).enabled(can_copy));
 ```
 
+### Navigation shortcuts: F6 and Shift+F6
+
+Every widget tree also registers two navigation shortcuts, global and with no
+owner, in the `navigation` category:
+
+| Command | Id | Default chord |
+|---|---|---|
+| Next Region | `focus.next_region` | `F6` |
+| Previous Region | `focus.previous_region` | `Shift+F6` |
+
+They move focus between the window's focus regions (`.focus_region(name)`,
+see [events-and-gestures.md](events-and-gestures.md#62-focus-regions-f6)):
+when no `Action` on the route takes the intent, the tree moves focus itself,
+before the intent is offered to the application tree. To do something else,
+register an `Action` for the id (on the route or with
+`register_action_global`, or in the application tree). In a window with no
+region and no action taking the intent, the two step aside and F6 reaches the
+focused widget as a plain `KeyDown`. An application shortcut
+of its own on F6 or Shift+F6 always wins over them, whatever its category; to
+cycle regions there, handle `focus.next_region` with an Action or rebind one
+of the two. Like the standard edits, a re-registration (to rename them) keeps
+them working in modals and comes back to the tree's own when its widget goes.
+
 ### Editor shortcuts: format and code commands
 
 The editors' own commands work the same way, with one difference: they

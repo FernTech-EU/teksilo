@@ -53,6 +53,7 @@ pub fn is_widget_builder_method(name: &str) -> bool {
             | "on_hover"
             | "on_scroll"
             | "keyboard_capture"
+            | "focus_region"
             // Touch and pointer arbitration
             | "touch_action"
             | "scroll_container"

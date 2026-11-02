@@ -720,6 +720,27 @@ fn a_presented_palette_lists_the_commands_of_the_focused_editor() {
 }
 
 #[test]
+fn a_presented_palette_lists_the_region_commands_only_when_there_is_a_region() {
+    use teksilo_core::shortcut::{NEXT_REGION, PREVIOUS_REGION};
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let palette = CommandPalette::new();
+    palette.state.presented.set(true);
+    let (_tree, state, _) = mounted(tree_with_commands(), palette);
+    assert!(
+        !listed(&state).contains(&NEXT_REGION),
+        "no region: F6 would do nothing"
+    );
+
+    let mut tree = tree_with_commands();
+    tree.add(crate::button::Button::new(teksilo_i18n::lit!("Go")).focus_region("Side".to_owned()));
+    let palette = CommandPalette::new();
+    palette.state.presented.set(true);
+    let (_tree, state, _) = mounted(tree, palette);
+    assert!(listed(&state).contains(&NEXT_REGION));
+    assert!(listed(&state).contains(&PREVIOUS_REGION));
+}
+
+#[test]
 fn typing_a_query_keeps_every_character() {
     // A rebuild restoring focus used to look like a fresh keyboard focus, so
     // the field selected all of its text and the next key replaced it.

@@ -461,6 +461,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } gyorsbillentyű használja ezt: { $chord }.
     }
 shortcut-category-edit = Szerkesztés
+shortcut-focus-next-region = Következő terület
+shortcut-focus-previous-region = Előző terület
+shortcut-category-navigation = Navigáció
 shortcut-format-bold = Félkövér
 shortcut-format-italic = Dőlt
 shortcut-format-underline = Aláhúzott
@@ -476,6 +479,7 @@ dock-side-left = Bal oldali panel
 dock-side-right = Jobb oldali panel
 dock-side-top = Felső panel
 dock-side-bottom = Alsó panel
+dock-centre = Fő terület
 dock-rail-left = Bal oldali tevékenységsáv
 dock-rail-right = Jobb oldali tevékenységsáv
 dock-rail-top = Felső tevékenységsáv

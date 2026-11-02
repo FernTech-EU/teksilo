@@ -66,6 +66,16 @@ by crate for clarity, not because crates version independently.
   **`BuildContext::is_descendant_of(id, ancestor)`**: the focused widget as a
   signal, and the subtree test, for a container that puts focus back where it
   was inside it.
+- **F6 and Shift+F6 move focus between the regions of a window and announce
+  the region's name.** Mark a region with `.focus_region(name)` (on
+  `WidgetBuilder` and `HandlerSet`). The two commands (`focus.next_region`,
+  `focus.previous_region`) are listed in `ShortcutSettings` under Navigation,
+  where they can be rebound, and in the command palette while the window has
+  a region to go to. Regions are visited in the order Tab reaches them.
+  Focus lands on the region's last focus, else its first control (a
+  `DockingLayout` side's panel before its activity rail); a divider
+  (`Role::Splitter`, such as a docking side's resize handle) only when the
+  region has nothing else to focus, even after the user focused it.
 - **`ImeOrigin`** (`Composition`, `Dictation`, `WritingTools`, `Insertion`;
   `#[non_exhaustive]`) says which part of the input system committed a text.
 - **`WidgetEvent::ime_commit(text)`** and
@@ -226,6 +236,10 @@ by crate for clarity, not because crates version independently.
   an ancestor**, not only a child, to place it elsewhere in the
   accessibility tree; each id is emitted once, and a second claim is
   skipped.
+- In a window that has focus regions, F6 and Shift+F6 no longer reach the
+  focused widget's `on_key`; a keyboard capture surface such as `Terminal`
+  still receives them. An application shortcut bound to F6 or Shift+F6 keeps
+  working everywhere and wins over the region commands.
 - `ShortcutRegistry::unregister_all_for_owner` no longer removes a standard
   edit shortcut (`edit.*`) the tree registered itself when its last owner
   goes: it puts back the tree's own registration, with its localized name.
@@ -263,6 +277,13 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **In a window with a `DockingLayout`, F6 and Shift+F6 move focus between its
+  sides and its centre** and a screen reader hears the region's name: the
+  side's name ("Left panel", or the one given with `side_label`) and "Main
+  area" for the centre, in every language. F6 into a side lands on the
+  first control of its panel, and on its activity rail only when the panel
+  shows nothing focusable, as when the side is collapsed. F6 therefore no
+  longer reaches the focused widget's `on_key` in such a window.
 - **After Next, Back, Skip or Enter, a `Stepper` moves focus into the new step
   and announces it** ("Step 2 of 3, Details"). Focus lands on the step's first
   control, or on Next (Finish on the last step) when the step has no enabled

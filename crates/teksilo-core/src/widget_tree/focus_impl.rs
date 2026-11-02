@@ -562,6 +562,31 @@ impl WidgetTree {
         enter_scope_edge(&scope, false)
     }
 
+    /// Every Tab stop within a subtree, `root` included, in **traversal
+    /// order**: the order Tab visits them in, nested `FocusScope`s and scoped
+    /// `tab_index` respected, as
+    /// [`first_focusable_descendant`](Self::first_focusable_descendant) reads
+    /// its first.
+    pub(crate) fn tab_stops_in_order(&self, root: WidgetId) -> Vec<WidgetId> {
+        fn flatten(entries: &[ScopeEntry], out: &mut Vec<WidgetId>) {
+            for entry in entries {
+                match &entry.kind {
+                    ScopeEntryKind::Focusable(id) => out.push(*id),
+                    ScopeEntryKind::Scope(child) => flatten(&child.entries, out),
+                }
+            }
+        }
+        if !self.arena.is_active(root) {
+            return Vec::new();
+        }
+        let mut entries = Vec::new();
+        self.collect_scope_entries(root, &mut entries);
+        sort_scope_entries(&mut entries);
+        let mut out = Vec::new();
+        flatten(&entries, &mut out);
+        out
+    }
+
     /// Every widget within a subtree, `root` included, that can take focus
     /// now (active, enabled, declared focusable), in **Tab order**: the order
     /// Tab would visit them if each were a Tab stop. Tab-stop flags are not
@@ -1106,12 +1131,17 @@ impl WidgetTree {
 
     /// Single point of mutation for `self.focused`. Mirror of
     /// `set_hovered` for the focused chain. Drives the inspector's
-    /// Focus tab without requiring the tab to poll. Does not touch
+    /// Focus tab without requiring the tab to poll, and records the new
+    /// focus as the remembered focus of its innermost focus region. Does not touch
     /// `focus_origin` or focus-within signals — call sites remain
     /// responsible for those (the bookkeeping varies by mutation
     /// path, e.g. focus loss vs. arena destruction).
     pub(crate) fn set_focused(&mut self, value: Option<WidgetId>) {
         self.focused = value;
+        // The focus F6 comes back to in the region it is in.
+        if let Some(focused) = value {
+            self.remember_region_focus(focused);
+        }
         if self.focused_signal.get() != value {
             self.focused_signal.set(value);
         }

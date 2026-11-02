@@ -473,6 +473,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } hurtigtaster bruker { $chord }.
     }
 shortcut-category-edit = Rediger
+shortcut-focus-next-region = Neste område
+shortcut-focus-previous-region = Forrige område
+shortcut-category-navigation = Navigasjon
 shortcut-format-bold = Fet
 shortcut-format-italic = Kursiv
 shortcut-format-underline = Understreket
@@ -488,6 +491,7 @@ dock-side-left = Venstre panel
 dock-side-right = Høyre panel
 dock-side-top = Øvre panel
 dock-side-bottom = Nedre panel
+dock-centre = Hovedområde
 dock-rail-left = Venstre aktivitetslinje
 dock-rail-right = Høyre aktivitetslinje
 dock-rail-top = Øvre aktivitetslinje

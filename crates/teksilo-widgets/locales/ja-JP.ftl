@@ -463,6 +463,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $chord } を使用するショートカットは { $count } 件です。
     }
 shortcut-category-edit = 編集
+shortcut-focus-next-region = 次の領域
+shortcut-focus-previous-region = 前の領域
+shortcut-category-navigation = ナビゲーション
 shortcut-format-bold = 太字
 shortcut-format-italic = 斜体
 shortcut-format-underline = 下線
@@ -478,6 +481,7 @@ dock-side-left = 左パネル
 dock-side-right = 右パネル
 dock-side-top = 上パネル
 dock-side-bottom = 下パネル
+dock-centre = メイン領域
 dock-rail-left = 左アクティビティバー
 dock-rail-right = 右アクティビティバー
 dock-rail-top = 上アクティビティバー

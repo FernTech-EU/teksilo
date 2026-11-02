@@ -498,6 +498,24 @@ pub trait Widget: std::fmt::Debug + std::any::Any {
         None
     }
 
+    /// Where F6 lands in this widget's region when the region remembers no
+    /// focus, on a node marked as a
+    /// [focus region](crate::widget_builder::WidgetBuilder::focus_region):
+    /// the first of the region's Tab stops inside the subtree this names,
+    /// when it holds one, else the region's first Tab stop. A `DockingLayout`
+    /// side names its panel, so F6 lands in the panel and not on the activity
+    /// rail Tab meets first.
+    ///
+    /// Read by region landing only. Unlike
+    /// [`initial_focus_hint`](Self::initial_focus_hint) it is never a
+    /// window's or a modal's first focus, and it does not change Tab order.
+    ///
+    /// Default: `None`.
+    #[doc(hidden)]
+    fn focus_region_landing(&self) -> Option<WidgetId> {
+        None
+    }
+
     /// The descendant whose accessibility node stands for this widget.
     ///
     /// Some composites keep everything an assistive technology reads on one
@@ -1015,6 +1033,10 @@ impl<W: Widget + ?Sized> Widget for Box<W> {
 
     fn initial_focus_hint(&self) -> Option<WidgetId> {
         (**self).initial_focus_hint()
+    }
+
+    fn focus_region_landing(&self) -> Option<WidgetId> {
+        (**self).focus_region_landing()
     }
 
     fn accessibility_proxy(&self) -> Option<WidgetId> {

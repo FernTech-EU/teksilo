@@ -467,6 +467,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } sneltoetsen gebruiken { $chord }.
     }
 shortcut-category-edit = Bewerken
+shortcut-focus-next-region = Volgend gebied
+shortcut-focus-previous-region = Vorig gebied
+shortcut-category-navigation = Navigatie
 shortcut-format-bold = Vet
 shortcut-format-italic = Cursief
 shortcut-format-underline = Onderstrepen
@@ -482,6 +485,7 @@ dock-side-left = Linkerpaneel
 dock-side-right = Rechterpaneel
 dock-side-top = Bovenpaneel
 dock-side-bottom = Onderpaneel
+dock-centre = Hoofdgebied
 dock-rail-left = Linkeractiviteitenbalk
 dock-rail-right = Rechteractiviteitenbalk
 dock-rail-top = Bovenste activiteitenbalk

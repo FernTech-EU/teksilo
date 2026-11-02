@@ -457,6 +457,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $chord }을(를) 사용하는 바로 가기 키가 { $count }개 있습니다.
     }
 shortcut-category-edit = 편집
+shortcut-focus-next-region = 다음 영역
+shortcut-focus-previous-region = 이전 영역
+shortcut-category-navigation = 탐색
 shortcut-format-bold = 굵게
 shortcut-format-italic = 기울임꼴
 shortcut-format-underline = 밑줄
@@ -472,6 +475,7 @@ dock-side-left = 왼쪽 패널
 dock-side-right = 오른쪽 패널
 dock-side-top = 위쪽 패널
 dock-side-bottom = 아래쪽 패널
+dock-centre = 주 영역
 dock-rail-left = 왼쪽 작업 표시줄
 dock-rail-right = 오른쪽 작업 표시줄
 dock-rail-top = 위쪽 작업 표시줄

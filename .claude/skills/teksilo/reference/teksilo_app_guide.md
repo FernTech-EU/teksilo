@@ -307,6 +307,13 @@ Dispatch is a **preview pass** (root → strict ancestors) then a **bubble pass*
   itself. So name the composite; you never need its inner field's id for this.
 - `.focus_within(Signal<bool>)` / `.hover_within(Signal<bool>)` — framework writes `true`
   when a **strict descendant** is focused/hovered (drives unified halos around composites).
+- `.focus_region(name)` marks one of a window's large parts (side panel, centre, bottom
+  panel, status bar): F6 / Shift+F6 move focus between regions (to the region's last focus,
+  else its first Tab stop, passing over a `Role::Splitter` divider while there is anything
+  else) and announce `name`. Put it on the node that carries the
+  landmark role, with the same words. In a window with no region F6 reaches `on_key` as
+  before; an app shortcut on F6 wins over the region commands (`focus.next_region`,
+  `focus.previous_region`, rebindable); a `keyboard_capture` surface keeps F6.
 
 ```rust,ignore
 ctx.add(
@@ -947,7 +954,10 @@ Import from `teksilo::widgets`. The main families:
   screen reader say its title; it acts in the layout's own window, and while a modal is
   open there it reveals the panel but moves no focus. Sides are named "Left panel",
   "Right panel" and so on by where they are on screen;
-  `DockingLayout::side_label(side, tr!(...))` gives one a name of your own.
+  `DockingLayout::side_label(side, tr!(...))` gives one a name of your own. Its sides and
+  centre are F6 regions already, under those names (the centre is "Main area"); F6 into a
+  side lands in its panel, and on its activity rail only when the panel is collapsed. Mark
+  a status bar outside the dock with `.focus_region(tr!(...))` to add it.
 - **Menus:** MenuBar, MenuList, MenuItem (Plain/Check/Radio modes, `&`-mnemonics). Context
   menus are wired via `.context_menu(...)` builder methods / `ContextMenuFactory`, plus the
   declarative `MenuModel` (shared by the in-window bar and the native OS menu bar).

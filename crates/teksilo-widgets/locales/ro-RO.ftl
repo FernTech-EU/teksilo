@@ -474,6 +474,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } de comenzi rapide folosesc { $chord }.
     }
 shortcut-category-edit = Editare
+shortcut-focus-next-region = Regiunea următoare
+shortcut-focus-previous-region = Regiunea anterioară
+shortcut-category-navigation = Navigare
 shortcut-format-bold = Aldin
 shortcut-format-italic = Cursiv
 shortcut-format-underline = Subliniat
@@ -489,6 +492,7 @@ dock-side-left = Panoul din stânga
 dock-side-right = Panoul din dreapta
 dock-side-top = Panoul de sus
 dock-side-bottom = Panoul de jos
+dock-centre = Zona principală
 dock-rail-left = Bara de activitate din stânga
 dock-rail-right = Bara de activitate din dreapta
 dock-rail-top = Bara de activitate de sus

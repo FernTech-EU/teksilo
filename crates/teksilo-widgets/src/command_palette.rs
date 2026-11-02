@@ -44,7 +44,11 @@
 //! editors' own ([`FormatShortcut`](crate::editor_shortcuts::FormatShortcut),
 //! [`CodeShortcut`](crate::editor_shortcuts::CodeShortcut)). A palette embedded
 //! in a surface of the caller's keeps the focus in its own search field, where
-//! those commands would act on the query, so it leaves them out.
+//! those commands would act on the query, so it leaves them out. The same goes
+//! for the focus region commands (F6, Shift+F6, `focus.next_region` and
+//! `focus.previous_region`), which move from the focus the palette was opened
+//! over; a presented palette lists them only while the window has a region to
+//! go to.
 //!
 //! # Presenting it
 //!
@@ -483,11 +487,18 @@ impl CommandPalette {
 }
 
 /// Whether `id` is a command that runs on the focused editor: a standard edit
-/// command, or one of the editors' own.
+/// command, one of the editors' own, or a focus region command, which moves
+/// from the focused widget.
 fn acts_on_the_focused_editor(id: &str) -> bool {
     StandardEdit::from_id(id).is_some()
+        || is_region_command(id)
         || crate::editor_shortcuts::FormatShortcut::from_id(id).is_some()
         || crate::editor_shortcuts::CodeShortcut::from_id(id).is_some()
+}
+
+/// Whether `id` is one of the tree's focus region commands.
+fn is_region_command(id: &str) -> bool {
+    id == teksilo_core::shortcut::NEXT_REGION || id == teksilo_core::shortcut::PREVIOUS_REGION
 }
 
 impl std::fmt::Debug for CommandPalette {

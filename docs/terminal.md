@@ -123,6 +123,9 @@ re-themes live when you swap the scheme.
   by the dispatcher for **every** `keyboard_capture` surface and never reaches
   the widget. Ctrl, not ⌘, on macOS as well, ⌘⇥ is the application switcher.
   The terminal advertises it to assistive technology as its keyboard shortcut.
+- **F6 goes to the child** like every other key, so the window's focus
+  regions are not cycled from inside a terminal: `Ctrl+Tab` out first, then
+  F6.
 
 ## Touch
 

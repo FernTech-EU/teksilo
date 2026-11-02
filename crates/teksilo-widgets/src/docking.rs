@@ -44,6 +44,17 @@
 //! dock's first control (a modal window with no focus hint) lands there;
 //! give the editor an `initial_focus_hint` to start in the centre.
 //!
+//! Each region is also a focus region (`focus_region`): F6 and Shift+F6
+//! move between the sides and the centre, landing where focus last was in
+//! the region, else on the first control of a side's panel (of the centre's
+//! content), and on the side's activity rail only when its panel shows
+//! nothing focusable, as when the side is collapsed; a screen reader hears
+//! the region's name. A resize handle the user focused is not where F6
+//! comes back to. Tab order is unchanged by this. A side is named as its
+//! landmark is ("Left panel", or the application's `side_label`), the
+//! centre "Main area", all translated. A status bar or toolbar outside the
+//! dock is a region only if the application marks it.
+//!
 //! # Revealing and focusing a dock
 //!
 //! [`DockingModel::reveal_dock`] shows a dock and leaves keyboard focus
@@ -145,6 +156,9 @@ pub struct DockingLayout {
     focus_moved_in_side: Signal<u64>,
     /// Whether focus is inside each side region, refilled on each build.
     sides_focus_within: Rc<RefCell<Vec<Signal<bool>>>>,
+    /// The direction the sides were last placed in, which their F6 region
+    /// names follow ("Left panel" is the trailing side right to left).
+    region_rtl: Signal<bool>,
     /// The focus request generation when the layout was first built: a
     /// request made before it was mounted is not applied (it would move
     /// focus long after the command that asked for it).
@@ -183,6 +197,7 @@ impl DockingLayout {
             focus_memory: Rc::new(RefCell::new(HashMap::new())),
             focus_moved_in_side: Signal::new(0),
             sides_focus_within: Rc::new(RefCell::new(Vec::new())),
+            region_rtl: Signal::new(false),
             mounted_at: Rc::new(Cell::new(None)),
             ordered: Vec::new(),
             center_slot: RegionSlot::default(),
@@ -329,11 +344,13 @@ impl Widget for DockingLayout {
             let frame = ctx.add(centre::CentreFrame::new(inner));
             ctx.add(
                 DockRegion {
+                    landing: None,
                     children: vec![frame],
                     slot: self.center_slot.clone(),
                     forwards_response: true,
                 }
-                .tab_index(region_tab_index(None)),
+                .tab_index(region_tab_index(None))
+                .focus_region(a11y::centre_region_name()),
             )
         };
 
@@ -577,6 +594,7 @@ impl Widget for DockingLayout {
         // The one direction every side name reads (see `a11y`), the same
         // value the geometry swap below uses.
         self.model.set_layout_rtl(rtl);
+        self.region_rtl.set_if_changed(rtl);
 
         let side_layout = |side: DockSide| -> SideLayout {
             // A disabled side contributes nothing (its placeholders are placed
@@ -1132,12 +1150,15 @@ impl DockingLayout {
         self.sides_focus_within.borrow_mut().push(within.clone());
         ctx.add(
             DockRegion {
+                // `[rail, content, handle]`: F6 lands in the panel.
+                landing: children.get(1).copied(),
                 children,
                 slot,
                 forwards_response: false,
             }
             .tab_index(region_tab_index(Some(side)))
-            .focus_within(within),
+            .focus_within(within)
+            .focus_region(a11y::side_region_name(&self.model, side, &self.region_rtl)),
         )
     }
 }
@@ -1153,6 +1174,14 @@ impl DockingLayout {
 /// `GenericContainer`, which the walker prunes.
 struct DockRegion {
     children: Vec<WidgetId>,
+    /// Where F6 lands in the region when it remembers no focus: a side's
+    /// panel content, so F6 reaches the panel's first control rather than the
+    /// activity rail Tab meets first, and the rail only when the panel holds
+    /// nothing focusable (a collapsed side). Offered as the region node's
+    /// `focus_region_landing`, which only the core's region landing reads:
+    /// Tab order and a window's first focus are not changed. `None` for the
+    /// centre.
+    landing: Option<WidgetId>,
     slot: RegionSlot,
     /// The centre region reports its child's full response (flex, shrink,
     /// min), which the dock measures; a side region reports its proposal.
@@ -1178,6 +1207,10 @@ impl Widget for DockRegion {
 
     fn preserves_children_on_rebuild(&self) -> bool {
         true
+    }
+
+    fn focus_region_landing(&self) -> Option<WidgetId> {
+        self.landing
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {

@@ -31,9 +31,28 @@
 
 mod standard;
 
-use standard::framework_default;
+mod focus_region;
+
+#[doc(hidden)]
+pub use focus_region::{NEXT_REGION, PREVIOUS_REGION, focus_region_shortcuts};
+pub(crate) use focus_region::{region_direction, register_focus_region_shortcuts};
+pub(crate) use standard::register_standard_shortcuts;
 pub use standard::{STANDARD_EDIT_CATEGORY, StandardEdit};
-pub(crate) use standard::{is_framework_shortcut_id, register_standard_shortcuts};
+
+/// Whether `id` names a shortcut the widget tree itself registers (the
+/// standard edits, the focus region commands), which applies wherever focus
+/// is, a modal included, whoever re-registered it.
+pub(crate) fn is_framework_shortcut_id(id: &str) -> bool {
+    StandardEdit::from_id(id).is_some() || region_direction(id).is_some()
+}
+
+/// The tree's own registration of a framework shortcut id, with its default
+/// chords, scope and English labels; `None` for any other id.
+fn framework_default(id: &str) -> Option<Shortcut> {
+    StandardEdit::from_id(id)
+        .map(StandardEdit::shortcut)
+        .or_else(|| focus_region::region_default(id))
+}
 
 use crate::event::{Key, Modifiers};
 use crate::intent::Intent;
@@ -924,7 +943,8 @@ impl ShortcutRegistry {
     /// from leaking entries whose `on_activate` closures may capture
     /// state owned by the destroyed widget.
     ///
-    /// A standard edit shortcut ([`StandardEdit`]) whose last owner goes is
+    /// A standard edit shortcut ([`StandardEdit`]), or a focus region command
+    /// ([`NEXT_REGION`], [`PREVIOUS_REGION`]), whose last owner goes is
     /// not removed when the tree registered it itself (with
     /// [`register`](Self::register), as `WidgetTree::new` does): the tree's
     /// own registration is put back, with its default chords and scope and

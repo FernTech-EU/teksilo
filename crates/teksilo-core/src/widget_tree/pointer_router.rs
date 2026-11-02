@@ -844,7 +844,27 @@ impl WidgetTree {
                     )
                 })
                 .collect();
-            let lookup = self.select_shortcut_for_focus(&candidates);
+            // The focus region commands (F6, Shift+F6) yield: an application
+            // shortcut on the same chord that applies wins whatever its
+            // category, and with no region to go to and no action (in the
+            // window or the application tree) taking the intent they are not
+            // candidates, so the key reaches the focused widget as before.
+            let (region_commands, others): (Vec<_>, Vec<_>) = candidates
+                .into_iter()
+                .partition(|(id, _, _)| crate::shortcut::region_direction(id).is_some());
+            let lookup = self.select_shortcut_for_focus(&others).or_else(|| {
+                let source = self.focus_or_modal().or_else(|| self.intent_anchor());
+                let live: Vec<_> = region_commands
+                    .into_iter()
+                    .filter(|(id, _, _)| {
+                        crate::shortcut::region_direction(id).is_some_and(|forward| {
+                            self.region_cycle_target_from(source, forward).is_some()
+                                || source.is_some_and(|source| self.can_handle_from(source, id))
+                        })
+                    })
+                    .collect();
+                self.select_shortcut_for_focus(&live)
+            });
             if let Some((id, scope, propagate_when_disabled)) = lookup {
                 let anchor = match scope {
                     // Global shortcuts fire regardless of focus. If no

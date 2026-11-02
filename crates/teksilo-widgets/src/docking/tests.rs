@@ -4665,3 +4665,221 @@ fn a_disabled_side_takes_no_tab_stop_and_no_space() {
         "the other sides' rails are still tab lists"
     );
 }
+
+// ── F6 regions ────────────────────────────────────────────────────────
+
+/// Which of the dock's five regions holds focus, by the name F6 should say
+/// there: the dock's children are `[centre, leading, trailing, top, bottom,
+/// courier]`.
+fn focused_region_name(t: &WidgetTree, dock: WidgetId) -> Option<&'static str> {
+    let focused = t.focused()?;
+    let names = [
+        "Main area",
+        "Left panel",
+        "Right panel",
+        "Top panel",
+        "Bottom panel",
+    ];
+    t.children(dock)
+        .into_iter()
+        .zip(names)
+        .find(|&(region, _)| t.is_descendant_of(focused, region))
+        .map(|(_, name)| name)
+}
+
+#[test]
+fn f6_visits_each_dock_region_and_says_its_name() {
+    let (mut t, _model, _root, dock) = five_regions(None);
+    let centre = t.find_by_label("Centre button").expect("the centre button");
+    t.focus(centre);
+    settle(&mut t);
+
+    let mut visited = Vec::new();
+    for _ in 0..5 {
+        let mark = heard_mark(&t);
+        t.press_key(Key::F6, Modifiers::NONE);
+        settle(&mut t);
+        let region = focused_region_name(&t, dock).expect("focus is in a region");
+        assert_eq!(
+            heard_since(&t, mark),
+            vec![region.to_string()],
+            "F6 says the name of the region it moved to"
+        );
+        visited.push(region);
+    }
+    assert_eq!(
+        visited.last(),
+        Some(&"Main area"),
+        "five F6 presses come back to the centre"
+    );
+    visited.sort_unstable();
+    assert_eq!(
+        visited,
+        vec![
+            "Bottom panel",
+            "Left panel",
+            "Main area",
+            "Right panel",
+            "Top panel"
+        ],
+        "each region once"
+    );
+}
+
+#[test]
+fn a_side_region_is_named_for_where_it_is_on_screen_in_right_to_left() {
+    use teksilo_core::environment::LayoutDirection;
+    let (mut t, _model, _root, dock) = five_regions(None);
+    t.set_layout_direction(LayoutDirection::RightToLeft);
+    settle(&mut t);
+    let centre = t.find_by_label("Centre button").expect("the centre button");
+    t.focus(centre);
+    settle(&mut t);
+    let leading = t.children(dock)[1];
+    let mut heard = Vec::new();
+    for _ in 0..5 {
+        let mark = heard_mark(&t);
+        t.press_key(Key::F6, Modifiers::NONE);
+        settle(&mut t);
+        if t.focused().is_some_and(|f| t.is_descendant_of(f, leading)) {
+            heard = heard_since(&t, mark);
+        }
+    }
+    assert_eq!(heard, vec!["Right panel".to_string()]);
+}
+
+#[test]
+fn f6_into_a_side_lands_on_its_panel_not_its_resize_handle() {
+    // The trailing and bottom sides draw their resize handle on their inner
+    // edge, so it is their first Tab stop. F6 goes past it into the panel;
+    // Tab still stops on it.
+    let (mut t, _model, _root, dock) = five_regions(None);
+    let centre = t.find_by_label("Centre button").expect("the centre button");
+    t.focus(centre);
+    settle(&mut t);
+    t.press_key(Key::Tab, Modifiers::NONE);
+    settle(&mut t);
+    assert_eq!(
+        t.accessibility_node(t.focused().expect("focus")).role(),
+        teksilo_core::accesskit::Role::Splitter,
+        "Tab from the centre reaches the trailing side's handle first"
+    );
+
+    t.focus(centre);
+    settle(&mut t);
+    let mut landed = Vec::new();
+    for _ in 0..5 {
+        t.press_key(Key::F6, Modifiers::NONE);
+        settle(&mut t);
+        let region = focused_region_name(&t, dock).expect("focus is in a region");
+        landed.push((region, focused_name(&t)));
+    }
+    for side in ["Right panel", "Bottom panel"] {
+        let (_, name) = landed
+            .iter()
+            .find(|(region, _)| *region == side)
+            .expect("F6 visits the side");
+        // The panel's first control: its dock's tab.
+        let tab = if side == "Right panel" {
+            "TrailDock"
+        } else {
+            "BottomDock"
+        };
+        assert_eq!(name.as_deref(), Some(tab), "{side}: {landed:?}");
+    }
+
+    // A handle reached by Tab is not where F6 comes back to.
+    t.focus(centre);
+    settle(&mut t);
+    t.press_key(Key::Tab, Modifiers::NONE);
+    settle(&mut t);
+    for _ in 0..5 {
+        t.press_key(Key::F6, Modifiers::NONE);
+        settle(&mut t);
+        if focused_region_name(&t, dock) == Some("Right panel") {
+            break;
+        }
+    }
+    assert_eq!(focused_name(&t).as_deref(), Some("TrailDock"));
+}
+
+/// F6 from the centre, round the dock, until focus is in `side`; what it
+/// landed on there.
+fn f6_into(t: &mut WidgetTree, dock: WidgetId, side: &str) -> Option<String> {
+    for _ in 0..5 {
+        t.press_key(Key::F6, Modifiers::NONE);
+        settle(t);
+        if focused_region_name(t, dock) == Some(side) {
+            return focused_name(t);
+        }
+    }
+    None
+}
+
+#[test]
+fn f6_into_a_side_with_a_rail_lands_on_its_panel_and_on_the_rail_only_when_collapsed() {
+    // The leading side has an activity rail, drawn before its panel and so
+    // its first Tab stop. F6 goes past it into the panel; Tab still meets
+    // it first.
+    let (mut t, model, _root, dock) = five_regions(None);
+    let centre = t.find_by_label("Centre button").expect("the centre button");
+    let leading = t.children(dock)[1];
+    let first_stop = t
+        .tab_stops_within(leading)
+        .first()
+        .copied()
+        .expect("the side has Tab stops");
+    assert_eq!(
+        t.accessibility_node(first_stop).name(),
+        Some("LeadDock"),
+        "Tab meets the rail's item first"
+    );
+    t.focus(centre);
+    settle(&mut t);
+    assert_eq!(
+        f6_into(&mut t, dock, "Left panel").as_deref(),
+        Some("Leading button"),
+        "the panel's first control, not the rail"
+    );
+
+    // Collapsed, the side shows its rail and no panel: F6 lands on the rail.
+    model.set_side_visible(DockSide::Leading, false);
+    settle(&mut t);
+    t.focus(centre);
+    settle(&mut t);
+    assert_eq!(
+        f6_into(&mut t, dock, "Left panel").as_deref(),
+        Some("LeadDock"),
+        "the rail, when the panel shows nothing focusable"
+    );
+}
+
+#[test]
+fn a_rail_item_the_user_focused_is_where_f6_comes_back() {
+    let (mut t, _model, _root, dock) = five_regions(None);
+    let leading = t.children(dock)[1];
+    let rail_item = t.tab_stops_within(leading)[0];
+    t.focus(rail_item);
+    settle(&mut t);
+    assert_eq!(
+        f6_into(&mut t, dock, "Left panel").as_deref(),
+        Some("LeadDock"),
+        "the remembered focus comes before the panel"
+    );
+}
+
+#[test]
+fn a_window_holding_a_dock_opens_with_the_first_focus_it_had() {
+    // A side's F6 landing is not a focus hint: a window or a modal holding
+    // the dock finds no hint in it, as before the landing existed, so a
+    // window opens with no focus and a modal on its first control.
+    let (t, _model, root, dock) = five_regions(None);
+    assert_eq!(t.widget_initial_focus_hint(root), None);
+    assert_eq!(t.widget_initial_focus_hint(dock), None);
+    let first = t.first_focusable_descendant(dock).expect("a first control");
+    assert_eq!(
+        t.accessibility_node(first).name(),
+        Some("TopDock"),
+        "a modal holding the dock starts on the top panel's tab, its first Tab stop"
+    );
+}

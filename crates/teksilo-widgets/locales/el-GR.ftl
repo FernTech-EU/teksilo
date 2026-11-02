@@ -464,6 +464,9 @@ a11y-shortcut-settings-find-result =
        *[other] { $count } συντομεύσεις χρησιμοποιούν το { $chord }.
     }
 shortcut-category-edit = Επεξεργασία
+shortcut-focus-next-region = Επόμενη περιοχή
+shortcut-focus-previous-region = Προηγούμενη περιοχή
+shortcut-category-navigation = Πλοήγηση
 shortcut-format-bold = Έντονα
 shortcut-format-italic = Πλάγια
 shortcut-format-underline = Υπογράμμιση
@@ -479,6 +482,7 @@ dock-side-left = Αριστερό πλαίσιο
 dock-side-right = Δεξί πλαίσιο
 dock-side-top = Επάνω πλαίσιο
 dock-side-bottom = Κάτω πλαίσιο
+dock-centre = Κύρια περιοχή
 dock-rail-left = Αριστερή γραμμή δραστηριοτήτων
 dock-rail-right = Δεξιά γραμμή δραστηριοτήτων
 dock-rail-top = Επάνω γραμμή δραστηριοτήτων
