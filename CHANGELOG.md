@@ -566,6 +566,10 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **`T` in a `Calendar` jumps to today when typed on a keyboard.** It only
+  answered a synthesised `Key::Character('t')`, never the `Key::T` a key
+  press arrives as.
+
 - **Up and Down move a segmented control's selection**, as Left and Right
   do, in list order and not mirrored in right-to-left layouts. They no longer
   reach the enclosing widget while the control has focus.

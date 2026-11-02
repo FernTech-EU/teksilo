@@ -1512,8 +1512,10 @@ fn build_keyboard_handler(
         // selection. `T` alone means the same in every view.
         let view = mode.get();
         // `T` is today, unless Alt is held: on macOS Option+T types "†" and
-        // arrives as `Key::T`, and elsewhere Alt+T is an accelerator.
-        let is_today = matches!(key, Key::Character('t' | 'T'))
+        // arrives as `Key::T`, and elsewhere Alt+T is an accelerator. A press
+        // from the keyboard arrives as `Key::T`; `Key::Character` is what a
+        // synthesised event (automation, a test) may carry.
+        let is_today = matches!(key, Key::T | Key::Character('t' | 'T'))
             && !crate::common::range_nav::option_blocks_key(*modifiers);
         if view != CalendarMode::Days && !is_today {
             let zoom = zoom_grid::Zoom {
@@ -1585,7 +1587,7 @@ fn build_keyboard_handler(
                 }
                 return EventResponse::Ignored;
             }
-            Key::Character('t' | 'T') if is_today => {
+            Key::T | Key::Character('t' | 'T') if is_today => {
                 let today = today_local();
                 let ym = YearMonth::from_date(today);
                 if visible_month.get() != ym {

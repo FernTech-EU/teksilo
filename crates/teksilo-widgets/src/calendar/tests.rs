@@ -1612,8 +1612,16 @@ fn a_calendar_built_disabled_works_once_enabled() {
 /// `T` jumps to today, but not with Alt held. On macOS Option+T types "†"
 /// and arrives as `Key::T` with that text (the rule is
 /// `range_nav::option_blocks_key_for`, pinned there for both conventions).
+/// The keyboard sends `Key::T`; a synthesised event may carry
+/// `Key::Character('t')`; both mean today.
 #[test]
 fn an_alt_press_of_t_is_not_today() {
+    for key in [Key::T, Key::Character('t')] {
+        alt_t_then_t(key);
+    }
+}
+
+fn alt_t_then_t(key: Key) {
     use teksilo_core::event::WidgetEvent;
     let (_mgr, mut tree) = speaking("fr-FR");
     let calendar = twelfth_of_march();
@@ -1629,13 +1637,13 @@ fn an_alt_press_of_t_is_not_today() {
     );
 
     tree.dispatch_event(WidgetEvent::KeyDown {
-        key: Key::Character('t'),
+        key,
         modifiers: Modifiers::ALT,
         text: Some("†".to_string()),
     });
     lay_out(&mut tree);
-    assert_eq!(cursor.get(), before, "Alt+T moved nothing");
+    assert_eq!(cursor.get(), before, "Alt+T moved nothing ({key:?})");
 
-    press(&mut tree, Key::Character('t'));
-    assert_eq!(cursor.get(), today_local(), "T alone is today");
+    press(&mut tree, key);
+    assert_eq!(cursor.get(), today_local(), "T alone is today ({key:?})");
 }
