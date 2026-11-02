@@ -664,6 +664,41 @@ impl WidgetTree {
         if let Some(modal_overlay) = self.overlay_manager.topmost_modal() {
             let content_id = modal_overlay.content_id;
             self.collect_scope_entries(content_id, &mut entries);
+            // An overlay opened from inside the modal (a date field's calendar
+            // popup) is often detached: its content is no arena descendant of
+            // the modal, so the walk above never meets it. With focus inside
+            // one, collect its content too, or Tab would find focus in no
+            // entry, enter the modal from its edge, and close the popup as
+            // focus left it, whatever traversal scope the popup declares.
+            let modal_id = modal_overlay.id;
+            let above: Vec<WidgetId> = {
+                let stack = &self.overlay_manager.stack;
+                stack
+                    .iter()
+                    .position(|overlay| overlay.id == modal_id)
+                    .map(|at| {
+                        stack[at + 1..]
+                            .iter()
+                            .map(|overlay| overlay.content_id)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            for overlay_content in above {
+                // A tooltip surface is spliced in next to its anchor below
+                // (`splice_sticky_tooltips_after_anchors`); collected here as
+                // well it would be in the list twice, and Tab would loop
+                // between its own two copies.
+                if self.tooltip_content_root(overlay_content).is_some() {
+                    continue;
+                }
+                let holds_focus = self
+                    .focused
+                    .is_some_and(|f| self.is_descendant_of(f, overlay_content));
+                if holds_focus && !self.is_descendant_of(overlay_content, content_id) {
+                    self.collect_scope_entries(overlay_content, &mut entries);
+                }
+            }
         } else {
             let roots = self.arena.roots();
             for root in roots {
@@ -2599,6 +2634,52 @@ mod tests_scope {
         assert_ne!(tree.focused(), Some(outside1));
         assert_ne!(tree.focused(), Some(outside2));
     }
+
+    /// A sticky tooltip that holds focus above a modal, on an anchor with no
+    /// Tab stop of its own, is one run of stops in the cycle, not two: Tab
+    /// from its last control leaves it (WCAG 2.1.2).
+    #[test]
+    fn a_sticky_tooltip_above_a_modal_does_not_trap_tab() {
+        let mut tree = WidgetTree::new();
+        tree.set_accessibility_preferences(false, true, 1.0);
+        let outside = tree.add(FillWidget::new().focusable());
+        let m1 = tree.add(FillWidget::new().focusable());
+        let anchor = tree.add(FillWidget::new());
+        let modal = tree.add(StackWidget::new().child(m1).child(anchor));
+        let t_a = tree.add(FillWidget::new().focusable());
+        let t_b = tree.add(FillWidget::new().focusable());
+        let tip = tree.add(StackWidget::new().child(t_a).child(t_b));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            modal,
+            outside,
+            crate::overlay::OverlayPlacement::Centered,
+            crate::overlay::DismissBehavior::Manual,
+        ));
+        tree.attach_tooltip_with_sticky(
+            anchor,
+            tip,
+            std::time::Duration::from_millis(500),
+            Some(std::time::Duration::from_millis(100)),
+        );
+        tree.tooltip_pointer_enter(anchor);
+        tree.advance_time(std::time::Duration::from_millis(550));
+        tree.promote_tooltip_to_sticky(tip);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(t_a);
+        assert_eq!(tree.focused(), Some(t_a), "focus is in the sticky tooltip");
+
+        let mut reached = Vec::new();
+        for _ in 0..4 {
+            tab(&mut tree);
+            reached.push(tree.focused());
+        }
+        assert!(
+            reached.contains(&Some(m1)),
+            "Tab leaves the tooltip for the modal, reached {reached:?}"
+        );
+    }
+
     /// A handler or a post-mount action can tell whether a modal is open, so
     /// it can refuse to move focus under the modal's scrim.
     #[test]
@@ -2626,6 +2707,50 @@ mod tests_scope {
         assert_eq!(ask(&mut tree), Some(true));
     }
 
+    /// A popup opened from inside a modal, with its own Cycle scope, keeps Tab
+    /// inside it. Its content is detached (no arena descendant of the modal),
+    /// as a date field's calendar is, so the modal's walk alone never met it:
+    /// Tab entered the modal from its edge and the popup closed as focus left.
+    #[test]
+    fn a_cycle_popup_above_a_modal_keeps_tab_inside_it() {
+        let mut tree = WidgetTree::new();
+        let outside = tree.add(FillWidget::new().focusable());
+        let field = tree.add(FillWidget::new().focusable());
+        let after = tree.add(FillWidget::new().focusable());
+        let modal = tree.add(StackWidget::new().child(field).child(after));
+        let p1 = tree.add(FillWidget::new().focusable());
+        let p2 = tree.add(FillWidget::new().focusable());
+        let popup = tree.add(StackWidget::new().child(p1).child(p2));
+        tree.set_traversal_scope(popup, Cycle);
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            modal,
+            outside,
+            crate::overlay::OverlayPlacement::Centered,
+            crate::overlay::DismissBehavior::Manual,
+        ));
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            popup,
+            field,
+            crate::overlay::OverlayPlacement::Below,
+            crate::overlay::DismissBehavior::EscapeOrClickOutside,
+        ));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(p1);
+
+        for expected in [p2, p1, p2] {
+            tab(&mut tree);
+            assert_eq!(tree.focused(), Some(expected), "Tab wraps inside the popup");
+        }
+        tree.press_key(Key::Tab, Modifiers::SHIFT);
+        assert_eq!(tree.focused(), Some(p1), "Shift+Tab too");
+        assert_eq!(tree.active_overlays().len(), 2, "the popup is still open");
+
+        // Focus in the modal itself: the popup takes no part in its cycle.
+        tree.focus(field);
+        tab(&mut tree);
+        assert_eq!(tree.focused(), Some(after));
+    }
 }
 
 #[cfg(test)]
