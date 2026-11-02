@@ -1681,13 +1681,16 @@ impl WidgetTree {
         // `OverlayPlacement::at_pointer_for` rather than at each call site.
         let placement =
             crate::overlay::OverlayPlacement::at_pointer_for(position, &self.current_input.pointer);
-        self.overlay_manager
-            .show(crate::overlay::OverlayRequest::new(
-                content_id,
-                owner_id,
-                placement,
-                crate::overlay::DismissBehavior::EscapeOrClickOutside,
-            ));
+        // The factory built this menu for this opening alone: it is destroyed
+        // once the menu closes, rather than parked forever.
+        let mut request = crate::overlay::OverlayRequest::new(
+            content_id,
+            owner_id,
+            placement,
+            crate::overlay::DismissBehavior::EscapeOrClickOutside,
+        );
+        request.destroy_content_on_dismiss = true;
+        self.overlay_manager.show(request);
         if let Some(focus_id) = prev_focus {
             self.record_top_focus_restore(focus_id);
         }

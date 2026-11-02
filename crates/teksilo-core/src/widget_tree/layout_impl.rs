@@ -135,6 +135,46 @@ impl WidgetTree {
         self.binding_registry.reclaim_empty_groups();
     }
 
+    /// Destroy the content of dismissed overlays that asked for it
+    /// ([`OverlayRequest::destroy_content_on_dismiss`](crate::overlay::OverlayRequest::destroy_content_on_dismiss)),
+    /// outside any dispatch, so a `Drop` that touches app state never runs
+    /// while a handler of the overlay is on the stack.
+    ///
+    /// Content that is gone already, or shown again by an overlay still up,
+    /// is skipped. So is content someone activated without an overlay: it is
+    /// theirs now, and a debug build says so.
+    fn destroy_dismissed_content(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        let mut queued = self.overlay_manager.take_pending_destroy();
+        if queued.is_empty() {
+            return;
+        }
+        // `on_dismiss` may still read the content: run any callback a
+        // re-entrant dismissal left parked before it goes.
+        self.run_pending_dismiss_callbacks(&mut *ops);
+        queued.sort_unstable();
+        queued.dedup();
+        let mut destroyed = false;
+        for id in queued {
+            if self.arena.get(id).is_none() || self.overlay_manager.find_by_content(id).is_some() {
+                continue;
+            }
+            if self.arena.is_active(id) {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "teksilo: overlay content {id:?} was activated outside an overlay after its \
+                     dismissal; it is no longer destroyed by the framework"
+                );
+                continue;
+            }
+            self.destroy_subtree(id);
+            destroyed = true;
+        }
+        if destroyed {
+            // A `Drop` may have set a signal this pass has already flushed.
+            self.request_frame();
+        }
+    }
+
     /// Dismiss any active overlay whose content widget is no longer
     /// alive in the arena. An overlay's owner can be torn down
     /// out-of-band: a data-driven rebuild destroys the widget that
@@ -630,6 +670,12 @@ impl WidgetTree {
         // popover rebuilds the bell that owns it). Without this the
         // overlay lingers as an invisible click-blocker. Runs before the
         // early-return so it takes effect even on otherwise-idle passes.
+        //
+        // Content the framework built for one overlay alone (a deferred
+        // modal's, its scrim, a context menu) is destroyed first, so an
+        // overlay opened from inside it whose content goes with it is
+        // collected right below in the same pass.
+        self.destroy_dismissed_content(&mut *ops);
         self.gc_orphaned_overlays();
 
         self.arena.refresh_roots();

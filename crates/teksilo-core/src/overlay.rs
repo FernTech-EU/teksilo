@@ -363,7 +363,9 @@ pub struct OverlayRequest {
     /// Invoked when the overlay is dismissed by any path. Use this
     /// to reset anchor-side state (e.g. `ComboBox.interaction`)
     /// when the framework tears down the overlay without going
-    /// through the anchor's own key/tap handlers.
+    /// through the anchor's own key/tap handlers. Content the framework
+    /// destroys on dismissal (a deferred modal's) can still be read here;
+    /// it is destroyed after the callback.
     pub on_dismiss: Option<OverlayDismissCallback>,
     /// Optional fade-in / fade-out duration. When `Some`, the
     /// framework attaches an animated opacity scope to `content_id`
@@ -381,6 +383,14 @@ pub struct OverlayRequest {
     /// [`OverlayRequest::command_source`].
     #[doc(hidden)]
     pub command_source: Option<WidgetId>,
+    /// The framework built `content_id` for this overlay alone and destroys
+    /// it once the overlay is dismissed: after `on_dismiss` has run and focus
+    /// has been given back, at the next layout pass, outside any dispatch.
+    /// Content shown again by another overlay before then is kept. Set by
+    /// teksilo-app for a deferred modal's content and its scrim, and by the
+    /// tree for a context menu.
+    #[doc(hidden)]
+    pub destroy_content_on_dismiss: bool,
 }
 
 impl OverlayRequest {
@@ -435,6 +445,7 @@ impl OverlayRequest {
             fade_duration: None,
             inert: false,
             command_source: None,
+            destroy_content_on_dismiss: false,
         }
     }
 
@@ -646,6 +657,8 @@ pub(crate) struct ActiveOverlay {
     /// every [`position_overlays`](OverlayManager::position_overlays). See
     /// [`EventContext::track_overlay_placement_by_content`](crate::widget::EventContext::track_overlay_placement_by_content).
     pub placement_source: Option<OverlayPlacementSource>,
+    /// [`OverlayRequest::destroy_content_on_dismiss`].
+    pub destroy_content: bool,
 }
 
 impl ActiveOverlay {
@@ -792,6 +805,11 @@ pub struct OverlayManager {
     removed: std::collections::VecDeque<RemovedOverlay>,
     /// Sequence number of the next entry pushed onto `removed`.
     removed_seq: u64,
+    /// Content of removed overlays flagged
+    /// [`destroy_content_on_dismiss`](OverlayRequest::destroy_content_on_dismiss),
+    /// waiting for the tree to destroy it. See
+    /// [`take_pending_destroy`](Self::take_pending_destroy).
+    pending_destroy: Vec<WidgetId>,
 }
 
 /// How many removed overlays [`OverlayManager`] remembers for the focus
@@ -839,15 +857,20 @@ impl OverlayManager {
             pending_dismiss: Vec::new(),
             removed: std::collections::VecDeque::new(),
             removed_seq: 0,
+            pending_destroy: Vec::new(),
         }
     }
 
-    /// Record every entry `leaving` selects, in stack order, as removed.
-    /// Every path that takes entries off the stack calls this first, with the
-    /// predicate it is about to remove by.
+    /// Record every entry `leaving` selects, in stack order, as removed, and
+    /// queue the content of the flagged ones for destruction. Every path that
+    /// takes entries off the stack calls this first, with the predicate it is
+    /// about to remove by.
     fn note_removed(&mut self, mut leaving: impl FnMut(&ActiveOverlay) -> bool) {
         let first_of_this_call = self.removed_seq;
         for overlay in self.stack.iter().filter(|o| leaving(o)) {
+            if overlay.destroy_content {
+                self.pending_destroy.push(overlay.content_id);
+            }
             self.removed.push_back(RemovedOverlay {
                 seq: self.removed_seq,
                 anchor: overlay.anchor,
@@ -866,6 +889,12 @@ impl OverlayManager {
         {
             self.removed.pop_front();
         }
+    }
+
+    /// Take the content queued for destruction by the removals since the last
+    /// call. The tree destroys it at its next layout pass.
+    pub(crate) fn take_pending_destroy(&mut self) -> Vec<WidgetId> {
+        std::mem::take(&mut self.pending_destroy)
     }
 
     /// The mark to pass to [`removed_since`](Self::removed_since): taken
@@ -944,6 +973,8 @@ impl OverlayManager {
         }
 
         let now = std::time::Instant::now();
+        // Shown again before the tree drained a queued destroy: it is in use.
+        self.pending_destroy.retain(|id| *id != request.content_id);
 
         let overlay = ActiveOverlay {
             id,
@@ -971,6 +1002,7 @@ impl OverlayManager {
             fade: None,
             inert: request.inert,
             placement_source: None,
+            destroy_content: request.destroy_content_on_dismiss,
         };
         // Sorted insert, not a push: an overlay goes above everything in a
         // lower band and below everything in a higher one, so a selection

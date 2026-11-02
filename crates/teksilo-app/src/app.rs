@@ -488,12 +488,25 @@ fn present_in_tree_modal_request(
     // signal, so the value we restore is the value that sticks.)
     let focus_visible_before = tree.focus_visible_signal().get();
     let focus_visible_signal = tree.focus_visible_signal();
-    let content_id = match request.content {
-        ModalContent::ExistingWidget(id) => id,
+    // Content built here belongs to this modal alone and is destroyed once
+    // it is dismissed; content the caller handed in stays theirs.
+    let (content_id, built_here) = match request.content {
+        ModalContent::ExistingWidget(id) => (id, false),
         ModalContent::Deferred(builder) => {
             let id = builder(tree);
+            // A builder handing back a widget it kept from an earlier
+            // presentation gets a destroyed id (or a parked one), and the
+            // dialog shows nothing. Say so in a debug build.
+            #[cfg(debug_assertions)]
+            if !tree.is_active(id) {
+                eprintln!(
+                    "teksilo: a ModalRequest::deferred builder returned {id:?}, which is gone or \
+                     parked: deferred content is destroyed after each dialog, so build it afresh, \
+                     or keep the widget and present it with ModalRequest::in_tree"
+                );
+            }
             tree.set_dormant(id);
-            id
+            (id, true)
         }
     };
 
@@ -515,12 +528,14 @@ fn present_in_tree_modal_request(
             .dismiss_target(dismiss_target.clone())
             .click_to_dismiss(click_to_dismiss),
     );
-    let scrim_overlay = tree.show_overlay(OverlayRequest::new(
+    let mut scrim_request = OverlayRequest::new(
         scrim_id,
         source_widget,
         OverlayPlacement::FullViewport,
         DismissBehavior::Manual,
-    ));
+    );
+    scrim_request.destroy_content_on_dismiss = true;
+    let scrim_overlay = tree.show_overlay(scrim_request);
 
     tree.activate(content_id);
     // Wrap the caller's `on_dismiss` so the framework also restores the
@@ -554,6 +569,7 @@ fn present_in_tree_modal_request(
     // keeping `parent_overlay: None` places the modal against the viewport.
     let mut request = OverlayRequest::new(content_id, source_widget, placement, dismiss);
     request.on_dismiss = on_dismiss;
+    request.destroy_content_on_dismiss = built_here;
     let modal_overlay = tree.show_overlay(request);
     // The modal is now the topmost overlay; record where focus should
     // return when it dismisses. Mirrors `show_overlay_from_source`'s
@@ -9246,6 +9262,179 @@ mod tests {
             focused == keep || tree.is_descendant_of(focused, keep),
             "focus went into the group that held the trigger"
         );
+    }
+
+    /// A leaf that records its own `Drop`, as Skribisto's undo guard does.
+    #[derive(Debug)]
+    struct DropProbe(Rc<std::cell::Cell<bool>>);
+
+    impl Drop for DropProbe {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    impl teksilo_core::widget::Widget for DropProbe {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &teksilo_core::widget::LayoutContext,
+        ) -> teksilo_core::widget::LayoutResponse {
+            proposal.resolve(10.0, 10.0).into()
+        }
+    }
+
+    /// A deferred modal holding a probe next to a Close button, presented
+    /// over a trigger with focus. Returns the probe's flag.
+    fn present_probe(tree: &mut WidgetTree, source: WidgetId) -> Rc<std::cell::Cell<bool>> {
+        let dropped = Rc::new(std::cell::Cell::new(false));
+        let probe = dropped.clone();
+        present_in_tree_modal_request(
+            tree,
+            source,
+            ModalRequest::deferred(move |tree| {
+                tree.add(ModalContainer::new(
+                    teksilo_widgets::VStack::new()
+                        .child(DropProbe(probe))
+                        .child(
+                            Button::new(lit!("Close")).on_activate_fn(|ctx| ctx.dismiss_modal()),
+                        ),
+                ))
+            })
+            .presentation(ModalPresentation::InTree)
+            .close_behavior(ModalCloseBehavior::EscapeOrClickOutside),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        dropped
+    }
+
+    /// A deferred modal's content and its scrim are destroyed after the modal
+    /// is dismissed, by every path, with or without a fade, and focus goes
+    /// back to the trigger.
+    #[test]
+    fn a_deferred_modal_is_destroyed_after_every_dismissal() {
+        let ways: [(&str, fn(&mut WidgetTree)); 4] = [
+            ("escape", |tree| {
+                tree.press_key(
+                    teksilo_core::event::Key::Escape,
+                    teksilo_core::event::Modifiers::NONE,
+                )
+            }),
+            ("close button", |tree| {
+                let close = tree.find_by_label("Close").expect("the Close button");
+                tree.click(close);
+            }),
+            ("scrim click", |tree| {
+                let corner = teksilo_canvas::Point::new(3.0, 3.0);
+                let primary = teksilo_core::event::PointerButton::Primary;
+                tree.pointer_down_button(corner, primary);
+                tree.pointer_up_button(corner, primary);
+            }),
+            ("programmatic", |tree| {
+                let modal = *tree.active_overlays().last().expect("the modal");
+                let mut noop = teksilo_core::window::NoopWindowOps;
+                tree.dismiss_overlay_with_ops(modal, &mut noop);
+            }),
+        ];
+        for (name, dismiss) in ways {
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            let source = tree.add(Button::new(lit!("Rename")));
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            tree.focus(source);
+            let before = tree.widget_count();
+            let dropped = present_probe(&mut tree, source);
+            assert!(tree.widget_count() > before);
+            dismiss(&mut tree);
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            tree.advance_time(std::time::Duration::from_secs(1));
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            assert!(dropped.get(), "{name}: the content was dropped");
+            assert_eq!(
+                tree.widget_count(),
+                before,
+                "{name}: neither the content nor the scrim is left"
+            );
+            assert_eq!(tree.focused(), Some(source), "{name}: focus is back");
+        }
+    }
+
+    /// Fifty openings and closings leave the arena where it started.
+    #[test]
+    fn repeated_deferred_modals_do_not_accumulate() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Rename")));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.focus(source);
+        let before = tree.widget_count();
+        for _ in 0..50 {
+            present_probe(&mut tree, source);
+            tree.press_key(
+                teksilo_core::event::Key::Escape,
+                teksilo_core::event::Modifiers::NONE,
+            );
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+        }
+        assert_eq!(tree.widget_count(), before);
+    }
+
+    /// After a deferred modal is dismissed by a scrim click and drained, a
+    /// click where it was reaches the widget behind it.
+    #[test]
+    fn a_click_after_the_scrim_dismissal_reaches_the_page() {
+        let clicks = Rc::new(std::cell::Cell::new(0));
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Rename")).on_activate_fn({
+            let clicks = clicks.clone();
+            move |_| clicks.set(clicks.get() + 1)
+        }));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.focus(source);
+        present_probe(&mut tree, source);
+        let corner = teksilo_canvas::Point::new(3.0, 3.0);
+        let primary = teksilo_core::event::PointerButton::Primary;
+        tree.pointer_down_button(corner, primary);
+        tree.pointer_up_button(corner, primary);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.advance_time(std::time::Duration::from_secs(1));
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the dialog and scrim went"
+        );
+        tree.click(source);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(clicks.get(), 1, "the page takes the click");
+    }
+
+    /// Content passed with `ModalRequest::in_tree` stays the caller's, and
+    /// can be presented again; the scrim still goes.
+    #[test]
+    fn an_in_tree_modal_keeps_its_content() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let source = tree.add(Button::new(lit!("Rename")));
+        let content = tree.add(ModalContainer::new(Button::new(lit!("Continue"))));
+        tree.set_dormant(content);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let before = tree.widget_count();
+        for _ in 0..2 {
+            present_in_tree_modal_request(
+                &mut tree,
+                source,
+                ModalRequest::in_tree(content).presentation(ModalPresentation::InTree),
+            );
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            assert!(tree.is_active(content), "presented");
+            tree.press_key(
+                teksilo_core::event::Key::Escape,
+                teksilo_core::event::Modifiers::NONE,
+            );
+            tree.layout(SizeProposal::exact(800.0, 600.0));
+            assert_eq!(
+                tree.widget_count(),
+                before,
+                "the content is kept, the scrim is not"
+            );
+        }
     }
 
     #[test]

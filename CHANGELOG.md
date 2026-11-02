@@ -482,6 +482,12 @@ by crate for clarity, not because crates version independently.
 - **A command a menu or popup row sends from focus after closing it with
   `dismiss_overlay` or `dismiss_all_overlays` starts at the widget focus
   went back to**, as rows closing their own menu already did.
+- **Content built for an in-window modal dialog (`ModalRequest::deferred`)
+  and the dialog's backdrop are destroyed when the dialog closes**, so their
+  `Drop` runs and repeated dialogs no longer accumulate. Content presented
+  with `ModalRequest::in_tree` is still kept.
+- **Context menus are destroyed after they close** instead of accumulating
+  in the widget tree with every right-click.
 
 #### Text
 

@@ -102,6 +102,10 @@ pub struct ModalRequest {
 
 impl ModalRequest {
     /// Present an existing widget subtree as modal content.
+    ///
+    /// The content stays yours: shown in the window, it is parked (dormant)
+    /// when the modal is dismissed, not destroyed, and can be presented
+    /// again.
     pub fn in_tree(content_id: WidgetId) -> Self {
         Self {
             content: ModalContent::ExistingWidget(content_id),
@@ -116,6 +120,15 @@ impl ModalRequest {
     }
 
     /// Build modal content on demand in the presentation target tree.
+    ///
+    /// The content is built for this modal alone. Shown in the window, it is
+    /// destroyed with the dialog's backdrop after the modal is dismissed:
+    /// once `on_dismiss` has run (it can still read the content) and focus
+    /// has gone back, at the next layout pass, so `Drop` implementations in
+    /// it run then. Shown as a native window, it goes with that window. The
+    /// ids of the widgets built here, and anything bound to them, are invalid
+    /// after dismissal: do not keep them to reuse on a later presentation,
+    /// build again.
     pub fn deferred(
         builder: impl FnOnce(&mut crate::widget_tree::WidgetTree) -> WidgetId + 'static,
     ) -> Self {

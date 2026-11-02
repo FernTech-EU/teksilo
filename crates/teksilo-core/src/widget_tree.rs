@@ -31,6 +31,8 @@ mod can_handle_tests;
 mod context_menu_contribution_tests;
 #[cfg(test)]
 mod device_scale_tests;
+#[cfg(test)]
+mod dismissed_content_tests;
 mod drag_drop_impl;
 mod focus_fallback_impl;
 #[cfg(test)]

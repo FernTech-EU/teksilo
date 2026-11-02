@@ -469,7 +469,9 @@ has no minimise button of its own (`minimizable(true)` is ignored). It is minimi
 restored and closed with its owner, except on Wayland, where no protocol tells the
 application of either. For a question, `ctx.present_message_box(MessageBox::question(..))`
 or `ctx.present_modal(..)` picks a native or in-window presentation per platform, and
-works from the application tree too. A forced close of the owner closes its dialogs
+works from the application tree too. Content built with `ModalRequest::deferred` is
+destroyed after the dialog closes (its `Drop` runs then); content passed with
+`ModalRequest::in_tree` stays yours. A forced close of the owner closes its dialogs
 first, each answering through its own Cancel path (a `MessageBox` reports its escape
 button, dismissed programmatically). A dialog the app raises without the user's input (a
 timer, another thread) takes no focus from another application: it asks for the user's
