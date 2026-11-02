@@ -63,8 +63,10 @@
 //! the selected segment; `Role::RadioButton` per segment, carrying
 //! "N of M" over the whole segment list — including segments currently in
 //! the overflow menu, which are still reachable. Arrow keys cycle
-//! selection (RTL-aware, resolved at event time) and Home/End jump to the
-//! ends, both skipping disabled segments; stepping onto an overflowed
+//! selection (Left and Right RTL-aware, resolved at event time; Up and
+//! Down move in list order and are not mirrored, only while the control
+//! itself has focus) and Home/End jump to the ends, both skipping
+//! disabled segments; stepping onto an overflowed
 //! segment promotes it into view. `Increment`/`Decrement` AT actions
 //! mirror the arrows.
 //!
@@ -1093,6 +1095,13 @@ impl Widget for SegmentedControl {
 
         // Arrow keys cycle selection, Home/End jump to the ends, both
         // skipping disabled segments. Focus stays on the control.
+        //
+        // Left and Right follow the reading direction (swapped in RTL).
+        // Up and Down move in list order in every direction, as a radio
+        // group does, and only while the group itself holds focus: the
+        // overflow chevron is a child, so a bare Up or Down on it bubbles
+        // here and must not step the selection under a focused button.
+        // Modifiers are ignored for all four, so Ctrl+Down moves too.
         {
             let index = index.clone();
             let disabled = disabled.clone();
@@ -1113,9 +1122,13 @@ impl Widget for SegmentedControl {
                     (Key::ArrowLeft, Key::ArrowRight)
                 };
                 let current = index.get().min(live_count - 1);
-                let target = if *key == next {
+                let vertical = matches!(key, Key::ArrowDown | Key::ArrowUp);
+                if vertical && ctx.focused() != Some(self_id) {
+                    return EventResponse::Ignored;
+                }
+                let target = if *key == next || *key == Key::ArrowDown {
                     Self::step_selection(current, true, &disabled)
-                } else if *key == previous {
+                } else if *key == previous || *key == Key::ArrowUp {
                     Self::step_selection(current, false, &disabled)
                 } else if *key == Key::Home {
                     Self::edge_selection(current, false, &disabled)

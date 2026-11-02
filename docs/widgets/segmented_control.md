@@ -136,8 +136,10 @@ widen to full fit     [A][B][C][D][E][F][G]
 the selected segment; `Role::RadioButton` per segment, carrying
 "N of M" over the whole segment list — including segments currently in
 the overflow menu, which are still reachable. Arrow keys cycle
-selection (RTL-aware, resolved at event time) and Home/End jump to the
-ends, both skipping disabled segments; stepping onto an overflowed
+selection (Left and Right RTL-aware, resolved at event time; Up and
+Down move in list order and are not mirrored, only while the control
+itself has focus) and Home/End jump to the ends, both skipping
+disabled segments; stepping onto an overflowed
 segment promotes it into view. `Increment`/`Decrement` AT actions
 mirror the arrows.
 

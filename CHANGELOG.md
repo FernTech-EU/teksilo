@@ -291,6 +291,9 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **Up and Down move a segmented control's selection**, as Left and Right
+  do, in list order and not mirrored in right-to-left layouts. They no longer
+  reach the enclosing widget while the control has focus.
 - **In a `CodeEditor`, the completion list follows text the input system
   commits.** After the accent popup replaced a typed `e` with `é`, or an
   emoji or dictated text was inserted, the list stayed open on the old word;

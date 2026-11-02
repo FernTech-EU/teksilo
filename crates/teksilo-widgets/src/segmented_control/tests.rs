@@ -310,6 +310,132 @@ fn rtl_swaps_the_arrow_directions() {
 }
 
 #[test]
+fn up_and_down_move_the_selection_skip_disabled_and_wrap() {
+    let selected = Signal::new(Some(A));
+    let mut t = measured_tree();
+    let control = t.add(SegmentedControl::new(selected.clone()).segments([
+        Segment::new(lit!("A")).id(A),
+        Segment::new(lit!("B")).id(B).disabled(true),
+        Segment::new(lit!("C")).id(C),
+    ]));
+    settle(&mut t, 300.0, 60.0);
+    t.focus(control);
+
+    t.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selected.get(), Some(C), "Down skips the disabled middle");
+    t.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selected.get(), Some(A), "Down wraps past the end");
+    t.press_key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(selected.get(), Some(C), "Up wraps past the start");
+    t.press_key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(selected.get(), Some(A), "Up skips the disabled middle");
+}
+
+#[test]
+fn up_and_down_are_not_mirrored_in_rtl() {
+    let selected = Signal::new(Some(B));
+    let mut t = measured_tree();
+    t.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+    let control = t.add(abc(selected.clone()));
+    settle(&mut t, 300.0, 60.0);
+    t.focus(control);
+
+    t.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(selected.get(), Some(C), "Down is next in RTL too");
+    t.press_key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(selected.get(), Some(B), "Up is previous in RTL too");
+    t.press_key(Key::ArrowLeft, Modifiers::NONE);
+    assert_eq!(selected.get(), Some(C), "Left still advances in RTL");
+    t.press_key(Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(selected.get(), Some(B), "Right still goes back in RTL");
+}
+
+#[test]
+fn up_and_down_are_consumed_by_the_focused_control_even_when_they_move_nothing() {
+    let selected = Signal::new(Some(A));
+    let seen = Rc::new(RefCell::new(Vec::<SegmentId>::new()));
+    let keys = Rc::new(RefCell::new(0_usize));
+    let mut t = measured_tree();
+    let control = SegmentedControl::new(selected.clone())
+        .segments([
+            Segment::new(lit!("A")).id(A),
+            Segment::new(lit!("B")).id(B).disabled(true),
+        ])
+        .on_change({
+            let seen = seen.clone();
+            move |id, _ctx| seen.borrow_mut().push(id)
+        });
+    t.add(crate::primitives::VStack::new().child(control).on_key({
+        let keys = keys.clone();
+        move |event, _ctx| {
+            // `press_key` also sends the KeyUp, which the control
+            // does not handle; only the KeyDown is the question.
+            if matches!(event, WidgetEvent::KeyDown { .. }) {
+                *keys.borrow_mut() += 1;
+            }
+            EventResponse::Ignored
+        }
+    }));
+    settle(&mut t, 300.0, 60.0);
+    let group = t
+        .find_by_role(accesskit::Role::RadioGroup)
+        .expect("the group");
+    t.focus(group);
+
+    t.press_key(Key::ArrowDown, Modifiers::NONE);
+    t.press_key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(selected.get(), Some(A));
+    assert!(seen.borrow().is_empty(), "no change, no on_change");
+    assert_eq!(*keys.borrow(), 0, "Up and Down do not bubble to the parent");
+}
+
+#[test]
+fn up_and_down_on_the_closed_chevron_do_not_move_the_selection() {
+    let mut pick = OverflowPick::new();
+    let chevron = pick.chevron();
+    pick.tree.focus(chevron);
+    pick.tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    pick.tree.press_key(Key::ArrowUp, Modifiers::NONE);
+    pick.settle();
+    assert_eq!(pick.selected.get(), Some(pick.ids[0]));
+    assert!(pick.seen.borrow().is_empty());
+    assert_eq!(
+        *pick.parent_keys.borrow(),
+        vec![Key::ArrowDown, Key::ArrowUp],
+        "the control does not consume them: they reach the parent"
+    );
+}
+
+#[test]
+fn down_onto_an_overflowed_segment_promotes_it_into_view() {
+    let mut pick = OverflowPick::new();
+    // Four segments fit; select the last visible one and focus the group.
+    pick.selected.set(Some(pick.ids[3]));
+    pick.settle();
+    assert!(
+        pick.tree.find_by_label("Five").is_none(),
+        "the fifth segment starts off the strip"
+    );
+    let group = pick
+        .tree
+        .find_by_role(accesskit::Role::RadioGroup)
+        .expect("the group");
+    pick.tree.focus(group);
+    pick.tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    pick.settle();
+
+    assert_eq!(pick.selected.get(), Some(pick.ids[4]));
+    let five = pick
+        .tree
+        .find_by_label("Five")
+        .expect("the promoted segment is on the strip");
+    assert_eq!(
+        pick.tree.accessibility_node(five).role(),
+        accesskit::Role::RadioButton
+    );
+}
+
+#[test]
 fn all_disabled_segments_make_the_arrows_no_ops() {
     let selected = Signal::new(Some(A));
     let mut t = measured_tree();
@@ -358,6 +484,8 @@ struct OverflowPick {
     ids: Vec<SegmentId>,
     selected: Signal<Option<SegmentId>>,
     seen: Rc<RefCell<Vec<SegmentId>>>,
+    /// KeyDown events that reached the control's parent.
+    parent_keys: Rc<RefCell<Vec<Key>>>,
 }
 
 impl OverflowPick {
@@ -372,13 +500,23 @@ impl OverflowPick {
             let seen = seen.clone();
             move |id, _ctx| seen.borrow_mut().push(id)
         });
+        let parent_keys: Rc<RefCell<Vec<Key>>> = Rc::new(RefCell::new(Vec::new()));
         let mut tree = measured_tree();
-        tree.add(crate::primitives::VStack::new().child(control));
+        tree.add(crate::primitives::VStack::new().child(control).on_key({
+            let parent_keys = parent_keys.clone();
+            move |event, _ctx| {
+                if let WidgetEvent::KeyDown { key, .. } = event {
+                    parent_keys.borrow_mut().push(*key);
+                }
+                EventResponse::Ignored
+            }
+        }));
         let mut pick = Self {
             tree,
             ids,
             selected,
             seen,
+            parent_keys,
         };
         pick.settle();
         assert!(

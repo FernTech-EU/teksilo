@@ -183,6 +183,7 @@ referencing it would dangle.
 | Key | Effect |
 | --- | --- |
 | ← / → | previous / next selectable segment, wrapping; RTL-swapped, resolved at event time so a locale flip needs no rebuild |
+| ↑ / ↓ | previous / next selectable segment, wrapping; not mirrored in RTL; only while the control itself has focus |
 | Home / End | first / last selectable segment |
 
 Disabled segments are skipped. Stepping onto a segment that is in the
