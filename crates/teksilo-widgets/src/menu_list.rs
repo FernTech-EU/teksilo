@@ -1105,10 +1105,9 @@ impl Widget for MenuList {
                         }
                         Key::Escape => {
                             // Bubble to the tree-level Escape overlay
-                            // dismissal. The menu is closing: forget its
-                            // highlight now, since a reopening before the
-                            // next layout pass would not see it parked.
-                            focused_index.set(None);
+                            // dismissal (which usually runs first): the
+                            // parked list forgets its highlight through its
+                            // activation signal, told at the dismissal.
                             EventResponse::Ignored
                         }
                         _ => {

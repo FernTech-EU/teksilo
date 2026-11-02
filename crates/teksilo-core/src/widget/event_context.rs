@@ -274,6 +274,9 @@ pub struct EventContext<'ops> {
     /// started by an external (OS) drag. Read via `drag_is_external()`.
     /// `false` for hand-constructed contexts and when no drag is active.
     pub(crate) drag_is_external: bool,
+    /// The identity of the key event being dispatched (the physical key when
+    /// the window manager noted one). Read via `key_identity()`.
+    pub(crate) key_identity: Option<u64>,
     /// Replace the tree-level theme. Drained after dispatch; triggers a
     /// composite-widget rebuild and full repaint.
     pub(crate) theme_request: Option<crate::styles::Theme>,
@@ -573,6 +576,7 @@ impl<'ops> EventContext<'ops> {
             drag_start_request: None,
             cancel_drag: false,
             drag_is_external: false,
+            key_identity: None,
             theme_request: None,
             follow_system_request: false,
             locale_request: None,
@@ -970,6 +974,22 @@ impl<'ops> EventContext<'ops> {
     pub(crate) fn with_drag_external(mut self, is_external: bool) -> Self {
         self.drag_is_external = is_external;
         self
+    }
+
+    pub(crate) fn with_key_identity(mut self, identity: Option<u64>) -> Self {
+        self.key_identity = identity;
+        self
+    }
+
+    /// The identity of the key whose `KeyDown` or `KeyUp` is being handled:
+    /// the physical key when the window manager reported one, so a press
+    /// and its release match even when their logical keys differ ("€"
+    /// pressed, "2" released once Shift is up), else a hash of the logical
+    /// key. `None` outside a key event. For a widget that forwards keys and
+    /// must release what it pressed (a web view).
+    #[doc(hidden)]
+    pub fn key_identity(&self) -> Option<u64> {
+        self.key_identity
     }
 
     /// Whether a drag is currently in flight that was started by an external

@@ -4798,6 +4798,18 @@ impl TeksiloAppHandler {
                     if let Some(action) = intercept {
                         self.apply_menubar_action(window_id, action, event_loop);
                     } else {
+                        // The physical key, so the tree pairs this release
+                        // with its press even when the logical key differs
+                        // (Option+Shift+2 pressed as "€", released as "2"
+                        // once Shift is up).
+                        if let Some(managed) = self.wm.get_by_winit_mut(window_id)
+                            && let Some(identity) =
+                                crate::input_routing::physical_key_identity(&key_event.physical_key)
+                        {
+                            managed
+                                .state
+                                .note_key_identity_from_os(identity, key_event.repeat);
+                        }
                         self.dispatch_in_window(window_id, evt, event_loop);
                     }
                 }

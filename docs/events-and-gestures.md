@@ -96,7 +96,17 @@ The framework decides what "target" means per event type:
 - **KeyDown / KeyUp / IME**, routed to the focused widget. Preview from root
   down, bubble focused-widget up. A key event's `key` is the key the chord
   names and `text` what the press typed: on macOS Option+A is `Key::A` with
-  the text "å".
+  the text "å". A `KeyUp` is the exception: it goes to the widget that
+  received the key's press, and bubbles from there (no preview pass), when
+  focus moved while the key was down, so the Enter that ran a command never
+  reaches the control focus moved to as a release; it is dropped when that
+  widget is gone or now behind a modal, unless it captures the keyboard or
+  asked for every release (a web view, whose page may answer a key with a
+  dialog). The press and release are paired
+  by the physical key the window manager reports, so a release whose
+  character changed (Shift let go first) still pairs. An Enter or Space
+  release with no press recorded is dropped; any other lone release goes to
+  focus.
 - **AccessKit actions**, routed to the target node directly. No pointer, no
   focus, the platform's AccessKit request carries a `NodeId`. No preview pass;
   handler runs on the target only, then bubbles.

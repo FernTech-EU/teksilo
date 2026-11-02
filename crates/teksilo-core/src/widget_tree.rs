@@ -51,6 +51,8 @@ mod gesture_dispatch_impl;
 mod hit_targeting_tests;
 #[cfg(test)]
 mod intent_routing_tests;
+#[cfg(test)]
+mod key_release_tests;
 mod layout_impl;
 #[cfg(test)]
 mod live_image_tests;
@@ -945,6 +947,13 @@ pub struct WidgetTree {
     /// and `BuildContext` so widgets can bind to the current window's
     /// signals via `ctx.window()`.
     pub(crate) window_state: Option<crate::window::WindowState>,
+    /// The widget each held key's press was delivered to, by key identity
+    /// (see `pointer_router`'s key-release redirect): a release goes there,
+    /// not to whatever focus moved to while the key was down.
+    key_presses: Vec<(u64, WidgetId)>,
+    /// The identity of the key event being dispatched, and whether it is an
+    /// auto-repeat.
+    current_key: Option<(u64, bool)>,
 }
 
 /// How long the shortened reshow delay stays active after the last tooltip
@@ -1251,6 +1260,8 @@ impl WidgetTree {
             description_memory: Default::default(),
             access_action_handled: false,
             window_state: None,
+            key_presses: Vec::new(),
+            current_key: None,
         }
     }
 
@@ -1288,6 +1299,7 @@ impl WidgetTree {
             .with_app_context(self.app_context.clone())
             .with_window_context(ops, self.window_state.clone())
             .with_drag_external(drag_is_external)
+            .with_key_identity(self.current_key.map(|(identity, _)| identity))
             .with_query_snapshot(
                 self.last_pointer_position(),
                 overlay_snapshot,
@@ -2428,6 +2440,12 @@ impl WidgetTree {
         if self.window_active_signal.get() != active {
             self.window_active_signal.set(active);
             self.arena.mark_all_needs_paint_only();
+            // Presses recorded before the window last lost the focus have had
+            // their releases (the platform makes them up as the focus goes);
+            // any left over is stale, and must not take a later release.
+            if active {
+                self.key_presses.clear();
+            }
             if !active {
                 // A held pointer first, before any other state is cleared: a
                 // widget that captured the pointer for a drag (a column-resize

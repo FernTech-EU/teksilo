@@ -986,6 +986,11 @@ impl WebView {
 impl Widget for WebView {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         let self_id = ctx.self_id();
+        // Every key forwarded down has to come back up: a page that answers
+        // a key press with a dialog (alert, confirm, prompt, a `<select>`)
+        // puts a modal over the view, and the engine would keep the key held
+        // if its release were dropped behind it.
+        ctx.receive_every_key_release();
 
         // --- Tier-3 chrome: resolve style (per-call > theme slot > default) ---
         let style = self
@@ -1088,17 +1093,37 @@ impl Widget for WebView {
         let key_handle = self.handle.clone();
         let key_page_focused = self.page_focused.clone();
         let key_forwards = self.surface.is_some();
-        handlers = handlers.on_key(move |event, _ctx| {
+        // The keys whose press went to the page, by the tree's key identity
+        // (the physical key when known, so "€" pressed and "2" released after
+        // Shift are one key). Their release goes too, even once the page has
+        // lost the keyboard (a dialog it opened on the press took focus), or
+        // the engine keeps them held.
+        let held: Rc<RefCell<Vec<u64>>> = Rc::default();
+        handlers = handlers.on_key(move |event, ctx| {
             use teksilo_core::event::{EventResponse, Key, Modifiers, WidgetEvent};
+            let identity = ctx.key_identity();
+            let pressed_here = match event {
+                WidgetEvent::KeyUp { .. } => identity.is_some_and(|id| held.borrow().contains(&id)),
+                _ => false,
+            };
             // A surface engine has no native view for the OS to send keys to:
             // while the page holds the keyboard, they go to it from here.
             // Ctrl+Tab and Ctrl+Shift+Tab stay Teksilo's, so the page is never
             // a keyboard trap (WCAG 2.1.2).
             if key_forwards
-                && key_page_focused.get()
+                && (key_page_focused.get() || pressed_here)
                 && let Some(input) = forwarded_key(event)
                 && let Some(h) = key_handle.borrow().as_ref()
             {
+                if let Some(identity) = identity {
+                    match event {
+                        WidgetEvent::KeyDown { .. } if !held.borrow().contains(&identity) => {
+                            held.borrow_mut().push(identity);
+                        }
+                        WidgetEvent::KeyUp { .. } => held.borrow_mut().retain(|k| *k != identity),
+                        _ => {}
+                    }
+                }
                 h.send_input(&input);
                 return EventResponse::Handled;
             }

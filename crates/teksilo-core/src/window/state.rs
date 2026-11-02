@@ -107,6 +107,10 @@ pub(crate) struct WindowStateInner {
     /// the window manager on each `Key::CapsLock` press; read by password
     /// fields to show a Caps Lock warning.
     caps_lock: Signal<bool>,
+    /// The physical identity of the key event about to be dispatched, and
+    /// whether it is an auto-repeat, noted by the window manager; see
+    /// [`WindowState::note_key_identity_from_os`].
+    key_identity: Cell<Option<(u64, bool)>>,
 
     /// `true` while the Alt key is currently held down. OS-driven only —
     /// no observer and no app→OS command. Set by the window manager from
@@ -196,6 +200,7 @@ impl WindowState {
             always_on_top: Signal::new(init.always_on_top),
             caption_buttons: Cell::new((true, true)),
             caps_lock: Signal::new(false),
+            key_identity: Cell::new(None),
             alt_down: Signal::new(false),
             other_key_pressed_during_alt: Cell::new(false),
             alt_press_seen: Cell::new(false),
@@ -518,6 +523,23 @@ impl WindowState {
     pub fn set_always_on_top_from_os(&self, on_top: bool) {
         self.inner
             .with_os_guard(|| self.inner.always_on_top.set(on_top));
+    }
+
+    /// Note the physical key of the key event the window manager is about to
+    /// dispatch (an opaque hash of it), and whether it is an auto-repeat. The
+    /// tree reads it to pair a release with the press of the same physical
+    /// key, which the logical key cannot do: on macOS, Option+Shift+2 with
+    /// Shift released first is pressed as "€" and released as "2". Read once,
+    /// by the next key event.
+    #[doc(hidden)]
+    pub fn note_key_identity_from_os(&self, identity: u64, repeat: bool) {
+        self.inner.key_identity.set(Some((identity, repeat)));
+    }
+
+    /// Take what [`note_key_identity_from_os`](Self::note_key_identity_from_os)
+    /// noted for the key event being dispatched.
+    pub(crate) fn take_key_identity(&self) -> Option<(u64, bool)> {
+        self.inner.key_identity.take()
     }
 
     /// Update Caps Lock state from the OS. No observer / command is

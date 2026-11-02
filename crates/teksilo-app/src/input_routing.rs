@@ -285,6 +285,20 @@ pub(crate) fn apply_external_drag_event(
     }
 }
 
+/// An opaque identity for a physical key, for the tree to pair a key's
+/// release with its press (see `WindowState::note_key_identity_from_os`).
+/// `None` for a key the platform could not identify: every such key would
+/// share one identity and mispair, so the tree pairs it by its logical key.
+pub(crate) fn physical_key_identity(key: &winit::keyboard::PhysicalKey) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    if matches!(key, winit::keyboard::PhysicalKey::Unidentified(_)) {
+        return None;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
 /// Whether the held modifiers make a press a command rather than typing:
 /// Super, or Control without Alt (with Alt it may be AltGr).
 fn is_command_chord(modifiers: teksilo_core::event::Modifiers) -> bool {

@@ -318,6 +318,10 @@ pub struct WidgetNode {
     /// check only while an overlay is open, so a capture surface below no
     /// overlay does see Escape. Default `false`.
     pub keyboard_capture: bool,
+    /// The node receives the release of every key it had the press of, even
+    /// once a modal has opened over it. See
+    /// [`BuildContext::receive_every_key_release`](crate::build_context::BuildContext::receive_every_key_release).
+    pub(crate) receives_every_key_release: bool,
     /// When `Some`, this node is a focus region (an F6 stop) with this name.
     /// See [`HandlerSet::focus_region`](crate::widget_builder::HandlerSet::focus_region).
     pub focus_region: Option<crate::signal::Prop<String>>,
@@ -577,6 +581,7 @@ impl WidgetNode {
             multi_contact: MultiContact::First,
             carried_tap_streak: None,
             keyboard_capture: false,
+            receives_every_key_release: false,
             focus_region: None,
             focus_region_last_focus: None,
             hit_transparent: false,

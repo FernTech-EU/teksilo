@@ -599,7 +599,8 @@ anchor's description, takes no Tab stop and shows no dwell countdown,
 however long focus rests. A keyboard or screen-reader user enters it by
 its Focus action; a pointer coming to rest on the anchor makes it sticky
 as a pointer dwell would, counted from its arrival (a pointer that only
-passes over does not).
+passes over does not). Inside a composite anchor, crossing from one child to
+another counts as leaving and arriving again, so the dwell restarts.
 
 Plain tooltips are deliberately **not** auto-shown on focus, their text
 reaches assistive tech through the described control's accessible

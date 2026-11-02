@@ -600,6 +600,89 @@ impl WidgetTree {
         true
     }
 
+    /// Record that the press being dispatched went to `target`. A fresh press
+    /// replaces a record for the same key (its release was lost); an
+    /// auto-repeat keeps the first.
+    fn note_key_press(&mut self, target: WidgetId) {
+        let Some((identity, repeat)) = self.current_key else {
+            return;
+        };
+        match self.key_presses.iter_mut().find(|(id, _)| *id == identity) {
+            Some(_) if repeat => {}
+            Some(record) => record.1 = target,
+            None => self.key_presses.push((identity, target)),
+        }
+    }
+
+    /// Whether `id` asked for every key release it had the press of, even
+    /// behind a modal opened since (a web view, whose engine otherwise keeps
+    /// the key held). See `BuildContext::receive_every_key_release`.
+    fn receives_every_key_release(&self, id: WidgetId) -> bool {
+        self.arena
+            .get(id)
+            .is_some_and(|node| node.receives_every_key_release)
+    }
+
+    /// Deliver a key release to the widget that received its press, not to
+    /// whatever focus moved to while the key was down: the Enter that ran
+    /// "Close tab" must not reach the next tab's button as a release. The
+    /// release bubbles from there (no preview pass), when that widget is
+    /// still active and not behind a modal opened since (a widget that
+    /// captures the keyboard, or one that asked for every release, a web
+    /// view, still gets it); otherwise it is dropped. A release with no press recorded goes to focus as before,
+    /// except Enter and Space, whose release activates a control: a lone one
+    /// (its press closed a dialog in another window, or was taken by a
+    /// shortcut) is dropped.
+    fn dispatch_key_release(
+        &mut self,
+        key: Key,
+        event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
+        let identity = self.current_key.map(|(id, _)| id);
+        let pressed = identity.and_then(|identity| {
+            let at = self
+                .key_presses
+                .iter()
+                .position(|(id, _)| *id == identity)?;
+            Some(self.key_presses.remove(at).1)
+        });
+        match pressed {
+            Some(target) if Some(target) == self.focused => {
+                self.dispatch_to_widget(target, event, &mut *ops);
+            }
+            Some(target) => {
+                if self.arena.is_active(target)
+                    && (!self.is_behind_modal(target)
+                        || self.is_keyboard_capture(target)
+                        || self.receives_every_key_release(target))
+                {
+                    // Bubbled from the press target up, as the press was, so
+                    // an ancestor tracking held keys hears it too; no preview
+                    // pass, which belongs to the focused widget's route.
+                    // A target behind a modal (one that asked for every release)
+                    // gets it alone: its ancestors are behind the modal too.
+                    let behind_modal = self.is_behind_modal(target);
+                    let mut current = Some(target);
+                    while let Some(id) = current {
+                        if self.dispatch_to_widget_direct_returning_handled(id, event, &mut *ops)
+                            || behind_modal
+                        {
+                            break;
+                        }
+                        current = self.arena.parent(id);
+                    }
+                }
+            }
+            None if matches!(key, Key::Enter | Key::Space) => {}
+            None => {
+                if let Some(focused) = self.focused {
+                    self.dispatch_to_widget(focused, event, &mut *ops);
+                }
+            }
+        }
+    }
+
     fn dispatch_event_impl(&mut self, event: WidgetEvent, ops: &mut dyn crate::window::WindowOps) {
         // Admit the pointer this event belongs to into the table before
         // anything routes. A legacy `WidgetEvent` names no pointer, so
@@ -618,6 +701,19 @@ impl WidgetTree {
             if self.current_input.pointer.kind.hovers() {
                 self.claim_hover_owner_for_current(&mut *ops);
             }
+        }
+
+        // Which physical key this is, for pairing a release with its press:
+        // what the window manager noted, else the key itself.
+        if let WidgetEvent::KeyDown { key, .. } | WidgetEvent::KeyUp { key, .. } = &event {
+            let noted = self
+                .window_state
+                .as_ref()
+                .and_then(|w| w.take_key_identity());
+            self.current_key = Some(noted.unwrap_or_else(|| (logical_key_identity(*key), false)));
+        } else if self.dispatch_depth <= 1 {
+            // Another event: no key identity is current.
+            self.current_key = None;
         }
 
         // Track input modality for `:focus-visible`: keyboard input reveals
@@ -1318,6 +1414,9 @@ impl WidgetTree {
                     // content) get a chance to intercept. Fall back to
                     // built-in focus cycling only when no handler
                     // returns `EventResponse::Handled`.
+                    if let Some(focused) = self.focused {
+                        self.note_key_press(focused);
+                    }
                     let handled = self
                         .focused
                         .map(|focused| {
@@ -1328,12 +1427,14 @@ impl WidgetTree {
                         self.cycle_focus(modifiers.shift(), &mut *ops);
                     }
                 } else if let Some(focused) = self.focused {
+                    self.note_key_press(focused);
                     self.dispatch_to_widget(focused, &event, &mut *ops);
                 }
             }
-            WidgetEvent::KeyUp { .. }
-            | WidgetEvent::ImeComposition { .. }
-            | WidgetEvent::ImeCommit { .. } => {
+            WidgetEvent::KeyUp { key, .. } => {
+                self.dispatch_key_release(*key, &event, &mut *ops);
+            }
+            WidgetEvent::ImeComposition { .. } | WidgetEvent::ImeCommit { .. } => {
                 if let Some(focused) = self.focused {
                     self.dispatch_to_widget(focused, &event, &mut *ops);
                 }
@@ -1693,6 +1794,14 @@ impl WidgetTree {
         self.overlay_manager.show(request);
         if let Some(focus_id) = prev_focus {
             self.record_top_focus_restore(focus_id);
+        }
+        // Opened without pointing (a key, a screen reader's action): the
+        // keyboard drives the menu, so the modality is the keyboard's, and
+        // a menu highlights its first row on arrival as it does from a key.
+        if trigger != crate::widget_builder::ContextMenuTrigger::Pointer
+            && !self.focus_visible.get()
+        {
+            self.focus_visible.set(true);
         }
         self.focus_ops(content_id, &mut *ops);
         // Flush intents the factory queued so they take effect on the
@@ -9611,4 +9720,19 @@ fn note_refused_section(owner: WidgetId) {
     }
     #[cfg(not(debug_assertions))]
     let _ = owner;
+}
+
+/// A key's identity for pairing a release with its press when the window
+/// manager noted no physical key (tests, automation): the key itself, a
+/// character folded to lower case so a Shift released first does not split
+/// one key into two.
+fn logical_key_identity(key: Key) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let key = match key {
+        Key::Character(c) => Key::Character(c.to_ascii_lowercase()),
+        other => other,
+    };
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut hasher);
+    hasher.finish()
 }

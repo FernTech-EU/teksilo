@@ -433,3 +433,51 @@ fn a_context_menu_opened_from_the_keyboard_starts_on_its_first_row() {
     press(&mut tree, Key::ContextMenu);
     assert_eq!(reader.heard(&mut tree).last(), focus("Cut").last());
 }
+
+/// Escape, then Down on the trigger with no layout pass between (no fade:
+/// motion reduced): the menu is told it was parked as it closes, and
+/// reopens on its first row, not on the row it had.
+#[test]
+fn escape_then_reopen_before_any_layout_starts_on_the_first_row() {
+    let (mut tree, _file, mut reader) = focused_menu_bar();
+    tree.set_accessibility_preferences(false, true, 1.0);
+    press(&mut tree, Key::ArrowDown);
+    press(&mut tree, Key::ArrowDown);
+    press(&mut tree, Key::ArrowDown);
+    assert_eq!(reader.heard(&mut tree).last(), focus("Save").last());
+    tree.press_key(Key::Escape, Modifiers::NONE);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    lay_out(&mut tree);
+    assert_eq!(reader.heard(&mut tree).last(), focus("New").last());
+}
+
+/// A screen reader's "show menu" after pointer use: the menu is driven by
+/// the keyboard now, and starts on its first row.
+#[test]
+fn a_menu_shown_by_a_screen_reader_after_a_click_starts_on_its_first_row() {
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let mut tree = light_tree();
+    let field = tree.add(crate::Button::new(lit!("Field")).context_menu(|_at, _ctx| {
+        Some(Box::new(
+            MenuList::new()
+                .item(MenuItem::new(lit!("Cut")))
+                .item(MenuItem::new(lit!("Copy"))),
+        ))
+    }));
+    lay_out(&mut tree);
+    tree.click(field);
+    lay_out(&mut tree);
+    assert!(
+        !tree.focus_visible_signal().get(),
+        "premise: pointer modality"
+    );
+    let mut reader = Listener::attach(&mut tree);
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::ShowContextMenu,
+        target: Some(field),
+        target_node: teksilo_core::accessibility::widget_id_to_node_id(field),
+        data: None,
+    });
+    lay_out(&mut tree);
+    assert_eq!(reader.heard(&mut tree).last(), focus("Cut").last());
+}

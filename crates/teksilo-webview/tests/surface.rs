@@ -518,3 +518,130 @@ fn a_page_control_goes_to_the_installed_presenter_with_its_area_in_the_window() 
         answer: WebViewControlAnswer::Confirmed,
     }));
 }
+
+/// A page that answers a key press with a dialog puts a modal over the view;
+/// the key's release must still reach the engine, or it keeps the key held.
+#[test]
+fn a_key_release_reaches_the_page_after_a_dialog_opens_over_it() {
+    use teksilo_core::event::WidgetEvent;
+    use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    let (registry, records) = memory_surface_registry();
+    let mut tree = tree_with_registry(registry.clone());
+    let webview = WebView::new().url("about:blank");
+    let id = webview.id();
+    let frame = tree.add(webview);
+    use teksilo_core::widget_builder::WidgetBuilder;
+    let dialog = tree.add(teksilo_widgets::primitives::RectWidget::new().focusable(true));
+    tree.set_dormant(dialog);
+    settle(&mut tree);
+    tree.focus(frame);
+    deliver(
+        &mut tree,
+        &registry,
+        id,
+        WebViewEvent::EngineFocusChanged(true),
+    );
+
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Enter,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    // The page's alert, as the app's dialog bridge shows it.
+    tree.activate(dialog);
+    tree.show_overlay(OverlayRequest::new(
+        dialog,
+        frame,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    settle(&mut tree);
+    if let Some(button) = tree.first_focusable_descendant(dialog) {
+        tree.focus(button);
+    }
+    tree.dispatch_event(WidgetEvent::KeyUp {
+        key: Key::Enter,
+        modifiers: Modifiers::NONE,
+    });
+    assert!(
+        records.input_log(id).iter().any(|e| matches!(
+            e,
+            WebViewInputEvent::Key {
+                key: Key::Enter,
+                pressed: false,
+                ..
+            }
+        )),
+        "the release reached the engine: {:?}",
+        records.input_log(id)
+    );
+}
+
+/// The same with Shift let go first: pressed as "€" (Option+Shift+2 on
+/// macOS), released as "2". The window manager's physical key pairs them,
+/// so the release still reaches the engine.
+#[test]
+fn a_key_release_with_another_logical_key_reaches_the_page_behind_a_dialog() {
+    use teksilo_core::event::WidgetEvent;
+    use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    use teksilo_core::widget_builder::WidgetBuilder;
+    use teksilo_core::window::state::WindowStateInit;
+    use teksilo_core::window::{WindowPlacement, WindowState};
+    let (registry, records) = memory_surface_registry();
+    let mut tree = tree_with_registry(registry.clone());
+    // The window the engine's events are delivered for (`deliver`).
+    let window = WindowState::new(WindowStateInit {
+        id: TeksiloWindowId::new(0),
+        string_id: None,
+        placement: WindowPlacement::Floating,
+        title: "Test".to_string(),
+        size: (800, 600),
+        position: (0, 0),
+        focused: true,
+        resizable: true,
+        always_on_top: false,
+    });
+    tree.set_window_state(window.clone());
+    let webview = WebView::new().url("about:blank");
+    let id = webview.id();
+    let frame = tree.add(webview);
+    let dialog = tree.add(teksilo_widgets::primitives::RectWidget::new().focusable(true));
+    tree.set_dormant(dialog);
+    settle(&mut tree);
+    tree.focus(frame);
+    deliver(
+        &mut tree,
+        &registry,
+        id,
+        WebViewEvent::EngineFocusChanged(true),
+    );
+
+    window.note_key_identity_from_os(42, false);
+    tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::Character('€'),
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    tree.activate(dialog);
+    tree.show_overlay(OverlayRequest::new(
+        dialog,
+        frame,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    settle(&mut tree);
+    tree.focus(dialog);
+    window.note_key_identity_from_os(42, false);
+    tree.dispatch_event(WidgetEvent::KeyUp {
+        key: Key::Character('2'),
+        modifiers: Modifiers::NONE,
+    });
+    assert!(
+        records
+            .input_log(id)
+            .iter()
+            .any(|e| matches!(e, WebViewInputEvent::Key { pressed: false, .. })),
+        "the release reached the engine: {:?}",
+        records.input_log(id)
+    );
+}

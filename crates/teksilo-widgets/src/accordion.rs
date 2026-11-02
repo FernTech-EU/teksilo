@@ -1126,6 +1126,45 @@ mod tests {
         assert!(expanded.get(), "content tap does not collapse the panel");
     }
 
+    /// The Enter that ran a command which moved focus onto the header is
+    /// released on the header: that release must not toggle it (the release
+    /// goes to the widget that got the press). A press and release on the
+    /// header itself toggles once.
+    #[test]
+    fn an_enter_released_after_focus_moved_onto_the_header_does_not_toggle() {
+        use crate::primitives::{RectWidget, TextWidget};
+        use teksilo_core::event::Modifiers;
+
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let content = tree.add(TextWidget::new(lit!("body")));
+        let acc = tree.add(Accordion::new(lit!("Panel"), expanded.clone()).content(content));
+        tree.layout(SizeProposal::exact(220.0, 300.0));
+        let header = tree
+            .first_focusable_descendant(acc)
+            .expect("the header takes focus");
+        let mover = tree.add(RectWidget::new().focusable(true).on_key(
+            move |event: &WidgetEvent, ctx: &mut EventContext| match event {
+                WidgetEvent::KeyDown {
+                    key: Key::Enter, ..
+                } => {
+                    ctx.request_focus(header);
+                    EventResponse::Handled
+                }
+                _ => EventResponse::Ignored,
+            },
+        ));
+        tree.layout(SizeProposal::exact(220.0, 300.0));
+        tree.focus(mover);
+
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert_eq!(tree.focused(), Some(header), "the press moved focus");
+        assert!(expanded.get(), "the release did not toggle the header");
+
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert!(!expanded.get(), "a press and release on it toggles once");
+    }
+
     #[test]
     fn fill_accordion_header_drag_fires_hook() {
         use crate::primitives::TextWidget;

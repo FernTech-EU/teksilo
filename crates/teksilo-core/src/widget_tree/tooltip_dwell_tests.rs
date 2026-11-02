@@ -53,6 +53,15 @@ fn lay_out(tree: &mut WidgetTree) {
 /// Two focusable fields side by side, the first carrying a rich tip with a
 /// one-millisecond dwell window, its content holding a focusable link.
 fn fields_with_a_rich_tip() -> (WidgetTree, WidgetId, WidgetId, WidgetId) {
+    fields_with_a_rich_tip_of(Duration::from_millis(1), None)
+}
+
+/// [`fields_with_a_rich_tip`] with a dwell window of `dwell`, and the tip's
+/// "shown at" sink when one is given.
+fn fields_with_a_rich_tip_of(
+    dwell: Duration,
+    sink: Option<std::rc::Rc<std::cell::Cell<Option<std::time::Instant>>>>,
+) -> (WidgetTree, WidgetId, WidgetId, WidgetId) {
     let mut tree = WidgetTree::new();
     let root = tree.add(Row);
     let first = tree.add_child(root, FillWidget::new().focusable());
@@ -60,7 +69,10 @@ fn fields_with_a_rich_tip() -> (WidgetTree, WidgetId, WidgetId, WidgetId) {
     let tip = tree.add(StackWidget::new());
     tree.add_child(tip, FillWidget::new().focusable());
     tree.set_dormant(tip);
-    tree.attach_tooltip_with_sticky(first, tip, DELAY, Some(Duration::from_millis(1)));
+    match sink {
+        Some(sink) => tree.attach_tooltip_with_sticky_sink(first, tip, DELAY, Some(dwell), sink),
+        None => tree.attach_tooltip_with_sticky(first, tip, DELAY, Some(dwell)),
+    }
     lay_out(&mut tree);
     (tree, first, second, tip)
 }
@@ -122,14 +134,35 @@ fn a_pointer_rest_after_a_focus_rest_pins_the_tip() {
 
 #[test]
 fn a_pointer_passing_over_a_focus_shown_tip_does_not_pin_it() {
-    let (mut tree, first, second, _tip) = fields_with_a_rich_tip();
+    // A window long enough that the pass over the anchor never outlasts it,
+    // however loaded the machine.
+    let dwell = Duration::from_millis(200);
+    let (mut tree, first, second, _tip) = fields_with_a_rich_tip_of(dwell, None);
     tree.focus(first);
     rest(&mut tree);
     hover(&mut tree, first);
     hover(&mut tree, second);
-    std::thread::sleep(Duration::from_millis(5));
+    std::thread::sleep(dwell + Duration::from_millis(50));
     lay_out(&mut tree);
     assert!(!tree.tooltip_is_sticky_within(first));
+}
+
+/// A tip a focus rest showed shows no dwell countdown (its sink is empty)
+/// and wakes the loop for none.
+#[test]
+fn a_focus_shown_tip_shows_no_countdown_and_wakes_nothing() {
+    let sink = std::rc::Rc::new(std::cell::Cell::new(None));
+    let (mut tree, first, _second, tip) =
+        fields_with_a_rich_tip_of(Duration::from_secs(60), Some(sink.clone()));
+    tree.focus(first);
+    tree.advance_time(DELAY * 2);
+    lay_out(&mut tree);
+    assert!(tree.is_active(tip), "shown");
+    assert_eq!(sink.get(), None, "no countdown");
+    assert_ne!(
+        tree.next_timer_deadline_source().map(|(_, source)| source),
+        Some("tooltip_dwell")
+    );
 }
 
 /// A hold still pins the tip it showed, as before: for a touch user it is

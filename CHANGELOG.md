@@ -491,6 +491,10 @@ by crate for clarity, not because crates version independently.
 - **A rich tooltip shown because keyboard focus rested on its control no
   longer takes a Tab stop**: only a pointer resting on the control, or a
   hold, makes it stay open as a panel; its Focus action still enters it.
+- **A key released after focus moved no longer reaches the newly focused
+  control**: the release goes to the control that received the press, so an
+  Enter that closed a tab or a dialog no longer also toggles the accordion,
+  tool box section or button focus landed on.
 
 #### Text
 

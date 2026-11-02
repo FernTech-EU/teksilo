@@ -2353,6 +2353,10 @@ impl WidgetTree {
         if !content_ids.is_empty() {
             self.cached_frame = None;
             self.a11y_dirty = true;
+            // Tell the parked content now, not at the next layout pass: a
+            // menu reopened in the same batch of input (Escape, then Down)
+            // would otherwise never see itself parked and keep its old row.
+            self.flush_activation_signals();
         }
     }
 

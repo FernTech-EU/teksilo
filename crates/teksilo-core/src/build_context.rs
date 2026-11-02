@@ -899,6 +899,19 @@ impl<'a> BuildContext<'a> {
         self.tree.set_traversal_scope(id, policy);
     }
 
+    /// The widget being built receives the release of every key whose press
+    /// it received, even once a modal has opened over it (a key release is
+    /// otherwise dropped then). For a widget that forwards keys to something
+    /// that tracks held keys, a web view's engine, which would keep a key
+    /// held after a page answered its press with a dialog.
+    #[doc(hidden)]
+    pub fn receive_every_key_release(&mut self) {
+        let id = self.self_id();
+        if let Some(node) = self.tree.arena.get_mut(id) {
+            node.receives_every_key_release = true;
+        }
+    }
+
     /// Attach a tooltip to a widget.
     pub fn attach_tooltip(
         &mut self,
