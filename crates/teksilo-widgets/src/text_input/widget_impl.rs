@@ -112,6 +112,7 @@ impl Widget for TextInput {
         // (placeholder visibility, clear-button visibility) before
         // the field is consumed by `ctx.add`.
         let text_signal_for_vis = field.text();
+        let field = field.default_name(self.default_name.clone());
 
         // Capture the inner field's reactive accessors BEFORE
         // `ctx.add` consumes it, so composing widgets that called
@@ -484,6 +485,18 @@ impl Widget for TextInput {
     /// before falling back to the first focusable descendant, and a composite
     /// that answered nothing was skipped over.
     fn initial_focus_hint(&self) -> Option<WidgetId> {
+        self.field_id_slot.get()
+    }
+
+    /// The inner field stands for this composite in the accessibility tree.
+    ///
+    /// The outer node is a `GenericContainer` the consumer drops, so what an
+    /// application attaches to the `TextInput`'s id (`access_label`,
+    /// `access_labelled_by`, `access_described_by`, a `FormLayout` row
+    /// label) would otherwise sit on a node no reader keeps. With this, it
+    /// lands on the field that holds focus, applied after the field's own,
+    /// and a rebuild that mints a new field carries it over.
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
         self.field_id_slot.get()
     }
 

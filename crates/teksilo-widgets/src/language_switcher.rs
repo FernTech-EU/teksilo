@@ -41,7 +41,7 @@ use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacemen
 use teksilo_core::widget_id::WidgetId;
 use teksilo_i18n::{
     LanguageIdentifier, LocalizedString, current_locale, current_supported_locales,
-    language_endonym, lit,
+    language_endonym, tr_widget,
 };
 
 use crate::combo_box::{ComboBox, ComboBoxVariant};
@@ -59,8 +59,8 @@ struct LocaleChoice {
 pub struct LanguageSwitcher {
     /// Forwarded to the inner [`ComboBox`]. Defaults to `Outlined`.
     variant: ComboBoxVariant,
-    /// Accessible / control label. Defaults to `lit!("Language")`; pass a
-    /// `tr!(...)` to localize it.
+    /// Accessible / control label. Without one, the switcher is read by a
+    /// row label when it has one, else by a localized "Language".
     label: Option<LocalizedString>,
     /// Explicit locale list. When `None` (the default), the switcher reads
     /// the supported locales from the active `I18nManager`.
@@ -115,8 +115,10 @@ impl LanguageSwitcher {
         self
     }
 
-    /// Set the accessible / control label (defaults to `"Language"`).
-    /// Pass a `tr!(...)` to localize it.
+    /// Set the accessible / control label. It is the application's name and
+    /// wins over a row label; without it the switcher is read by a row label
+    /// when it has one, else by a localized "Language". Pass a `tr!(...)` to
+    /// localize it.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         self.label = Some(label.into());
         self
@@ -203,21 +205,24 @@ impl Widget for LanguageSwitcher {
             .and_then(|t| choices.iter().find(|c| &c.tag == t).cloned());
         self.selected.set(initial);
 
-        let label = self.label.clone().unwrap_or_else(|| lit!("Language"));
-
         let mut combo = ComboBox::from_items(
             choices.clone(),
             self.selected.clone(),
             |c: &LocaleChoice| LocalizedString::literal(c.display.clone()),
         )
         .variant(self.variant)
-        .label(label)
-        .placeholder(lit!("Language"))
+        .placeholder(tr_widget!(a11y_language_switcher_name()))
         // The reason this widget needs `ComboBox::on_select` (not a plain
         // signal observer): `set_locale` lives on `EventContext`, so the
         // full window-manager fan-out (redraw-all + RTL layout direction)
         // only happens on this context-bearing path.
         .on_select(|c: &LocaleChoice, ctx| ctx.set_locale(c.tag.clone()));
+        // The application's `.label()` wins over everything; the built-in
+        // "Language" gives way to a row label (`FormLayout`).
+        combo = match self.label.clone() {
+            Some(label) => combo.label(label),
+            None => combo.default_name(tr_widget!(a11y_language_switcher_name())),
+        };
 
         // Forward any configured tooltip onto the inner ComboBox. The
         // three setters are mutually exclusive, so exactly one branch

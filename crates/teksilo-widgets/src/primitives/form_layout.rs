@@ -17,6 +17,20 @@
 //! emits `Role::Form` so screen-reader users can navigate directly to the
 //! form. Without a name it demotes to a presentational `GenericContainer`.
 //!
+//! Each row's field is named by the row's label: a screen reader landing on
+//! the field reads the label beside it. A layout wrapper on either side (a
+//! `FixedSize` around the field, a `Padding` around the label) is seen
+//! through, as long as it holds one control and one label. The row label
+//! replaces a control's built-in name (`DateEdit`'s "Date",
+//! `LanguageSwitcher`'s "Language"); a name the application gave the control
+//! (`TextInput::label`, `ComboBox::label`, `access_label`) wins over it, and
+//! a control that names itself from its own visible text (a checkbox, a
+//! radio button, a button, a link) keeps that text. A cell holding several
+//! controls (a field and a browse button) is named by nobody: give each
+//! control its own `.label()` there. A checkbox or toggle with no text of
+//! its own, named only by the row, needs `.labelled_externally()`, or its
+//! debug check that it has a name fails.
+//!
 //! ```rust
 //! # use teksilo_widgets::primitives::{FormLayout, TextWidget, RectWidget};
 //! # use teksilo_i18n::lit;
@@ -235,8 +249,10 @@ impl Widget for FormLayout {
                         let l = resolve_pending(label, ctx);
                         let f = resolve_pending(field, ctx);
                         // WCAG 3.3.2 / EN 301 549 11.5.2.7: name the field after
-                        // its visible label so assistive tech reads "<label>,
-                        // `line()`'s two forms: a deferred widget and a pre-registered id.
+                        // its visible label, for `line()`'s two forms (a
+                        // deferred widget and a pre-registered id). The tree
+                        // sees through a wrapper on either side and puts the
+                        // relation on the one control inside it.
                         ctx.access_labelled_by(f, l);
                         FormRow::Pair(l, f)
                     }

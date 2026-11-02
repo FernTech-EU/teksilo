@@ -884,14 +884,15 @@ impl Widget for Calendar {
         let ym = self.visible_month.get();
         builder.set_role(Role::Grid);
 
-        let label = match &self.label {
-            Some(s) => s.resolve_now(),
-            None => resolve_message_widget(
+        // An explicit `.label()` wins; the built-in "Calendar, May 2026" gives
+        // way to a row label (`FormLayout`).
+        match &self.label {
+            Some(s) => builder.set_name(s.resolve_now()),
+            None => builder.set_default_name(resolve_message_widget(
                 "calendar-name-with-month",
                 &[("month", FluentValue::from(month_and_year(ym, &self.lang)))],
-            ),
-        };
-        builder.set_name(label);
+            )),
+        }
 
         // Deliberately not a live region. A live node speaks its name when it
         // enters the tree and whenever the name changes (AT-SPI:

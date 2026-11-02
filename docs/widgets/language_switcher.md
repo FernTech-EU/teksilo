@@ -97,10 +97,12 @@ Pick the inner ComboBox's design-language variant.
 
 <a id="languageswitcher-label"></a>
 
-#### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self`
+#### `pub fn label(mut self, label: impl Into<LocalizedString>) -> Self` (default: `None`)
 
-Set the accessible / control label (defaults to `"Language"`).
-Pass a `tr!(...)` to localize it.
+Set the accessible / control label. It is the application's name and
+wins over a row label; without it the switcher is read by a row label
+when it has one, else by a localized "Language". Pass a `tr!(...)` to
+localize it.
 
 <a id="languageswitcher-locales"></a>
 

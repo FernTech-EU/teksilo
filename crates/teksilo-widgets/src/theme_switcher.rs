@@ -274,14 +274,6 @@ impl Widget for ThemeSwitcher {
         let initial = choices.iter().find(|c| c.id == current_id).cloned();
         self.selected.set(initial);
 
-        // Pass the reactive `LocalizedString` straight through (don't pre-resolve
-        // with `lit!`, which would freeze the control label at the build-time
-        // locale). The AT tree re-walks on a locale change and re-resolves it.
-        let label = self
-            .label
-            .clone()
-            .unwrap_or_else(|| tr_widget!(theme_switcher_label()));
-
         let on_select_actions = actions.clone();
         let mut combo =
             ComboBox::from_items(choices.clone(), self.selected.clone(), |c: &ThemeChoice| {
@@ -292,7 +284,6 @@ impl Widget for ThemeSwitcher {
                     .unwrap_or_else(|| LocalizedString::literal(c.display.clone()))
             })
             .variant(self.variant)
-            .label(label)
             // The reason this widget needs `ComboBox::on_select` (not a plain signal
             // observer): both `set_theme` and `follow_system_theme` live on
             // `EventContext`, which `ctx.effect` can't provide.
@@ -304,6 +295,15 @@ impl Widget for ThemeSwitcher {
                     }
                 }
             });
+        // Pass the reactive `LocalizedString` straight through (don't
+        // pre-resolve with `lit!`, which would freeze it at the build-time
+        // locale; the AT tree re-walks on a locale change). The application's
+        // `.label()` wins over everything; the built-in one gives way to a row
+        // label (`FormLayout`).
+        combo = match self.label.clone() {
+            Some(label) => combo.label(label),
+            None => combo.default_name(tr_widget!(theme_switcher_label())),
+        };
 
         // Forward any configured tooltip onto the inner ComboBox. The
         // three setters are mutually exclusive, so exactly one branch

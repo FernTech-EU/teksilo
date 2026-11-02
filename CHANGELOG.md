@@ -215,6 +215,10 @@ by crate for clarity, not because crates version independently.
   edit shortcut (`edit.*`) the tree registered itself when its last owner
   goes: it puts back the tree's own registration, with its localized name.
   `ShortcutRegistry::unregister` still removes it.
+- **`BuildContext::access_labelled_by` sees through layout wrappers.** On
+  either end it links the one control, or the one named label, inside a
+  wrapper no screen reader keeps, and the label it links replaces a
+  widget's built-in default name (never a name the application gave).
 - **Breaking.** `WidgetEvent::ImeCommit` is `{ text, origin, replacement }`
   where it was `{ text }`: `origin` is an `ImeOrigin` and `replacement` an
   optional character range of the field's text to replace. A `match` on it
@@ -507,6 +511,22 @@ by crate for clarity, not because crates version independently.
   (`row_click_expands`, the default) still toggles twice.
 - **In a `TableView`, `CellContext::is_focused` follows the cell cursor.** It
   was refreshed only when something else happened to rebuild the table.
+- **A field in a `FormLayout` row is read by the row's label.** A bare
+  `TextInput`, `PasswordField`, `DateEdit` or `TimeEdit` was read with no
+  name or by its built-in "Date" or "Time", and a field or label inside a
+  `FixedSize`, `VStack` or `Padding` was not linked at all. The row label now
+  names the one control in the cell and replaces a built-in name, including
+  the "Language", "Theme" and "Font" of `LanguageSwitcher`, `ThemeSwitcher`
+  and `FontPicker`. A name the application gave (`.label()`,
+  `access_label`) still wins, and a control that names itself from its own
+  text (a checkbox, a button, a link) keeps it. `DateTimeEdit`,
+  `DateRangeEdit`, `Calendar`, `ColorPicker` and `TextScaleControl` give
+  their built-in names the same way, and `TextScaleControl`'s is now
+  translated. `LanguageSwitcher`'s built-in name is now translated.
+- **What an application attaches to a `TextInput` or `PasswordField`
+  (`access_label`, `access_labelled_by`, `access_described_by`, a tooltip)
+  reaches the field a screen reader lands on**, as it already did for
+  `SpinBox` and `DateEdit`.
 - **In a `CodeEditor`, the completion list follows text the input system
   commits.** After the accent popup replaced a typed `e` with `é`, or an
   emoji or dictated text was inserted, the list stayed open on the old word;

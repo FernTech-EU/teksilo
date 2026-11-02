@@ -2781,6 +2781,74 @@ mod tests {
         assert!(node.labelled_by().contains(&other_nid));
     }
 
+    /// A control's built-in default name gives way to the label it is linked
+    /// to, an application's name wins over both, and a default stays when
+    /// the link names nothing. Each name as the consumer resolves it.
+    #[test]
+    fn a_labelled_by_relation_replaces_a_default_name_only() {
+        use crate::accessibility::{AccessNodeBuilder, widget_id_to_node_id};
+
+        #[derive(Debug)]
+        struct DefaultNamed;
+        impl crate::widget::Widget for DefaultNamed {
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &crate::widget::LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(40.0, 20.0).into()
+            }
+            fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+                builder.set_role(accesskit::Role::TextInput);
+                builder.set_default_name("Date");
+            }
+        }
+        #[derive(Debug)]
+        struct Named;
+        impl crate::widget::Widget for Named {
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &crate::widget::LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(40.0, 20.0).into()
+            }
+            fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+                builder.set_role(accesskit::Role::TextInput);
+                builder.set_name("Main");
+            }
+        }
+
+        let mut tree = WidgetTree::new();
+        let row = tree.add(FillWidget::new().label("Birthday"));
+        let nameless = tree.add(FillWidget::new());
+        let linked = tree.add(DefaultNamed.access_labelled_by(row));
+        let given = tree.add(
+            DefaultNamed
+                .access_labelled_by(row)
+                .access_label_literal("Given"),
+        );
+        let unlinked = tree.add(DefaultNamed);
+        let linked_to_nothing = tree.add(DefaultNamed.access_labelled_by(nameless));
+        let named = tree.add(Named.access_labelled_by(row));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let update = tree.sync_accessibility();
+
+        let consumer = accesskit_consumer::Tree::new(update.clone(), false);
+        let state = consumer.state();
+        let name = |id| {
+            state
+                .node_by_tree_local_id(widget_id_to_node_id(id), accesskit::TreeId::ROOT)
+                .and_then(|n| n.label())
+        };
+        assert_eq!(name(linked).as_deref(), Some("Birthday"));
+        assert_eq!(name(given).as_deref(), Some("Given"));
+        assert_eq!(name(unlinked).as_deref(), Some("Date"));
+        assert_eq!(name(linked_to_nothing).as_deref(), Some("Date"));
+        // A name set with `set_name` is not a default.
+        assert_eq!(name(named).as_deref(), Some("Main"));
+    }
+
     /// The structural twin of the relation strip above, and a harder failure:
     /// a relation that dangles loses a link, a *child* that dangles breaks the
     /// walk, because everything under an unresolvable child is unreachable.

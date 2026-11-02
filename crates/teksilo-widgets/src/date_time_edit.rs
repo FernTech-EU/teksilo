@@ -918,7 +918,8 @@ impl Widget for DateTimeEdit {
         if let Some(ref label) = self.label {
             builder.set_name(label.clone());
         } else {
-            builder.set_name(resolve_message_widget("date-time-edit-name", &[]));
+            // The built-in name gives way to a row label (`FormLayout`).
+            builder.set_default_name(resolve_message_widget("date-time-edit-name", &[]));
         }
         match self.value.get() {
             Some(dt) => {

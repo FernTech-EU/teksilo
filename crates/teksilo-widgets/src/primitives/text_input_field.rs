@@ -76,7 +76,7 @@ pub mod validator;
 mod widget_impl;
 
 use std::rc::Rc;
-use teksilo_i18n::tr_widget;
+use teksilo_i18n::{LocalizedString, tr_widget};
 
 use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
@@ -246,6 +246,8 @@ pub struct TextInputField {
     text_height: Option<f32>,
     /// See [`press_band`](Self::press_band).
     press_band: teksilo_canvas::EdgeInsets,
+    /// See [`default_name`](Self::default_name).
+    default_name: Option<LocalizedString>,
     /// See [`text_style`](Self::text_style). `None` shapes in the engine's
     /// default font, as every field did before the style could be chosen.
     text_style: Option<TextStyleProp>,
@@ -374,6 +376,7 @@ impl TextInputField {
             suffix: Prop::Static(String::new()),
             text_height: None,
             press_band: teksilo_canvas::EdgeInsets::ZERO,
+            default_name: None,
             text_style: None,
             text_alignment: None,
             text_color: None,
@@ -605,6 +608,15 @@ impl TextInputField {
     /// an outset never leaves the parent that owns it.
     pub(crate) fn press_band(mut self, band: teksilo_canvas::EdgeInsets) -> Self {
         self.press_band = band;
+        self
+    }
+
+    /// The name the field is read by when nothing names it: a composite's
+    /// built-in default ("Date", "Time"). Unlike an `access_label`, it gives
+    /// way to a `labelled_by` relation, such as a `FormLayout` row label
+    /// (see `AccessNodeBuilder::set_default_name`).
+    pub(crate) fn default_name(mut self, name: Option<LocalizedString>) -> Self {
+        self.default_name = name;
         self
     }
 

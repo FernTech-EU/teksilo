@@ -111,6 +111,14 @@ TextInput::new(search.clone())
 
 None of them is set by default, and the field then looks as it always has.
 
+#### Accessibility
+
+The inner field is the node a screen reader lands on, and it stands for
+the `TextInput` (`Widget::accessibility_proxy`): an `access_label`,
+`access_labelled_by`, `access_described_by` or tooltip given to the
+`TextInput` reaches it. The field is read by its `label`
+when it has one, else by the label of the `FormLayout` row it sits in.
+
 #### Touch and pen
 
 The trailing clear affordance is 16 dp of paint and a 24 dp target: raising

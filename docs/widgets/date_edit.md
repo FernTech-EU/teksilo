@@ -95,9 +95,9 @@ popover anchored below the field for graphical date selection.
   composite's
   `accessibility_proxy`:
   an `access_label` or an `access_described_by` given to the `DateEdit`
-  lands on the field. A `labelled_by` relation (a `FormLayout` row's)
-  lands there too, but AccessKit reads a node's own name before its
-  relations, so name a date field in a form with `.label()`.
+  lands on the field. The field is read by the `.label()` when there is
+  one, else by a `labelled_by` relation (a `FormLayout` row label), else
+  by the built-in "Date".
 - The calendar opens on the date the field holds (the text typed in it
   is committed first), on its days, whatever an earlier opening left.
 

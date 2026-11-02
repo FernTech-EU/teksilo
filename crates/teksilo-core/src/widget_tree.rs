@@ -3732,7 +3732,15 @@ impl WidgetTree {
     /// Used by container widgets (e.g. `FormLayout`) to name a field after its
     /// label once both ids are known. Idempotent: re-adding the same target is
     /// a no-op, so a composite may re-register the relation on every rebuild.
+    ///
+    /// Both ends are resolved through layout wrappers first (see
+    /// [`labelled_field_end`](Self::labelled_field_end) and
+    /// [`labelled_label_end`](Self::labelled_label_end)), because the
+    /// container only knows the ids it was handed, and a `FixedSize` or a
+    /// `VStack` around a field or a label is a node no reader keeps.
     pub(crate) fn push_access_labelled_by(&mut self, id: WidgetId, label_id: WidgetId) {
+        let id = self.labelled_field_end(id);
+        let label_id = self.labelled_label_end(label_id);
         if let Some(node) = self.arena.get_mut(id) {
             let overrides = node.access_overrides.get_or_insert_with(|| {
                 Box::new(crate::widget_builder::AccessibilityOverrides::default())
@@ -3746,6 +3754,105 @@ impl WidgetTree {
             overrides.labelled_by.push(label_id);
             self.a11y_dirty = true;
         }
+    }
+
+    /// The node a `labelled_by` relation pushed onto `id` should sit on.
+    ///
+    /// `id` itself when it holds focus or hands its node to a proxy
+    /// ([`Widget::accessibility_proxy`]),
+    /// or when its own node is one a reader keeps. Otherwise `id` is a layout
+    /// wrapper the consumer prunes, and a relation on it names nothing; the
+    /// relation goes to the one control inside it instead: the outermost
+    /// descendant that holds focus or has a proxy, so a composite such as a
+    /// `DateEdit` takes it and hands it on to its field at walk time, and a
+    /// rebuild of the composite's inside does not strand it. With no such
+    /// control, or several (a field and a browse button), `id` is kept and
+    /// nothing is guessed. Only descendants already built are found.
+    fn labelled_field_end(&self, id: WidgetId) -> WidgetId {
+        // A composite asking about itself from its own `build()` is a
+        // placeholder in the arena at that moment: its node and proxy are
+        // unknown, so the id stays as it is.
+        if self.is_mid_build(id) {
+            return id;
+        }
+        let speaks = |w: WidgetId| {
+            self.arena
+                .get(w)
+                .is_some_and(|node| self.is_node_focusable(node))
+                || self.live_accessibility_proxy(w).is_some()
+        };
+        if !self.arena.is_active(id) || speaks(id) || !self.is_pruned_wrapper(id) {
+            return id;
+        }
+        let found = self.outermost_descendants(id, speaks);
+        match found.as_slice() {
+            [only] => *only,
+            _ => id,
+        }
+    }
+
+    /// The node a `labelled_by` relation should point at to name something
+    /// with `label_id`.
+    ///
+    /// `label_id` itself when its node has a name or a value to give (see
+    /// `has_name_to_give`). Otherwise, the one descendant that has: a label
+    /// text inside a `FixedSize` or a `Padding`. With none, or several,
+    /// `label_id` is kept.
+    fn labelled_label_end(&self, label_id: WidgetId) -> WidgetId {
+        if self.is_mid_build(label_id) {
+            return label_id;
+        }
+        // A label that is a node a reader keeps (a control, a group) is
+        // pointed at as it is, named or not: only a layout wrapper is seen
+        // through, never into a control's parts.
+        if !self.arena.is_active(label_id)
+            || self.has_name_to_give(label_id)
+            || !self.is_pruned_wrapper(label_id)
+        {
+            return label_id;
+        }
+        let found = self.outermost_descendants(label_id, |w| self.has_name_to_give(w));
+        match found.as_slice() {
+            [only] => *only,
+            _ => label_id,
+        }
+    }
+
+    /// Whether `id` is being built right now: its widget is out of the arena,
+    /// a placeholder in its place.
+    fn is_mid_build(&self, id: WidgetId) -> bool {
+        self.arena
+            .get(id)
+            .is_some_and(|node| node.widget.type_name().ends_with("PlaceholderWidget"))
+    }
+
+    /// Whether `id`'s own node is one the consumer drops: a
+    /// `GenericContainer` or `Unknown` role with no name and no value.
+    fn is_pruned_wrapper(&self, id: WidgetId) -> bool {
+        use accesskit::Role;
+        let builder = self.build_overridden_builder(id);
+        let empty = |s: Option<&str>| s.is_none_or(|s| s.trim().is_empty());
+        matches!(builder.role(), Role::GenericContainer | Role::Unknown)
+            && empty(builder.name())
+            && empty(builder.value())
+    }
+
+    /// The active strict descendants of `id` that match `hit`, without
+    /// descending into one once found, in document order.
+    fn outermost_descendants(&self, id: WidgetId, hit: impl Fn(WidgetId) -> bool) -> Vec<WidgetId> {
+        let mut found = Vec::new();
+        let mut stack: Vec<WidgetId> = self.arena.children(id).iter().rev().copied().collect();
+        while let Some(w) = stack.pop() {
+            if !self.arena.is_active(w) {
+                continue;
+            }
+            if hit(w) {
+                found.push(w);
+                continue;
+            }
+            stack.extend(self.arena.children(w).iter().rev().copied());
+        }
+        found
     }
 
     /// Append an accessibility `described_by` relation onto an already-mounted

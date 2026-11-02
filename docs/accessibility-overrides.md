@@ -107,6 +107,29 @@ and the shell wires the relation for it, that is how `Dialog` and
 returns a copy of the string; the hint remains for content that has no
 label node to point at.
 
+#### Which name a field is read by
+
+A field linked to a label (a `FormLayout` row, `access_labelled_by`) can
+have up to three names, and the one read follows the order Qt and WinUI use:
+
+1. a name the application gave it: `.access_label(..)`, a name set in
+   `.access_customize(..)`, or the control's own `.label(..)`
+   (`TextInput::label`, `ComboBox::label`, `DateEdit::label`);
+2. the label it is linked to;
+3. the control's built-in default, such as `DateEdit`'s "Date" or
+   `LanguageSwitcher`'s "Language", which the walker drops when a
+   `labelled_by` target has a name to give.
+
+A control that names itself from its own visible text (a checkbox, a radio
+button, a button, a link, a tab) keeps that text over a row label: it is what
+the user reads on screen, and so it is their name (WCAG 2.5.3).
+
+`BuildContext::access_labelled_by` also sees through layout wrappers. A
+field inside a `FixedSize` or a `VStack` gets the relation when it is the
+only control there, and a label inside a `Padding` is pointed at when it is
+the only named node there. A cell holding several controls (a field and a
+browse button) is named by nobody; give each control its own `.label(..)`.
+
 #### A composite that publishes itself through the field that holds focus
 
 Some composites keep everything a screen reader reads on one inner widget.

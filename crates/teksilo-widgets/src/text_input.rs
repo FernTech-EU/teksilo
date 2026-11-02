@@ -46,6 +46,14 @@
 //!
 //! None of them is set by default, and the field then looks as it always has.
 //!
+//! ## Accessibility
+//!
+//! The inner field is the node a screen reader lands on, and it stands for
+//! the `TextInput` (`Widget::accessibility_proxy`): an `access_label`,
+//! `access_labelled_by`, `access_described_by` or tooltip given to the
+//! `TextInput` reaches it. The field is read by its [`label`](TextInput::label)
+//! when it has one, else by the label of the `FormLayout` row it sits in.
+//!
 //! ## Touch and pen
 //!
 //! The trailing clear affordance is 16 dp of paint and a 24 dp target: raising
@@ -171,6 +179,9 @@ pub struct TextInput {
 
     // ── Configuration owned by this composite only ──────────────────
     label: Option<LocalizedString>,
+    /// A composite's built-in name for the field, read when nothing else
+    /// names it (see [`default_name`](Self::default_name)).
+    default_name: Option<LocalizedString>,
     /// Optional override for the frame's intrinsic minimum width
     /// (default 65 dp). Composing widgets like `DateEdit` /
     /// `TimeEdit` raise this so the frame stays at the design
@@ -249,6 +260,7 @@ impl TextInput {
             field_id_slot: std::rc::Rc::new(std::cell::Cell::new(None)),
             feedback_signal: Signal::new(ValidationFeedback::Pristine),
             label: None,
+            default_name: None,
             min_width: None,
             min_height: None,
             text_style: None,
@@ -317,6 +329,18 @@ impl TextInput {
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
+        self
+    }
+
+    /// The name a composing widget gives the field when the application
+    /// names it nowhere: `DateEdit`'s "Date", `TimeEdit`'s "Time".
+    ///
+    /// A [`label`](Self::label) is the application's name and wins over
+    /// everything; this one gives way to a row label (`FormLayout`, an
+    /// `access_labelled_by`), so a date field in a "Birthday" row reads
+    /// "Birthday".
+    pub(crate) fn default_name(mut self, name: impl Into<LocalizedString>) -> Self {
+        self.default_name = Some(name.into());
         self
     }
 

@@ -34,8 +34,8 @@
 //!   [`accessibility_proxy`](teksilo_core::widget::Widget::accessibility_proxy):
 //!   what an application gives the `TimeEdit` (`access_label`,
 //!   `access_described_by`) lands on the field. As on `DateEdit`, the
-//!   field's own name is read before a `labelled_by` relation, so name a
-//!   time field in a form with `.label()`.
+//!   field is read by the `.label()` when there is one, else by a
+//!   `labelled_by` relation (a `FormLayout` row label), else by "Time".
 //!
 //! ```ignore
 //! use teksilo_core::signal::Signal;
@@ -614,11 +614,15 @@ impl Widget for TimeEdit {
         // The field is where focus lands, so it carries the name, the
         // default one included: only an explicit `.label()` used to reach it,
         // and two time fields side by side were both read as "entry".
-        text_input = text_input.label(
-            self.label
-                .clone()
-                .unwrap_or_else(|| localized(|| resolve_message_widget("time-edit-name", &[]))),
-        );
+        // An explicit `.label()` is the application's name and wins; the
+        // built-in "Time" is a default, which a row label replaces
+        // (`FormLayout`, `access_labelled_by`).
+        text_input = match self.label.clone() {
+            Some(label) => text_input.label(label),
+            None => {
+                text_input.default_name(localized(|| resolve_message_widget("time-edit-name", &[])))
+            }
+        };
         self.field_id = text_input.field_id();
 
         let caret_for_step = text_input.caret_position();

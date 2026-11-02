@@ -70,6 +70,9 @@ pub struct TextScaleControl {
     /// Optional visible label rendered to the leading side of the spinbox.
     label: Option<LocalizedString>,
     root_child_id: Option<WidgetId>,
+    /// The inner spin box, which stands for this widget when it has no label
+    /// of its own (see `accessibility_proxy`).
+    spin_id: Option<WidgetId>,
     /// Optional plain tooltip text shown after a hover delay.
     /// Mutually exclusive with `rich_tooltip_source` and
     /// `composite_tooltip_content` — every tooltip setter clears the other two.
@@ -96,6 +99,7 @@ impl TextScaleControl {
             percent_signal: Signal::new(percent),
             label: None,
             root_child_id: None,
+            spin_id: None,
             tooltip_text: None,
             rich_tooltip_source: None,
             composite_tooltip_content: None,
@@ -180,8 +184,10 @@ impl Widget for TextScaleControl {
         // a name set here would win over the relation in the consumer and
         // announce a copy that no longer tracks the label. Without one there
         // is nothing to point at, so the fallback string stands.
+        // The fallback is a default, which a row label (`FormLayout`)
+        // replaces.
         if self.label.is_none() {
-            spin = spin.label(LocalizedString::literal("Text scale"));
+            spin = spin.default_name(teksilo_i18n::tr_widget!(text_scale_control_name()));
         }
         let spin = spin.on_value_changed({
             let factor = self.factor_signal.clone();
@@ -194,6 +200,7 @@ impl Widget for TextScaleControl {
             }
         });
         let spin_id = ctx.add(spin);
+        self.spin_id = Some(spin_id);
 
         let root = if let Some(label) = &self.label {
             let label_id = ctx.add(TextWidget::new(label.clone()));
@@ -248,11 +255,28 @@ impl Widget for TextScaleControl {
     }
 
     fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
-        // A group wrapping the inner SpinButton, named — like the spin box
-        // itself — by pointing at the label it already paints. Copying the
-        // string here instead made a reader hear it twice on the way in,
-        // once for the group and once for the label under it.
-        builder.set_role(teksilo_core::accesskit::Role::Group);
+        // With a label: a group wrapping the inner SpinButton, named, like the
+        // spin box itself, by pointing at the label it already paints.
+        // Copying the string here instead made a reader hear it twice on the
+        // way in, once for the group and once for the label under it.
+        // Without one there is no group to name: the spin box stands for this
+        // widget (`accessibility_proxy`), so a row label reaches it.
+        if self.label.is_some() {
+            builder.set_role(teksilo_core::accesskit::Role::Group);
+        } else {
+            builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+        }
+    }
+
+    /// Without a label of its own, the spin box stands for this widget: what
+    /// an application or a `FormLayout` row attaches to it lands on the node
+    /// a reader is on.
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        if self.label.is_some() {
+            None
+        } else {
+            self.spin_id
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

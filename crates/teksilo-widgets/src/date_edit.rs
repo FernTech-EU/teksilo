@@ -49,9 +49,9 @@
 //!   composite's
 //!   [`accessibility_proxy`](teksilo_core::widget::Widget::accessibility_proxy):
 //!   an `access_label` or an `access_described_by` given to the `DateEdit`
-//!   lands on the field. A `labelled_by` relation (a `FormLayout` row's)
-//!   lands there too, but AccessKit reads a node's own name before its
-//!   relations, so name a date field in a form with `.label()`.
+//!   lands on the field. The field is read by the `.label()` when there is
+//!   one, else by a `labelled_by` relation (a `FormLayout` row label), else
+//!   by the built-in "Date".
 //! - The calendar opens on the date the field holds (the text typed in it
 //!   is committed first), on its days, whatever an earlier opening left.
 //!
@@ -873,11 +873,15 @@ impl Widget for DateEdit {
         // `DateInput` around it, which it does not speak. `TextInput::label`
         // names the field itself, not the composite's container, so no named
         // middle node appears (audit G9).
-        text_input = text_input.label(
-            self.label
-                .clone()
-                .unwrap_or_else(|| localized(|| resolve_message_widget("date-edit-name", &[]))),
-        );
+        // An explicit `.label()` is the application's name and wins; the
+        // built-in "Date" is a default, which a row label replaces
+        // (`FormLayout`, `access_labelled_by`).
+        text_input = match self.label.clone() {
+            Some(label) => text_input.label(label),
+            None => {
+                text_input.default_name(localized(|| resolve_message_widget("date-edit-name", &[])))
+            }
+        };
         self.field_id = text_input.field_id();
         if let Some(trigger) = trigger_widget_opt {
             text_input = text_input.trailing_slot(trigger);

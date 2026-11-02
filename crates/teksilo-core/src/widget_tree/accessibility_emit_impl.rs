@@ -528,13 +528,22 @@ impl WidgetTree {
                 let mut chain = Vec::with_capacity(standing_for.len() + 1);
                 chain.push(id);
                 chain.extend(standing_for.iter().copied());
+                // Two composites can name the same proxy: a `DateEdit` names
+                // its `TextInput`'s field, and so does the `TextInput`. The
+                // outer one was walked first and left its share already; it
+                // goes after this one's, since the order is innermost first.
+                if let Some(outer) = proxies.standing_for.remove(&proxy_id) {
+                    chain.extend(outer);
+                }
                 proxies.standing_for.insert(proxy_id, chain);
                 if let Some(content) = reserved_tooltip
                     .take()
                     .or_else(|| self.tooltip_claim_for_proxy(id, handled_tooltips))
                 {
                     handled_tooltips.insert(content);
-                    proxies.tooltips.insert(proxy_id, content);
+                    // An outer composite that names the same proxy reserved
+                    // its tooltip first; keep it rather than overwrite it.
+                    proxies.tooltips.entry(proxy_id).or_insert(content);
                 }
                 proxies
                     .nodes
@@ -547,6 +556,9 @@ impl WidgetTree {
                 for &composite in &standing_for {
                     self.announce_context_menu(composite, &mut builder);
                 }
+                // Before the overrides, so an application's own name still
+                // wins over the row label that replaces a default here.
+                self.yield_default_name(id, &standing_for, &mut builder);
                 self.apply_access_overrides(id, &mut builder);
                 for &composite in &standing_for {
                     self.apply_access_overrides(composite, &mut builder);
@@ -995,6 +1007,7 @@ impl WidgetTree {
             for &composite in &behind {
                 self.announce_context_menu(composite, &mut builder);
             }
+            self.yield_default_name(id, &behind, &mut builder);
             self.apply_access_overrides(id, &mut builder);
             for composite in behind {
                 self.apply_access_overrides(composite, &mut builder);
@@ -1004,6 +1017,110 @@ impl WidgetTree {
             merge_descendants_into(&mut builder, id, &self.arena);
         }
         builder
+    }
+
+    /// Drop a name the widget set with
+    /// [`AccessNodeBuilder::set_default_name`] when a `labelled_by` relation
+    /// on the node, or on a composite it stands for, names it instead.
+    ///
+    /// The naming order is the one Qt and WinUI follow: a name the
+    /// application gave (`access_label`, `access_customize`, applied after
+    /// this) first, then the label the node is linked to, then the control's
+    /// built-in default. `accesskit_consumer` reads a node's own name before
+    /// its `labelled_by` targets, so a default left in place would hide the
+    /// row label of a `FormLayout`: a date field in a "Birthday" row read
+    /// "Date". A relation whose targets are all gone or nameless names
+    /// nothing, and then the default stays.
+    fn yield_default_name(
+        &self,
+        id: WidgetId,
+        standing_for: &[WidgetId],
+        builder: &mut AccessNodeBuilder,
+    ) {
+        if !builder.name_is_default() {
+            return;
+        }
+        let named_by_relation = std::iter::once(id)
+            .chain(standing_for.iter().copied())
+            .filter_map(|owner| self.arena.get(owner)?.access_overrides.as_deref())
+            .flat_map(|ov| ov.labelled_by.iter().copied())
+            .any(|target| self.has_name_to_give(target));
+        if named_by_relation {
+            builder.clear_default_name();
+        }
+    }
+
+    /// Whether `target`, as the end of a `labelled_by` relation, gives the
+    /// node pointing at it a name, read as `accesskit_consumer` reads it
+    /// (`Node::write_label`): a `Role::Label` by its text, any other node by
+    /// its own name alone, never by its own `labelled_by`.
+    ///
+    /// So a target that is not in the update (inactive, or under an excluded
+    /// or merged ancestor) gives nothing, and neither does one whose own name
+    /// is a default that yields to a relation of its own: the walk clears it,
+    /// and the consumer does not follow that target's relation on. A relation
+    /// that names a composite names the proxy standing for it (see
+    /// `ProxyLedger::redirect_relations`), so the probe follows the proxy
+    /// chain and applies the overrides the composites hand down.
+    pub(crate) fn has_name_to_give(&self, target: WidgetId) -> bool {
+        self.gives_name(target, &mut Vec::new())
+    }
+
+    fn gives_name(&self, target: WidgetId, visited: &mut Vec<WidgetId>) -> bool {
+        use crate::widget_builder::AccessSubtreeMode;
+        if !self.arena.is_active(target) || visited.contains(&target) {
+            return false;
+        }
+        visited.push(target);
+        // An excluded or merged subtree emits no node for the target.
+        let mut ancestor = self.arena.parent(target);
+        while let Some(a) = ancestor {
+            if self
+                .arena
+                .get(a)
+                .is_some_and(|n| n.access_subtree != AccessSubtreeMode::Inherit)
+            {
+                return false;
+            }
+            ancestor = self.arena.parent(a);
+        }
+        let mut node_id = target;
+        // A proxy is a strict descendant, so the chain is finite; the bound
+        // is a guard, not a limit anyone reaches.
+        for _ in 0..16 {
+            match self.live_accessibility_proxy(node_id) {
+                Some(proxy) => node_id = proxy,
+                None => break,
+            }
+        }
+        let Some(node) = self.arena.get(node_id) else {
+            return false;
+        };
+        let mut builder = AccessNodeBuilder::for_name_probe(node_id);
+        node.widget.accessibility(&mut builder);
+        let behind = self.composites_standing_behind(node_id);
+        if builder.name_is_default() {
+            let yields = std::iter::once(node_id)
+                .chain(behind.iter().copied())
+                .filter_map(|owner| self.arena.get(owner)?.access_overrides.as_deref())
+                .flat_map(|ov| ov.labelled_by.clone())
+                .any(|t| self.gives_name(t, visited));
+            if yields {
+                builder.clear_default_name();
+            }
+        }
+        self.apply_access_overrides(node_id, &mut builder);
+        for composite in behind {
+            self.apply_access_overrides(composite, &mut builder);
+        }
+        let non_empty = |s: Option<&str>| s.is_some_and(|s| !s.trim().is_empty());
+        if builder.role() == accesskit::Role::Label {
+            // The walker writes a label's text as its value, which is what
+            // the consumer reads from it.
+            non_empty(builder.name()) || non_empty(builder.value())
+        } else {
+            non_empty(builder.name())
+        }
     }
 
     /// Apply the builder-level overrides attached to `id` onto `builder`.
@@ -1070,14 +1187,18 @@ impl WidgetTree {
     /// A composite can name another composite as its proxy, which names a
     /// field in turn, so the climb follows the chain rather than stopping at
     /// the first match.
+    ///
+    /// Two composites can also name the same proxy (a `DateEdit` and the
+    /// `TextInput` inside it both name the field), so an ancestor counts when
+    /// its proxy is `id` or any composite already found.
     pub(crate) fn composites_standing_behind(&self, id: WidgetId) -> Vec<WidgetId> {
         let mut found = Vec::new();
-        let mut stands_for = id;
         let mut current = self.arena.parent(id);
         while let Some(ancestor) = current {
-            if self.live_accessibility_proxy(ancestor) == Some(stands_for) {
+            if let Some(proxy) = self.live_accessibility_proxy(ancestor)
+                && (proxy == id || found.contains(&proxy))
+            {
                 found.push(ancestor);
-                stands_for = ancestor;
             }
             current = self.arena.parent(ancestor);
         }

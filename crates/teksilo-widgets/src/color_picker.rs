@@ -798,12 +798,12 @@ impl Widget for ColorPicker {
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
         builder.set_role(Role::Group);
-        let name = self
-            .label
-            .as_ref()
-            .map(|ls| ls.resolve_now())
-            .unwrap_or_else(|| resolve_message_widget("color-picker-name", &[]));
-        builder.set_name(name);
+        // An explicit `.label()` wins; the built-in name gives way to a row
+        // label (`FormLayout`).
+        match self.label.as_ref() {
+            Some(ls) => builder.set_name(ls.resolve_now()),
+            None => builder.set_default_name(resolve_message_widget("color-picker-name", &[])),
+        }
         builder.set_live(Live::Polite);
         let hex = self
             .last_announced_hex

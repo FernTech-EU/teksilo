@@ -399,6 +399,9 @@ pub struct SpinBox<T: SpinValue> {
     /// and [`fill_width`](SpinBox::fill_width) builder methods.
     width_policy: WidthPolicy,
     label: Option<LocalizedString>,
+    /// A composite's built-in name for the spin box, read when nothing else
+    /// names it (see [`default_name`](Self::default_name)).
+    default_name: Option<LocalizedString>,
     placeholder: LocalizedString,
     /// Enabled state, static or reactive; forwarded to the arena at
     /// build time and never read as a `bool` there. The arena disables
@@ -490,6 +493,7 @@ impl<T: SpinValue> SpinBox<T> {
             wheel_mode: WheelMode::Focused,
             width_policy: WidthPolicy::Pixels(DEFAULT_PREFERRED_WIDTH),
             label: None,
+            default_name: None,
             placeholder: LocalizedString::literal(String::new()),
             enabled: Prop::Static(true),
             read_only: false,
@@ -701,6 +705,14 @@ impl<T: SpinValue> SpinBox<T> {
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
+        self
+    }
+
+    /// The name a composing widget (`TextScaleControl`) gives the spin box
+    /// when the application names it nowhere. Unlike [`label`](Self::label)
+    /// it gives way to a row label.
+    pub(crate) fn default_name(mut self, name: impl Into<LocalizedString>) -> Self {
+        self.default_name = Some(name.into());
         self
     }
 
@@ -1275,6 +1287,7 @@ impl<T: SpinValue> Widget for SpinBox<T> {
             (inner_height - 2.0 * field_dims::TEXT_FIELD_PADDING_VERTICAL).max(0.0);
 
         let mut field = TextInputField::new(self.text_signal.clone())
+            .default_name(self.default_name.clone())
             .share_handle(&field_handle)
             .press_band(field_dims::TEXT_FIELD_PRESS_BAND)
             // An assistive-technology `SetValue` on the inner text node is a

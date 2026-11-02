@@ -1420,6 +1420,26 @@ impl<'a> BuildContext<'a> {
     /// child is mounted (so a container like `FormLayout` can pair a label and
     /// a boxed field once both ids are resolved) and preserves any
     /// accessibility overrides the child already carries.
+    ///
+    /// Both ends see through layout wrappers, which no screen reader keeps:
+    ///
+    /// - When `id` neither takes focus nor hands its node to a proxy
+    ///   ([`Widget::accessibility_proxy`](crate::widget::Widget::accessibility_proxy))
+    ///   and its own node is an empty container (a `FixedSize`, a `VStack`),
+    ///   the relation goes to the one control inside it: the outermost
+    ///   descendant that takes focus or has a proxy. With none, or several (a
+    ///   field and a browse button), it stays on `id` and names nothing.
+    /// - When `label_id` has no name or value of its own, the relation points
+    ///   at the one descendant that has, such as a text inside a `Padding`.
+    ///   With none, or several, it points at `label_id`.
+    ///
+    /// Only descendants already built are found, so call this once both
+    /// subtrees exist. The end is decided now: a wrapper that later swaps
+    /// its control (a `Switcher` flipping branch) leaves the relation on the
+    /// old one, so link the control itself in that case. The label replaces a control's built-in default name
+    /// (`DateEdit`'s "Date"); a name the application gave (`access_label`)
+    /// and a name the control takes from its own visible text (a
+    /// checkbox's) are kept.
     pub fn access_labelled_by(
         &mut self,
         id: crate::widget_id::WidgetId,

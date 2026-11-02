@@ -56,6 +56,16 @@
 //!   `FilteredItemList` inner widget.
 //! - `tests` holds the headless unit tests.
 //!
+//! ## Accessibility
+//!
+//! The combo box is read by its [`label`](ComboBox::label) when it has one,
+//! else by the label of the `FormLayout` row (or `access_labelled_by`
+//! target) it sits beside. The chosen item is its value. With nothing
+//! chosen, the [`placeholder`](ComboBox::placeholder) is read as a hint, not
+//! as a value: "Select a fruit..." does not sound like a choice already
+//! made. A real "none" choice ("No label") must therefore be an item, so it
+//! is read as the value.
+//!
 //! ## Touch and pen
 //!
 //! The closed box is one target — the arrow column is paint inside it, not a
@@ -150,6 +160,9 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     /// Accessible label — independent of placeholder and current selection.
     /// Screen readers announce this as the name of the control.
     label: Option<LocalizedString>,
+    /// A preset's built-in name, read when nothing else names the combo box
+    /// (see [`default_name`](Self::default_name)).
+    default_name: Option<LocalizedString>,
     /// Enabled state, static or reactive; forwarded to the arena at
     /// build time.
     enabled: Prop<bool>,
@@ -258,6 +271,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             on_select: None,
             placeholder: LocalizedString::literal(String::new()),
             label: None,
+            default_name: None,
             enabled: Prop::Static(true),
             max_visible_items: DEFAULT_MAX_VISIBLE_ITEMS,
             type_ahead_timeout: Duration::from_millis(500),
@@ -432,9 +446,21 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// (e.g. "Fruit", "Font family"). Independent of the visible
     /// placeholder and of the current selection — screen readers
     /// announce this as the name of the control.
+    ///
+    /// It is the application's name for the control, so it wins over a
+    /// `FormLayout` row label or another `labelled_by` relation. Leave it
+    /// unset in a form row to have the row's label read.
     pub fn label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.label = Some(ls);
+        self
+    }
+
+    /// The name a preset (`LanguageSwitcher`, `ThemeSwitcher`, `FontPicker`)
+    /// gives the combo box when the application names it nowhere. Unlike
+    /// [`label`](Self::label), it gives way to a row label.
+    pub(crate) fn default_name(mut self, name: impl Into<LocalizedString>) -> Self {
+        self.default_name = Some(name.into());
         self
     }
 
@@ -1329,6 +1355,8 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
 
         if let Some(name) = self.label.as_ref() {
             builder.set_name(name.resolve_now());
+        } else if let Some(name) = self.default_name.as_ref() {
+            builder.set_default_name(name.resolve_now());
         }
 
         // A11y gap #3: use `placeholder` when nothing is selected, `value`

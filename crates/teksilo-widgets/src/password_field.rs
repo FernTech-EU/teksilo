@@ -132,6 +132,9 @@ pub struct PasswordField {
     // ── Internal ────────────────────────────────────────────────────
     revealed_signal: Signal<bool>,
     root_child_id: Option<WidgetId>,
+    /// The inner field, which stands for this widget in the accessibility
+    /// tree (see `accessibility_proxy`).
+    field_id: Option<WidgetId>,
 }
 
 impl std::fmt::Debug for PasswordField {
@@ -174,6 +177,7 @@ impl PasswordField {
             composite_tooltip_content: None,
             revealed_signal: Signal::new(false),
             root_child_id: None,
+            field_id: None,
         }
     }
 
@@ -456,6 +460,7 @@ impl Widget for PasswordField {
         } else {
             ctx.add(field.access_label(self.label.clone()))
         };
+        self.field_id = Some(field_id);
 
         let padded_field = ctx.add(
             Padding::new(
@@ -676,5 +681,14 @@ impl Widget for PasswordField {
 
     fn children(&self) -> Vec<WidgetId> {
         self.root_child_id.into_iter().collect()
+    }
+
+    /// The inner field stands for this widget in the accessibility tree:
+    /// what an application attaches to the `PasswordField`'s id
+    /// (`access_label`, `access_described_by`, a `FormLayout` row label)
+    /// lands on the `Role::PasswordInput` node that holds focus, not on this
+    /// composite's container, which no reader keeps.
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        self.field_id
     }
 }

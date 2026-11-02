@@ -556,16 +556,17 @@ impl Widget for FontPicker {
             .variant(self.variant)
             .searchable(self.searchable)
             .enabled(self.enabled.clone())
-            .label(
-                self.label
-                    .clone()
-                    .unwrap_or_else(|| tr_widget!(font_picker_label())),
-            )
             .placeholder(
                 self.placeholder
                     .clone()
                     .unwrap_or_else(|| tr_widget!(font_picker_placeholder())),
             );
+        // The application's `.label()` wins over everything; the built-in
+        // one gives way to a row label (`FormLayout`).
+        combo = match self.label.clone() {
+            Some(label) => combo.label(label),
+            None => combo.default_name(tr_widget!(font_picker_label())),
+        };
 
         // Per-row preview.
         {

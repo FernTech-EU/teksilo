@@ -1304,6 +1304,10 @@ impl Widget for TextInputField {
         };
         let st = state.borrow();
 
+        if let Some(name) = &self.default_name {
+            builder.set_default_name(name.resolve_now());
+        }
+
         let text = st.document.to_plain_text().unwrap_or_default();
 
         // AT-protection tracks the *explicit* reveal toggle only — not

@@ -95,6 +95,16 @@ The widget is split across four internal modules:
   `FilteredItemList` inner widget.
 - `tests` holds the headless unit tests.
 
+#### Accessibility
+
+The combo box is read by its `label` when it has one,
+else by the label of the `FormLayout` row (or `access_labelled_by`
+target) it sits beside. The chosen item is its value. With nothing
+chosen, the `placeholder` is read as a hint, not
+as a value: "Select a fruit..." does not sound like a choice already
+made. A real "none" choice ("No label") must therefore be an item, so it
+is read as the value.
+
 #### Touch and pen
 
 The closed box is one target — the arrow column is paint inside it, not a
@@ -295,6 +305,10 @@ Accessible label describing what this combo box is for
 (e.g. "Fruit", "Font family"). Independent of the visible
 placeholder and of the current selection — screen readers
 announce this as the name of the control.
+
+It is the application's name for the control, so it wins over a
+`FormLayout` row label or another `labelled_by` relation. Leave it
+unset in a form row to have the row's label read.
 
 <a id="combobox-enabled"></a>
 

@@ -63,6 +63,10 @@ pub struct AccessNodeBuilder {
     /// discarded along with the builder while the widget's real node
     /// keeps its own copies.
     name_probe: bool,
+    /// The name was set with [`set_default_name`](AccessNodeBuilder::set_default_name):
+    /// a fallback the widget supplies when nobody named it, which a
+    /// `labelled_by` relation replaces.
+    name_is_default: bool,
 }
 
 /// The ids of every `Role::TextRun` this node attached to **itself**, or
@@ -518,6 +522,7 @@ impl AccessNodeBuilder {
             children_collected: Vec::new(),
             child_local_bounds: Vec::new(),
             name_probe: false,
+            name_is_default: false,
         }
     }
 
@@ -566,6 +571,44 @@ impl AccessNodeBuilder {
         let name: String = name.into();
         self.inner.set_label(name.clone());
         self.name = Some(name);
+        self.name_is_default = false;
+    }
+
+    /// Set the name a control falls back to when nothing names it: the
+    /// "Date" of a date field, the "Language" of a language switcher.
+    ///
+    /// Unlike [`set_name`](Self::set_name), this name gives way to a
+    /// `labelled_by` relation whose target has a name, such as the row label
+    /// a `FormLayout` links its field to, so the field is read by the label
+    /// beside it. An application's own name (`access_label`,
+    /// `access_customize`) still wins over both. A name the control takes
+    /// from its own visible text (a checkbox's or a button's) is not a
+    /// default and is set with `set_name`.
+    // Shared plumbing for teksilo-widgets (DateEdit, ComboBox and the other
+    // controls with a built-in name); whether to document it is open.
+    #[doc(hidden)]
+    pub fn set_default_name(&mut self, name: impl Into<String>) {
+        self.set_name(name);
+        self.name_is_default = true;
+    }
+
+    /// Whether the current name came from
+    /// [`set_default_name`](Self::set_default_name).
+    pub(crate) fn name_is_default(&self) -> bool {
+        self.name.is_some() && self.name_is_default
+    }
+
+    /// Remove the name, so a `labelled_by` relation names the node. A name
+    /// the widget wrote past the builder afterwards (through `inner_mut`) is
+    /// not the default any more, and is kept.
+    pub(crate) fn clear_default_name(&mut self) {
+        if self.inner.label() != self.name.as_deref() {
+            self.name_is_default = false;
+            return;
+        }
+        self.inner.clear_label();
+        self.name = None;
+        self.name_is_default = false;
     }
 
     pub fn set_disabled(&mut self) {
