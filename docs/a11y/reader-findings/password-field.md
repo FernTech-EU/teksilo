@@ -23,7 +23,7 @@ How to read an entry, and what the words mean, is in
 | [password-08](#password-08) | password-field | RevealMode::Hold exposes a 'button' no reader can operate: no action, not focusable, skipped by Tab | medium | Linux | open |
 | [password-09](#password-09) | password-field | The disabled Sign in button reads as enabled and sensitive on AT-SPI, and a reader's focus request lands on it | low | Linux | partly fixed |
 | [password-10](#password-10) | password-field | The first character typed or pasted into an empty text field is never reported: an empty field has no text run and no Text interface | medium | Linux | fixed |
-| [password-11](#password-11) | password-field | The Username field has no name: Orca reads its placeholder as if it were the field's content | high | Linux | open (example) |
+| [password-11](#password-11) | password-field | The Username field has no name: Orca reads its placeholder as if it were the field's content | high | Linux | fixed |
 | [password-12](#password-12) | password-field | The showcase captions duplicate the fields' names and are read as one run-on sentence on entering the panel | low | Linux | open (example) |
 | [password-13](#password-13) | password-field | Every reveal toggle has the same name and no relation to its field | low | Linux | open |
 | [password-v01](#password-v01) | password-field | On macOS the Caps Lock warning never appears: winit delivers no KeyboardInput for Caps Lock there, and that is Teksilo's only source | high | macOS | open |
@@ -386,7 +386,8 @@ The Username field has no name: Orca reads its placeholder as if it were the fie
 - **The reader got (`261a218f`):** The entry has no name, which the launch audit reports as unnamed-control. Orca says 'entry you@example.com.', which can be heard as a field that already holds that address. The visible caption 'Username' is a separate label linked to nothing.
 - **Platform:** Linux AT-SPI / Orca 46.1 (measured); the missing name reaches every platform by source.
 - **Severity:** high; **layer:** example
-- **Status:** Open, in the example's own code.
+- **Status:** Fixed by `d2165497` (examples).
+- **Since `d2165497`:** fixed in code: the Username `TextInput` has `.label(lit!("Username"))`, which names the field a reader focuses (`examples/password_field/src/main.rs:84-90`). Not yet measured with a reader; the `password` and `verify-password` scenarios now look the field up by the name Username.
 - **Now (`c198e4d1`):** The Username entry still has no name. The launch audit reports it as an unnamed control, and Orca says 'entry you@example.com.', which can be heard as a field already holding that address.
 - **Measured again:** every launch in both passes; tabwalk-password-field, 2 of 2 runs
 - **Evidence (`c198e4d1`):**

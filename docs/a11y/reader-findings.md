@@ -49,7 +49,11 @@ Every entry says:
 - **Where**: the source (`file:line`) behind the finding, at `c198e4d1`; a
   fixed finding with nothing left to point at keeps its lines at `261a218f`;
 - **Status**: from the re-measure: the commit that fixed it, or why it stays
-  open.
+  open. Where an entry has a **Since** line, the status comes from that line
+  instead;
+- **Since**: a change made after the re-measure, read from the code, with no
+  reader run on it. The entry says what the code does now and that it was not
+  measured, and the count below says how many statuses are of this kind.
 
 K1 and K2 in some entries are the two fixes made before the sweep, which the
 sweep ran against: K1 names each window by its title (`89a567cd`), K2 is the
@@ -82,12 +86,12 @@ All 126 findings the fixes reported fixed or partly fixed are fixed or partly fi
 | severity | framework | example | upstream | harness | all | fixed | partly fixed |
 |---|---|---|---|---|---|---|---|
 | critical | 24 | 1 | 5 | 0 | 30 | 25 | 0 |
-| high | 132 | 15 | 21 | 0 | 168 | 65 | 8 |
+| high | 132 | 15 | 21 | 0 | 168 | 70 | 10 |
 | medium | 123 | 21 | 20 | 0 | 164 | 13 | 20 |
 | low | 85 | 26 | 20 | 1 | 132 | 5 | 16 |
-| all | 364 | 63 | 66 | 1 | 494 | 108 | 44 |
+| all | 364 | 63 | 66 | 1 | 494 | 113 | 46 |
 
-On `c198e4d1`, of 494 findings: 108 fixed, 44 partly fixed, 233 open in Teksilo, 61 open in the examples' own code, and 47 upstream. A severity is the one the re-measure gave, which is the sweep's unless what the reader gets has changed. Every sweep finding was reproduced by the verifier; 85 of them were corrected on the way, and the verifiers added 80 the sweep had missed. The last page, the examples swept last, was swept on the build with the fixes and has no second agent's pass in the sweep.
+Counted from the finding pages: of 494 findings, 113 fixed, 46 partly fixed, 227 open in Teksilo, 60 open in the examples' own code, and 47 upstream (high severity: 70 fixed, 10 partly fixed). Of the fixed and partly fixed, 4 were set from the code and have not been measured with a reader: chrome-13, chrome-14, chrome-15, password-11. `tools/count_reader_findings.py` counts the table and this line from the pages under it, and `--check` compares them with this page. A severity is the one the re-measure gave, which is the sweep's unless what the reader gets has changed. Every sweep finding was reproduced by the verifier; 85 of them were corrected on the way, and the verifiers added 80 the sweep had missed. The last page, the examples swept last, was swept on the build with the fixes and has no second agent's pass in the sweep.
 
 ## What was fixed
 
@@ -127,7 +131,7 @@ found a gap, its correction is part of the same commit.
 
 ## What stays open
 
-In Teksilo itself 266 findings stay open or partly fixed on `c198e4d1`: 4 critical, 71 high, 111 medium, 80 low.
+In Teksilo itself 262 findings stay open or partly fixed: 4 critical, 67 high, 111 medium, 80 low.
 
 The critical and high ones in Teksilo itself, by what the reader lacks. Each
 id links to its entry.
@@ -146,7 +150,7 @@ id links to its entry.
   [catalog-b-06](reader-findings/catalog-b.md#catalog-b-06)), `LogView::announce_appends` ([console-08](reader-findings/console.md#console-08)) and the
   terminal's output ([console-04](reader-findings/console.md#console-04), [console-05](reader-findings/console.md#console-05), [console-V1](reader-findings/console.md#console-v1)) are not
   announced; a wizard's step ([catalog-a-M3](reader-findings/catalog-a.md#catalog-a-m3), [catalog-a-M4](reader-findings/catalog-a.md#catalog-a-m4)), the outcome of
-  a shortcut rebind ([chrome-14](reader-findings/chrome.md#chrome-14), [chrome-15](reader-findings/chrome.md#chrome-15)), the unread count
+  a shortcut rebind that has no conflict, or clears a chord ([chrome-15](reader-findings/chrome.md#chrome-15)), the unread count
   ([toast-10](reader-findings/toast.md#toast-10), [catalog-c-15](reader-findings/catalog-c.md#catalog-c-15)) and a date segment's step ([datetime-05](reader-findings/datetime.md#datetime-05)) are
   silent. Messages raised as focus arrives that are not the announcer's, a
   field's validation message or a message box's own live region, are still
@@ -161,7 +165,7 @@ id links to its entry.
   look ([dialogs-v-01](reader-findings/dialogs.md#dialogs-v-01), [catalog-c-18](reader-findings/catalog-c.md#catalog-c-18)).
 - **No name.** The ColorPicker's channels ([catalog-b-05](reader-findings/catalog-b.md#catalog-b-05), [misc-03](reader-findings/misc.md#misc-03)),
   ColorEdit ([misc-16](reader-findings/misc.md#misc-16)), the SceneView ([sceneetc-09](reader-findings/scene-and-more.md#sceneetc-09)), the dock resize
-  handles ([docking-05](reader-findings/docking.md#docking-05)), ShortcutSettings' buttons ([chrome-13](reader-findings/chrome.md#chrome-13)),
+  handles ([docking-05](reader-findings/docking.md#docking-05)),
   InputDialog's field ([newkit-03](reader-findings/new-widgets-kit.md#newkit-03)), the previewer's knobs ([sceneetc-14](reader-findings/scene-and-more.md#sceneetc-14)), a
   composite tooltip read as "Tooltip" ([catalog-a-04](reader-findings/catalog-a.md#catalog-a-04)); names left in English
   in a French interface ([catalog-b-09](reader-findings/catalog-b.md#catalog-b-09)).

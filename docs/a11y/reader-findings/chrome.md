@@ -25,9 +25,9 @@ How to read an entry, and what the words mean, is in
 | [chrome-10](#chrome-10) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | A Splitter divider's position is never spoken, on focus or while resizing with the arrows | high | Linux | upstream |
 | [chrome-11](#chrome-11) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Splitter collapse/restore animation sends a value change every frame; Orca says 'vertical splitter' about ten times per Enter | medium | Linux | open |
 | [chrome-12](#chrome-12) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Every Splitter divider is named 'Splitter divider'; a reader cannot tell which panes it separates | medium | all | open |
-| [chrome-13](#chrome-13) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | ShortcutSettings: 42 buttons named 'Rebind', 'Rebind 2nd' or 'Reset' with no shortcut or current chord | high | all | open |
-| [chrome-14](#chrome-14) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | The rebind capture hint 'Press any key…' is cut: the whole panel rebuilds and focus moves to a new Rebind node after it | high | Linux | open |
-| [chrome-15](#chrome-15) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | The outcome of a rebind is never spoken, including a conflict that silently unbinds another shortcut | high | all | open |
+| [chrome-13](#chrome-13) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | ShortcutSettings: 42 buttons named 'Rebind', 'Rebind 2nd' or 'Reset' with no shortcut or current chord | high | all | fixed |
+| [chrome-14](#chrome-14) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | The rebind capture hint 'Press any key…' is cut: the whole panel rebuilds and focus moves to a new Rebind node after it | high | Linux | fixed |
+| [chrome-15](#chrome-15) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | The outcome of a rebind is never spoken, including a conflict that silently unbinds another shortcut | high | all | partly fixed |
 | [chrome-16](#chrome-16) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Collapsed menu bar: Alt+letter reveals the bar and hides it again ~200 ms later; the menu never opens | high | all | open |
 | [chrome-17](#chrome-17) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | Menu items are never announced in these examples' menus (shared MenuList cause) | medium | Linux | partly fixed |
 | [chrome-18](#chrome-18) | tooltips-showcase, tool-box, splitter, shortcuts-demo, title-bar-demo, collapsible-menu-bar, native-menu | native-menu: the in-window menu's commands do nothing on Linux | high | Linux | open (example) |
@@ -412,7 +412,8 @@ ShortcutSettings: 42 buttons named 'Rebind', 'Rebind 2nd' or 'Reset' with no sho
 - **The reader got (`261a218f`):** 'Rebind push button.', 'Rebind 2nd push button.', 'Rebind push button.' … for all 14 shortcuts. On entering the panel Orca adds its unrelated-labels guess 'Cycle Bounds Overlay Go to line… Scroll by page'.
 - **Platform:** All platforms (names); measured Linux
 - **Severity:** high; **layer:** framework
-- **Status:** Open.
+- **Status:** Fixed by `b89bdc832` (the ShortcutSettings redesign).
+- **Since `b89bdc832`:** fixed in code: each chord is now its own control, named after its command and its chord, and a reset button is named after the command it resets (`shortcut_settings/table.rs`). Not yet measured with a reader; the scenarios `chrome-shortcuts-capture` and `chrome-shortcuts-conflict` still look for the old Rebind buttons.
 - **Now (`c198e4d1`):** The Shortcut settings buttons are still named only 'Rebind', 'Rebind 2nd' and 'Reset', with no shortcut name or current chord. Entering the panel, Orca adds its guess 'Cycle Bounds Overlay Go to line… Scroll by page'.
 - **Measured again:** chrome-walk-shortcuts 2 of 2 runs, chrome-shortcuts-capture and chrome-shortcuts-conflict 2 of 2 runs
 - **Evidence (`c198e4d1`):**
@@ -438,7 +439,8 @@ The rebind capture hint 'Press any key…' is cut: the whole panel rebuilds and 
 - **The reader got (`261a218f`):** The live status node's announcement reaches the bus 50-125 ms before a focus change to a newly created 'Rebind' node (the panel is rebuilt: 388 children-changed events); Orca cuts the hint to read 'Rebind push button.' The old focused node is defunct ('Ignoring defunct object: \[push button: 'Rebind'\]'). This message goes through a live Role::Status node added with a name, not ctx.announce, so the K2 fix does not cover it.
 - **Platform:** Linux AT-SPI/Orca measured; the rebuild and focus move are platform-independent
 - **Severity:** high; **layer:** framework
-- **Status:** Open.
+- **Status:** Fixed by `b89bdc832` (the ShortcutSettings redesign).
+- **Since `b89bdc832`:** fixed in code: the panel is still rebuilt, but focus goes back to the control with the same key (`FocusKey`, `shortcut_settings/table.rs`) and the recording hint is that control's description (`table.rs:280-300`), so the hint is not replaced by a differently named button. Not yet measured with a reader.
 - **Now (`c198e4d1`):** Space on Rebind still rebuilds the whole panel and moves focus to a new 'Rebind' node about 100 to 200 ms after the capture hint is announced. Orca cuts 'Press any key. Delete to clear. Escape to cancel.' to read 'Rebind push button.'
 - **Measured again:** chrome-shortcuts-capture 2 of 2 runs, chrome-shortcuts-conflict 2 of 2 runs
 - **Evidence (`c198e4d1`):**
@@ -466,7 +468,8 @@ The outcome of a rebind is never spoken, including a conflict that silently unbi
 - **The reader got (`261a218f`):** Only 'Rebind push button.' (the panel rebuilds again and refocuses). Italic loses Ctrl+I without a word.
 - **Platform:** All platforms (nothing is published); measured Linux
 - **Severity:** high; **layer:** framework
-- **Status:** Open.
+- **Status:** Partly fixed by `b89bdc832` (the ShortcutSettings redesign). What remains is under **Since**.
+- **Since `b89bdc832`:** a conflict and Reset all are announced (`shortcut_settings/state.rs:405-412`, `table.rs:501`); a plain rebind with no conflict, and clearing a chord with Delete (`state.rs:319-322`), announce nothing themselves and rely on the refocused control's new name. Not yet measured with a reader.
 - **Now (`c198e4d1`):** The outcome of a rebind is still never spoken. After Ctrl+K, and after Ctrl+I which takes the chord from Italic, the reader hears only 'Rebind push button.' as the panel rebuilds; Italic loses Ctrl+I without a word.
 - **Measured again:** chrome-shortcuts-capture 2 of 2 runs, chrome-shortcuts-conflict 2 of 2 runs
 - **Evidence (`c198e4d1`):**
