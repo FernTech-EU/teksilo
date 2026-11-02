@@ -591,8 +591,12 @@ impl Widget for ZoomCell {
         }
         // The pick was serviced and never advertised, so no screen reader
         // offered it: AT-SPI lists no action on a node that advertises none.
-        // No `Action::Focus`, for the reason a day has none (see `DayCell`).
+        // `Focus` as on a day (see `DayCell`): the calendar moves its cursor
+        // to the month or year and keeps keyboard focus.
         builder.add_action(Action::Click);
+        if self.enabled {
+            builder.add_action(Action::Focus);
+        }
     }
 }
 

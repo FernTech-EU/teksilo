@@ -524,6 +524,37 @@ fn the_advertised_click_action_actually_enters_the_page() {
     );
 }
 
+/// A `Focus` aimed at a node of the page the widget mirrors does not enter
+/// the page: nothing could focus that element in the engine, and entering the
+/// page would leave its own active element focused, pulling a reader's cursor
+/// away from the node it asked for.
+#[test]
+fn an_assistive_focus_on_a_page_node_does_not_enter_the_page() {
+    let (registry, records) = memory_registry();
+    let mut tree = tree_with_registry(registry);
+    let webview = WebView::new().url("https://example.com");
+    let wv_id = webview.id();
+    let id = tree.add(webview);
+    layout(&mut tree);
+    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
+        action: teksilo_core::accesskit::Action::Focus,
+        target: Some(id),
+        target_node: teksilo_core::accessibility::synthetic_node_id(
+            id,
+            7,
+            teksilo_core::accessibility::SyntheticKind::WebPageNode,
+        ),
+        data: None,
+    });
+    assert!(
+        !records
+            .ops_for(wv_id)
+            .iter()
+            .any(|op| matches!(op, WebViewOp::SetFocus { .. })),
+        "the page was not entered"
+    );
+}
+
 /// A window moved to a display with another scale keeps its logical size, so
 /// nothing relayouts on its own; the web view binds the device scale and
 /// repositions its native page at the new scale, which an engine positioning

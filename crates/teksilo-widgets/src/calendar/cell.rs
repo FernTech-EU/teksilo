@@ -314,14 +314,20 @@ impl Widget for DayCell {
         }
 
         builder.add_action(Action::Click);
-        // No `Action::Focus`: a day is reached through the grid's active
-        // descendant, never focused itself, as a grouped `RadioTile` is. The
-        // dispatcher services `Focus` by moving keyboard focus onto the node
-        // it names, focusable or not (`pointer_router.rs`), so an assistive
-        // technology that focused a day (a UIA `SetFocus`, VoiceOver's
-        // keyboard focus following its cursor) took focus off the grid. The
-        // grid then named no descendant, and every arrow press after it moved
-        // the cursor in silence, the platform's focus left on that day.
+        // `Focus`: a day is reached through the grid's active descendant and
+        // takes no keys itself, but it is where the platform's focus is, and
+        // `accesskit_consumer` reads a node as focusable (UIA
+        // `IsKeyboardFocusable`) from this action alone. The router offers an
+        // assistive `Focus` on a day to the calendar, which moves its cursor
+        // there and keeps keyboard focus (`common::item_focus`); it used to
+        // move keyboard focus onto the day, which took no keys. Only on a day
+        // the arrows can reach: not before `min` or after `max`, not in a
+        // disabled calendar, which the calendar refuses.
+        let out_of_range = self.min_date.is_some_and(|min| self.date < min)
+            || self.max_date.is_some_and(|max| self.date > max);
+        if self.enabled && !out_of_range {
+            builder.add_action(Action::Focus);
+        }
     }
 }
 

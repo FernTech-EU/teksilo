@@ -916,6 +916,11 @@ impl Widget for RichTextEditorBody {
         let (anchor_pair, caret_pair) = walk.selection();
         let syn_map = walk.syn_map;
         let link_map = walk.link_map;
+        let walk_link_ranges: std::collections::HashMap<_, _> = walk
+            .link_ranges
+            .iter()
+            .map(|&(id, start, end)| (id, (start, end)))
+            .collect();
 
         // A link Tab moved to is where a screen reader's focus is: the link's
         // node, as the editor's active descendant, which `accesskit_consumer`
@@ -960,6 +965,7 @@ impl Widget for RichTextEditorBody {
         if emits_children {
             *st.synthetic_to_element.borrow_mut() = syn_map;
             *st.link_nodes.borrow_mut() = link_map;
+            *st.link_ranges.borrow_mut() = walk_link_ranges;
         }
 
         builder.add_action(Action::Focus);

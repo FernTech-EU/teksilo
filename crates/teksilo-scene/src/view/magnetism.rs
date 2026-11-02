@@ -355,7 +355,76 @@ pub(crate) fn render_default_feedback(
     }
 }
 
+/// An assistive `Focus` on a magnet in the keyboard connect flow.
+///
+/// While the flow is on, the view names the magnet its arrows reached as its
+/// active descendant, so that magnet is the platform's focus, and
+/// `accesskit_consumer` reads a node as focusable (UIA `IsKeyboardFocusable`)
+/// from an advertised `Focus` alone. Every magnet the arrows could reach
+/// advertises it (see [`SceneView::magnet_takes_focus`]), and this moves the
+/// flow's focus there, as the arrows would, the view taking keyboard focus.
+pub(super) struct MagnetFocusRoute {
+    magnetism: Rc<MagnetismConfig>,
+    model: SceneModel,
+    connect_mode: Rc<Cell<bool>>,
+    focus: Rc<Cell<Option<MagnetId>>>,
+    pending: Rc<Cell<Option<MagnetId>>>,
+}
+
+impl MagnetFocusRoute {
+    /// Move the connect flow's focus to the magnet `target` names, when it is
+    /// one the arrows could reach now. `false` for any other node.
+    pub(super) fn focus(
+        &self,
+        target: teksilo_core::accesskit::NodeId,
+        self_id: WidgetId,
+        ctx: &mut EventContext,
+    ) -> bool {
+        use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id};
+        if !self.magnetism.enabled.get() || !self.connect_mode.get() {
+            return false;
+        }
+        let Some((mid, _)) = enabled_magnets(&self.model).into_iter().find(|(mid, _)| {
+            synthetic_node_id(self_id, mid.as_u64(), SyntheticKind::SceneMagnet) == target
+        }) else {
+            return false;
+        };
+        if !passes_gate(&self.model, &self.magnetism, self.pending.get(), mid) {
+            return false;
+        }
+        self.focus.set(Some(mid));
+        reveal_focus(&self.model, Some(mid), Some(self_id), ctx);
+        ctx.request_focus(self_id);
+        ctx.request_accessibility_update();
+        ctx.request_frame();
+        true
+    }
+}
+
 impl SceneView {
+    /// The route an assistive `Focus` on a magnet takes, when magnetism is
+    /// configured (see [`MagnetFocusRoute`]).
+    pub(super) fn magnet_focus_route(&self) -> Option<MagnetFocusRoute> {
+        Some(MagnetFocusRoute {
+            magnetism: self.magnetism.clone()?,
+            model: self.model.clone(),
+            connect_mode: self.magnet_connect_mode.clone(),
+            focus: self.magnet_focus.clone(),
+            pending: self.magnet_pending.clone(),
+        })
+    }
+
+    /// Whether the magnet `mid` advertises `Focus`: the connect flow is on
+    /// and its arrows could reach it now, which is what
+    /// [`MagnetFocusRoute::focus`] accepts.
+    pub(super) fn magnet_takes_focus(&self, mid: MagnetId) -> bool {
+        let Some(cfg) = self.magnetism_active() else {
+            return false;
+        };
+        self.magnet_connect_mode.get()
+            && passes_gate(&self.model, &cfg, self.magnet_pending.get(), mid)
+    }
+
     /// The active magnetism config for this view: `Some` iff a config is
     /// installed and its enabled signal is currently `true`.
     pub(super) fn magnetism_active(&self) -> Option<Rc<MagnetismConfig>> {

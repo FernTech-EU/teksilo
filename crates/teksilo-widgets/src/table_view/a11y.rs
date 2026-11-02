@@ -290,6 +290,11 @@ impl Widget for CellA11y {
         if let Some(span) = self.column_span {
             builder.set_column_span(span);
         }
+        // The table's focused cell is its active descendant, so a cell takes
+        // focus: without the action `accesskit_consumer` reads it as not
+        // focusable (UIA `IsKeyboardFocusable` false) even while it is the
+        // focus. The table's own handler services it (`on_item_focus`).
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
     }
 
     fn children(&self) -> Vec<WidgetId> {

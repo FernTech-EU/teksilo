@@ -388,41 +388,92 @@ fn the_today_button_clicked_while_the_grid_has_focus_is_not_announced() {
 }
 
 #[test]
-fn an_assistive_focus_on_a_day_leaves_the_keyboard_on_the_grid() {
-    // A day is the grid's active descendant and takes no keys of its own.
-    // It used to offer `Action::Focus`, which the dispatcher services by
-    // moving keyboard focus onto the node named, focusable or not. After a
-    // UIA `SetFocus` on a day, or VoiceOver's keyboard focus following its
-    // cursor there, the grid had lost focus and named no descendant, and the
-    // next arrow press moved the cursor in silence, the platform's focus
-    // left on the day that had been focused.
+fn an_assistive_focus_on_a_day_moves_the_grids_cursor_there() {
+    // A day is the grid's active descendant and takes no keys of its own,
+    // but it is where the platform's focus is, so it must read as focusable
+    // (UIA `IsKeyboardFocusable`). An assistive `Focus` on it (a UIA
+    // `SetFocus`, VoiceOver's keyboard focus following its cursor) does what
+    // the arrows do: the cursor moves to the day and the keyboard stays on
+    // the grid. It used to move keyboard focus onto the day, which took no
+    // keys, and the next arrow press moved the cursor in silence.
+    use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
     let calendar = twelfth_of_march();
     let (_mgr, mut tree, mut listener) = focused_french_grid(calendar);
     let grid = tree.focused();
     let day = tree
         .find_by_label("mardi 16 mars 2027")
         .expect("a day of the month on show");
+    let node = teksilo_core::accessibility::widget_id_to_node_id(day);
     assert!(
-        !tree
-            .accessibility_node(day)
-            .actions()
-            .contains(&teksilo_core::accesskit::Action::Focus),
-        "a day offers no focus of its own"
+        reads_as_focusable(&mut tree, node),
+        "a day the grid can point at reads as focusable"
     );
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
-        action: teksilo_core::accesskit::Action::Focus,
-        target: Some(day),
-        target_node: teksilo_core::accessibility::root_node_id(),
-        data: None,
-    });
+    assert!(assistive_focus(&mut tree, node), "the calendar took it");
     lay_out(&mut tree);
     assert_eq!(tree.focused(), grid, "keyboard focus stays on the grid");
-    assert_eq!(listener.heard(&mut tree), vec![]);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("mardi 16 mars 2027".to_string())]
+    );
     press(&mut tree, Key::ArrowRight);
     assert_eq!(
         listener.heard(&mut tree),
-        vec![Heard::Focus("samedi 13 mars 2027".to_string())]
+        vec![Heard::Focus("mercredi 17 mars 2027".to_string())]
     );
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn a_day_the_arrows_cannot_reach_takes_no_assistive_focus() {
+    // Before `min` or after `max` the arrows stop, and so does an assistive
+    // `Focus`: the day offers none, and one sent anyway moves nothing and is
+    // reported unhandled, the keyboard left on the grid and not parked on the
+    // day. A disabled calendar offers focus on none of its days.
+    use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
+    let calendar = twelfth_of_march().min_date(Date::constant(2027, 3, 10));
+    let focused_date = calendar.focused_date.clone();
+    let (_mgr, mut tree, _listener) = focused_french_grid(calendar);
+    let grid = tree.focused();
+    let early = tree
+        .find_by_label("lundi 8 mars 2027")
+        .expect("a day before min on show");
+    let node = teksilo_core::accessibility::widget_id_to_node_id(early);
+    assert!(!reads_as_focusable(&mut tree, node));
+    assert!(!assistive_focus(&mut tree, node), "nothing took it");
+    assert_eq!(tree.focused(), grid, "the keyboard stays on the grid");
+    assert_eq!(focused_date.get(), Date::constant(2027, 3, 12));
+
+    let calendar = twelfth_of_march().enabled(false);
+    let (_mgr, mut tree, _listener) = focused_french_grid(calendar);
+    let day = tree
+        .find_by_label("mardi 16 mars 2027")
+        .expect("a day of the month on show");
+    let node = teksilo_core::accessibility::widget_id_to_node_id(day);
+    assert!(!reads_as_focusable(&mut tree, node));
+    assert!(!assistive_focus(&mut tree, node), "nothing took it");
+    assert_ne!(tree.focused(), Some(day));
+    teksilo_i18n::thread_local::clear();
+}
+
+#[test]
+fn an_assistive_focus_on_a_month_moves_the_months_cursor_there() {
+    // The months view names the month under its cursor the same way, and a
+    // Focus on another month moves the cursor (the month shown) there.
+    use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
+    let calendar = twelfth_of_march();
+    let mode = calendar.mode.clone();
+    let visible = calendar.visible_month.clone();
+    let months = calendar.month_cells.clone();
+    let (_mgr, mut tree, _listener) = focused_french_grid(calendar);
+    let grid = tree.focused().expect("the calendar has focus");
+    mode.set(CalendarMode::Months);
+    lay_out(&mut tree);
+    let june = zoom_grid::cell_for(&months, 6).expect("June is shown");
+    let node = teksilo_core::accessibility::widget_id_to_node_id(june);
+    assert!(reads_as_focusable(&mut tree, node));
+    assert!(assistive_focus(&mut tree, node), "the calendar took it");
+    assert_eq!(visible.get(), YearMonth::new(2027, 6));
+    assert_eq!(tree.focused(), Some(grid));
     teksilo_i18n::thread_local::clear();
 }
 

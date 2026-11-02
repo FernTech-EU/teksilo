@@ -1068,6 +1068,59 @@ fn a_commit_closes_the_completion_list_when_nothing_matches() {
     assert_eq!(st.borrow().completion.test_labels(), vec!["enum"]);
 }
 
+/// A completion row is the editor's active descendant while highlighted, so it
+/// must read as focusable to a platform adapter (UIA `IsKeyboardFocusable`),
+/// and an assistive `Focus` on one highlights it, as the arrows would, the
+/// keyboard staying in the editor.
+#[test]
+fn an_assistive_focus_on_a_completion_row_highlights_it() {
+    use crate::common::item_focus::test_support::{
+        assistive_focus, platform_focus, reads_as_focusable,
+    };
+    let editor = super::widget::CodeEditor::new(TextDocument::new()).completion_provider(|_cx| {
+        ["enum", "else", "elif"]
+            .map(CompletionItem::new)
+            .into_iter()
+            .collect()
+    });
+    let st = editor.handle().state_handle();
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(600.0, 400.0));
+    let focus = tree.first_focusable_descendant(id).unwrap_or(id);
+    tree.focus(focus);
+    ime_frame(&mut tree);
+    type_keys(&mut tree, "e");
+    assert!(st.borrow().completion.open.get(), "typing opens the list");
+    // The panel rebuilds its rows as the highlight moves, so a row is found
+    // afresh: the options in list order, by their position in the set.
+    fn option(tree: &mut WidgetTree, nth: usize) -> teksilo_core::accesskit::NodeId {
+        let mut options: Vec<_> = tree
+            .sync_accessibility()
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == teksilo_core::accesskit::Role::ListBoxOption)
+            .map(|(id, node)| (node.position_in_set(), *id))
+            .collect();
+        options.sort();
+        options[nth].1
+    }
+    let else_row = option(&mut tree, 1);
+    assert_ne!(platform_focus(&mut tree), Some(else_row));
+    assert!(reads_as_focusable(&mut tree, else_row));
+
+    assert!(assistive_focus(&mut tree, else_row), "the row took it");
+    ime_frame(&mut tree);
+    assert_eq!(st.borrow().completion.selected.get(), 1);
+    let else_row = option(&mut tree, 1);
+    assert_eq!(platform_focus(&mut tree), Some(else_row));
+    assert_eq!(
+        tree.focused(),
+        Some(focus),
+        "the keyboard stays in the editor"
+    );
+}
+
 /// The states a composition went through are never recorded: one undo takes
 /// back what it committed, the next the typing before it.
 #[test]

@@ -783,9 +783,13 @@ impl Widget for RadioTile {
             }
         }
         builder.add_action(teksilo_core::accesskit::Action::Click);
-        // Only a standalone tile is a direct focus target; a grouped tile is
-        // reached via the group's roving `active_descendant`.
-        if !self.grouped {
+        // A standalone tile is a direct focus target. A grouped tile is
+        // reached via the group's roving `active_descendant`, which names the
+        // selected one: that tile is the platform's focus while the group
+        // has it, and `accesskit_consumer` reads a node as focusable (UIA
+        // `IsKeyboardFocusable`) from this action alone. The group answers
+        // it. The others cannot be the focus without being selected.
+        if !self.grouped || self.is_selected() {
             builder.add_action(teksilo_core::accesskit::Action::Focus);
         }
     }

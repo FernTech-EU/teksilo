@@ -970,6 +970,21 @@ impl Widget for SuggestionPanel {
                         highlighted_for_hover.set(Some(idx));
                     }
                 })
+                // An assistive `Focus` on the row (advertised by
+                // `SuggestionRow`) highlights it, as the arrows would; the
+                // field keeps keyboard focus and names it as its active
+                // descendant.
+                .on_access_action({
+                    let highlighted = highlighted.clone();
+                    move |action, ctx| {
+                        if action != teksilo_core::accesskit::Action::Focus {
+                            return teksilo_core::event::EventResponse::Ignored;
+                        }
+                        highlighted.set(Some(idx));
+                        ctx.request_accessibility_update();
+                        teksilo_core::event::EventResponse::Handled
+                    }
+                })
                 .cursor(CursorIcon::Pointer),
             );
             row_ids.push(row);
@@ -1163,6 +1178,11 @@ impl Widget for SuggestionRow {
         let is_selected = self.selected_signal.get() == Some(self.index);
         builder.set_selected(is_selected);
         builder.set_position_in_set(self.index + 1);
+        // The highlighted row is the field's active descendant, so the
+        // platform's focus, and `accesskit_consumer` reads a node as
+        // focusable (UIA `IsKeyboardFocusable`) from this action alone. The
+        // row answers it by taking the highlight.
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
         // The "of N" half lives on the `SuggestionListBox` container; a count
         // written here would be read by no adapter.
     }
@@ -1421,6 +1441,41 @@ mod tests {
         press(&mut tree, Key::Escape);
         let (_, focused) = focused_node(&mut tree);
         assert_eq!(focused.is_expanded(), Some(false));
+    }
+
+    /// A suggestion row is the field's active descendant while highlighted,
+    /// so it must read as focusable to a platform adapter (UIA
+    /// `IsKeyboardFocusable`), and an assistive `Focus` on it highlights it,
+    /// as the arrows would, the keyboard staying in the field.
+    #[test]
+    fn an_assistive_focus_on_a_suggestion_highlights_it() {
+        use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
+        let (mut tree, id) =
+            mounted(SearchField::new(Signal::new(String::new())).with_suggestions(fruit));
+        tree.focus(id);
+        let field = tree.focused().unwrap();
+        tree.type_text(field, "a");
+        tree.layout(size());
+        press(&mut tree, Key::ArrowDown);
+        let (nodes, focused) = focused_node(&mut tree);
+        let first = focused.active_descendant().expect("the highlight");
+        let second = nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some("apricot"))
+            .map(|(id, _)| *id)
+            .expect("the second suggestion");
+        assert_ne!(first, second);
+        assert!(reads_as_focusable(&mut tree, second));
+
+        assert!(assistive_focus(&mut tree, second), "the row took it");
+        tree.layout(size());
+        let (_, focused) = focused_node(&mut tree);
+        assert_eq!(focused.active_descendant(), Some(second));
+        assert_eq!(
+            tree.focused(),
+            Some(field),
+            "the keyboard stays in the field"
+        );
     }
 
     /// Arrowing through the suggestions moves the focused field's active

@@ -1144,13 +1144,15 @@ impl Widget for WebView {
         // The advertised `Click` needs something behind it: an action a widget
         // declares but does not execute is worse than one it never declared,
         // because AT reports the control as operable when it is not.
+        //
+        // No `Focus` here: the frame is focusable, so the router services a
+        // `Focus` on its own node itself, and a mirrored page node offers none
+        // (see `page_a11y::remap`).
         let action_handle = self.handle.clone();
         handlers = handlers.on_access_action(move |action, _ctx| {
             use teksilo_core::event::EventResponse;
-            if matches!(
-                action,
-                teksilo_core::accesskit::Action::Click | teksilo_core::accesskit::Action::Focus
-            ) && let Some(h) = action_handle.borrow().as_ref()
+            if action == teksilo_core::accesskit::Action::Click
+                && let Some(h) = action_handle.borrow().as_ref()
             {
                 h.set_focus();
                 return EventResponse::Handled;

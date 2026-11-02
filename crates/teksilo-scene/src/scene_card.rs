@@ -1023,10 +1023,13 @@ impl Widget for SceneCard {
         }
         {
             let this = self.handle();
-            handlers = handlers.on_access_action_request(move |action, _node, data, ctx| {
+            // Only the card's own node: a `Focus` aimed at something in the
+            // body (an item a body widget points at) is that widget's.
+            let own = teksilo_core::accessibility::widget_id_to_node_id(self_id);
+            handlers = handlers.on_access_action_request(move |action, node, data, ctx| {
                 use accesskit::{Action, ActionData};
                 match (action, data) {
-                    (Action::Focus, _) => {
+                    (Action::Focus, _) if node == own => {
                         this.select(ctx);
                         EventResponse::Handled
                     }

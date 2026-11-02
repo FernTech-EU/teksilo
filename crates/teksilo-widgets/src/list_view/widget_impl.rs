@@ -939,6 +939,28 @@ impl<T: 'static> Widget for ListView<T> {
             });
         }
 
+        // An assistive `Focus` on a realized row (each one advertises it, see
+        // `list_item_a11y`) makes it the current row, as Ctrl+arrow would,
+        // and gives the view keyboard focus. Not in a presentational list:
+        // its rows are no options and the view takes no focus.
+        if !self.presentational {
+            let rows = self.row_map.clone();
+            let handle = self.handle();
+            handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
+                self_id,
+                move |item, _ctx| {
+                    let found = rows
+                        .borrow()
+                        .iter()
+                        .find(|&&(_, row)| row == item)
+                        .map(|&(index, _)| index);
+                    found
+                        .inspect(|&index| handle.set_cursor(Some(index)))
+                        .is_some()
+                },
+            ));
+        }
+
         ctx.apply_self_handlers(handlers);
 
         // --- Body pane ---

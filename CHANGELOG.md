@@ -217,6 +217,19 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **An assistive `Focus` on a widget node that is not focusable itself, or
+  on a synthetic node, that advertises `Focus`, now reaches handlers**
+  (for a synthetic node, starting at the widget that owns it): the node's
+  own `on_access_action`, `on_access_action_request` and
+  `.access_action(Action::Focus, ..)`, then
+  those of each ancestor up to the first focusable one. A handler that
+  answers `Handled` replaces the framework's own focus move; the widget then
+  moves its cursor and asks for focus itself. Before, the framework moved
+  focus on its own and no handler ever saw a `Focus`. A node with a Tab stop
+  inside and a node that advertises no `Focus` still go the framework's way.
+  A `Focus` that lands nowhere (a handler that left focus elsewhere, or no
+  enabled focusable node to land on) is reported unhandled instead of
+  focusing the node itself.
 - **Breaking.** `WindowOps::begin_os_drag` returns an `OsDragStart` where it
   returned a `bool`. `WidgetTree::confirm_os_drag` takes the drag's id.
 - **A drag that went out through the platform and was dropped back on the
@@ -282,6 +295,10 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A `WebView`'s mirrored page nodes (Servo) no longer offer `Focus` to
+  assistive technology.** The mirror is read-only and nothing could focus the
+  element in the engine; a `Focus` on one entered the page, whose own focused
+  element then drew the reader's cursor away from the node asked for.
 - **In a window with a `DockingLayout`, F6 and Shift+F6 move focus between its
   sides and its centre** and a screen reader hears the region's name: the
   side's name ("Left panel", or the one given with `side_label`) and "Main
@@ -848,6 +865,20 @@ by crate for clarity, not because crates version independently.
 - **The terminal sends ESC and the key's own character for Option+key on
   macOS** with `alt_sends_escape`, where it sent ESC and the composed
   character.
+- **The item a widget points a screen reader at is focusable**: the current
+  row of a `ListView` or `TreeView`, the focused cell of a `TableView` or
+  `TreeTableView`, the cursor's tile in a `GridView`, the cursor's day,
+  month or year in a `Calendar`, the selected segment of a
+  `SegmentedControl` and tile of a `RadioTileGroup`, the highlighted row of
+  a `MenuList`, of a `ComboBox`, `SearchField` or `CommandPalette` list, of a
+  `CodeEditor` completion list and of the terminal's context menu, the link
+  Tab stopped on in a read-only `RichTextEditor`, a chart's focused datum,
+  and a `SceneView`'s roved transform handle or connect-flow magnet. On
+  Windows each had the keyboard focus but reported `IsKeyboardFocusable`
+  false, and Accessibility Insights labelled it "Not Focusable". A screen
+  reader's or an automation client's focus request on such an item now
+  moves the widget's cursor to it, as the arrow keys do, with the keyboard
+  on the widget. Before, it left the cursor where it was.
 
 #### Automation
 

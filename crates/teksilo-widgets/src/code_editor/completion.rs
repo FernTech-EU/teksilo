@@ -825,6 +825,7 @@ impl Widget for CompletionPanel {
             }
 
             let row_state = self.state.clone();
+            let selection = self.state.borrow().completion.selected.clone();
             let filtered_index = i;
             let posinset = i + 1;
             // Only the highlighted row paints a background; the rest are bare, so
@@ -845,6 +846,17 @@ impl Widget for CompletionPanel {
                     commit(&row_state, ctx, filtered_index);
                 })
                 .access_role(Role::ListBoxOption)
+                // The highlighted row is the editor's active descendant, so the
+                // platform's focus, and `accesskit_consumer` reads a node as
+                // focusable (UIA `IsKeyboardFocusable`) from `Focus` alone. An
+                // assistive `Focus` on a row highlights it, as the arrows
+                // would; the editor keeps keyboard focus.
+                .access_action(teksilo_core::accesskit::Action::Focus, move |ctx| {
+                    if selection.get() != filtered_index {
+                        selection.set(filtered_index);
+                    }
+                    ctx.request_accessibility_update();
+                })
                 .access_customize(move |b| {
                     b.inner_mut().set_selected(highlighted);
                     b.set_position_in_set(posinset);

@@ -188,9 +188,32 @@ impl Widget for TerminalMenu {
         let count = self.commands.len();
         let commands = self.commands.clone();
         let run = Rc::clone(&self.run);
+        // An assistive `Focus` on a row (each advertises it) highlights it,
+        // as the arrows would, and gives the menu keyboard focus: the row is
+        // the menu's active descendant, so the platform's focus.
+        let focus_row = {
+            let active = self.active.clone();
+            let rows = self.rows.clone();
+            let menu = ctx.self_id();
+            move |action, node, _data, ctx: &mut teksilo_core::widget::EventContext| {
+                if action != accesskit::Action::Focus {
+                    return EventResponse::Ignored;
+                }
+                let Some(index) = rows
+                    .iter()
+                    .position(|&row| widget_id_to_node_id(row) == node)
+                else {
+                    return EventResponse::Ignored;
+                };
+                active.set(index);
+                ctx.request_focus(menu);
+                EventResponse::Handled
+            }
+        };
         let handlers = HandlerSet::new()
             .focusable(true)
             .cursor(CursorIcon::Default)
+            .on_access_action_request(focus_row)
             .on_key(move |event, ctx| {
                 let WidgetEvent::KeyDown { key, .. } = event else {
                     return EventResponse::Ignored;
@@ -401,6 +424,11 @@ impl Widget for TerminalMenuRow {
         builder.set_role(accesskit::Role::MenuItem);
         builder.set_name(self.command.label());
         builder.add_action(accesskit::Action::Click);
+        // The menu names its highlighted row as its active descendant, so a
+        // row is where the platform's focus is, and `accesskit_consumer`
+        // reads a node as focusable (UIA `IsKeyboardFocusable`) from this
+        // action alone. The menu answers it by highlighting the row.
+        builder.add_action(accesskit::Action::Focus);
         builder.set_position_in_set(self.index + 1);
         builder.set_size_of_set(self.count);
     }
@@ -460,6 +488,40 @@ mod tests {
                 "a menu row at {density:?} must reach the density's target size"
             );
         }
+    }
+
+    /// A row is the menu's active descendant while highlighted, so it
+    /// advertises `Focus` (what `accesskit_consumer` reads as focusable, UIA
+    /// `IsKeyboardFocusable`), and an assistive `Focus` on one highlights it,
+    /// the keyboard on the menu.
+    #[test]
+    fn an_assistive_focus_on_a_row_highlights_it() {
+        use teksilo_core::widget_tree::WidgetTree;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let m = menu(vec![
+            TerminalMenuCommand::Copy,
+            TerminalMenuCommand::Paste,
+            TerminalMenuCommand::Clear,
+        ]);
+        let active = m.active.clone();
+        let id = tree.add(m);
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        let rows = tree.children(id);
+        assert!(
+            tree.accessibility_node(rows[2])
+                .actions()
+                .contains(&accesskit::Action::Focus),
+            "a row advertises Focus"
+        );
+        let handled = tree.dispatch_access_action(
+            widget_id_to_node_id(rows[2]),
+            accesskit::Action::Focus,
+            None,
+            &mut teksilo_core::window::NoopWindowOps,
+        );
+        assert!(handled, "the menu took it");
+        assert_eq!(active.get(), 2);
+        assert_eq!(tree.focused(), Some(id), "the keyboard is on the menu");
     }
 
     /// The panel's height is the row height times the row count plus its

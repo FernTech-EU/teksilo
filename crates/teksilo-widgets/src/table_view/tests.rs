@@ -2415,6 +2415,69 @@ fn active_descendant_clears_after_the_focused_cell_scrolls_out_of_realization() 
     );
 }
 
+// ── An assistive Focus on a cell ────────────────────────────────────────────
+
+/// A cell is the table's active descendant, so it must read as focusable to a
+/// platform adapter (UIA `IsKeyboardFocusable`), and an assistive `Focus` on
+/// it must do what Ctrl+arrow does: make it the focused cell, with the
+/// keyboard on the table.
+#[test]
+fn an_assistive_focus_on_a_cell_makes_it_the_focused_cell() {
+    use crate::common::item_focus::test_support::{
+        assistive_focus, platform_focus, reads_as_focusable,
+    };
+    use teksilo_core::accessibility::widget_id_to_node_id;
+
+    let (mut tree, table, _model) = build_table(10);
+    focus_at(&mut tree, table, 1, 1);
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    let cell = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.cell_map
+            .borrow()
+            .iter()
+            .find(|&&(pos, _)| pos == (3, 0))
+            .map(|&(_, id)| id)
+            .expect("row 3 is realized")
+    };
+    let node = widget_id_to_node_id(cell);
+    assert!(
+        reads_as_focusable(&mut tree, node),
+        "a cell the table can point at reads as focusable"
+    );
+
+    tree.clear_focus();
+    assert!(assistive_focus(&mut tree, node), "the table took it");
+    assert_eq!(read_focused_cell(&tree, table), Some((3, 0)));
+    assert_eq!(tree.focused(), Some(table), "the keyboard is on the table");
+    assert_eq!(platform_focus(&mut tree), Some(node));
+
+    // While a cell editor is open it keeps the keyboard, as it does against
+    // Ctrl+arrow: the focused cell stays where it is.
+    let editing = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.editing_cell_signal().clone()
+    };
+    editing.set(Some((3, 0)));
+    let other = {
+        let any = tree.widget_as_any(table).unwrap();
+        let tv = any.downcast_ref::<TableView<Row>>().unwrap();
+        tv.cell_map
+            .borrow()
+            .iter()
+            .find(|&&(pos, _)| pos == (5, 1))
+            .map(|&(_, id)| id)
+            .expect("row 5 is realized")
+    };
+    assert!(!assistive_focus(&mut tree, widget_id_to_node_id(other)));
+    assert_eq!(read_focused_cell(&tree, table), Some((3, 0)));
+}
+
 // ── Taking focus reveals the row the cursor is on ───────────────────────────
 
 /// Taking focus scrolls the keyboard cursor's row into the realized window.

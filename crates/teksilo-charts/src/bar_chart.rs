@@ -1838,6 +1838,44 @@ mod tests {
         assert_eq!(f.focus.get(), Some(key));
     }
 
+    /// The focused datum is the chart's active descendant, so a datum must
+    /// advertise `Focus` (what `accesskit_consumer` reads as focusable, UIA
+    /// `IsKeyboardFocusable`), and an assistive `Focus` on one moves the
+    /// chart's keyboard cursor there, the keyboard on the chart.
+    #[test]
+    fn an_assistive_focus_on_a_datum_moves_the_charts_cursor_there() {
+        let f = fixture(BarChart::new(sample_model()));
+        let (_, key) = bar_center(&f.marks, 2);
+        let node = teksilo_core::accessibility::synthetic_node_id(
+            f.chart,
+            hit::mark_element_id(key.0, key.1),
+            teksilo_core::accessibility::SyntheticKind::ChartMark,
+        );
+        let mut tree = f.tree;
+        let snapshot = tree.sync_accessibility();
+        let mark = snapshot
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == node)
+            .map(|(_, node)| node)
+            .expect("the datum's node");
+        assert!(mark.supports_action(teksilo_core::accesskit::Action::Focus));
+        let handled = tree.dispatch_access_action(
+            node,
+            teksilo_core::accesskit::Action::Focus,
+            None,
+            &mut teksilo_core::window::NoopWindowOps,
+        );
+        assert!(handled, "the chart owns its marks' actions");
+        assert_eq!(f.focus.get(), Some(key));
+        assert_eq!(
+            tree.focused(),
+            Some(f.chart),
+            "the keyboard is on the chart"
+        );
+        assert_eq!(active_descendant_of(&mut tree, f.chart), Some(node));
+    }
+
     #[test]
     fn the_focused_datum_is_published_as_the_active_descendant() {
         use teksilo_core::event::{Key, Modifiers};

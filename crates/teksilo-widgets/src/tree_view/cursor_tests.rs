@@ -244,3 +244,36 @@ fn an_at_click_on_a_focused_row_node_does_not_leave_focus_on_nothing() {
         assert_eq!(focused, tv, "the row went: focus is on the view");
     }
 }
+
+/// A row is the tree's active descendant, so it must read as focusable to a
+/// platform adapter (UIA `IsKeyboardFocusable`), and an assistive `Focus` on
+/// it does what Ctrl+arrow does: the cursor moves to it, the selection stays,
+/// and the keyboard is on the tree.
+#[test]
+fn an_assistive_focus_on_a_row_moves_the_cursor_there() {
+    use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
+    let (view, _first, sel) = make(20, SelectionMode::Multi);
+    let handle = view.handle();
+    let (mut tree, tv) = mount(view);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(announced_row(&mut tree, tv), Some(0));
+    let row = the_view(&tree, tv)
+        .row_map
+        .borrow()
+        .iter()
+        .find(|&&(index, _)| index == 3)
+        .map(|&(_, id)| id)
+        .expect("row 3 is realized");
+    let node = teksilo_core::accessibility::widget_id_to_node_id(row);
+    assert!(
+        reads_as_focusable(&mut tree, node),
+        "a row the tree can point at reads as focusable"
+    );
+
+    tree.clear_focus();
+    assert!(assistive_focus(&mut tree, node), "the tree took it");
+    assert_eq!(handle.cursor(), Some(3));
+    assert_eq!(tree.focused(), Some(tv), "the keyboard is on the tree");
+    assert_eq!(announced_row(&mut tree, tv), Some(3), "row 3 is announced");
+    assert_eq!(sel.selected_indices(), vec![0], "the selection stayed");
+}

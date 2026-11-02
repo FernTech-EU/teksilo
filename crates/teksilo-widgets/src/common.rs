@@ -35,6 +35,7 @@ pub(crate) mod input_editor;
 pub(crate) mod input_journal;
 pub(crate) mod input_trace;
 pub(crate) mod interaction;
+pub(crate) mod item_focus;
 pub(crate) mod list_nav;
 #[cfg(test)]
 pub(crate) mod locale_switch_test;

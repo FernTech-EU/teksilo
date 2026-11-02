@@ -967,6 +967,35 @@ fn active_descendant_tracks_the_selection() {
     );
 }
 
+/// The selected segment is the control's active descendant, so it must read
+/// as focusable to a platform adapter (UIA `IsKeyboardFocusable`), and an
+/// assistive `Focus` on it gives the control keyboard focus. Another segment
+/// cannot be the focus without being chosen, so it offers none.
+#[test]
+fn the_selected_segment_reads_as_focusable_and_takes_an_assistive_focus() {
+    use crate::common::item_focus::test_support::{
+        assistive_focus, platform_focus, reads_as_focusable,
+    };
+    use teksilo_core::accessibility::widget_id_to_node_id;
+    let selected = Signal::new(Some(B));
+    let mut t = measured_tree();
+    let control = t.add(abc(selected.clone()));
+    settle(&mut t, 300.0, 60.0);
+    let cells = active_cells(&t, control);
+    let (a, b) = (
+        widget_id_to_node_id(cells[0]),
+        widget_id_to_node_id(cells[1]),
+    );
+    assert!(reads_as_focusable(&mut t, b), "the selected segment");
+    assert!(!reads_as_focusable(&mut t, a), "another segment");
+
+    assert!(assistive_focus(&mut t, b), "the control took it");
+    assert_eq!(t.focused(), Some(control), "the keyboard is on the control");
+    assert_eq!(platform_focus(&mut t), Some(b));
+    assert!(!assistive_focus(&mut t, a), "no focus offered there");
+    assert_eq!(selected.get(), Some(B), "a focus request chose nothing");
+}
+
 #[test]
 fn radio_group_relations_never_reference_an_overflowed_segment() {
     // A dormant cell publishes no AccessKit node, so a `push_to_radio_group`

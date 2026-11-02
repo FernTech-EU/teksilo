@@ -319,6 +319,54 @@ fn connect_mode_points_active_descendant_at_focused_magnet() {
     );
 }
 
+/// In the connect flow the magnet the arrows reached is the view's active
+/// descendant, so a magnet the arrows could reach advertises `Focus` (what
+/// `accesskit_consumer` reads as focusable, UIA `IsKeyboardFocusable`), and
+/// an assistive `Focus` on one moves the flow's focus there, the keyboard on
+/// the view. Outside the flow no magnet can be the focus, and none offers it.
+#[test]
+fn an_assistive_focus_on_a_magnet_moves_the_connect_flow_there() {
+    use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
+    use teksilo_core::accesskit::Action;
+
+    let (scene, _a, _am, _b, bm) = two_node_scene();
+    let (cfg, _rec) = recording_config(source_to_target);
+    let mut tree = WidgetTree::new();
+    let view_id = tree.add(SceneView::new(scene).magnetism(cfg));
+    tree.layout(SizeProposal::exact(800.0, 600.0));
+    let target = synthetic_node_id(view_id, bm.as_u64(), SyntheticKind::SceneMagnet);
+    let offers_focus = |tree: &mut WidgetTree| {
+        tree.sync_accessibility()
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == target)
+            .map(|(_, node)| node.supports_action(Action::Focus))
+            .expect("the magnet's node")
+    };
+    assert!(!offers_focus(&mut tree), "no connect flow, no focus");
+
+    tree.focus(view_id);
+    key(&mut tree, Key::Character('m'));
+    assert!(offers_focus(&mut tree), "the arrows could reach it");
+    tree.clear_focus();
+    let handled = tree.dispatch_access_action(
+        target,
+        Action::Focus,
+        None,
+        &mut teksilo_core::window::NoopWindowOps,
+    );
+    assert!(handled, "the view took it");
+    assert_eq!(tree.focused(), Some(view_id), "the keyboard is on the view");
+    let update = tree.sync_accessibility();
+    let view = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == widget_id_to_node_id(view_id))
+        .map(|(_, node)| node)
+        .expect("the view's node");
+    assert_eq!(view.active_descendant(), Some(target));
+}
+
 #[test]
 fn multi_view_magnet_at_nodes_are_per_view() {
     use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id};

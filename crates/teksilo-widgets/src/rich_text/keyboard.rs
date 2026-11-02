@@ -602,12 +602,7 @@ pub(super) fn handle_key(
             // first) the key leaves the editor. `TabKey::MoveFocus` turns the
             // stops off. The filter question agrees with Enter's (above) for
             // every shipped filter.
-            Key::Tab
-                if !tab_escape
-                    && !tab_consumed
-                    && st.tab_key == crate::common::editor_runtime::TabKey::Edit
-                    && st.on_link_activated.is_some() =>
-            {
+            Key::Tab if !tab_escape && st.links_are_stops() => {
                 match link_tab_stop(&st, shift) {
                     Some((start, end)) => {
                         st.cursor.set_position(start, MoveMode::MoveAnchor);

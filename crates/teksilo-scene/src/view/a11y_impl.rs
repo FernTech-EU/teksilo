@@ -525,6 +525,12 @@ impl SceneView {
                         child.set_numeric_value_step(step);
                     }
                     child.add_action(accesskit::Action::Click);
+                    // `Focus` as `Click`: it enters the keyboard mode on this
+                    // handle, which the view then names as its active
+                    // descendant (so the platform's focus, and
+                    // `accesskit_consumer` reads a node as focusable from
+                    // this action alone).
+                    child.add_action(accesskit::Action::Focus);
                     // Every handle takes both, slider or not: a corner has no
                     // single value to announce but it still has two directions
                     // to be pushed in, and refusing the actions there would
@@ -734,6 +740,9 @@ impl SceneView {
                 // not a piece of the drawing.
                 let (cx, cy) = (scene_pos.x, scene_pos.y);
                 let half = MAGNET_AT_HALF_EXTENT / view_scale(&view_transform);
+                // In the keyboard connect flow a magnet the arrows can reach
+                // can be the view's active descendant, so it takes focus.
+                let takes_focus = self.magnet_takes_focus(mid);
                 builder.push_scene_child_under(
                     Some(synthetic_id),
                     mid.as_u64(),
@@ -741,6 +750,9 @@ impl SceneView {
                     |child| {
                         child.set_role(accesskit::Role::Button);
                         child.set_name(name);
+                        if takes_focus {
+                            child.add_action(accesskit::Action::Focus);
+                        }
                         child.inner_mut().set_bounds(accesskit::Rect {
                             x0: (cx - half) as f64,
                             y0: (cy - half) as f64,

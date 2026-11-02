@@ -201,6 +201,38 @@ fn a_long_list_is_one_list_box_of_named_options() {
     assert_one_flat_list_box(&reader, "Item 01");
 }
 
+/// The option the keyboard is on is the combo box's active descendant, so an
+/// option must read as focusable to a platform adapter (UIA
+/// `IsKeyboardFocusable`), and an assistive `Focus` on one moves the highlight
+/// there, as the arrows would, committing nothing.
+#[test]
+fn an_assistive_focus_on_an_option_highlights_it() {
+    use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
+    use teksilo_core::accessibility::widget_id_to_node_id;
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let (combo, mut reader) = focused_combo(
+        &mut tree,
+        ComboBox::new(["Apple", "Banana", "Cherry"], selected.clone()).label(lit!("Fruit")),
+    );
+    press(&mut tree, Key::ArrowDown, Modifiers::ALT);
+    assert_eq!(reader.heard(&mut tree), vec![focus("Apple")]);
+    let cherry = widget_id_to_node_id(tree.find_by_label("Cherry").expect("the option"));
+    assert!(reads_as_focusable(&mut tree, cherry));
+
+    assert!(assistive_focus(&mut tree, cherry), "the option took it");
+    laid_out(&mut tree);
+    assert_eq!(reader.heard(&mut tree), vec![focus("Cherry")]);
+    assert_eq!(
+        tree.focused(),
+        Some(combo),
+        "the keyboard is on the combo box"
+    );
+    assert_eq!(selected.get(), None, "a focus request commits nothing");
+    press(&mut tree, Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(reader.heard(&mut tree), vec![focus("Banana")]);
+}
+
 #[test]
 fn a_short_list_is_one_list_box_of_named_options() {
     let mut tree = light_tree();

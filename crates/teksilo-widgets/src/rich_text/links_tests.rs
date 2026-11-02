@@ -204,11 +204,9 @@ fn tab_and_shift_tab_move_between_a_viewers_links() {
 /// focus (UIA's `HasKeyboardFocus`, which `accesskit_windows` reads from
 /// `NodeRef::is_focused`, active descendant included).
 ///
-/// Not `is_focusable`: that reads an advertised `Action::Focus`, which the
-/// link does not carry, as the table cells a `TableView` names as its active
-/// descendant do not. The dispatcher services `Action::Focus` on the
-/// editor that owns the node, so advertising it on the link would promise
-/// a focus that lands on the document, not on the link.
+/// `is_focusable` is asked apart (see
+/// `an_assistive_focus_on_a_link_makes_it_the_link_stop`): it reads the
+/// advertised `Action::Focus`, not where the focus is.
 fn reader_focus(m: &Mounted) -> (Role, Option<String>, bool) {
     let state = m.reader.platform().state();
     let focus = state.focus().expect("the window has focus");
@@ -293,6 +291,63 @@ fn a_link_tab_selects_holds_the_readers_focus() {
     m.press(Key::Tab, Modifiers::SHIFT);
     assert_eq!(m.selection(), (4, 11));
     assert_eq!(reader_focus(&m).0, Role::Document);
+}
+
+/// A link Tab stops on is where the platform's focus is when selected, so it
+/// must read as focusable (UIA `IsKeyboardFocusable`), and an assistive
+/// `Focus` on it does what Tab does: it becomes the link stop, with the
+/// keyboard on the editor. A link that is no stop (a viewer that follows no
+/// link, an editor) offers no focus.
+#[test]
+fn an_assistive_focus_on_a_link_makes_it_the_link_stop() {
+    use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
+    let mut m = Mounted::new(viewer(doc(
+        "see [backups](help:backups) or [notes](help:notes)",
+    )));
+    m.caret_at(0);
+    let notes = find_link(&m, "notes");
+    assert!(
+        reads_as_focusable(&mut m.tree, notes),
+        "a link stop reads as focusable"
+    );
+    let after = m
+        .reader
+        .widget(Role::Button, "After")
+        .expect("the After button");
+    m.tree.focus(after);
+    m.settle();
+    m.reader.heard(&mut m.tree);
+
+    assert!(assistive_focus(&mut m.tree, notes), "the editor took it");
+    m.settle();
+    let heard = m.reader.heard(&mut m.tree);
+    assert_eq!(
+        reader_focus(&m),
+        (Role::Link, Some("notes".into()), true),
+        "{heard:?}"
+    );
+    assert!(
+        left(&heard, "notes"),
+        "focus moves onto the link: {heard:?}"
+    );
+    m.press(Key::Tab, Modifiers::SHIFT);
+    assert_eq!(
+        reader_focus(&m).1.as_deref(),
+        Some("backups"),
+        "Shift+Tab goes on from the link"
+    );
+
+    for editor in [
+        RichTextEditor::read_only(doc(SEE_BACKUPS)),
+        RichTextEditor::editor(doc(SEE_BACKUPS)).on_link_activated(|_, _| {}),
+    ] {
+        let mut m = Mounted::new(editor);
+        let link = find_link(&m, "backups");
+        assert!(
+            !reads_as_focusable(&mut m.tree, link),
+            "a link that is no stop offers no focus"
+        );
+    }
 }
 
 /// A key that changes nothing the walk reads (Escape, a letter in a

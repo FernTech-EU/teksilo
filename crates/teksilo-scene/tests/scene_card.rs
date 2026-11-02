@@ -344,6 +344,57 @@ fn a_tap_selects_the_card_and_brings_it_to_the_front() {
     );
 }
 
+/// An assistive `Focus` aimed at something in the body belongs to the body:
+/// on a `DateEdit` it lands on the field's first segment, as it does outside
+/// a card, and on a plain label it lands nowhere and is reported unhandled.
+/// Neither selects the card nor brings it forward.
+#[test]
+fn an_assistive_focus_in_the_body_is_not_the_cards() {
+    use teksilo_core::accesskit::Action;
+    let mut b = Board::with_body(|| {
+        Box::new(
+            teksilo_widgets::primitives::VStack::new()
+                .child(teksilo_widgets::DateEdit::new(Signal::new(None)).label(lit!("Due date")))
+                .child(TextWidget::new(lit!("Plain words"))),
+        )
+    });
+    let field = b.tree.find_by_label("Due date").expect("the date field");
+    let label = b.tree.find_by_label("Plain words").expect("the label");
+    let mut ops = teksilo_core::window::NoopWindowOps;
+
+    let handled = b.tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(field),
+        Action::Focus,
+        None,
+        &mut ops,
+    );
+    assert!(handled, "the field took it");
+    let focused = b.tree.focused().expect("something has focus");
+    assert!(
+        focused == field || b.tree.is_descendant_of(focused, field),
+        "the keyboard is in the date field"
+    );
+    assert!(
+        b.selection.selected().is_empty(),
+        "the card was not selected"
+    );
+    assert_eq!(b.mode.get(), CardMode::Idle);
+
+    b.tree.clear_focus();
+    let handled = b.tree.dispatch_access_action(
+        teksilo_core::accessibility::widget_id_to_node_id(label),
+        Action::Focus,
+        None,
+        &mut ops,
+    );
+    assert!(!handled, "a label takes no focus");
+    assert_eq!(b.tree.focused(), None);
+    assert!(
+        b.selection.selected().is_empty(),
+        "the card was not selected"
+    );
+}
+
 /// `bring_to_front` on an entry that is already strictly on top does nothing —
 /// and, in particular, does not pull it **down**.
 ///

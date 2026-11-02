@@ -1050,6 +1050,12 @@ impl Widget for MenuItem {
         }
         // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(teksilo_core::accesskit::Action::Click);
+        // The menu keeps keyboard focus and names its highlighted row as its
+        // active descendant, so a row is where the platform's focus is, and
+        // `accesskit_consumer` reads a node as focusable (UIA
+        // `IsKeyboardFocusable`) from this action alone. The `MenuList`
+        // answers it by highlighting the row.
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
         // Announce the current chord *live*: a manual label, else the
         // per-id signal's present value — so AT reflects a rebind even
         // though the item itself is never rebuilt for shortcut changes.

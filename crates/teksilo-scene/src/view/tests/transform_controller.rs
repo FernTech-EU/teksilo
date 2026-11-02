@@ -1101,6 +1101,48 @@ fn an_at_increment_on_a_handle_makes_the_same_change_the_keyboard_makes() {
     );
 }
 
+/// A handle is the view's active descendant in the keyboard mode, so it
+/// advertises `Focus` (what `accesskit_consumer` reads as focusable, UIA
+/// `IsKeyboardFocusable`), and an assistive `Focus` on one enters that mode on
+/// it with the keyboard on the view.
+#[test]
+fn an_assistive_focus_on_a_handle_roves_the_keyboard_mode_there() {
+    use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};
+
+    let (model, a, _b, selection) = two_square_scene();
+    selection.replace([a]);
+    let (mut tree, view_id) = mount(model, selection, TransformConfig::new());
+    let node = synthetic_node_id(
+        view_id,
+        TransformHandle::Rotate.index() as u64 + 1,
+        SyntheticKind::SceneHandle,
+    );
+    let offers_focus = tree
+        .sync_accessibility()
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == node)
+        .map(|(_, n)| n.supports_action(accesskit::Action::Focus))
+        .expect("the rotate handle's node");
+    assert!(offers_focus);
+    let handled = tree.dispatch_access_action(
+        node,
+        accesskit::Action::Focus,
+        None,
+        &mut teksilo_core::window::NoopWindowOps,
+    );
+    assert!(handled, "the view took it");
+    assert_eq!(tree.focused(), Some(view_id), "the keyboard is on the view");
+    let update = tree.sync_accessibility();
+    let view = update
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == widget_id_to_node_id(view_id))
+        .map(|(_, n)| n)
+        .expect("the view's node");
+    assert_eq!(view.active_descendant(), Some(node));
+}
+
 #[test]
 fn the_keyboard_mode_points_active_descendant_at_the_roved_handle() {
     use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id, widget_id_to_node_id};

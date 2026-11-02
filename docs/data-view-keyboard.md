@@ -356,6 +356,12 @@ type-to-edit on bare letters, and the editor wins; the WinForms default
   reader. The tree views answer `Action::Expand` and `Action::Collapse`, on
   branch rows only, a leaf that advertised them would be the same
   advertised-and-inert bug one level down.
+- Every row, cell or tile a view can name as its active descendant advertises
+  `Action::Focus`. `accesskit_consumer` reads a node as focusable (UIA
+  `IsKeyboardFocusable`) from that action alone, not from the active
+  descendant, so without it the focused cell read "not focusable". The view
+  answers it as Ctrl+arrow does: the cursor moves to the item, the selection
+  stays, and the keyboard is on the view.
 
 **Known upstream limitations.** A selected *row* does not report `IsSelected`
 on Windows: `Role::Row` is absent from `accesskit_windows`' selection-item list,

@@ -307,6 +307,14 @@ impl Widget for SegmentCell {
         }
         // Framework a11y walker sets `set_disabled` from arena state.
         builder.add_action(teksilo_core::accesskit::Action::Click);
+        // The selected segment is the control's active descendant, so the
+        // platform's focus while the control has it, and `accesskit_consumer`
+        // reads a node as focusable (UIA `IsKeyboardFocusable`) from this
+        // action alone. The control answers it. The other segments cannot be
+        // the focus without being selected.
+        if self.selected.get() == self.index {
+            builder.add_action(teksilo_core::accesskit::Action::Focus);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

@@ -1029,19 +1029,21 @@ fn a_selection_change_keeps_the_readers_tile_and_changes_its_state() {
     teksilo_i18n::thread_local::clear();
 }
 
-/// A tile is the grid's active descendant and takes no keys of its own. It
-/// used to offer `Action::Focus`, which the dispatcher services by moving
-/// keyboard focus onto the node named, focusable or not. After a UIA
-/// `SetFocus` on a tile, an AT-SPI `grab_focus`, or VoiceOver's keyboard focus
-/// following its cursor there, keyboard focus sat on that tile while the
-/// grid's cursor stayed where it was: Enter opened the cursor's tile, not the
-/// one the reader had just been told about, and the next key that rebuilt the
-/// tiles dropped focus onto the window.
+/// A tile is the grid's active descendant and takes no keys of its own, but it
+/// is where the platform's focus is, so it must read as focusable (UIA
+/// `IsKeyboardFocusable`). An assistive `Focus` on it (a UIA `SetFocus`, an
+/// AT-SPI `grab_focus`, VoiceOver's keyboard focus following its cursor) does
+/// what Ctrl+arrow does: the grid's cursor moves to the tile and the keyboard
+/// stays on the grid. It used to move keyboard focus onto the tile, which took
+/// no keys, while the cursor stayed behind: Enter opened the cursor's tile,
+/// not the one the reader had just been told about.
 #[test]
-fn an_assistive_focus_on_a_tile_leaves_the_keyboard_on_the_grid() {
+fn an_assistive_focus_on_a_tile_moves_the_grids_cursor_there() {
     use crate::common::heard_test::{Heard, Listener};
+    use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
     use std::cell::Cell;
     use std::rc::Rc;
+    use teksilo_core::accessibility::widget_id_to_node_id;
     use teksilo_core::event::{Key, Modifiers};
     let activated = Rc::new(Cell::new(None));
     let (_mgr, mut tree) = crate::common::locale_switch_test::speaking("fr-FR");
@@ -1064,41 +1066,24 @@ fn an_assistive_focus_on_a_tile_leaves_the_keyboard_on_the_grid() {
         vec![Heard::Focus("Photo 0".to_string())]
     );
 
-    let tile = tiles(&tree, id)[2];
-    tree.dispatch_event(teksilo_core::event::WidgetEvent::AccessAction {
-        action: teksilo_core::accesskit::Action::Focus,
-        target: Some(tile),
-        target_node: teksilo_core::accessibility::root_node_id(),
-        data: None,
-    });
+    let tile = widget_id_to_node_id(tiles(&tree, id)[2]);
+    assert!(
+        reads_as_focusable(&mut tree, tile),
+        "a tile the grid can point at reads as focusable"
+    );
+    assert!(assistive_focus(&mut tree, tile), "the grid took it");
     tree.layout(SizeProposal::exact(400.0, 300.0));
     assert_eq!(tree.focused(), Some(id), "keyboard focus stays on the grid");
-    assert_eq!(listener.heard(&mut tree), vec![]);
+    assert_eq!(
+        listener.heard(&mut tree),
+        vec![Heard::Focus("Photo 2".to_string())]
+    );
 
     press(&mut tree, Key::Enter, Modifiers::NONE);
     assert_eq!(
         activated.get(),
-        Some(0),
+        Some(2),
         "Enter opens the tile the reader is on"
-    );
-    press(&mut tree, Key::ArrowRight, Modifiers::NONE);
-    assert_eq!(tree.focused(), Some(id));
-    // The count is raised in the update that moves the reader to the next
-    // tile, so it is held back until that move has been heard: Orca stops
-    // speaking to read a new focus, and would cut it.
-    assert_eq!(
-        listener.heard(&mut tree),
-        vec![
-            Heard::Focus("Photo 1".to_string()),
-            Heard::Live("1 élément sélectionné".to_string()),
-        ]
-    );
-    assert!(
-        !tree
-            .accessibility_node(tile)
-            .actions()
-            .contains(&teksilo_core::accesskit::Action::Focus),
-        "a tile offers no focus of its own"
     );
     teksilo_i18n::thread_local::clear();
 }

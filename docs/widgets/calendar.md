@@ -145,9 +145,10 @@ assembled from numbers or from translated names (see
   opened. Its name is its title: the month and year, the year, or the
   decade in words ("2020 to 2029").
 - Month and year cells of the zoomed views: `Role::GridCell`, a month
-  named with its year ("mai 2026"), `Action::Click` advertised, no Tab
-  stop of their own: the grid names the one under the cursor as its
-  active descendant, as it does a day.
+  named with its year ("mai 2026"), `Action::Click` and `Action::Focus`
+  advertised, no Tab stop of their own: the grid names the one under the
+  cursor as its active descendant, as it does a day, and an assistive
+  `Focus` on one moves the cursor there.
 - Weekday header row: `Role::Row` of `Role::ColumnHeader` cells, each
   labelled with the long weekday name (e.g. "Monday").
 - Weeks: `Role::Row`, each holding its seven day cells, so the grid is
@@ -155,9 +156,11 @@ assembled from numbers or from translated names (see
 - Day cells: `Role::GridCell` named by the day in full
   ("Saturday, May 2, 2026", "samedi 2 mai 2026"), `set_selected`,
   `set_aria_current(Date)` on today, `set_disabled` for filter
-  rejections, and `Action::Click` advertised. Keyboard focus stays on
-  the Calendar root, which names the cell under the cursor as its
-  active descendant while it holds focus in the day view. AccessKit
+  rejections, and `Action::Click` and `Action::Focus` advertised.
+  Keyboard focus stays on the Calendar root, which names the cell under
+  the cursor as its active descendant while it holds focus in the day
+  view; an assistive `Focus` on a day moves the cursor there, as the
+  arrows would. AccessKit
   reports that cell as the focus on AT-SPI, UIA and macOS, so each
   arrow press, and each change of month, is a focus change to the new
   day, which is what a screen reader speaks.

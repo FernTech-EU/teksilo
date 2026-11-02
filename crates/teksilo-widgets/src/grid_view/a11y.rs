@@ -225,17 +225,14 @@ impl Widget for TileA11y {
                 builder.add_action(teksilo_core::accesskit::Action::Expand);
             }
         }
-        // No `Action::Focus`: a tile is reached through the grid's active
-        // descendant and takes no keys of its own. The dispatcher services
-        // `Focus` itself, moving keyboard focus onto the node named, focusable
-        // or not, so a screen reader's focus request on a tile (UIA
-        // `SetFocus`, AT-SPI `grab_focus`, VoiceOver's keyboard focus following
-        // its cursor) took focus off the grid while the grid's cursor stayed
-        // where it was: Enter opened the cursor's tile rather than the one the
-        // reader was on, and the next key that rebuilt the tiles dropped focus
-        // onto the window. An assistive `Focus` on a tile is now reported
-        // unhandled and moves nothing; `Click` chooses the tile and moves the
-        // cursor to it. `ListItemWrapper` and a calendar day do the same.
+        // `Focus`: a tile is reached through the grid's active descendant and
+        // takes no keys of its own, but it is where the platform's focus is,
+        // and `accesskit_consumer` reads a node as focusable (UIA
+        // `IsKeyboardFocusable`) from this action alone. The router offers an
+        // assistive `Focus` on a tile to the grid, which moves its cursor to
+        // the tile and keeps keyboard focus (`common::item_focus`); it used
+        // to move keyboard focus onto the tile itself, which took no keys.
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
         // Advertised, not just handled: every adapter gates its scroll
         // pattern on the node *supporting* the action (UIA's
         // `IScrollItemProvider`, AppKit's `accessibilityScrollToVisible`,

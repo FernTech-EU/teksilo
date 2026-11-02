@@ -156,26 +156,46 @@ impl SceneView {
     /// along, so this is where a handle's `Increment` becomes a keyboard step.
     /// Without it the actions the frame advertises would be advertised and dead,
     /// which is worse than not advertising them at all.
+    ///
+    /// The same handler answers an assistive `Focus` on a magnet in the
+    /// keyboard connect flow (see `super::magnetism::focus_magnet`): the
+    /// slot holds one handler, so the two routes share it.
     pub(super) fn register_transform_handlers(
         &self,
         handlers: teksilo_core::widget_builder::HandlerSet,
         self_id: WidgetId,
     ) -> teksilo_core::widget_builder::HandlerSet {
-        let Some(driver) = self.transform_driver() else {
+        let driver = self.transform_driver();
+        let magnets = self.magnet_focus_route();
+        if driver.is_none() && magnets.is_none() {
             return handlers;
-        };
+        }
         handlers.on_access_action_request(move |action, target, data, ctx| {
             use teksilo_core::accessibility::{SyntheticKind, synthetic_node_id};
             use teksilo_core::event::EventResponse;
-            for handle in HANDLE_ORDER {
-                let node = synthetic_node_id(
-                    self_id,
-                    handle.index() as u64 + 1,
-                    SyntheticKind::SceneHandle,
-                );
-                if node == target && driver.access_action(action, data.as_ref(), handle, ctx) {
-                    return EventResponse::Handled;
+            if let Some(driver) = driver.as_ref() {
+                for handle in HANDLE_ORDER {
+                    let node = synthetic_node_id(
+                        self_id,
+                        handle.index() as u64 + 1,
+                        SyntheticKind::SceneHandle,
+                    );
+                    if node == target && driver.access_action(action, data.as_ref(), handle, ctx) {
+                        // A handle is the view's active descendant in the
+                        // keyboard mode the action entered, so the view takes
+                        // keyboard focus, as the mode key would leave it.
+                        if action == accesskit::Action::Focus {
+                            ctx.request_focus(self_id);
+                        }
+                        return EventResponse::Handled;
+                    }
                 }
+            }
+            if action == accesskit::Action::Focus
+                && let Some(route) = magnets.as_ref()
+                && route.focus(target, self_id, ctx)
+            {
+                return EventResponse::Handled;
             }
             EventResponse::Ignored
         })

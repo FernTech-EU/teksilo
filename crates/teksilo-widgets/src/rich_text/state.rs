@@ -722,6 +722,12 @@ pub(crate) struct EditorState {
     /// it. Replaced by every real walk, as `synthetic_to_element` is.
     pub link_nodes: RefCell<std::collections::HashMap<teksilo_core::accesskit::NodeId, String>>,
 
+    /// Each `Role::Link` node the last real walk emitted, with the range of
+    /// the view's text it covers, so an assistive technology's Focus on a
+    /// link makes it the link stop Tab would. Replaced by every real walk.
+    pub link_ranges:
+        RefCell<std::collections::HashMap<teksilo_core::accesskit::NodeId, (usize, usize)>>,
+
     /// Per-synthetic-NodeId lookup table populated during the
     /// accessibility walk. Maps each emitted `Role::TextRun` NodeId
     /// to its text-document element_id, absolute-document
@@ -917,6 +923,17 @@ impl EditorState {
     /// literal tab) rather than move focus. The one predicate the keys and
     /// the accessibility description both ask, so the hint and the key
     /// cannot drift.
+    /// Whether the links are stops inside the editor: Tab selects the next
+    /// one and Shift+Tab the previous one, and each is named the editor's
+    /// active descendant while selected. Only in an editor that leaves Tab to
+    /// focus traversal because its filter takes no edits (a viewer) and that
+    /// follows links; `TabKey::MoveFocus` turns the stops off.
+    pub(crate) fn links_are_stops(&self) -> bool {
+        !self.tab_consumed()
+            && self.tab_key == crate::common::editor_runtime::TabKey::Edit
+            && self.on_link_activated.is_some()
+    }
+
     pub(crate) fn tab_consumed(&self) -> bool {
         self.tab_key == crate::common::editor_runtime::TabKey::Edit
             && self
@@ -1083,6 +1100,7 @@ impl EditorState {
             select_all_level: 0,
             accessibility_flow_snapshot: RefCell::new(None),
             link_nodes: RefCell::new(std::collections::HashMap::new()),
+            link_ranges: RefCell::new(std::collections::HashMap::new()),
             synthetic_to_element: RefCell::new(std::collections::HashMap::new()),
         }))
     }
@@ -1728,6 +1746,7 @@ impl EditorState {
         *self.accessibility_flow_snapshot.borrow_mut() = None;
         self.synthetic_to_element.borrow_mut().clear();
         self.link_nodes.borrow_mut().clear();
+        self.link_ranges.borrow_mut().clear();
     }
 }
 

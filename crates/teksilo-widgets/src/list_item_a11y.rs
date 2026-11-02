@@ -306,12 +306,15 @@ impl Widget for ListItemWrapper {
         // since the caller gets a success reply for a no-op, so the two sites
         // must always be edited together.
         //
-        // `Focus` is deliberately NOT advertised: the *container* is the
-        // focusable node, and `WidgetEvent::AccessAction`'s Focus arm is
-        // intercepted by the tree before any widget sees it, so advertising it
-        // here would move focus off the view's root and kill arrow navigation.
+        // `Focus` too: the *container* keeps keyboard focus and names the
+        // current row as its active descendant, and the router offers an
+        // assistive `Focus` on a row to the view, which makes it the current
+        // row and takes focus itself (`common::item_focus`). Without it
+        // `accesskit_consumer` read the current row as not focusable while it
+        // had the focus (UIA `IsKeyboardFocusable` false).
         builder.add_action(teksilo_core::accesskit::Action::Click);
         builder.add_action(teksilo_core::accesskit::Action::ScrollIntoView);
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
         // "row 147". The matching "of 200" lives on the `Role::ListBox`
         // container: AccessKit's `size_of_set` belongs there, unlike ARIA's
         // per-item `aria-setsize`, and `size_of_set_from_container` walks up
@@ -501,11 +504,12 @@ impl Widget for TreeItemWrapper {
             builder.set_expanded(expanded);
         }
         builder.set_selected(self.selected);
-        // See `ListItemWrapper::accessibility` for why `Click` /
-        // `ScrollIntoView` are advertised and `Focus` is not. The handlers live
-        // in `TreeViewBodyPane::build`.
+        // See `ListItemWrapper::accessibility` for why `Click`,
+        // `ScrollIntoView` and `Focus` are advertised. The first two are
+        // handled in `TreeViewBodyPane::build`, `Focus` by the view itself.
         builder.add_action(teksilo_core::accesskit::Action::Click);
         builder.add_action(teksilo_core::accesskit::Action::ScrollIntoView);
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
         // Only the direction that would actually change something: a collapsed
         // branch advertises `Expand`, an expanded one `Collapse`. A leaf
         // (`expanded == None`) advertises neither. Without this a caller

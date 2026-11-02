@@ -815,6 +815,31 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // descendant of another dragged node is safely skipped).
         handlers = self.export.install_completion(handlers);
 
+        // An assistive `Focus` on a realized cell makes it the focused cell,
+        // as Ctrl+arrow would, and gives the view keyboard focus (see
+        // `TableView`'s build).
+        {
+            let cells = self.cell_map.clone();
+            let focused = self.focused_cell.clone();
+            let editing = self.editing_cell.clone();
+            handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
+                self_id,
+                move |item, _ctx| {
+                    // An open cell editor keeps the keyboard, as it does
+                    // against Ctrl+arrow.
+                    if editing.get().is_some() {
+                        return false;
+                    }
+                    let found = cells
+                        .borrow()
+                        .iter()
+                        .find(|&&(_, cell)| cell == item)
+                        .map(|&(pos, _)| pos);
+                    found.inspect(|&pos| focused.set(Some(pos))).is_some()
+                },
+            ));
+        }
+
         ctx.apply_self_handlers(handlers);
 
         // ── Build children ────────────────────────────────────────────

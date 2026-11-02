@@ -86,9 +86,10 @@
 //!   opened. Its name is its title: the month and year, the year, or the
 //!   decade in words ("2020 to 2029").
 //! - Month and year cells of the zoomed views: `Role::GridCell`, a month
-//!   named with its year ("mai 2026"), `Action::Click` advertised, no Tab
-//!   stop of their own: the grid names the one under the cursor as its
-//!   active descendant, as it does a day.
+//!   named with its year ("mai 2026"), `Action::Click` and `Action::Focus`
+//!   advertised, no Tab stop of their own: the grid names the one under the
+//!   cursor as its active descendant, as it does a day, and an assistive
+//!   `Focus` on one moves the cursor there.
 //! - Weekday header row: `Role::Row` of `Role::ColumnHeader` cells, each
 //!   labelled with the long weekday name (e.g. "Monday").
 //! - Weeks: `Role::Row`, each holding its seven day cells, so the grid is
@@ -96,9 +97,11 @@
 //! - Day cells: `Role::GridCell` named by the day in full
 //!   ("Saturday, May 2, 2026", "samedi 2 mai 2026"), `set_selected`,
 //!   `set_aria_current(Date)` on today, `set_disabled` for filter
-//!   rejections, and `Action::Click` advertised. Keyboard focus stays on
-//!   the Calendar root, which names the cell under the cursor as its
-//!   active descendant while it holds focus in the day view. AccessKit
+//!   rejections, and `Action::Click` and `Action::Focus` advertised.
+//!   Keyboard focus stays on the Calendar root, which names the cell under
+//!   the cursor as its active descendant while it holds focus in the day
+//!   view; an assistive `Focus` on a day moves the cursor there, as the
+//!   arrows would. AccessKit
 //!   reports that cell as the focus on AT-SPI, UIA and macOS, so each
 //!   arrow press, and each change of month, is a focus change to the new
 //!   day, which is what a screen reader speaks.
@@ -868,12 +871,76 @@ impl Widget for Calendar {
         // the calendar actually holds focus (Int UI behaviour: no
         // focus indicator on a non-focused control).
         let focused_signal = self.focused.clone();
-        let handlers = HandlerSet::new()
+        // An assistive `Focus` on the cell a view shows (a day, a month or a
+        // year; each advertises it) moves the cursor there as the arrows
+        // would, the month shown following it, and gives the calendar
+        // keyboard focus. A day the arrows could not reach (before `min` or
+        // after `max`) is refused.
+        let focus_cell = {
+            let days = self.day_cells.clone();
+            let months = self.month_cells.clone();
+            let years = self.year_cells.clone();
+            let mode = self.mode.clone();
+            let focused_date = self.focused_date.clone();
+            let visible_month = self.visible_month.clone();
+            let on_month_changed = self.on_month_changed.clone();
+            let (min_date, max_date) = (self.min_date, self.max_date);
+            crate::common::item_focus::on_item_focus(self_id, move |item, ctx| {
+                let find = |cells: &zoom_grid::ZoomCells| {
+                    cells
+                        .borrow()
+                        .iter()
+                        .find(|&&(_, cell)| cell == item)
+                        .map(|&(key, _)| key)
+                };
+                let shown = visible_month.get();
+                let month = match mode.get() {
+                    CalendarMode::Days => {
+                        let Some(date) = days
+                            .borrow()
+                            .iter()
+                            .find(|&&(_, cell)| cell == item)
+                            .map(|&(date, _)| date)
+                        else {
+                            return false;
+                        };
+                        if min_date.is_some_and(|min| date < min)
+                            || max_date.is_some_and(|max| date > max)
+                        {
+                            return false;
+                        }
+                        focused_date.set(date);
+                        YearMonth::from_date(date)
+                    }
+                    CalendarMode::Months => match find(&months) {
+                        Some(month) => YearMonth::new(shown.year(), month as i8),
+                        None => return false,
+                    },
+                    CalendarMode::Years => match find(&years) {
+                        Some(year) => YearMonth::new(year, shown.month()),
+                        None => return false,
+                    },
+                };
+                if month != shown {
+                    visible_month.set(month);
+                    if let Some(cb) = on_month_changed.as_ref() {
+                        cb(month, ctx);
+                    }
+                }
+                ctx.request_frame();
+                true
+            })
+        };
+        let mut handlers = HandlerSet::new()
             .focusable(enabled)
             .on_focus(move |has_focus, _ctx| {
                 focused_signal.set(has_focus);
             })
             .on_key(key_handler);
+        // A disabled calendar takes no focus, and its cells offer none.
+        if enabled {
+            handlers = handlers.on_access_action_request(focus_cell);
+        }
         ctx.apply_self_handlers(handlers);
 
         // Bind reactive sources at AccessibilityOnly so the AT node's

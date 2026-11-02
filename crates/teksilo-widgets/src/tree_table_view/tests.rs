@@ -1930,6 +1930,49 @@ fn focused_cell_sets_active_descendant_to_the_cell_node() {
     );
 }
 
+/// A cell is the view's active descendant, so it must read as focusable to a
+/// platform adapter, and an assistive `Focus` on it makes it the focused cell
+/// with the keyboard on the view, as Ctrl+arrow does.
+#[test]
+fn an_assistive_focus_on_a_cell_makes_it_the_focused_cell() {
+    use crate::common::item_focus::test_support::{
+        assistive_focus, platform_focus, reads_as_focusable,
+    };
+    let proxy = SortFilterTreeModel::new(sample_tree());
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let id = tree.add(
+        TreeTableView::from_projection(proxy)
+            .add_column(name_col())
+            .add_column(size_col())
+            .row_height(20.0),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    let (cell, focused) = {
+        let any = tree.widget_as_any(id).unwrap();
+        let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+        let cell = tt
+            .cell_map
+            .borrow()
+            .iter()
+            .find(|&&(pos, _)| pos == (1, 1))
+            .map(|&(_, cell)| cell)
+            .expect("row 1 is realized");
+        (cell, tt.focused_cell_signal().clone())
+    };
+    let node = widget_id_to_node_id(cell);
+    assert!(
+        reads_as_focusable(&mut tree, node),
+        "a cell the view can point at reads as focusable"
+    );
+    assert!(assistive_focus(&mut tree, node), "the view took it");
+    assert_eq!(focused.get(), Some((1, 1)));
+    assert_eq!(tree.focused(), Some(id), "the keyboard is on the view");
+    assert_eq!(platform_focus(&mut tree), Some(node));
+}
+
 #[test]
 fn active_descendant_clears_after_the_focused_cell_scrolls_out_of_realization() {
     let proxy = SortFilterTreeModel::new(wide_tree(1000));

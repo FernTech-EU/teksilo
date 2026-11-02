@@ -680,8 +680,8 @@ pub(crate) fn mark_element_id(series_id: SeriesId, point_idx: usize) -> u64 {
 /// `builder` (the chart widget's own accessibility builder), returning
 /// the node id allocated for it.
 ///
-/// The node advertises the two actions a datum can actually answer, and
-/// the chart implements both — an advertised action nothing implements is
+/// The node advertises the three actions a datum can actually answer, and
+/// the chart implements them all: an advertised action nothing implements is
 /// worse than a missing one, because the only way to discover it does
 /// nothing is to invoke it.
 ///
@@ -695,6 +695,11 @@ pub(crate) fn mark_element_id(series_id: SeriesId, point_idx: usize) -> u64 {
 ///   above the chart is asked to reveal the mark's own rectangle. It is
 ///   meaningful because a chart is frequently a tile on a scrolling page
 ///   even though nothing scrolls *inside* the plot.
+/// * [`Focus`](accesskit::Action::Focus) moves the chart's keyboard cursor
+///   to the datum, as the arrows would, and gives the chart keyboard focus.
+///   The focused datum is the chart's active descendant, so the platform's
+///   focus, and `accesskit_consumer` reads a node as focusable (UIA
+///   `IsKeyboardFocusable`) from this action alone.
 ///
 /// The bounds are the mark's own logical rectangle. The device scale
 /// factor is applied once, by the root window node's transform, so a
@@ -712,6 +717,7 @@ pub(crate) fn emit_mark_node(
         child.set_numeric_value(m.value as f64);
         child.add_action(accesskit::Action::Click);
         child.add_action(accesskit::Action::ScrollIntoView);
+        child.add_action(accesskit::Action::Focus);
         child.inner_mut().set_bounds(accesskit::Rect {
             x0: bounds.x as f64,
             y0: bounds.y as f64,
@@ -721,11 +727,11 @@ pub(crate) fn emit_mark_node(
     })
 }
 
-/// Handle a `Click` / `ScrollIntoView` action addressed to one of
+/// Handle a `Click` / `ScrollIntoView` / `Focus` action addressed to one of
 /// `owner`'s per-datum AT nodes.
 ///
 /// Returns [`EventResponse::Handled`] when `node` named a live mark and
-/// the action was one of the two [`emit_mark_node`] advertises.
+/// the action was one of the three [`emit_mark_node`] advertises.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_mark_action(
     action: accesskit::Action,
@@ -740,7 +746,7 @@ pub(crate) fn handle_mark_action(
 ) -> EventResponse {
     if !matches!(
         action,
-        accesskit::Action::Click | accesskit::Action::ScrollIntoView
+        accesskit::Action::Click | accesskit::Action::ScrollIntoView | accesskit::Action::Focus
     ) {
         return EventResponse::Ignored;
     }
@@ -757,6 +763,7 @@ pub(crate) fn handle_mark_action(
                 selection.select_point(key.0, key.1);
             }
         }
+        accesskit::Action::Focus => ctx.request_focus(owner),
         _ => {
             if let Some(m) = mark_index_of(marks, key).and_then(|i| marks.get(i)) {
                 ctx.ensure_visible(m.shape.bounding_rect());

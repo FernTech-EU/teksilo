@@ -5058,6 +5058,36 @@ fn handle_access_action_request(
             ctx.request_frame();
             EventResponse::Handled
         }
+        // A Focus on a link that is a stop (each advertises it, see
+        // `FlowWalk::runs_and_links`) selects it as Tab would and gives the
+        // editor keyboard focus, so the link is the editor's active
+        // descendant and the platform's focus.
+        (Action::Focus, _) => {
+            let range = state
+                .borrow()
+                .link_ranges
+                .borrow()
+                .get(&target_node)
+                .copied();
+            let mut st = state.borrow_mut();
+            let (Some((start, end)), true) = (range, st.links_are_stops()) else {
+                return EventResponse::Ignored;
+            };
+            let (start, end) = (st.document_position(start), st.document_position(end));
+            st.cursor.set_position(start, MoveMode::MoveAnchor);
+            st.cursor.set_position(end, MoveMode::KeepAnchor);
+            let (a, b) = st.shown_selection();
+            st.link_stop = Some((a.min(b), a.max(b)));
+            let editor = st.self_id;
+            drop(st);
+            sync_cursor_signals(state);
+            if let Some(editor) = editor {
+                ctx.request_focus(editor);
+            }
+            ctx.request_accessibility_update();
+            ctx.request_frame();
+            EventResponse::Handled
+        }
         // A Click on one of the walk's `Role::Link` nodes follows that link.
         (Action::Click, _) => {
             let href = state

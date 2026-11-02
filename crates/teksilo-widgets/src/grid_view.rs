@@ -2587,6 +2587,25 @@ impl<T: 'static> Widget for GridView<T> {
                 false
             });
         }
+        // An assistive `Focus` on a realized tile makes it the grid's cursor,
+        // as Ctrl+arrow would, and gives the grid keyboard focus.
+        {
+            let tiles = self.tile_map.clone();
+            let handle = self.handle();
+            handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
+                self_id,
+                move |item, _ctx| {
+                    let found = tiles
+                        .borrow()
+                        .iter()
+                        .find(|&&(_, tile)| tile == item)
+                        .map(|&(index, _)| index);
+                    found
+                        .inspect(|&index| handle.set_cursor(Some(index)))
+                        .is_some()
+                },
+            ));
+        }
         ctx.apply_self_handlers(handlers);
 
         // Children: body pane (or empty view), scrollbar, overlay.

@@ -1223,6 +1223,34 @@ impl Widget for MenuList {
                 }
             })
             .focusable(true);
+        // An assistive `Focus` on a shown row (each `MenuItem` advertises it)
+        // highlights it, as the arrows would, and gives the menu keyboard
+        // focus.
+        let handler_set = {
+            let rows = self.rows.clone();
+            let highlight = self.highlight.clone();
+            let item_ids = self.item_widget_ids.clone();
+            handler_set.on_access_action_request(crate::common::item_focus::on_item_focus(
+                ctx.self_id(),
+                move |item, ctx| {
+                    let index = {
+                        let rows = rows.borrow();
+                        rows.ids
+                            .iter()
+                            .position(|&row| row == item)
+                            .filter(|&index| rows.is_shown(index))
+                    };
+                    let Some(index) = index else {
+                        return false;
+                    };
+                    highlight.set(Some(index));
+                    ctx.show_highlight_tooltip(item_ids[index]);
+                    reveal(index, &item_ids, ctx);
+                    ctx.request_accessibility_update();
+                    true
+                },
+            ))
+        };
 
         ctx.apply_self_handlers(handler_set);
 
@@ -2222,6 +2250,47 @@ mod tests {
         ) {
             self.seen.set(bounds);
         }
+    }
+
+    /// A row is the menu's active descendant while highlighted, so it must
+    /// read as focusable to a platform adapter (UIA `IsKeyboardFocusable`),
+    /// and an assistive `Focus` on it highlights it as the arrows would, the
+    /// keyboard on the menu. A greyed row too: the arrows reach it as well.
+    #[test]
+    fn an_assistive_focus_on_a_row_highlights_it() {
+        use crate::common::item_focus::test_support::{
+            assistive_focus, platform_focus, reads_as_focusable,
+        };
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        let mut tree = light_tree();
+        let menu = MenuList::new()
+            .item(MenuItem::new(lit!("Open")))
+            .item(MenuItem::new(lit!("Paste")).enabled(false))
+            .item(MenuItem::new(lit!("Save")));
+        let menu_id = tree.add(menu);
+        tree.layout(SizeProposal::with_width(300.0));
+        // The signal the build installed.
+        let highlight = tree
+            .widget_as_any(menu_id)
+            .and_then(|any| any.downcast_ref::<MenuList>())
+            .expect("a MenuList")
+            .highlight
+            .clone();
+        let row = |tree: &WidgetTree, name: &str| {
+            widget_id_to_node_id(tree.find_by_label(name).expect("the row"))
+        };
+        let save = row(&tree, "Save");
+        assert!(reads_as_focusable(&mut tree, save));
+
+        assert!(assistive_focus(&mut tree, save), "the menu took it");
+        assert_eq!(highlight.get(), Some(2));
+        assert_eq!(tree.focused(), Some(menu_id), "the keyboard is on the menu");
+        assert_eq!(platform_focus(&mut tree), Some(save));
+
+        let paste = row(&tree, "Paste");
+        assert!(assistive_focus(&mut tree, paste), "a greyed row too");
+        assert_eq!(highlight.get(), Some(1));
+        assert_eq!(tree.focused(), Some(menu_id));
     }
 
     #[test]

@@ -163,3 +163,101 @@ fn cursor_signal_notifies_every_move() {
     assert_eq!(*seen.borrow(), vec![Some(3), Some(4)]);
     assert_eq!(signal.get(), Some(4));
 }
+
+/// A row is the list's active descendant, so it must read as focusable to a
+/// platform adapter (UIA `IsKeyboardFocusable`), and an assistive `Focus` on
+/// it does what Ctrl+arrow does: the cursor moves to it, the selection stays,
+/// and the keyboard is on the list.
+#[test]
+fn an_assistive_focus_on_a_row_moves_the_cursor_there() {
+    use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
+    let (mut tree, lv, sel, handle) = list(20, SelectionMode::Multi);
+    tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(announced_row(&mut tree, lv), Some(0));
+    let row = tree
+        .widget_as_any(lv)
+        .and_then(|any| any.downcast_ref::<ListView<usize>>())
+        .and_then(|view| {
+            view.realized_row_ids()
+                .borrow()
+                .iter()
+                .find(|&&(index, _)| index == 3)
+                .map(|&(_, id)| id)
+        })
+        .expect("row 3 is realized");
+    let node = teksilo_core::accessibility::widget_id_to_node_id(row);
+    assert!(
+        reads_as_focusable(&mut tree, node),
+        "a row the list can point at reads as focusable"
+    );
+
+    tree.clear_focus();
+    assert!(assistive_focus(&mut tree, node), "the list took it");
+    assert_eq!(handle.cursor(), Some(3));
+    assert_eq!(tree.focused(), Some(lv), "the keyboard is on the list");
+    assert_eq!(announced_row(&mut tree, lv), Some(3), "row 3 is announced");
+    assert_eq!(sel.selected_indices(), vec![0], "the selection stayed");
+}
+
+/// A presentational list (the rows of a `ComboBox` or `CommandPalette`
+/// popup, whose owner publishes the options) takes no assistive `Focus` on
+/// a row: its rows are no options, and the list takes no focus.
+#[test]
+fn a_presentational_list_takes_no_assistive_focus_on_a_row() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    let model = ListModel::from_vec((0..20).collect::<Vec<usize>>());
+    let view = ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 20.0)))
+        .item_height(20.0)
+        .presentational(true);
+    let handle = view.handle();
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(view);
+    tree.layout(viewport());
+    let row = tree
+        .widget_as_any(lv)
+        .and_then(|any| any.downcast_ref::<ListView<usize>>())
+        .and_then(|view| {
+            view.realized_row_ids()
+                .borrow()
+                .iter()
+                .find(|&&(index, _)| index == 3)
+                .map(|&(_, id)| id)
+        })
+        .expect("row 3 is realized");
+    let node = teksilo_core::accessibility::widget_id_to_node_id(row);
+    assert!(!assistive_focus(&mut tree, node));
+    assert_eq!(handle.cursor(), None, "the cursor did not move");
+    assert_eq!(tree.focused(), None);
+}
+
+/// A list inside a disabled container takes no input, so an assistive
+/// `Focus` on one of its rows moves nothing, puts the keyboard nowhere, and
+/// is reported unhandled.
+#[test]
+fn a_row_of_a_list_in_a_disabled_container_takes_no_assistive_focus() {
+    use crate::common::item_focus::test_support::assistive_focus;
+    let model = ListModel::from_vec((0..20).collect::<Vec<usize>>());
+    let view =
+        ListView::new(model, |_i, _item, _sel| Box::new(FixedLeaf(100.0, 20.0))).item_height(20.0);
+    let handle = view.handle();
+    let mut tree = WidgetTree::new();
+    let lv = tree.add(view);
+    let container = tree.add(crate::primitives::VStack::new().child(lv));
+    tree.enabled_when(container, teksilo_core::signal::Signal::new(false));
+    tree.layout(viewport());
+    let row = tree
+        .widget_as_any(lv)
+        .and_then(|any| any.downcast_ref::<ListView<usize>>())
+        .and_then(|view| {
+            view.realized_row_ids()
+                .borrow()
+                .iter()
+                .find(|&&(index, _)| index == 3)
+                .map(|&(_, id)| id)
+        })
+        .expect("row 3 is realized");
+    let node = teksilo_core::accessibility::widget_id_to_node_id(row);
+    assert!(!assistive_focus(&mut tree, node), "nothing took it");
+    assert_eq!(handle.cursor(), None, "the cursor did not move");
+    assert_eq!(tree.focused(), None, "the keyboard went nowhere");
+}

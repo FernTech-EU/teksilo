@@ -547,6 +547,20 @@ impl Widget for RadioTileGroup {
             });
         }
 
+        // The selected tile is the group's active descendant and advertises
+        // `Focus` (see `RadioTile::accessibility`); an assistive `Focus` on it
+        // gives the group keyboard focus. Only the selected one: here the
+        // arrows move the selection with the cursor, so another tile cannot be
+        // the focus without being chosen, and a focus request is no choice.
+        {
+            let selected = self.selected.clone();
+            let tile_ids = self.tile_ids.clone();
+            handlers = handlers.on_access_action_request(crate::common::item_focus::on_item_focus(
+                self_id,
+                move |item, _ctx| tile_ids.get(selected.get()) == Some(&item),
+            ));
+        }
+
         ctx.apply_self_handlers(handlers);
 
         self.tile_ids.clone()
@@ -676,6 +690,37 @@ mod tests {
         assert_eq!(selected.get(), 1);
         tree.click(ids[2]);
         assert_eq!(selected.get(), 2);
+    }
+
+    /// The selected tile is the group's active descendant, so it must read as
+    /// focusable to a platform adapter (UIA `IsKeyboardFocusable`), and an
+    /// assistive `Focus` on it gives the group keyboard focus. Another tile
+    /// cannot be the focus without being chosen, so it offers none.
+    #[test]
+    fn the_selected_tile_reads_as_focusable_and_takes_an_assistive_focus() {
+        use crate::common::item_focus::test_support::{
+            assistive_focus, platform_focus, reads_as_focusable,
+        };
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        let selected = Signal::new(1_usize);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let g = tree.add(group_with(
+            selected.clone(),
+            TileLayout::Row,
+            &["one", "two", "three"],
+        ));
+        tree.layout(SizeProposal::exact(600.0, 300.0));
+        let ids = tile_ids(&tree, 3);
+        let (first, second) = (widget_id_to_node_id(ids[0]), widget_id_to_node_id(ids[1]));
+        assert!(reads_as_focusable(&mut tree, second), "the selected tile");
+        assert!(!reads_as_focusable(&mut tree, first), "another tile");
+
+        assert!(assistive_focus(&mut tree, second), "the group took it");
+        assert_eq!(tree.focused(), Some(g), "the keyboard is on the group");
+        assert_eq!(platform_focus(&mut tree), Some(second));
+        assert!(!assistive_focus(&mut tree, first), "no focus offered there");
+        assert_eq!(selected.get(), 1, "a focus request chose nothing");
+        assert_eq!(tree.focused(), Some(g));
     }
 
     #[test]

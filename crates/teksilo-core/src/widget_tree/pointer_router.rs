@@ -1439,7 +1439,12 @@ impl WidgetTree {
                     self.dispatch_to_widget(focused, &event, &mut *ops);
                 }
             }
-            WidgetEvent::AccessAction { target, action, .. } => {
+            WidgetEvent::AccessAction {
+                target,
+                action,
+                target_node,
+                ..
+            } => {
                 // An AT action (e.g. VoiceOver's VO+Space → `Action::Click`)
                 // always names the node it targets — the element under the
                 // assistive-technology cursor. It must be delivered to THAT
@@ -1479,34 +1484,113 @@ impl WidgetTree {
                         // above true of composites and only of them. Walking
                         // from *any* non-focusable node meant an AT `Focus` on a
                         // `Panel`, a `GroupBox`, a landmark or a label moved the
-                        // keyboard onto the first control inside it — a node the
+                        // keyboard onto the first control inside it, a node the
                         // assistive technology could have named itself and did
-                        // not — and reported success. A node that offers no
-                        // `Focus` now reports the action unhandled instead,
-                        // which is the honest answer.
+                        // not, and reported success. A node that offers no
+                        // `Focus` reports the action unhandled instead, which is
+                        // the honest answer, and so does one whose walk finds
+                        // nothing focusable: the keyboard is never parked on a
+                        // node that takes no keys.
                         //
                         // A node that stands for a focusable composite (an
                         // editor's text body, see `Widget::accessibility_proxy`)
                         // is the composite to the assistive technology, so the
                         // keyboard goes to the composite.
-                        if self.advertises_focus_action(id) {
+                        //
+                        // A node that is not itself the focus but an item the
+                        // focus points at (a table cell, a list row, a link in
+                        // a viewer, a chart's mark: a widget's
+                        // `active_descendant`) is first offered to the widget
+                        // that publishes it, which moves its own cursor there
+                        // and gives itself keyboard focus, as an arrow key
+                        // would. See `offer_item_focus` for who is asked.
+                        let synthetic =
+                            *target_node != crate::accessibility::widget_id_to_node_id(id);
+                        let takes_focus_itself = !synthetic
+                            && (self
+                                .arena
+                                .get(id)
+                                .is_some_and(|node| self.is_node_focusable(node))
+                                || self.focusable_composite_behind(id).is_some());
+                        // A composite with a Tab stop inside (a `DateEdit`
+                        // in a card) is no item: the walk below lands on its
+                        // stop, and no ancestor is asked. A synthetic node is
+                        // offered only when it advertises `Focus` itself, in
+                        // the tree the assistive technology was handed.
+                        let offered = !takes_focus_itself
+                            && if synthetic {
+                                self.published_node_advertises_focus(*target_node)
+                            } else {
+                                self.advertises_focus_action(id)
+                                    && self.first_focusable_descendant(id).is_none()
+                            };
+                        let focused_before = self.focused;
+                        let answered = if offered {
+                            self.offer_item_focus(id, synthetic, &event, &mut *ops)
+                        } else {
+                            None
+                        };
+                        if let Some(answerer) = answered {
+                            // Success only when the keyboard is where the
+                            // item's owner keeps it: focus moved, or it was
+                            // already on the widget that answered (or inside
+                            // it), or the item answered for itself, as an
+                            // option of an open list does while the field it
+                            // belongs to keeps focus. A handler that answered
+                            // and moved nothing is no success, and lights no
+                            // ring on a field the mouse focused.
+                            let landed = self.focused.is_some_and(|focused| {
+                                Some(focused) != focused_before
+                                    || focused == answerer
+                                    || self.is_descendant_of(focused, answerer)
+                                    || answerer == id
+                            });
+                            if landed {
+                                // The handler's own `request_focus` declares
+                                // no modality; the user is navigating, as for
+                                // the branch below.
+                                self.focus_origin = Some(crate::focus::FocusOrigin::Accessibility);
+                                if let Some(visible) =
+                                    crate::focus::FocusOrigin::Accessibility.focus_visible()
+                                    && self.focus_visible.get() != visible
+                                {
+                                    self.focus_visible.set(visible);
+                                }
+                            }
+                            self.access_action_handled = landed;
+                        } else if self.advertises_focus_action(id) {
                             let target = self
                                 .focusable_composite_behind(id)
                                 .or_else(|| self.first_focusable_descendant(id))
                                 .unwrap_or(id);
-                            // An assistive move, not a scripted one: the user is
-                            // navigating, so the focus ring appears exactly as it
-                            // would for a Tab. `Programmatic` — what this used to
-                            // pass — declares no modality and left a screen-reader
-                            // user with an invisible focus after any click.
-                            self.focus_with_origin_ops(
-                                target,
-                                crate::focus::FocusOrigin::Accessibility,
-                                &mut *ops,
-                            );
-                            // Focus is serviced here rather than by the widget,
-                            // so "handled" means the focus actually landed.
-                            self.access_action_handled = self.focused == Some(target);
+                            if self.arena.is_enabled(target)
+                                && self
+                                    .arena
+                                    .get(target)
+                                    .is_some_and(|node| self.is_node_focusable(node))
+                            {
+                                // An assistive move, not a scripted one: the
+                                // user is navigating, so the focus ring appears
+                                // exactly as it would for a Tab. `Programmatic`,
+                                // what this used to pass, declares no modality
+                                // and left a screen-reader user with an
+                                // invisible focus after any click.
+                                self.focus_with_origin_ops(
+                                    target,
+                                    crate::focus::FocusOrigin::Accessibility,
+                                    &mut *ops,
+                                );
+                                // Focus is serviced here rather than by the
+                                // widget, so "handled" means the focus actually
+                                // landed.
+                                self.access_action_handled = self.focused == Some(target);
+                            } else {
+                                // An item whose owner refused it (a day the
+                                // arrows cannot reach, a row in a disabled
+                                // view), or a disabled widget: nothing takes
+                                // keys there.
+                                self.access_action_handled = false;
+                            }
                         } else {
                             self.access_action_handled = false;
                         }
@@ -1579,6 +1663,92 @@ impl WidgetTree {
         // before commands are flushed, so commands emitted from
         // action handlers land on the same tick.
         self.drain_pending_intents(&mut *ops);
+    }
+
+    /// Offer an assistive `Focus` on `id`, an item a widget may name as its
+    /// active descendant, to the widget that owns it; report whether one took
+    /// it.
+    ///
+    /// Addressed, not bubbled: the item's own node, then each ancestor up to
+    /// and including the first focusable one, which is where a view, a menu or
+    /// a calendar that keeps keyboard focus sits. An ancestor above that owns
+    /// nothing in the item, and a catch-all `Focus` handler there (a card
+    /// selecting itself) must not take it.
+    ///
+    /// A greyed item (a menu row the arrows still highlight) takes no input of
+    /// its own, so the offer starts at its parent. An item inside a disabled
+    /// container is offered to no one: its owner is disabled with it.
+    ///
+    /// Only a widget item is greyed that way. For a synthetic node `id` is its
+    /// owner (a chart, a web view), and a disabled owner refuses; a disabled
+    /// composite (a `DateEdit` with its segments) is no item either.
+    ///
+    /// Returns the node that answered.
+    fn offer_item_focus(
+        &mut self,
+        id: WidgetId,
+        synthetic: bool,
+        event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> Option<WidgetId> {
+        let start = if self.arena.is_enabled(id) {
+            Some(id)
+        } else {
+            let greyed_item = !synthetic
+                && self
+                    .arena
+                    .get(id)
+                    .and_then(|node| node.enabled_state.as_ref())
+                    .is_some_and(|state| !state.get())
+                && !self.has_focusable_descendant(id);
+            self.arena
+                .parent(id)
+                .filter(|&parent| greyed_item && self.arena.is_enabled(parent))
+        };
+        let mut at = start;
+        while let Some(node) = at {
+            if self.dispatch_to_widget_direct_returning_handled(node, event, &mut *ops) {
+                return Some(node);
+            }
+            if self
+                .arena
+                .get(node)
+                .is_some_and(|n| self.is_node_focusable(n))
+            {
+                return None;
+            }
+            at = self.arena.parent(node);
+        }
+        None
+    }
+
+    /// Whether any node below `id` is focusable, Tab stop or not, enabled or
+    /// not.
+    fn has_focusable_descendant(&self, id: WidgetId) -> bool {
+        let mut stack: Vec<WidgetId> = self.arena.children(id).to_vec();
+        while let Some(node) = stack.pop() {
+            if self
+                .arena
+                .get(node)
+                .is_some_and(|n| self.is_node_focusable(n))
+            {
+                return true;
+            }
+            stack.extend_from_slice(self.arena.children(node));
+        }
+        false
+    }
+
+    /// Whether the node `node_id` advertises `Focus` in the accessibility
+    /// tree last built, the one an assistive technology acts on. For a
+    /// synthetic node, which no widget can be asked about directly.
+    fn published_node_advertises_focus(&self, node_id: accesskit::NodeId) -> bool {
+        self.cached_a11y.as_ref().is_some_and(|update| {
+            update
+                .nodes
+                .iter()
+                .any(|(id, node)| *id == node_id && node.supports_action(accesskit::Action::Focus))
+        })
     }
 
     /// Open the context menu the keyboard just asked for, and report whether
@@ -8389,6 +8559,390 @@ mod press_and_focus_tests {
         assert_eq!(tree.focused(), Some(b));
         assert!(visible.get(), "an assistive move is a navigation");
         assert_eq!(tree.focus_origin(), Some(FocusOrigin::Accessibility));
+    }
+
+    /// A view-like owner of two items it can point at, inside a focusable
+    /// ancestor whose handler takes any `Focus` (a card selecting itself), the
+    /// two beside another focusable control.
+    struct ItemFocusFixture {
+        tree: WidgetTree,
+        other: WidgetId,
+        /// A container around the owner that takes no focus.
+        group: WidgetId,
+        owner: WidgetId,
+        /// The owner refuses this one, as a calendar refuses a day the arrows
+        /// cannot reach.
+        refused: WidgetId,
+        taken: WidgetId,
+        /// A plain label, advertising no `Focus`.
+        label: WidgetId,
+        cursor: Rc<Cell<Option<accesskit::NodeId>>>,
+        catch_all: Rc<Cell<u32>>,
+    }
+
+    fn item_focus_fixture() -> ItemFocusFixture {
+        let advertises_focus = |b: &mut crate::accessibility::AccessNodeBuilder| {
+            b.add_action(accesskit::Action::Focus)
+        };
+        let mut tree = WidgetTree::new();
+        let other = tree.add(FillWidget::new().focusable());
+        let refused = tree.add(FillWidget::new().access_customize(advertises_focus));
+        let taken = tree.add(FillWidget::new().access_customize(advertises_focus));
+        let label = tree.add(FillWidget::new());
+        let cursor: Rc<Cell<Option<accesskit::NodeId>>> = Rc::new(Cell::new(None));
+        let owner_slot: Rc<Cell<Option<WidgetId>>> = Rc::new(Cell::new(None));
+        let taken_node = crate::accessibility::widget_id_to_node_id(taken);
+        let owner = tree.add(
+            SideBySide {
+                children: vec![refused, taken],
+            }
+            .focusable(true)
+            .on_access_action_request({
+                let cursor = cursor.clone();
+                let owner_slot = owner_slot.clone();
+                move |action, node, _data, ctx| {
+                    if action != accesskit::Action::Focus || node != taken_node {
+                        return EventResponse::Ignored;
+                    }
+                    cursor.set(Some(node));
+                    if let Some(owner) = owner_slot.get() {
+                        ctx.request_focus(owner);
+                    }
+                    EventResponse::Handled
+                }
+            }),
+        );
+        owner_slot.set(Some(owner));
+        // A container that is not focusable, as a `GroupBox` is.
+        let group = tree.add(SideBySide {
+            children: vec![owner],
+        });
+        let catch_all = Rc::new(Cell::new(0));
+        let card = tree.add(
+            SideBySide {
+                children: vec![group, label],
+            }
+            .focusable(true)
+            .on_access_action({
+                let catch_all = catch_all.clone();
+                move |action, _ctx| {
+                    if action != accesskit::Action::Focus {
+                        return EventResponse::Ignored;
+                    }
+                    catch_all.set(catch_all.get() + 1);
+                    EventResponse::Handled
+                }
+            }),
+        );
+        tree.add(SideBySide {
+            children: vec![other, card],
+        });
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        ItemFocusFixture {
+            tree,
+            other,
+            group,
+            owner,
+            refused,
+            taken,
+            label,
+            cursor,
+            catch_all,
+        }
+    }
+
+    fn assistive_focus(tree: &mut WidgetTree, id: WidgetId) -> bool {
+        tree.dispatch_access_action(
+            crate::accessibility::widget_id_to_node_id(id),
+            accesskit::Action::Focus,
+            None,
+            &mut crate::window::NoopWindowOps,
+        )
+    }
+
+    /// An assistive `Focus` on an item a widget points at through its
+    /// `active_descendant` goes to that widget, which moves its cursor to
+    /// the item and takes keyboard focus itself, as an arrow key would. The
+    /// item takes no keys: focusing its own node left the widget naming no
+    /// descendant and the keys going nowhere useful. The ancestor above the
+    /// owner, which takes any `Focus`, is not asked.
+    #[test]
+    fn an_assistive_focus_on_an_item_goes_to_the_widget_that_points_at_it() {
+        let mut f = item_focus_fixture();
+        let visible = f.tree.focus_visible_signal();
+        f.tree.click(f.other);
+        assert!(!visible.get());
+
+        assert!(
+            assistive_focus(&mut f.tree, f.taken),
+            "the widget that points at the item took it"
+        );
+        let item = crate::accessibility::widget_id_to_node_id(f.taken);
+        assert_eq!(f.cursor.get(), Some(item), "its cursor moved to the item");
+        assert_eq!(
+            f.tree.focused(),
+            Some(f.owner),
+            "the keyboard is on the widget, not on the item"
+        );
+        assert!(visible.get(), "an assistive move is a navigation");
+        assert_eq!(f.tree.focus_origin(), Some(FocusOrigin::Accessibility));
+        assert_eq!(
+            f.catch_all.get(),
+            0,
+            "no ancestor above the owner was asked"
+        );
+    }
+
+    /// An item its owner refuses gets no focus: the keyboard is not parked on
+    /// a node that takes no keys, no ancestor above the owner takes it in its
+    /// place, and the action is reported unhandled.
+    #[test]
+    fn an_item_its_owner_refuses_takes_no_assistive_focus() {
+        let mut f = item_focus_fixture();
+        f.tree.click(f.other);
+        assert!(!assistive_focus(&mut f.tree, f.refused));
+        assert_eq!(f.tree.focused(), Some(f.other), "focus did not move");
+        assert_eq!(f.cursor.get(), None);
+        assert_eq!(f.catch_all.get(), 0);
+    }
+
+    /// A node that advertises no `Focus` (a label) is offered to no one and
+    /// reports the action unhandled, whatever an ancestor's handler takes.
+    #[test]
+    fn a_node_that_offers_no_focus_takes_no_assistive_focus() {
+        let mut f = item_focus_fixture();
+        f.tree.click(f.other);
+        assert!(!assistive_focus(&mut f.tree, f.label));
+        assert_eq!(f.tree.focused(), Some(f.other));
+        assert_eq!(f.catch_all.get(), 0);
+    }
+
+    /// A greyed item (a menu row the arrows still highlight) is still offered
+    /// to its owner; an item in a disabled container is offered to no one,
+    /// not to an ancestor above the container either.
+    #[test]
+    fn a_greyed_item_reaches_its_owner_and_a_disabled_container_takes_nothing() {
+        let mut f = item_focus_fixture();
+        let item_enabled = crate::signal::Signal::new(false);
+        f.tree.enabled_when(f.taken, item_enabled.clone());
+        f.tree.layout(SizeProposal::exact(400.0, 50.0));
+        f.tree.click(f.other);
+        assert!(assistive_focus(&mut f.tree, f.taken), "a greyed item");
+        assert_eq!(f.tree.focused(), Some(f.owner));
+
+        let mut f = item_focus_fixture();
+        f.tree
+            .enabled_when(f.group, crate::signal::Signal::new(false));
+        f.tree.layout(SizeProposal::exact(400.0, 50.0));
+        f.tree.click(f.other);
+        assert!(
+            !assistive_focus(&mut f.tree, f.taken),
+            "a disabled container"
+        );
+        assert_eq!(f.tree.focused(), Some(f.other));
+        assert_eq!(f.cursor.get(), None);
+        assert_eq!(f.catch_all.get(), 0);
+    }
+
+    /// A composite with a Tab stop inside (a `DateEdit` root that advertises
+    /// `Focus`) is no item: the focus lands on its stop, and the ancestor that
+    /// takes any `Focus` is not asked.
+    #[test]
+    fn a_composite_in_a_catch_all_ancestor_gets_its_stop() {
+        let mut tree = WidgetTree::new();
+        let other = tree.add(FillWidget::new().focusable());
+        let leaf = tree.add(FillWidget::new().focusable());
+        let composite = tree.add(
+            SideBySide {
+                children: vec![leaf],
+            }
+            .access_customize(|b| b.add_action(accesskit::Action::Focus)),
+        );
+        let catch_all = Rc::new(Cell::new(0));
+        let card = tree.add(
+            SideBySide {
+                children: vec![composite],
+            }
+            .focusable(true)
+            .on_access_action({
+                let catch_all = catch_all.clone();
+                move |action, _ctx| {
+                    if action == accesskit::Action::Focus {
+                        catch_all.set(catch_all.get() + 1);
+                        return EventResponse::Handled;
+                    }
+                    EventResponse::Ignored
+                }
+            }),
+        );
+        tree.add(SideBySide {
+            children: vec![other, card],
+        });
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        tree.click(other);
+        assert!(assistive_focus(&mut tree, composite));
+        assert_eq!(tree.focused(), Some(leaf), "the keyboard is on its stop");
+        assert_eq!(catch_all.get(), 0);
+    }
+
+    /// A focusable widget that publishes one synthetic child, advertising
+    /// `Focus` or not.
+    #[derive(Debug)]
+    struct SyntheticOwner {
+        advertises: bool,
+    }
+
+    impl crate::widget::Widget for SyntheticOwner {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &crate::widget::LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn accessibility(&self, builder: &mut crate::accessibility::AccessNodeBuilder) {
+            let advertises = self.advertises;
+            builder.push_scene_child(1, crate::accessibility::SyntheticKind::ChartMark, |child| {
+                child.set_role(accesskit::Role::GraphicsObject);
+                if advertises {
+                    child.add_action(accesskit::Action::Focus);
+                }
+            });
+        }
+    }
+
+    /// A focusable ancestor that takes any `Focus`, counting them.
+    fn catch_all_card(tree: &mut WidgetTree, child: WidgetId) -> (WidgetId, Rc<Cell<u32>>) {
+        let catch_all = Rc::new(Cell::new(0));
+        let card = tree.add(
+            SideBySide {
+                children: vec![child],
+            }
+            .focusable(true)
+            .on_access_action({
+                let catch_all = catch_all.clone();
+                move |action, _ctx| {
+                    if action == accesskit::Action::Focus {
+                        catch_all.set(catch_all.get() + 1);
+                        return EventResponse::Handled;
+                    }
+                    EventResponse::Ignored
+                }
+            }),
+        );
+        (card, catch_all)
+    }
+
+    /// A disabled owner of synthetic items, or a disabled composite, is no
+    /// greyed item: a `Focus` aimed at it is offered to no ancestor, and
+    /// nothing takes it.
+    #[test]
+    fn a_disabled_synthetic_owner_or_composite_offers_nothing_upward() {
+        let mut tree = WidgetTree::new();
+        let other = tree.add(FillWidget::new().focusable());
+        let owner = tree.add(SyntheticOwner { advertises: true }.focusable(true));
+        let leaf = tree.add(FillWidget::new().focusable());
+        let composite = tree.add(
+            SideBySide {
+                children: vec![leaf],
+            }
+            .access_customize(|b| b.add_action(accesskit::Action::Focus)),
+        );
+        let group = tree.add(SideBySide {
+            children: vec![owner, composite],
+        });
+        let (card, catch_all) = catch_all_card(&mut tree, group);
+        tree.add(SideBySide {
+            children: vec![other, card],
+        });
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        let _ = tree.sync_accessibility();
+        tree.enabled_when(owner, crate::signal::Signal::new(false));
+        tree.enabled_when(composite, crate::signal::Signal::new(false));
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        tree.click(other);
+
+        let mark = crate::accessibility::synthetic_node_id(
+            owner,
+            1,
+            crate::accessibility::SyntheticKind::ChartMark,
+        );
+        let handled = tree.dispatch_access_action(
+            mark,
+            accesskit::Action::Focus,
+            None,
+            &mut crate::window::NoopWindowOps,
+        );
+        assert!(!handled, "a disabled owner's item");
+        assert!(
+            !assistive_focus(&mut tree, composite),
+            "a disabled composite"
+        );
+        assert_eq!(tree.focused(), Some(other));
+        assert_eq!(catch_all.get(), 0, "no ancestor was asked");
+    }
+
+    /// A synthetic node that advertises no `Focus` is offered to no one; the
+    /// framework focuses its owner, as it always did.
+    #[test]
+    fn a_synthetic_node_that_offers_no_focus_is_offered_to_no_one() {
+        let mut tree = WidgetTree::new();
+        let other = tree.add(FillWidget::new().focusable());
+        // Not focusable itself, so the offer would climb to the card.
+        let owner = tree.add(SyntheticOwner { advertises: false });
+        let (card, catch_all) = catch_all_card(&mut tree, owner);
+        tree.add(SideBySide {
+            children: vec![other, card],
+        });
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        let _ = tree.sync_accessibility();
+        tree.click(other);
+        let mark = crate::accessibility::synthetic_node_id(
+            owner,
+            1,
+            crate::accessibility::SyntheticKind::ChartMark,
+        );
+        let _ = tree.dispatch_access_action(
+            mark,
+            accesskit::Action::Focus,
+            None,
+            &mut crate::window::NoopWindowOps,
+        );
+        assert_eq!(catch_all.get(), 0, "no handler was asked");
+    }
+
+    /// A handler that answers `Focus` and moves nothing, with the keyboard on
+    /// another control, is no success: the action is reported unhandled and
+    /// the mouse-focused control gets no ring.
+    #[test]
+    fn an_answer_that_moves_no_focus_is_no_success() {
+        let mut tree = WidgetTree::new();
+        let other = tree.add(FillWidget::new().focusable());
+        let item = tree
+            .add(FillWidget::new().access_customize(|b| b.add_action(accesskit::Action::Focus)));
+        let owner = tree.add(
+            SideBySide {
+                children: vec![item],
+            }
+            .focusable(true)
+            .on_access_action(|action, _ctx| {
+                if action == accesskit::Action::Focus {
+                    EventResponse::Handled
+                } else {
+                    EventResponse::Ignored
+                }
+            }),
+        );
+        tree.add(SideBySide {
+            children: vec![other, owner],
+        });
+        tree.layout(SizeProposal::exact(400.0, 50.0));
+        let visible = tree.focus_visible_signal();
+        tree.click(other);
+        assert!(!assistive_focus(&mut tree, item), "reported unhandled");
+        assert_eq!(tree.focused(), Some(other));
+        assert!(!visible.get(), "no ring on the mouse-focused control");
     }
 
     /// A programmatic focus abstains: it declares no modality, so the ring

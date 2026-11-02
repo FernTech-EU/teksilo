@@ -117,6 +117,12 @@ fn remap(node: &mut Node, mirrored: &HashSet<u64>, id: &impl Fn(u64) -> NodeId) 
             .collect()
     };
     node.clear_children();
+    // The mirror is read-only: nothing routes a focus request to the
+    // engine's element, so a mirrored node offers none. The frame would take
+    // it in the page's place and the page's own active element, which stays
+    // where it was, would pull the reader's cursor away from the node asked
+    // for.
+    node.remove_action(teksilo_core::accesskit::Action::Focus);
     macro_rules! remap_many {
         ($($get:ident, $set:ident, $clear:ident);* $(;)?) => {$(
             let targets = many(node.$get());
@@ -212,5 +218,17 @@ mod tests {
         remap(&mut n, &mirrored, &|id| NodeId(id + 1000));
         assert_eq!(n.labelled_by(), &[NodeId(1005)]);
         assert_eq!(n.active_descendant(), None);
+    }
+
+    /// A mirrored node offers no `Focus`, whatever the page's node offers:
+    /// nothing routes it to the engine's element.
+    #[test]
+    fn a_mirrored_node_offers_no_focus() {
+        let mut n = node(Role::Link, "Docs", &[]);
+        n.add_action(teksilo_core::accesskit::Action::Focus);
+        n.add_action(teksilo_core::accesskit::Action::Click);
+        remap(&mut n, &HashSet::new(), &|id| NodeId(id + 1000));
+        assert!(!n.supports_action(teksilo_core::accesskit::Action::Focus));
+        assert!(n.supports_action(teksilo_core::accesskit::Action::Click));
     }
 }

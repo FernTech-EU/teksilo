@@ -928,6 +928,36 @@ fn the_search_field_publishes_the_highlighted_row_as_its_active_descendant() {
     );
 }
 
+/// A row is the search field's active descendant while highlighted, so it
+/// must read as focusable to a platform adapter (UIA `IsKeyboardFocusable`),
+/// and an assistive `Focus` on it highlights it, as the arrows would, the
+/// keyboard staying in the field.
+#[test]
+fn an_assistive_focus_on_a_row_highlights_it() {
+    use crate::common::item_focus::test_support::{assistive_focus, reads_as_focusable};
+    let (mut tree, state, _root) = mounted(tree_with_commands(), CommandPalette::new());
+    let field = tree.focused();
+    let first = state
+        .active_row
+        .get()
+        .expect("the first row is highlighted");
+    press(&mut tree, Key::ArrowDown);
+    press(&mut tree, Key::ArrowDown);
+    let third = state.active_row.get().expect("the third row");
+    let first_node = teksilo_core::accessibility::widget_id_to_node_id(first);
+    assert!(reads_as_focusable(&mut tree, first_node));
+
+    assert!(assistive_focus(&mut tree, first_node), "the row took it");
+    tree.layout(AREA);
+    assert_eq!(
+        state.active_row.get(),
+        Some(first),
+        "the row is highlighted"
+    );
+    assert_ne!(first, third);
+    assert_eq!(tree.focused(), field, "the keyboard stays in the field");
+}
+
 #[test]
 fn an_empty_result_set_publishes_no_stale_active_descendant() {
     let (mut tree, state, root) = mounted(tree_with_commands(), CommandPalette::new());

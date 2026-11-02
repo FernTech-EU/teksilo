@@ -173,11 +173,24 @@ impl Widget for PaletteRow {
         self.root_child_id = Some(root);
 
         let state = self.state.clone();
+        let state_for_focus = self.state.clone();
         ctx.apply_self_handlers(
             HandlerSet::new()
                 .on_tap(move |_tap, ctx: &mut EventContext| {
                     state.set_highlight(index);
                     state.activate_highlighted(ctx);
+                })
+                // An assistive `Focus` on the row (advertised in
+                // `accessibility`) highlights it, as the arrows would; the
+                // search field keeps keyboard focus and names it as its
+                // active descendant.
+                .on_access_action(move |action, ctx: &mut EventContext| {
+                    if action != teksilo_core::accesskit::Action::Focus {
+                        return teksilo_core::event::EventResponse::Ignored;
+                    }
+                    state_for_focus.move_highlight(index);
+                    ctx.request_accessibility_update();
+                    teksilo_core::event::EventResponse::Handled
                 })
                 .on_hover(move |entered: bool, _ctx: &mut EventContext| hovered.set(entered))
                 .cursor(if enabled {
@@ -237,6 +250,11 @@ impl Widget for PaletteRow {
         }
         builder.set_selected(self.state.highlight.get() == self.index);
         builder.set_position_in_set(self.index + 1);
+        // The highlighted row is the search field's active descendant, so the
+        // platform's focus, and `accesskit_consumer` reads a node as
+        // focusable (UIA `IsKeyboardFocusable`) from this action alone. The
+        // row answers it by taking the highlight.
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
         // The "of N" half is on the result list's `Role::ListBox`: AccessKit
         // resolves an item's set size by walking up to its container.
     }

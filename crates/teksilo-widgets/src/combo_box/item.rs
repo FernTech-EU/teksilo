@@ -207,6 +207,25 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
                     hovered.set(entered);
                 }
             })
+            // An assistive `Focus` on this option (advertised in
+            // `accessibility`) moves the keyboard's highlight here, as the
+            // arrows would. Keyboard focus stays where it is: on the combo
+            // box or its search field, which the open list belongs to and
+            // which names the highlighted option as its active descendant.
+            .on_access_action({
+                let highlight = self.highlight.value.clone();
+                let value = self.value.clone();
+                move |action, ctx: &mut EventContext| {
+                    if action != teksilo_core::accesskit::Action::Focus {
+                        return teksilo_core::event::EventResponse::Ignored;
+                    }
+                    if highlight.get().as_ref() != Some(&value) {
+                        highlight.set(Some(value.clone()));
+                    }
+                    ctx.request_accessibility_update();
+                    teksilo_core::event::EventResponse::Handled
+                }
+            })
             .cursor(CursorIcon::Pointer);
 
         ctx.apply_self_handlers(handler_set);
@@ -262,6 +281,11 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
         let is_selected = self.highlight.value.get().as_ref() == Some(&self.value);
         builder.set_selected(is_selected);
         builder.set_position_in_set(self.position);
+        // The highlighted option is the focused node's active descendant, so
+        // the platform's focus, and `accesskit_consumer` reads a node as
+        // focusable (UIA `IsKeyboardFocusable`) from this action alone. The
+        // row answers it by taking the highlight (see `build`).
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
         // The "of N" half lives on the `DropdownPanel`'s `Role::ListBox`.
         // AccessKit resolves an item's set size by walking up from it, so a
         // count written here is read by no adapter on any platform.

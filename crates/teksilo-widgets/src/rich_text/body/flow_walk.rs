@@ -611,10 +611,19 @@ impl<'a> FlowWalk<'a> {
                 block.position + links[index].end,
             ));
         }
+        // A link Tab stops on is named the editor's active descendant while
+        // it is selected, so it takes focus: without the action
+        // `accesskit_consumer` reads it as not focusable (UIA
+        // `IsKeyboardFocusable` false) even while it is the focus. The
+        // editor's own handler services it, making it the link stop.
+        let stops = self.st.links_are_stops();
         if follows {
             for (id, index) in made {
                 builder.with_collected_node(id, |node| {
-                    node.add_action(teksilo_core::accesskit::Action::Click)
+                    node.add_action(teksilo_core::accesskit::Action::Click);
+                    if stops {
+                        node.add_action(teksilo_core::accesskit::Action::Focus);
+                    }
                 });
                 self.link_map.insert(id, links[index].href.clone());
             }
