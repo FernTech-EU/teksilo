@@ -55,6 +55,13 @@ by crate for clarity, not because crates version independently.
   **`WidgetTree::handle_os_drag_ended_for`**: a platform that starts a native
   drag on its own loop keeps the in-app drag alive until it confirms that
   drag's start, and an event naming another drag changes nothing.
+- **`AccessNodeBuilder::push_link_child_under(parent, element_id, label, url)`**
+  pushes a `Role::Link` under another synthetic node, and
+  **`text_runs::push_text_runs_with_links`** (with `LinkSpan`,
+  `EmittedLink` and `LinkedTextRunEmission`) emits a text's runs with each
+  link a `Role::Link` node in reading order, its runs in one character space
+  with the rest of the text. Neither adds an action: a widget that follows
+  links adds Click to the link nodes and routes it.
 - **`ImeOrigin`** (`Composition`, `Dictation`, `WritingTools`, `Insertion`;
   `#[non_exhaustive]`) says which part of the input system committed a text.
 - **`WidgetEvent::ime_commit(text)`** and

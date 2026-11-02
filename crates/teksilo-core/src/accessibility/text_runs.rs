@@ -34,6 +34,9 @@
 //! - Ids are derived from (byte offset, byte length, caller seed) and
 //!   deduplicated, because two runs sharing a `NodeId` panic
 //!   `accesskit_consumer`'s tree builder.
+//! - With [`push_text_runs_with_links`], no run straddles a link's edge, and
+//!   all of the above holds across the links: one character space, one line
+//!   chain per visual line, whichever node a run hangs from.
 //!
 //! Word boundaries come from UAX #29 rather than from whitespace: a
 //! reader stepping by word through "l'anticonstitutionnellement, dit-il"
@@ -569,7 +572,133 @@ pub fn push_text_runs(
     parent: Option<NodeId>,
     source: &TextRunSource<'_>,
 ) -> TextRunEmission {
+    emit_runs(builder, parent, source, &[], &mut Vec::new())
+}
+
+/// One link inside a laid-out source, for [`push_text_runs_with_links`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkSpan {
+    /// Byte range within [`TextRunSource::text`]. Spans must not overlap.
+    pub byte_range: Range<usize>,
+    /// Keys the link's nodes, so the same id gives the same `NodeId`s on
+    /// every walk: an id that survives edits elsewhere in the text (a
+    /// format run's id, say), not an offset.
+    pub element_id: u64,
+    /// The link's name: the text it covers.
+    pub label: String,
+    /// The link's destination, announced as the node's value.
+    pub url: String,
+}
+
+/// A `Role::Link` node [`push_text_runs_with_links`] emitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmittedLink {
+    /// Index of the span in the slice the caller passed.
+    pub index: usize,
+    /// The `Role::Link` node. It advertises no action: a caller that follows
+    /// links adds `Action::Click` to it and routes it.
+    pub id: NodeId,
+    /// The `Role::Label` text container beneath it that holds its runs.
+    pub text: NodeId,
+}
+
+/// What one [`push_text_runs_with_links`] call produced.
+#[derive(Debug, Clone, Default)]
+pub struct LinkedTextRunEmission {
+    /// The runs, in one character space, exactly as [`push_text_runs`]
+    /// reports them.
+    pub runs: TextRunEmission,
+    /// One entry per span that got any text, in reading order.
+    pub links: Vec<EmittedLink>,
+}
+
+/// [`push_text_runs`], with the runs inside each span hung under a
+/// `Role::Link` node of their own, in reading order.
+///
+/// Each link is a `Role::Link` node named by its text, with its URL as value,
+/// holding a `Role::Label` text container that holds the link's runs:
+/// `Role::Link` is not text-range capable, and a run whose filtered parent is
+/// not loses its text-change events. The link node is pushed where its first
+/// run falls, so a reader meets it between the text before it and the text
+/// after it. Its box, and its container's, is the union of its runs' boxes:
+/// for a link that wraps, a box spanning both lines, so a hit test there
+/// (explore-by-touch) finds the link over the text beside it on either line.
+/// Each run keeps its own box.
+///
+/// Everything else is `push_text_runs`'s: runs are cut at span boundaries as
+/// well as at the run-length cap, every run keeps one character space across
+/// the spans (so `TextRunEmission::position_of` answers for the whole
+/// source), and every run of a visual line is linked on that line whichever
+/// node it hangs from. A hard break rides the line's last run: when the
+/// line's text ends in a link, that is the link's last run, so the link's
+/// text ends with the break.
+///
+/// The link advertises no action, like [`AccessNodeBuilder::push_link_child`]:
+/// a caller that follows links adds `Action::Click` to each
+/// [`EmittedLink::id`] (through `with_collected_node`) and routes it.
+pub fn push_text_runs_with_links(
+    builder: &mut AccessNodeBuilder,
+    parent: Option<NodeId>,
+    source: &TextRunSource<'_>,
+    links: &[LinkSpan],
+) -> LinkedTextRunEmission {
+    let mut emitted = Vec::new();
+    let runs = emit_runs(builder, parent, source, links, &mut emitted);
+    LinkedTextRunEmission {
+        runs,
+        links: emitted,
+    }
+}
+
+/// The smallest rect holding both.
+fn rect_union(a: Rect, b: Rect) -> Rect {
+    let x0 = a.x.min(b.x);
+    let y0 = a.y.min(b.y);
+    let x1 = (a.x + a.width).max(b.x + b.width);
+    let y1 = (a.y + a.height).max(b.y + b.height);
+    Rect::new(x0, y0, x1 - x0, y1 - y0)
+}
+
+/// The ids of a link's two nodes, from its span's element id: one per role,
+/// so neither collides with the other nor with any run.
+fn link_seeds(element_id: u64) -> (u64, u64) {
+    (
+        fnv_mix_u64(element_id, 0x4c49_4e4b, 1),
+        fnv_mix_u64(element_id, 0x4c49_4e4b, 2),
+    )
+}
+
+/// The parent a run of span `index` hangs from: the link's text container,
+/// pushed with its link at the span's first run.
+fn link_parent(
+    builder: &mut AccessNodeBuilder,
+    parent: Option<NodeId>,
+    links: &[LinkSpan],
+    index: usize,
+    emitted: &mut Vec<EmittedLink>,
+) -> Option<NodeId> {
+    if let Some(made) = emitted.iter().find(|l| l.index == index) {
+        return Some(made.text);
+    }
+    let span = &links[index];
+    let (link_seed, text_seed) = link_seeds(span.element_id);
+    let id =
+        builder.push_link_child_under(parent, link_seed, span.label.clone(), span.url.clone())?;
+    let text = builder.push_link_text_child(id, text_seed)?;
+    emitted.push(EmittedLink { index, id, text });
+    Some(text)
+}
+
+fn emit_runs(
+    builder: &mut AccessNodeBuilder,
+    parent: Option<NodeId>,
+    source: &TextRunSource<'_>,
+    links: &[LinkSpan],
+    emitted: &mut Vec<EmittedLink>,
+) -> TextRunEmission {
     let text = source.text.as_ref();
+    // Each link's box, the union of its runs' boxes, set once every run is in.
+    let mut link_bounds: Vec<Option<Rect>> = vec![None; links.len()];
     let mut emission = TextRunEmission::default();
     let emit = !builder.emits_no_children();
     let mut char_cursor = 0usize;
@@ -606,15 +735,33 @@ pub fn push_text_runs(
             let slice = &text[piece.byte_range.clone()];
             let offsets = char_offsets(slice);
             let count = offsets.len() - 1;
+            // A run never straddles a link's edge: the piece is cut at every
+            // span boundary inside it, then each stretch at the cap.
+            let mut stops: Vec<usize> = links
+                .iter()
+                .flat_map(|l| [l.byte_range.start, l.byte_range.end])
+                .filter(|&b| b > piece.byte_range.start && b < piece.byte_range.end)
+                .filter_map(|b| {
+                    offsets
+                        .iter()
+                        .position(|&o| piece.byte_range.start + o == b)
+                })
+                .collect();
+            stops.push(count);
+            stops.sort_unstable();
+            stops.dedup();
             let mut start = 0usize;
-            while start < count {
-                let end = (start + MAX_RUN_CHARS).min(count);
-                chunks.push((
-                    piece.byte_range.start + offsets[start]..piece.byte_range.start + offsets[end],
-                    piece_index,
-                    start,
-                ));
-                start = end;
+            for stop in stops {
+                while start < stop {
+                    let end = (start + MAX_RUN_CHARS).min(stop);
+                    chunks.push((
+                        piece.byte_range.start + offsets[start]
+                            ..piece.byte_range.start + offsets[end],
+                        piece_index,
+                        start,
+                    ));
+                    start = end;
+                }
             }
         }
 
@@ -721,8 +868,26 @@ pub fn push_text_runs(
             if !emit {
                 continue;
             }
+            let in_link = (!range.is_empty())
+                .then(|| {
+                    links.iter().position(|l| {
+                        l.byte_range.start <= range.start && range.start < l.byte_range.end
+                    })
+                })
+                .flatten();
+            let run_parent = match in_link {
+                Some(index) => link_parent(builder, parent, links, index, emitted).or(parent),
+                None => parent,
+            };
+            if let Some(index) = in_link {
+                let union = match link_bounds[index] {
+                    Some(r) => rect_union(r, rect),
+                    None => rect,
+                };
+                link_bounds[index] = Some(union);
+            }
             let id = builder.push_text_run(
-                parent,
+                run_parent,
                 TextRunSpec {
                     element_id,
                     value,
@@ -748,6 +913,26 @@ pub fn push_text_runs(
 
         if emit {
             builder.link_runs_on_line(&line_run_ids);
+        }
+    }
+
+    for link in emitted.iter() {
+        let Some(rect) = link_bounds[link.index] else {
+            continue;
+        };
+        for node in [link.id, link.text] {
+            if source.rects_are_absolute {
+                builder.with_collected_node(node, |n| {
+                    n.set_bounds(accesskit::Rect {
+                        x0: rect.x as f64,
+                        y0: rect.y as f64,
+                        x1: (rect.x + rect.width) as f64,
+                        y1: (rect.y + rect.height) as f64,
+                    })
+                });
+            } else {
+                builder.set_child_bounds_local(node, rect);
+            }
         }
     }
 

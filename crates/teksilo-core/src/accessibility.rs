@@ -1307,6 +1307,57 @@ impl AccessNodeBuilder {
         node_id
     }
 
+    /// Push a `Role::Link` child under `parent` when given, and under the
+    /// widget's own node otherwise: the form of
+    /// [`push_link_child`](Self::push_link_child) for a link that sits inside
+    /// another synthetic node (a paragraph's text container, a table cell),
+    /// so it can be placed in reading order among the runs around it.
+    ///
+    /// The node is named `label` and carries `url` as its value, as
+    /// `push_link_child` does, and advertises no action either: a caller
+    /// that follows links adds `Action::Click` through
+    /// [`with_collected_node`](Self::with_collected_node) and routes it.
+    /// [`text_runs::push_text_runs_with_links`] does both halves of that
+    /// for a link inside laid-out text.
+    ///
+    /// `element_id` keys the node as it does for `push_link_child`, so the
+    /// same id gives the same `NodeId` on every walk. Returns `None` when the
+    /// builder has no owner or the id is already taken (a duplicate child id
+    /// panics `accesskit_consumer`'s tree builder).
+    pub fn push_link_child_under(
+        &mut self,
+        parent: Option<NodeId>,
+        element_id: u64,
+        label: impl Into<String>,
+        url: impl Into<String>,
+    ) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::Link);
+        let mut node = Node::new(Role::Link);
+        let label: String = label.into();
+        if !label.is_empty() {
+            node.set_label(label);
+        }
+        node.set_value(url.into());
+        self.push_collected_child(parent, node_id, node)
+    }
+
+    /// Push the `Role::Label` text container a link's runs hang from.
+    ///
+    /// `Role::Link` is not text-range capable, and a run whose filtered
+    /// parent is not loses its text-change events on every platform, so the
+    /// runs go under this container rather than under the link itself.
+    ///
+    /// Minted with `SyntheticKind::Link` although it is a `Role::Label`:
+    /// `SyntheticKind` is exhaustive, so a variant of its own would break
+    /// every match on it, and the caller's seed already keeps the id apart
+    /// from the link's.
+    pub(crate) fn push_link_text_child(&mut self, link: NodeId, element_id: u64) -> Option<NodeId> {
+        let owner = self.owner?;
+        let node_id = synthetic_node_id(owner, element_id, SyntheticKind::Link);
+        self.push_collected_child(Some(link), node_id, Node::new(Role::Label))
+    }
+
     /// Push a synthetic child node representing a lightweight
     /// `SceneItem` (or `SceneGroup`) emitted by `teksilo_scene::SceneView`.
     /// The caller customizes a sub-`AccessNodeBuilder` (mirroring the
