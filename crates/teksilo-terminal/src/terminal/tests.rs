@@ -610,10 +610,16 @@ fn a_synchronized_update_deadline_wakes_and_asks_for_an_update() {
 
 /// A synchronized update the child never ends is shown once its deadline
 /// passes, by the pull the frame step asks for, with nothing written.
+///
+/// The test never waits for the wall clock. Phase 1 uses a deadline a minute
+/// ahead, far past anything a loaded host can spend before the assertions, and
+/// checks the wake that was asked for. Phase 2 moves the deadline into the
+/// past in the three places the pull depends on, so it does not matter how
+/// long phase 1 took.
 #[test]
 fn a_synchronized_update_never_ended_is_shown_at_its_deadline() {
     let mut f = Fixture::new();
-    let deadline = Instant::now() + Duration::from_millis(30);
+    let deadline = Instant::now() + Duration::from_secs(60);
     f.shared.borrow_mut().synchronized_update = Some(deadline);
     let wakes = f.waker.count();
     f.output.write(b"\x1b[?2026hhalf a frame");
@@ -623,18 +629,19 @@ fn a_synchronized_update_never_ended_is_shown_at_its_deadline() {
     );
     f.frame();
     assert_eq!(f.state.borrow().sync_deadline, Some(deadline));
-    assert!(
-        f.tree
-            .wake_at_handle()
-            .get()
-            .is_some_and(|at| at <= deadline),
-        "woken for the deadline"
+    assert_eq!(
+        f.tree.wake_at_handle().get(),
+        Some(deadline),
+        "woken for the deadline and for nothing else"
     );
     assert_eq!(f.shared.borrow().synchronized_updates_ended, 0);
 
-    while Instant::now() < deadline {
-        std::thread::yield_now();
-    }
+    // The deadline passes: the engine's, the frame step's and the tree's wake
+    // slot, which the layout needs to run the frame tick at all.
+    let past = Instant::now() - Duration::from_millis(1);
+    f.shared.borrow_mut().synchronized_update = Some(past);
+    f.state.borrow_mut().sync_deadline = Some(past);
+    f.tree.wake_at_handle().set(Some(past));
     f.tree.layout(SizeProposal::exact(600.0, 300.0));
     assert_eq!(
         f.shared.borrow().synchronized_updates_ended,
