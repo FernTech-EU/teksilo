@@ -170,11 +170,13 @@ impl WidgetTree {
         use crate::shortcut::ShortcutScope;
         let mut best: Option<(usize, (&'static str, ShortcutScope, bool))> = None;
         // With focus in a modal, a global shortcut applies only when one of
-        // the widgets that registered it is inside that modal, or when none
-        // did (the tree's own, such as the standard edit shortcuts): a
-        // native modal window has its own widgets' shortcuts and not those
-        // of the window it blocks. With nothing focused, judged from the
-        // topmost modal.
+        // the widgets that registered it is inside that modal, when none did,
+        // or when it is one of the tree's own (the standard edit shortcuts),
+        // whoever re-registered it: a native modal window has its own
+        // widgets' shortcuts and not those of the window it blocks. An app
+        // may re-register a standard edit to rename it, and every text widget
+        // answers those from the focused widget's route, which a modal must
+        // not cut off. With nothing focused, judged from the topmost modal.
         let focus = self.focus_or_modal();
         let modal = focus.and_then(|f| self.intent_walk(f, &[]).2);
         for &(id, scope, propagate) in candidates {
@@ -183,14 +185,14 @@ impl WidgetTree {
             // outranks it (`usize::MAX - hops`, so fewer hops = deeper
             // scope = higher score). Tree depth is tiny, so no overflow.
             let score = match scope {
-                ShortcutScope::Global => {
+                ShortcutScope::Global => (crate::shortcut::is_framework_shortcut_id(id) || {
                     let owners = self.shortcut_registry.owners(id);
-                    (owners.is_empty()
+                    owners.is_empty()
                         || owners
                             .iter()
-                            .any(|&owner| self.global_applies(owner, modal)))
-                    .then_some(0usize)
-                }
+                            .any(|&owner| self.global_applies(owner, modal))
+                })
+                .then_some(0usize),
                 ShortcutScope::Scoped(scope_id) => focus
                     .and_then(|f| self.scope_distance_from_focus(f, scope_id))
                     .map(|hops| usize::MAX - hops),

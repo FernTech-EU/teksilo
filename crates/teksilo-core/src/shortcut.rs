@@ -31,8 +31,9 @@
 
 mod standard;
 
-pub(crate) use standard::register_standard_shortcuts;
+use standard::framework_default;
 pub use standard::{STANDARD_EDIT_CATEGORY, StandardEdit};
+pub(crate) use standard::{is_framework_shortcut_id, register_standard_shortcuts};
 
 use crate::event::{Key, Modifiers};
 use crate::intent::Intent;
@@ -734,6 +735,23 @@ pub struct ShortcutRegistry {
     /// instead of hard-rebuilding on the coarse global [`Self::version`]
     /// signal (which would tear down the item and drop clicks).
     resolved: HashMap<&'static str, Signal<Option<KeyStroke>>>,
+    /// The labels of the last registration with no owner of each framework
+    /// shortcut id (the standard edits): what the tree itself registered, as
+    /// localized by `teksilo-app`. When the last widget that re-registered
+    /// such an id goes away, the tree's own registration is put back with
+    /// these labels rather than the id being removed.
+    framework_labels: HashMap<&'static str, FrameworkLabels>,
+}
+
+/// The labels of a framework shortcut that vary from the default
+/// [`framework_default`] builds: what a localization changes. `Shortcut` is
+/// not `Clone` (its `on_activate` is a boxed closure), so these are kept
+/// instead of the shortcut.
+#[derive(Debug, Clone)]
+struct FrameworkLabels {
+    name: Prop<String>,
+    category_label: Option<Prop<String>>,
+    description: Option<Prop<String>>,
 }
 
 impl Default for ShortcutRegistry {
@@ -763,6 +781,7 @@ impl ShortcutRegistry {
             shared_owners: HashMap::new(),
             version: Signal::new(0),
             resolved: HashMap::new(),
+            framework_labels: HashMap::new(),
         }
     }
 
@@ -805,6 +824,16 @@ impl ShortcutRegistry {
     /// automatically).
     pub fn register(&mut self, shortcut: Shortcut) -> Option<Shortcut> {
         let id = shortcut.id;
+        if is_framework_shortcut_id(id) {
+            self.framework_labels.insert(
+                id,
+                FrameworkLabels {
+                    name: shortcut.name.clone(),
+                    category_label: shortcut.category_label.clone(),
+                    description: shortcut.description.clone(),
+                },
+            );
+        }
         let previous = self.defaults.insert(id, shortcut);
         // If a previous registration had an owner, the new anonymous
         // registration reassigns ownership away. Drop the old owner
@@ -819,7 +848,9 @@ impl ShortcutRegistry {
     /// Upsert a shortcut default owned by `owner`. When `owner` is
     /// destroyed, the framework calls
     /// [`ShortcutRegistry::unregister_all_for_owner`] to remove this
-    /// registration. Preserves user overrides identically to
+    /// registration, or, for a standard edit shortcut
+    /// ([`StandardEdit`]) the tree registered itself, to put the tree's own
+    /// registration back. Preserves user overrides identically to
     /// [`ShortcutRegistry::register`].
     pub fn register_owned(&mut self, shortcut: Shortcut, owner: WidgetId) -> Option<Shortcut> {
         let id = shortcut.id;
@@ -835,7 +866,10 @@ impl ShortcutRegistry {
 
     /// Upsert a shortcut default that several widgets declare together, adding
     /// `owner` to the widgets keeping it. The default stays registered while
-    /// any of them lives, and goes with the last.
+    /// any of them lives, and goes with the last, except a standard edit
+    /// shortcut ([`StandardEdit`]) the tree registered itself, which reverts
+    /// to the tree's own (see
+    /// [`unregister_all_for_owner`](Self::unregister_all_for_owner)).
     ///
     /// For a command more than one instance of a widget implements, such as
     /// the bold of every rich-text editor: one id in the registry, so one row
@@ -869,7 +903,12 @@ impl ShortcutRegistry {
     /// Remove a default by id. The user override for that id (if any)
     /// stays in the graveyard so it can be re-applied if the shortcut
     /// is later re-registered.
+    ///
+    /// An explicit removal is final for a standard edit shortcut too: the
+    /// tree's own registration is not put back when a widget that registers
+    /// the id later goes away.
     pub fn unregister(&mut self, id: &str) -> Option<Shortcut> {
+        self.framework_labels.remove(id);
         let removed = self.defaults.remove(id);
         if removed.is_some() {
             self.detach_owner_index(id);
@@ -884,6 +923,15 @@ impl ShortcutRegistry {
     /// widget tree when a widget is destroyed — keeps the registry
     /// from leaking entries whose `on_activate` closures may capture
     /// state owned by the destroyed widget.
+    ///
+    /// A standard edit shortcut ([`StandardEdit`]) whose last owner goes is
+    /// not removed when the tree registered it itself (with
+    /// [`register`](Self::register), as `WidgetTree::new` does): the tree's
+    /// own registration is put back, with its default chords and scope and
+    /// the labels of that last registration with no owner (the localized
+    /// ones in a window `teksilo-app` opened). An `on_activate`, an
+    /// `.intent(..)` or an `enabled_when` the owner had attached is not
+    /// restored. [`unregister`](Self::unregister) cancels this.
     pub fn unregister_all_for_owner(&mut self, owner: WidgetId) {
         let Some(ids) = self.by_owner.remove(&owner) else {
             return;
@@ -898,16 +946,38 @@ impl ShortcutRegistry {
                 }
                 self.shared_owners.remove(id);
             }
+            self.owner_by_id.remove(id);
+            // The tree's own standard edit comes back rather than leaving
+            // its chord unbound in every window and modal.
+            if let Some(mut restored) = self.framework_restore(id) {
+                any = true;
+                let labels = self.framework_labels[id].clone();
+                restored.name = labels.name;
+                restored.category_label = labels.category_label;
+                restored.description = labels.description;
+                self.defaults.insert(id, restored);
+                self.refresh_resolved(id);
+                continue;
+            }
             if self.defaults.remove(id).is_some() {
                 any = true;
             }
-            self.owner_by_id.remove(id);
             // Its effective primary is now gone — push that to any observer.
             self.refresh_resolved(id);
         }
         if any {
             self.bump_version();
         }
+    }
+
+    /// The tree's own registration of the framework shortcut `id`, when the
+    /// tree made one and nothing has [unregistered](Self::unregister) it
+    /// since; the caller puts the stored labels on it.
+    fn framework_restore(&self, id: &'static str) -> Option<Shortcut> {
+        if !self.framework_labels.contains_key(id) {
+            return None;
+        }
+        framework_default(id)
     }
 
     /// The widget id that currently owns `id`, if any.
@@ -925,7 +995,9 @@ impl ShortcutRegistry {
 
     /// Every widget keeping shortcut `id` registered: its one owner, or the
     /// owners of a [shared](Self::register_shared) one. Empty for a shortcut
-    /// registered with no owner (the tree's standard edit shortcuts).
+    /// registered with no owner (the tree's standard edit shortcuts). A
+    /// standard edit an app re-registered has owners, and still applies in a
+    /// modal none of them is inside.
     pub(crate) fn owners(&self, id: &str) -> Vec<WidgetId> {
         match self.owner_by_id.get(id) {
             Some(owner) => vec![*owner],
@@ -1627,6 +1699,102 @@ mod tests {
     }
 
     // --- Registry: owner indexing & cleanup ----------------------------
+
+    /// The tree's standard edits, as `WidgetTree::new` registers them, with
+    /// Paste renamed "Coller" as a localization would.
+    fn registry_with_standard_edits() -> ShortcutRegistry {
+        let mut reg = ShortcutRegistry::new();
+        super::register_standard_shortcuts(&mut reg);
+        let mut paste = StandardEdit::Paste.shortcut();
+        paste.name = "Coller".into();
+        reg.register(paste);
+        reg
+    }
+
+    #[test]
+    fn a_standard_edit_comes_back_when_its_last_owner_goes() {
+        use slotmap::KeyData;
+        let page: WidgetId = KeyData::from_ffi(1).into();
+        let other: WidgetId = KeyData::from_ffi(2).into();
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let mut reg = registry_with_standard_edits();
+        let chord = reg.effective("edit.paste").unwrap().primary;
+        let observed = reg.effective_primary_signal("edit.paste");
+
+        let mut renamed = StandardEdit::Paste.shortcut();
+        renamed.name = "Paste here".into();
+        reg.register_owned(renamed, page);
+        let ticks = Rc::new(Cell::new(0));
+        let counter = ticks.clone();
+        let _watch = observed.observe(move |_| counter.set(counter.get() + 1));
+        let version = reg.version().get();
+
+        reg.unregister_all_for_owner(page);
+        let paste = reg.get_default("edit.paste").expect("still registered");
+        assert_eq!(paste.name.get(), "Coller", "the last anonymous name");
+        assert!(!reg.has_owner("edit.paste"));
+        assert_eq!(reg.effective("edit.paste").unwrap().primary, chord);
+        assert_eq!(reg.version().get(), version + 1, "one tick per teardown");
+        assert_eq!(ticks.get(), 0, "the chord did not change, so no tick");
+
+        // Shared, after its last owner.
+        let mut shared = StandardEdit::Copy.shortcut();
+        shared.name = "Copy here".into();
+        reg.register_shared(StandardEdit::Copy.shortcut(), page);
+        reg.register_shared(shared, other);
+        reg.unregister_all_for_owner(page);
+        assert_eq!(
+            reg.get_default("edit.copy").unwrap().name.get(),
+            "Copy here"
+        );
+        reg.unregister_all_for_owner(other);
+        assert_eq!(reg.get_default("edit.copy").unwrap().name.get(), "Copy");
+        assert!(!reg.has_owner("edit.copy"));
+    }
+
+    #[test]
+    fn a_users_rebind_survives_the_restore_of_a_standard_edit() {
+        use slotmap::KeyData;
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let page: WidgetId = KeyData::from_ffi(1).into();
+        let mut reg = registry_with_standard_edits();
+        let rebound = KeyStroke::ctrl(Key::B);
+        reg.rebind_primary("edit.paste", Some(rebound));
+        let resolved = reg.effective("edit.paste").unwrap().primary;
+        let observed = reg.effective_primary_signal("edit.paste");
+        reg.register_owned(StandardEdit::Paste.shortcut(), page);
+        let ticks = Rc::new(Cell::new(0));
+        let counter = ticks.clone();
+        let _watch = observed.observe(move |_| counter.set(counter.get() + 1));
+
+        reg.unregister_all_for_owner(page);
+        assert_eq!(resolved, Some(rebound), "a user's chord is taken literally");
+        assert_eq!(reg.effective("edit.paste").unwrap().primary, resolved);
+        assert_eq!(ticks.get(), 0, "the user's chord did not change");
+    }
+
+    #[test]
+    fn an_explicit_unregister_keeps_a_standard_edit_gone() {
+        use slotmap::KeyData;
+        let page: WidgetId = KeyData::from_ffi(1).into();
+        let mut reg = registry_with_standard_edits();
+        reg.unregister("edit.paste");
+        reg.register_owned(StandardEdit::Paste.shortcut(), page);
+        reg.unregister_all_for_owner(page);
+        assert!(reg.get_default("edit.paste").is_none());
+    }
+
+    #[test]
+    fn a_standard_edit_never_registered_anonymously_goes_with_its_owner() {
+        use slotmap::KeyData;
+        let page: WidgetId = KeyData::from_ffi(1).into();
+        let mut reg = ShortcutRegistry::new();
+        reg.register_owned(StandardEdit::Paste.shortcut(), page);
+        reg.unregister_all_for_owner(page);
+        assert!(reg.get_default("edit.paste").is_none());
+    }
 
     #[test]
     fn unregister_all_for_owner_removes_only_owner_entries() {

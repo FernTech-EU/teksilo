@@ -1270,10 +1270,14 @@ impl<'a> BuildContext<'a> {
     /// scope: the shortcut fires wherever focus is, except in a modal overlay
     /// (a dialog presented in the window, the command palette) this widget is
     /// not inside, as a native modal window has only its own widgets'
-    /// shortcuts.
+    /// shortcuts. A standard edit shortcut
+    /// ([`StandardEdit`](crate::shortcut::StandardEdit)) is the exception: an
+    /// app may re-register one to rename it, and it still applies in every
+    /// modal.
     ///
     /// Ownership still applies: the shortcut is torn down when this
-    /// widget goes away.
+    /// widget goes away, except a standard edit shortcut, which reverts to
+    /// the tree's own.
     pub fn register_shortcut_global(&mut self, mut shortcut: crate::shortcut::Shortcut) {
         let id = self.self_id();
         shortcut.scope = crate::shortcut::ShortcutScope::Global;
@@ -1284,7 +1288,11 @@ impl<'a> BuildContext<'a> {
 
     /// Register a global [`Shortcut`](crate::shortcut::Shortcut) that every
     /// instance of a widget declares together, with the widget being built
-    /// among its owners. It stays registered while any of them lives. See
+    /// among its owners. It stays registered while any of them lives, except
+    /// a standard edit shortcut
+    /// ([`StandardEdit`](crate::shortcut::StandardEdit)), which reverts to the
+    /// tree's own when the last goes, and which applies in every modal
+    /// whoever registered it. See
     /// [`ShortcutRegistry::register_shared`](crate::shortcut::ShortcutRegistry::register_shared).
     ///
     /// For a command each instance runs from an

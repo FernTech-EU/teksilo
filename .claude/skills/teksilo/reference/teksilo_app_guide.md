@@ -368,7 +368,9 @@ impl Widget for Root {
   `register_action_global`). A focused text widget's action answers first; yours runs when
   focus is elsewhere. A shortcut whose intent no action handles leaves its key to the
   focused widget. The built-in text widgets grey their Edit menu rows when there is
-  nothing to act on; the shortcut still reaches the widget.
+  nothing to act on; the shortcut still reaches the widget. Re-registering a `StandardEdit`
+  shortcut to rename it (`register_shortcut_global(StandardEdit::Paste.shortcut())` with
+  your own name) is allowed and keeps it working in dialogs; keep its `edit.*` intent.
 - While an editable `RichTextEditor` exists the tree also binds `format.bold` / `italic` /
   `underline` / `insert_paragraph` (`FormatShortcut`), and `CodeEditor` binds
   `code.toggle_comment` / `code.duplicate` (`CodeShortcut`). Same rule: don't bind Ctrl+B or

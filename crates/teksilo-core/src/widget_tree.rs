@@ -4156,6 +4156,10 @@ impl WidgetTree {
     /// window's tree has the shortcuts of its own widgets and none of the
     /// window it blocks; an in-tree modal behaves the same for keys. An
     /// intent goes on past the modal ([`intent_route`](Self::intent_route)).
+    ///
+    /// Not asked for the tree's own shortcuts (the standard edits), which
+    /// apply in a modal whoever re-registered them
+    /// (`select_shortcut_for_focus`).
     pub(crate) fn global_applies(&self, owner: WidgetId, modal: Option<WidgetId>) -> bool {
         modal.is_none_or(|modal| self.modal_of(owner) == Some(modal))
     }

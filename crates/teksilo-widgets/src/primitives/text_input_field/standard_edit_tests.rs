@@ -362,3 +362,68 @@ fn a_redo_leaves_the_caret_after_the_redone_text() {
     f.tree.layout(SizeProposal::exact(300.0, 40.0));
     assert_eq!(f.text.get(), "abc defY");
 }
+
+/// A widget of the page re-registering Paste, Copy and Select All under
+/// another name, as an application renaming them does.
+#[derive(Debug)]
+struct RenamesEdits;
+
+impl Widget for RenamesEdits {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        for command in [
+            StandardEdit::Paste,
+            StandardEdit::Copy,
+            StandardEdit::SelectAll,
+        ] {
+            let mut shortcut = command.shortcut();
+            shortcut.name = "Renamed".into();
+            ctx.register_shortcut_global(shortcut);
+        }
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+}
+
+/// A field in a dialog shown in the window still pastes, selects all and
+/// copies when the application re-registered those shortcuts from its page.
+#[test]
+fn a_field_in_a_modal_answers_standard_edits_an_app_re_registered() {
+    use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+
+    let mut f = Field::alone("page", false);
+    f.tree.add(RenamesEdits);
+    f.tree.layout(SizeProposal::exact(300.0, 40.0));
+    assert!(
+        f.tree
+            .shortcut_registry()
+            .has_owner(StandardEdit::Paste.id())
+    );
+
+    let text = Signal::new(String::new());
+    let dialog_field = f.tree.add(TextInputField::new(text.clone()));
+    f.tree.show_overlay(OverlayRequest::new(
+        dialog_field,
+        f.field,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    f.tree.layout(SizeProposal::exact(300.0, 40.0));
+    let focusable = f
+        .tree
+        .first_focusable_descendant(dialog_field)
+        .unwrap_or(dialog_field);
+    f.tree.focus(focusable);
+
+    f.clipboard.set_text("x").unwrap();
+    f.press(Key::V, Modifiers::COMMAND);
+    f.press(Key::V, Modifiers::COMMAND);
+    assert_eq!(text.get(), "xx", "Ctrl+V pasted into the dialog's field");
+    f.clipboard.set_text("").unwrap();
+    f.press(Key::A, Modifiers::COMMAND);
+    f.press(Key::C, Modifiers::COMMAND);
+    assert_eq!(f.clipboard(), "xx", "select all, then copy");
+    assert_eq!(f.text.get(), "page", "the page's field is untouched");
+}

@@ -211,6 +211,10 @@ by crate for clarity, not because crates version independently.
   an ancestor**, not only a child, to place it elsewhere in the
   accessibility tree; each id is emitted once, and a second claim is
   skipped.
+- `ShortcutRegistry::unregister_all_for_owner` no longer removes a standard
+  edit shortcut (`edit.*`) the tree registered itself when its last owner
+  goes: it puts back the tree's own registration, with its localized name.
+  `ShortcutRegistry::unregister` still removes it.
 - **Breaking.** `WidgetEvent::ImeCommit` is `{ text, origin, replacement }`
   where it was `{ text }`: `origin` is an `ImeOrigin` and `replacement` an
   optional character range of the field's text to replace. A `match` on it
@@ -364,6 +368,12 @@ by crate for clarity, not because crates version independently.
   between the clicks.** The tap count now survives a rebuild of the node, so a
   widget whose first click makes it rebuild (a data-view row that the first
   click selects) still sees the second click as the second.
+- **Cut, copy, paste, undo, redo and select all work in a text field inside
+  a dialog shown in the window when the application re-registered their
+  shortcuts to rename them.** Before, the chords did nothing there.
+- **A standard edit shortcut stays bound when the widget that re-registered
+  it goes away.** Before, Ctrl+V and the others stopped working everywhere
+  once that widget was destroyed.
 
 #### Text
 

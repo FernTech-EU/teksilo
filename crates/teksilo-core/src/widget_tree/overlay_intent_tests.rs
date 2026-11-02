@@ -1021,3 +1021,314 @@ fn a_popover_attached_inside_a_modal_reaches_the_modals_own_actions() {
         "the dialog's editor, not the root"
     );
 }
+
+// The standard edit shortcuts are the tree's own: they apply in a modal even
+// when an app re-registered them from a widget of the page to rename them, so
+// cut, copy and paste keep working in a dialog's text field. The intent still
+// stays in the modal, so the page's own edit actions are not reached.
+
+/// A focusable stand-in for a text field: an action for every standard edit,
+/// recording its id, except those in `declines`, which it passes on,
+/// recording "declined" and the id.
+#[derive(Debug)]
+struct EditField {
+    calls: Calls,
+    declines: &'static [&'static str],
+}
+
+impl Widget for EditField {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        for command in crate::shortcut::StandardEdit::ALL {
+            let id = command.id();
+            let calls = self.calls.clone();
+            let declines = self.declines;
+            ctx.register_action(Action::new(id).on_invoke_with_response(move |_, _| {
+                if declines.contains(&id) {
+                    calls.borrow_mut().push(if id == "edit.undo" {
+                        "declined edit.undo"
+                    } else {
+                        "declined"
+                    });
+                    return crate::IntentResponse::Propagated;
+                }
+                calls.borrow_mut().push(id);
+                crate::IntentResponse::Handled
+            }));
+        }
+        ctx.apply_self_handlers(crate::widget_builder::HandlerSet::new().focusable(true));
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(100.0, 20.0).into()
+    }
+}
+
+/// A widget of the page re-registering every standard edit shortcut under
+/// another name, owned (`register_shortcut_global`) or shared
+/// (`register_shortcut_shared`), as an app renaming them does.
+#[derive(Debug)]
+struct RenamesStandardEdits {
+    shared: bool,
+}
+
+impl Widget for RenamesStandardEdits {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        for command in crate::shortcut::StandardEdit::ALL {
+            let mut shortcut = command.shortcut();
+            shortcut.name = "Renamed".into();
+            if self.shared {
+                ctx.register_shortcut_shared(shortcut);
+            } else {
+                ctx.register_shortcut_global(shortcut);
+            }
+        }
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+}
+
+/// The page's own undo, as an app's project undo: a window-global action for
+/// `edit.undo`, recording "page undo".
+#[derive(Debug)]
+struct PageUndo {
+    calls: Calls,
+}
+
+impl Widget for PageUndo {
+    fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+        let calls = self.calls.clone();
+        ctx.register_action_global(Action::new("edit.undo").on_invoke(move |_, _| {
+            calls.borrow_mut().push("page undo");
+        }));
+        vec![]
+    }
+
+    fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+}
+
+impl Window {
+    /// Add `widget` to the page (a root of its own) and lay out.
+    fn on_page(&mut self, widget: impl Widget + 'static) -> WidgetId {
+        let id = self.tree.add(widget);
+        self.tree.layout(SizeProposal::exact(400.0, 300.0));
+        id
+    }
+
+    /// An [`EditField`] in a new modal attached to the page's button; returns
+    /// the field, not focused.
+    fn modal_edit_field(&mut self, declines: &'static [&'static str]) -> WidgetId {
+        let field = self.tree.add(EditField {
+            calls: self.calls.clone(),
+            declines,
+        });
+        let content = self.tree.add(StackWidget::new().child(field));
+        self.tree.show_overlay(OverlayRequest::new(
+            content,
+            self.button,
+            OverlayPlacement::Centered,
+            DismissBehavior::Manual,
+        ));
+        self.tree.layout(SizeProposal::exact(400.0, 300.0));
+        field
+    }
+
+    /// Press the chord the registry currently binds to `id`.
+    fn press_command(&mut self, id: &str) {
+        let chord = self
+            .tree
+            .shortcut_registry()
+            .effective(id)
+            .and_then(|effective| effective.primary)
+            .unwrap_or_else(|| panic!("{id} has a chord"));
+        self.tree.press_key(chord.key, chord.modifiers);
+    }
+
+    /// Press every standard edit's chord, returning what the field recorded.
+    fn press_every_standard_edit(&mut self) -> Vec<&'static str> {
+        self.calls.borrow_mut().clear();
+        for command in crate::shortcut::StandardEdit::ALL {
+            self.press_command(command.id());
+        }
+        self.calls()
+    }
+}
+
+fn every_standard_edit_id() -> Vec<&'static str> {
+    crate::shortcut::StandardEdit::ALL
+        .iter()
+        .map(|command| command.id())
+        .collect()
+}
+
+#[test]
+fn a_standard_edit_an_app_re_registered_still_reaches_the_field_in_a_modal() {
+    let mut window = Window::new();
+    window.on_page(RenamesStandardEdits { shared: false });
+    assert!(window.tree.shortcut_registry().has_owner("edit.paste"));
+    let field = window.modal_edit_field(&[]);
+    window.tree.focus(field);
+    assert_eq!(window.press_every_standard_edit(), every_standard_edit_id());
+}
+
+#[test]
+fn a_standard_edit_two_page_widgets_share_still_reaches_the_field_in_a_modal() {
+    let mut window = Window::new();
+    window.on_page(RenamesStandardEdits { shared: true });
+    window.on_page(RenamesStandardEdits { shared: true });
+    assert!(window.tree.shortcut_registry().has_owner("edit.paste"));
+    let field = window.modal_edit_field(&[]);
+    window.tree.focus(field);
+    assert_eq!(window.press_every_standard_edit(), every_standard_edit_id());
+}
+
+#[test]
+fn a_rebound_standard_edit_an_app_re_registered_reaches_the_field_in_a_modal() {
+    let mut window = Window::new();
+    window.on_page(RenamesStandardEdits { shared: false });
+    window
+        .tree
+        .shortcut_registry_mut()
+        .rebind_primary("edit.paste", Some(KeyStroke::ctrl(Key::B)));
+    let field = window.modal_edit_field(&[]);
+    window.tree.focus(field);
+    window.tree.press_key(Key::B, Modifiers::COMMAND);
+    assert_eq!(window.calls(), ["edit.paste"]);
+}
+
+/// With nothing focused under the modal, the key is judged from the topmost
+/// modal, and the action on the modal's content takes the re-registered
+/// standard edit.
+#[test]
+fn a_re_registered_standard_edit_fires_under_a_modal_with_nothing_focused() {
+    let mut window = Window::new();
+    window.on_page(RenamesStandardEdits { shared: false });
+    let content = window.tree.add(EditField {
+        calls: window.calls.clone(),
+        declines: &[],
+    });
+    window.tree.show_overlay(OverlayRequest::new(
+        content,
+        window.button,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(window.tree.focused(), None);
+    window.press_command("edit.paste");
+    assert_eq!(window.calls(), ["edit.paste"]);
+}
+
+/// The shortcut applies in the modal, but its intent stays there: the page's
+/// own undo is not run when the field declines it.
+#[test]
+fn a_re_registered_standard_edit_in_a_modal_does_not_reach_the_pages_action() {
+    let mut window = Window::new();
+    window.on_page(RenamesStandardEdits { shared: false });
+    window.on_page(PageUndo {
+        calls: window.calls.clone(),
+    });
+    let field = window.modal_edit_field(&["edit.undo"]);
+    window.tree.focus(field);
+    window.press_command("edit.undo");
+    assert_eq!(
+        window.calls(),
+        ["declined edit.undo"],
+        "the field saw the shortcut's intent and declined it; the page's undo did not run"
+    );
+}
+
+/// A scoped binding on the same chord inside the modal still wins over the
+/// standard edit: the more specific scope is kept.
+#[test]
+fn a_scoped_binding_in_a_modal_beats_a_re_registered_standard_edit() {
+    #[derive(Debug)]
+    struct ScopedPaste {
+        calls: Calls,
+        field: Rc<RefCell<Option<WidgetId>>>,
+    }
+    impl Widget for ScopedPaste {
+        fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
+            let calls = self.calls.clone();
+            ctx.register_action(Action::new("test.scoped_paste").on_invoke(move |_, _| {
+                calls.borrow_mut().push("scoped");
+            }));
+            ctx.register_shortcut(
+                Shortcut::new("test.scoped_paste")
+                    .primary(KeyStroke::ctrl(Key::V))
+                    .build(),
+            );
+            let field = ctx.add(EditField {
+                calls: self.calls.clone(),
+                declines: &[],
+            });
+            *self.field.borrow_mut() = Some(field);
+            vec![field]
+        }
+
+        fn layout_response(&self, proposal: SizeProposal, _: &LayoutContext) -> LayoutResponse {
+            proposal.resolve(100.0, 20.0).into()
+        }
+    }
+
+    let mut window = Window::new();
+    window.on_page(RenamesStandardEdits { shared: false });
+    let field = Rc::new(RefCell::new(None));
+    let content = window.tree.add(ScopedPaste {
+        calls: window.calls.clone(),
+        field: field.clone(),
+    });
+    window.tree.show_overlay(OverlayRequest::new(
+        content,
+        window.button,
+        OverlayPlacement::Centered,
+        DismissBehavior::Manual,
+    ));
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    let field = field.borrow().expect("built");
+    window.tree.focus(field);
+    window.tree.press_key(Key::V, Modifiers::COMMAND);
+    assert_eq!(window.calls(), ["scoped"]);
+}
+
+/// The tree's own registration, never re-registered, reaches the field in a
+/// modal as before.
+#[test]
+fn a_standard_edit_reaches_the_field_in_a_modal() {
+    let mut window = Window::new();
+    assert!(!window.tree.shortcut_registry().has_owner("edit.paste"));
+    let field = window.modal_edit_field(&[]);
+    window.tree.focus(field);
+    assert_eq!(window.press_every_standard_edit(), every_standard_edit_id());
+}
+
+/// When the widget that re-registered the standard edits is destroyed, the
+/// tree's own registrations come back: Ctrl+V still reaches the field, in the
+/// window and in a modal.
+#[test]
+fn a_standard_edit_survives_the_widget_that_re_registered_it() {
+    let mut window = Window::new();
+    let renamer = window.on_page(RenamesStandardEdits { shared: false });
+    let page_field = window.on_page(EditField {
+        calls: window.calls.clone(),
+        declines: &[],
+    });
+    window.tree.destroy_subtree_for_testing(renamer);
+    window.tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert!(!window.tree.shortcut_registry().has_owner("edit.paste"));
+
+    window.tree.focus(page_field);
+    window.tree.press_key(Key::V, Modifiers::COMMAND);
+    assert_eq!(window.calls(), ["edit.paste"], "in the window");
+
+    window.calls.borrow_mut().clear();
+    let field = window.modal_edit_field(&[]);
+    window.tree.focus(field);
+    window.tree.press_key(Key::V, Modifiers::COMMAND);
+    assert_eq!(window.calls(), ["edit.paste"], "in a modal");
+}

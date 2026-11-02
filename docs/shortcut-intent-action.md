@@ -418,7 +418,9 @@ order:
    global binding registered by a widget inside that modal is, or one
    registered with no owner (the standard edit shortcuts, a window's copies
    of the application menu's shortcuts), as in a native
-   modal window's tree (see "Scoped vs global actions"). With nothing
+   modal window's tree (see "Scoped vs global actions"). The standard edit
+   shortcuts apply in a modal even when an app re-registered them from a
+   widget of the page. With nothing
    focused while a modal is open, the key is judged as if focus were in the
    topmost modal.
 2. **Most-specific scope wins.** An applicable `Scoped` binding beats a
@@ -978,6 +980,21 @@ history leaves the row to the application's Undo; off, the widget keeps
 Undo and the row greys. This changes no dispatch: a shortcut whose command
 has nothing to act on still reaches the focused widget's action, which
 handles or declines it as above.
+
+An app may re-register a standard edit shortcut to rename it, for example
+`ctx.register_shortcut_global(StandardEdit::Paste.shortcut())` with a name of
+its own. It still applies wherever focus is, a dialog shown in the window
+included, so the text fields there keep pasting. For that the
+re-registration must keep the `edit.*` intent name (no `.intent(..)` or
+`on_activate` producing another one) and must not disable itself with
+`enabled_when`: the intent of a shortcut fired in a modal stays in the modal,
+and a field there answers only `edit.paste`. When the widget that
+re-registered it goes away, the tree's own registration comes back, with the
+tree's chords and its localized name (anything the app attached, an
+`on_activate`, an `.intent(..)`, an `enabled_when`, is not kept);
+`ShortcutRegistry::unregister` removes it for good. A re-registration with
+`register_shortcut` (scoped) limits the shortcut to that widget's subtree, in
+the window and in a modal alike.
 
 A widget of your own that copies, pastes or selects all should do the
 same: register an `Action` for the `edit.*` id rather than match the
