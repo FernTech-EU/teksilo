@@ -448,6 +448,13 @@ by crate for clarity, not because crates version independently.
 
 #### Core
 
+- **On Windows and Linux, a table cell, grid cell or row or column header
+  that has no name of its own is named by the text it shows**, as ARIA names
+  it from its content. On Windows such a cell was an unnamed UIA data item, so
+  NVDA read the rows of a `TableView` or a `TreeTableView` as "data item, 2 of
+  5" and never their text. On macOS cells are left unnamed, as VoiceOver
+  already reads them from the text they hold. A cell holding a control, and a
+  table inside a rich-text editor or viewer, are left as they were.
 - **A double or triple click is recognized even when the widget rebuilds
   between the clicks.** The tap count now survives a rebuild of the node, so a
   widget whose first click makes it rebuild (a data-view row that the first
@@ -566,6 +573,17 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A multiple-selection `TableView` tells screen readers it takes more
+  than one row or cell**, as a `TreeTableView` already did. On Windows its
+  grid reported `CanSelectMultiple` as false in the `MultiRow` and
+  `MultiCell` modes.
+- **A `TableView` row tells screen readers its place among the rows ("2 of
+  50")**, as a `TreeTableView` row does. NVDA used to read a row change in a
+  table as "data item" with no position.
+- **A selected `TableView` or `TreeTableView` row is heard as selected on
+  Windows.** The cells of a table or tree table that has a selection are grid
+  cells, which carry their row's selected state to UI Automation; a row and a
+  plain cell carry none there.
 - **`T` in a `Calendar` jumps to today when typed on a keyboard.** It only
   answered a synthesised `Key::Character('t')`, never the `Key::T` a key
   press arrives as.

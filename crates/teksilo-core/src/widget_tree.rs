@@ -12,6 +12,7 @@ use crate::event::{EventResponse, Key, Modifiers, PointerButton, WidgetEvent};
 use crate::widget::{EventContext, LayoutContext, PaintContext, Widget, WidgetPlacement};
 use crate::widget_id::WidgetId;
 
+mod accessibility_cell_name_impl;
 mod accessibility_description_impl;
 #[cfg(test)]
 mod accessibility_description_tests;

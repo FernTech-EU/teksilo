@@ -1875,7 +1875,11 @@ fn focused_cell_sets_active_descendant_to_the_cell_node() {
         .find(|(nid, _)| *nid == active)
         .map(|(_, n)| n)
         .expect("active_descendant must reference a node present in the TreeUpdate");
-    assert_eq!(cell_node.role(), Role::Cell);
+    assert_eq!(
+        cell_node.role(),
+        Role::GridCell,
+        "a selectable tree table's cell"
+    );
 }
 
 #[test]
@@ -2006,7 +2010,7 @@ fn taking_focus_reveals_the_cursor_row() {
         nominated(&mut tree),
         // `row_index` is stored zero-based and the adapters add the 1 back,
         // so the cursor's row 500 reads as 501 with the header counted.
-        Some((Role::Cell, Some(501))),
+        Some((Role::GridCell, Some(501))),
         "taking focus has to bring the cursor's row into the realized \
          window, or nothing in the tree can be told about it"
     );
@@ -3519,17 +3523,19 @@ fn tt_flatten_through_bands(tree: &WidgetTree, ids: Vec<WidgetId>) -> Vec<Widget
 }
 
 /// The first BODY `Role::Row` (band-flattened children include a
-/// `Role::Cell`) — distinguishes it from the header, which shares
-/// `Role::Row` but has only `Role::ColumnHeader` children.
+/// `Role::Cell` or `Role::GridCell`), which tells it from the header: that
+/// one shares `Role::Row` but has only `Role::ColumnHeader` children.
 fn tt_first_body_row_id(tree: &WidgetTree, root: WidgetId) -> WidgetId {
     let mut walker = vec![root];
     while let Some(id) = walker.pop() {
         if tree.accessibility_node(id).role() == Role::Row {
             let flat = tt_flatten_through_bands(tree, tree.children(id));
-            if flat
-                .iter()
-                .any(|&c| tree.accessibility_node(c).role() == Role::Cell)
-            {
+            if flat.iter().any(|&c| {
+                matches!(
+                    tree.accessibility_node(c).role(),
+                    Role::Cell | Role::GridCell
+                )
+            }) {
                 return id;
             }
         }
@@ -4461,7 +4467,10 @@ fn tree_column_chrome_is_clipped_to_its_column() {
     let mut walker = vec![id];
     let mut checked = false;
     while let Some(node) = walker.pop() {
-        if tree.accessibility_node(node).role() == Role::Cell {
+        if matches!(
+            tree.accessibility_node(node).role(),
+            Role::Cell | Role::GridCell
+        ) {
             let kids = tree.children(node);
             if let Some(&wrapper) = kids.first()
                 && tree.widget_clips_children(wrapper)
@@ -5745,7 +5754,8 @@ mod full_width_and_pinned {
     #[test]
     fn a_band_is_one_cell_spanning_every_column_to_assistive_technology() {
         for (mode, cell_role) in [
-            (TableSelectionMode::MultiRow, Role::Cell),
+            (TableSelectionMode::MultiRow, Role::GridCell),
+            (TableSelectionMode::None, Role::Cell),
             (TableSelectionMode::SingleCell, Role::GridCell),
         ] {
             let proxy = library(5);
@@ -7229,8 +7239,12 @@ mod nested_rows {
             .map(|c| c.role())
             .collect();
         assert_eq!(roles.last(), Some(&Role::Group), "{roles:?}");
+        // Grid cells: the view has the default row selection, which the
+        // cells carry (see `CellA11y::is_grid_cell`).
         assert!(
-            roles[..roles.len() - 1].iter().all(|r| *r == Role::Cell),
+            roles[..roles.len() - 1]
+                .iter()
+                .all(|r| *r == Role::GridCell),
             "{roles:?}"
         );
     }

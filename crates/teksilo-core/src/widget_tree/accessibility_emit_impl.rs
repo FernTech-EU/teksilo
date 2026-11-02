@@ -337,21 +337,27 @@ impl WidgetTree {
         //
         // Runs before the relation strip so a child removed here cannot be
         // resurrected as a relation target by a later pass.
-        {
-            let emitted: std::collections::HashSet<accesskit::NodeId> =
-                nodes.iter().map(|(id, _)| *id).collect();
-            for (_, node) in &mut nodes {
-                if node.children().iter().all(|c| emitted.contains(c)) {
-                    continue;
-                }
-                let kept: Vec<_> = node
-                    .children()
-                    .iter()
-                    .filter(|c| emitted.contains(*c))
-                    .copied()
-                    .collect();
-                node.set_children(kept);
+        //
+        // Each emitted node's position in `nodes`, built once here and read by
+        // the two strips and the cell naming pass below: none of them adds,
+        // removes or reorders a node (the announcer nodes appended after the
+        // strips are absent from it, and no strip or cell looks for them).
+        let emitted: std::collections::HashMap<accesskit::NodeId, usize> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, (id, _))| (*id, i))
+            .collect();
+        for (_, node) in &mut nodes {
+            if node.children().iter().all(|c| emitted.contains_key(c)) {
+                continue;
             }
+            let kept: Vec<_> = node
+                .children()
+                .iter()
+                .filter(|c| emitted.contains_key(*c))
+                .copied()
+                .collect();
+            node.set_children(kept);
         }
 
         // Strip relationship targets (controls, described_by, labelled_by) that
@@ -365,13 +371,11 @@ impl WidgetTree {
         // consumer concatenates its targets' values to build the node's name
         // (`accesskit_consumer::node::write_label`), and a dangling target
         // panics the iterator before it gets there.
-        let emitted: std::collections::HashSet<accesskit::NodeId> =
-            nodes.iter().map(|(id, _)| *id).collect();
         for (_, node) in &mut nodes {
             let controlled: Vec<_> = node
                 .controls()
                 .iter()
-                .filter(|id| emitted.contains(*id))
+                .filter(|id| emitted.contains_key(*id))
                 .copied()
                 .collect();
             if controlled.len() != node.controls().len() {
@@ -380,7 +384,7 @@ impl WidgetTree {
             let described: Vec<_> = node
                 .described_by()
                 .iter()
-                .filter(|id| emitted.contains(*id))
+                .filter(|id| emitted.contains_key(*id))
                 .copied()
                 .collect();
             if described.len() != node.described_by().len() {
@@ -389,7 +393,7 @@ impl WidgetTree {
             let labelled: Vec<_> = node
                 .labelled_by()
                 .iter()
-                .filter(|id| emitted.contains(*id))
+                .filter(|id| emitted.contains_key(*id))
                 .copied()
                 .collect();
             if labelled.len() != node.labelled_by().len() {
@@ -440,6 +444,12 @@ impl WidgetTree {
             }
         }
         nodes.extend(announcer_nodes);
+
+        // A table cell is named after the text it shows, as ARIA names it
+        // from its content and the consumer does not. Before the description
+        // pass, which reads names; after the relation strip, so every target
+        // it adds is present.
+        super::accessibility_cell_name_impl::name_cells_from_content(&mut nodes, &emitted);
 
         // Last, on the nodes this update carries: a `described_by` relation
         // reaches no screen reader through AccessKit, so its targets' text is

@@ -401,7 +401,7 @@ impl<T: 'static> TreeBodyPane<T> {
         let cell = ctx.add(
             CellA11y::new(band, flat_idx + 2, 1, selected)
                 .with_live_selected(LiveFlag::new(move || flags().selected))
-                .with_grid_cell_role(self.selection_mode.is_cell_mode())
+                .with_grid_cell_role(self.selection_mode != TableSelectionMode::None)
                 .with_level(Some(entry.depth + 1))
                 .with_expanded(entry.has_children.then_some(entry.is_expanded))
                 .with_column_span(Some(col_count)),
@@ -719,7 +719,7 @@ impl<T: 'static> Widget for TreeBodyPane<T> {
                     CellA11y::new(leading_id, flat_idx + 2, display_pos + 1, is_selected)
                         .with_live_selected(LiveFlag::new(move || flags().selected))
                         .with_menu_target(inner_id)
-                        .with_grid_cell_role(selection_mode.is_cell_mode())
+                        .with_grid_cell_role(selection_mode != TableSelectionMode::None)
                         // The row publishes the level too, but the row is an
                         // ancestor of the node this view puts the AT cursor on,
                         // and that is the one place NVDA will not read a level

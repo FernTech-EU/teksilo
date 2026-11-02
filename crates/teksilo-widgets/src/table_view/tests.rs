@@ -332,10 +332,11 @@ fn root_role_is_grid_with_row_and_col_count() {
     assert_eq!(info.role(), Role::Grid);
     let row_count = count_role(&tree, table, Role::Row);
     let header_count = count_role(&tree, table, Role::ColumnHeader);
-    let cell_count = count_role(&tree, table, Role::Cell);
+    let cell_count = count_role(&tree, table, Role::GridCell);
     // Header is on by default. Each body row carries 2
-    // `Role::Cell` children; the header row carries 2 `Role::ColumnHeader`
-    // children. row_count includes the header row.
+    // `Role::GridCell` children (the table has a row selection); the header
+    // row carries 2 `Role::ColumnHeader` children. row_count includes the
+    // header row.
     assert!(row_count >= 2);
     assert_eq!(header_count, 2, "two column headers");
     assert_eq!(
@@ -344,6 +345,100 @@ fn root_role_is_grid_with_row_and_col_count() {
         "{cell_count} body cells across {} body rows",
         row_count - 1
     );
+}
+
+/// The grid says whether its selection takes more than one row or cell, as
+/// `TreeTableView`'s does: UIA's `CanSelectMultiple` reads it, and
+/// `accesskit_windows` chooses `ElementAddedToSelection` over
+/// `ElementSelected` from it. A multi-row table published false.
+#[test]
+fn a_multi_select_table_says_so_and_a_single_select_one_does_not() {
+    fn published(mode: TableSelectionMode, model_multi: bool) -> bool {
+        let mut table = TableView::new(rows(3))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(mode);
+        if mode.is_cell_mode() {
+            table = table.cell_selection(super::CellSelectionModel::new(if model_multi {
+                TableSelectionMode::MultiCell
+            } else {
+                TableSelectionMode::SingleCell
+            }));
+        } else {
+            table = table.selection(SelectionModel::new(if model_multi {
+                SelectionMode::Multi
+            } else {
+                SelectionMode::Single
+            }));
+        }
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        tree.add(table);
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        let consumer = accesskit_consumer::Tree::new(tree.accessibility_tree_snapshot(), true);
+        fn grid<'a>(
+            node: accesskit_consumer::NodeRef<'a>,
+        ) -> Option<accesskit_consumer::NodeRef<'a>> {
+            if node.role() == Role::Grid {
+                return Some(node);
+            }
+            node.children().find_map(grid)
+        }
+        grid(consumer.state().root())
+            .expect("the table publishes a Grid")
+            .is_multiselectable()
+    }
+
+    assert!(published(TableSelectionMode::MultiRow, true));
+    assert!(published(TableSelectionMode::MultiCell, true));
+    assert!(!published(TableSelectionMode::SingleRow, true));
+    assert!(!published(TableSelectionMode::SingleCell, false));
+    assert!(
+        !published(TableSelectionMode::MultiRow, false),
+        "a multi-row table handed a single model holds one row"
+    );
+}
+
+/// A body row says which row it is and of how many, as `TreeTableView`'s
+/// rows do, read the way an adapter reads it: the position from the row and
+/// the set size from the nearest node above it that carries one. Its cells
+/// read the row's cell count, not the table's row count.
+#[test]
+fn a_body_row_says_its_position_among_the_rows() {
+    let (tree, _table, _) = build_table(50);
+    let consumer = accesskit_consumer::Tree::new(tree.accessibility_tree_snapshot(), true);
+    let filter = accesskit_consumer::common_filter;
+    fn body_rows<'a>(
+        node: accesskit_consumer::NodeRef<'a>,
+        out: &mut Vec<accesskit_consumer::NodeRef<'a>>,
+    ) {
+        if node.role() == Role::Row && node.children().any(|c| c.role() == Role::GridCell) {
+            out.push(node);
+        }
+        for child in node.children() {
+            body_rows(child, out);
+        }
+    }
+    let mut rows = Vec::new();
+    body_rows(consumer.state().root(), &mut rows);
+    assert!(rows.len() >= 3, "{} body rows realized", rows.len());
+    for (i, row) in rows.iter().take(3).enumerate() {
+        // AccessKit's position is zero-based; the adapters add the 1.
+        assert_eq!(row.position_in_set(), Some(i), "row {i}");
+        assert_eq!(row.size_of_set_from_container(&filter), Some(50), "row {i}");
+        let cell = row
+            .children()
+            .find(|c| c.role() == Role::GridCell)
+            .expect("a cell");
+        assert_eq!(
+            cell.size_of_set_from_container(&filter),
+            Some(2),
+            "a cell reads its row's cell count"
+        );
+    }
 }
 
 #[test]
@@ -378,8 +473,9 @@ fn rows_under_table_form_a_rowgroup_with_header_alongside() {
 }
 
 #[test]
-fn cells_carry_role_cell_under_row() {
-    // Each *body* Role::Row's children should all be Role::Cell. The
+fn cells_carry_role_grid_cell_under_row() {
+    // Each *body* Role::Row's children should all be Role::GridCell (the
+    // table has a row selection, which its cells carry). The
     // header is also a `Role::Row` but its children are
     // `Role::ColumnHeader`, so we look at every row in the tree and
     // require *one of them* to be a body row whose children are all
@@ -399,7 +495,11 @@ fn cells_carry_role_cell_under_row() {
                 // Header row — skip.
             } else {
                 for r in &kids {
-                    assert_eq!(*r, Role::Cell, "body row child should be Role::Cell");
+                    assert_eq!(
+                        *r,
+                        Role::GridCell,
+                        "body row child should be Role::GridCell"
+                    );
                 }
                 saw_body_row = true;
             }
@@ -1997,14 +2097,15 @@ fn focused_cell_sets_active_descendant_to_the_cell_node() {
         .expect("a focused cell must set active_descendant");
 
     // It must resolve to a real node in this same update, and that node
-    // must be the cell itself (Role::Cell), not the row or the table.
+    // must be the cell itself (Role::GridCell in a selectable table), not
+    // the row or the table.
     let cell_node = update
         .nodes
         .iter()
         .find(|(id, _)| *id == active)
         .map(|(_, n)| n)
         .expect("active_descendant must reference a node present in the TreeUpdate");
-    assert_eq!(cell_node.role(), Role::Cell);
+    assert_eq!(cell_node.role(), Role::GridCell);
 }
 
 #[test]
@@ -2121,7 +2222,7 @@ fn taking_focus_reveals_the_focused_cells_row() {
         .find(|(id, _)| *id == active)
         .map(|(_, n)| n)
         .expect("active_descendant must reference a node present in the TreeUpdate");
-    assert_eq!(cell.role(), Role::Cell);
+    assert_eq!(cell.role(), Role::GridCell);
     assert_eq!(
         cell.row_index(),
         Some(501),
@@ -5256,11 +5357,29 @@ fn a_cell_selection_table_announces_grid_cells() {
         "cell-selection tables announce GridCell"
     );
 
+    // A row-selection table's cells carry their row's selected state, which
+    // a `Role::Row` cannot say to UIA: grid cells too.
     let (tree, table, _) = build_table(3);
+    assert!(count_role(&tree, table, Role::GridCell) > 0);
+    assert_eq!(count_role(&tree, table, Role::Cell), 0);
+
+    // With no selection there is no state to carry: plain cells.
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(3))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::None),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
     assert_eq!(
         count_role(&tree, table, Role::GridCell),
         0,
-        "a row-selection table's cells are not the selectable unit"
+        "a table with no selection has no grid cells"
     );
     assert!(count_role(&tree, table, Role::Cell) > 0);
 }
@@ -5859,10 +5978,12 @@ mod adopted_state {
         while let Some(id) = walker.pop() {
             if tree.accessibility_node(id).role() == Role::Row {
                 let mut cells = flatten_through_bands(tree, tree.children(id));
-                if cells
-                    .iter()
-                    .any(|&c| tree.accessibility_node(c).role() == Role::Cell)
-                {
+                if cells.iter().any(|&c| {
+                    matches!(
+                        tree.accessibility_node(c).role(),
+                        Role::Cell | Role::GridCell
+                    )
+                }) {
                     cells.sort_by(|&a, &b| tree.bounds(a).x.total_cmp(&tree.bounds(b).x));
                     let texts = cells.into_iter().map(|c| text(tree, c)).collect();
                     rows.push((tree.bounds(id).y, texts));

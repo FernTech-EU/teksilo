@@ -7,7 +7,8 @@
 //! The body widget itself is the `TableView` root; this file just holds
 //! the small `BodyRow` container that one level above the leaf cell
 //! delegates so the AccessKit tree exposes the canonical
-//! `Table > Row > Cell` hierarchy.
+//! `Grid > Row > GridCell` hierarchy (`Table > Row > Cell` for a table with
+//! no selection).
 //!
 //! ## Pane bands and horizontal scroll
 //!
@@ -93,6 +94,9 @@ pub(crate) struct BodyRow {
     announce_a11y: bool,
     /// Where the menu key and "show menu" on this row start.
     menu_target: Option<super::a11y::RowMenuTarget>,
+    /// 1-based position among the table's body rows and the row's cell
+    /// count. See [`Self::with_position`].
+    position: Option<(usize, usize)>,
 
     // Build state — populated by `build()`.
     bands: Option<[Option<WidgetId>; 3]>,
@@ -119,8 +123,20 @@ impl BodyRow {
             scroll_x,
             announce_a11y: true,
             menu_target: None,
+            position: None,
             bands: None,
         }
+    }
+
+    /// Say which body row this is, 1-based, as `TreeTableView`'s rows do: a
+    /// screen reader reads "2 of 50" from the row's position and the set
+    /// size the body pane carries. `cell_count` goes on the row as its own
+    /// set size, because every adapter gives a node the set size of the
+    /// nearest node above it that has one: without it the row's cells read
+    /// the table's row count as theirs.
+    pub(crate) fn with_position(mut self, position_1based: usize, cell_count: usize) -> Self {
+        self.position = Some((position_1based, cell_count));
+        self
     }
 
     /// Read the row's selected state at each accessibility walk, so a
@@ -293,6 +309,12 @@ impl Widget for BodyRow {
             self.selected,
         ));
         builder.set_row_index(self.row_index_1based);
+        if let Some((position, cell_count)) = self.position {
+            builder.set_position_in_set(position);
+            if cell_count > 0 {
+                builder.set_size_of_set(cell_count);
+            }
+        }
         // Advertised, not just handled: every adapter gates its scroll
         // pattern on the node *supporting* the action (UIA's
         // `IScrollItemProvider`, AppKit's `accessibilityScrollToVisible`,

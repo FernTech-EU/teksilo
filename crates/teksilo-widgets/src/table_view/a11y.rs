@@ -4,7 +4,8 @@
 //! Accessibility wrappers for `TableView` / `TreeTableView`.
 //!
 //! AccessKit's table semantics work by labelling individual nodes with
-//! `Role::Table` / `Role::Row` / `Role::Cell` and stamping each cell with
+//! `Role::Table` / `Role::Row` / `Role::Cell` (`Role::Grid` and
+//! `Role::GridCell` for a view with a selection) and stamping each cell with
 //! its row/column index. The cell delegate the user supplies typically
 //! produces a generic widget (Text, Button, …) that wouldn't carry table
 //! semantics by itself, so the body wraps each cell in a thin
@@ -52,8 +53,9 @@ pub(crate) fn live_or(live: &Option<LiveFlag>, fixed: bool) -> bool {
     live.as_ref().map_or(fixed, LiveFlag::get)
 }
 
-/// Wrapper that announces a `Role::Cell` (or `Role::RowHeader`) with
-/// row/column indices and selection state.
+/// Wrapper that announces a `Role::Cell`, `Role::GridCell` (a cell of a view
+/// with a selection) or `Role::RowHeader` with row/column indices and
+/// selection state.
 #[derive(Debug)]
 pub(crate) struct CellA11y {
     child: WidgetId,
@@ -66,14 +68,18 @@ pub(crate) struct CellA11y {
     /// When true, emit `Role::RowHeader` instead of `Role::Cell` — used
     /// when the table promotes a column to row-header status.
     is_row_header: bool,
-    /// Whether the cell is itself the selectable unit.
+    /// Whether the cell carries a selection state a reader must hear: its
+    /// own in a cell-selection mode, and in a row mode its row's (a
+    /// `Role::Row` exposes none on Windows, so the cell the reader is on
+    /// says it). True in `TableView` and `TreeTableView` whenever the view
+    /// has a selection mode other than `TableSelectionMode::None`.
     ///
     /// Decides `Role::GridCell` over `Role::Cell`, which is not cosmetic on
     /// Windows: `accesskit_windows` supports UIA's `SelectionItem` pattern for
-    /// `GridCell` unconditionally and for `Role::Cell` not at all, so a
-    /// selected cell announced as `Cell` never reports `IsSelected`. The two
-    /// map identically on macOS (`NSAccessibilityCellRole`) and AT-SPI
-    /// (`TableCell`), so this costs nothing there.
+    /// `GridCell` unconditionally and for `Role::Cell` and `Role::Row` not at
+    /// all, so a selected cell announced as `Cell` never reports `IsSelected`.
+    /// The two map identically on macOS (`NSAccessibilityCellRole`) and
+    /// AT-SPI (`TableCell`), so this costs nothing there.
     is_grid_cell: bool,
     /// Optional name override (when the cell content isn't textual).
     name: Option<String>,
@@ -117,9 +123,6 @@ impl CellA11y {
         }
     }
 
-    /// Announce `Role::GridCell` — the cell is the selectable unit. Named for
-    /// the sibling `with_role_row_header`, not `as_*`, which clippy reserves
-    /// for by-reference conversions.
     /// Read the selected state live, at each accessibility walk. The view
     /// binds the selection at `AccessibilityOnly` so a change re-walks.
     pub(crate) fn with_live_selected(mut self, selected: LiveFlag) -> Self {
@@ -127,6 +130,10 @@ impl CellA11y {
         self
     }
 
+    /// Announce `Role::GridCell`: the cell carries a selection state a
+    /// reader must hear (see `is_grid_cell`). Named for the sibling
+    /// `with_role_row_header`, not `as_*`, which clippy reserves for
+    /// by-reference conversions.
     pub(crate) fn with_grid_cell_role(mut self, is_grid_cell: bool) -> Self {
         self.is_grid_cell = is_grid_cell;
         self

@@ -8,8 +8,9 @@
 //! `teksilo-data` and the `teksilo-core` `TableStyle`. Mirrors Qt's
 //! `QTableView`, SwiftUI's `Table`, and JavaFX's `TableView`.
 //! The core skeleton: single body pane, row-virtualized with alternating
-//! backgrounds, grid lines, `Role::Table > Role::Row > Role::Cell`
-//! accessibility, multi-row selection, and an empty-state slot. Headers,
+//! backgrounds, grid lines, `Role::Grid > Role::Row > Role::GridCell`
+//! accessibility (`Role::Table > Role::Row > Role::Cell` for a view with no
+//! selection), multi-row selection, and an empty-state slot. Headers,
 //! sort, filter, resize, reorder, pinning, cell selection, and editing are
 //! also included. Row heights come in three modes: uniform (`row_height`,
 //! the default fast path), exact per-row callback (`row_height_fn`), and

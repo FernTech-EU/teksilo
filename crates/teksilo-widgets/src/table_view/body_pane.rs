@@ -446,9 +446,11 @@ impl<T: 'static> Widget for BodyPane<T> {
                     .with_live_selected(crate::table_view::a11y::LiveFlag::new(move || {
                         flags().selected
                     }))
-                    // `Role::GridCell` only where the cell really is the
-                    // selectable unit; see `CellA11y::is_grid_cell`.
-                    .with_grid_cell_role(selection_mode.is_cell_mode());
+                    // `Role::GridCell` whenever the view has a selection: in
+                    // a row mode the cell carries its row's selected state,
+                    // which a `Role::Row` cannot say on Windows; see
+                    // `CellA11y::is_grid_cell`.
+                    .with_grid_cell_role(selection_mode != TableSelectionMode::None);
                     let cell_id = ctx.add(cell_a11y);
 
                     // Per-cell pointer handler: a click on the cell
@@ -587,6 +589,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                     _ => false,
                 })
             };
+            let cell_count = cell_ids.len();
             let row_widget = BodyRow::new(
                 cell_ids,
                 row_idx + 2,
@@ -597,6 +600,7 @@ impl<T: 'static> Widget for BodyPane<T> {
                 self.scroll_x.clone(),
             )
             .with_live_selected(live_row_selected)
+            .with_position(row_idx + 1, cell_count)
             .menu_target(super::a11y::RowMenuTarget::new(
                 self.focused_cell.clone(),
                 row_idx,
@@ -1029,6 +1033,14 @@ impl<T: 'static> Widget for BodyPane<T> {
         // that walk `Table > Row` directly would balk at a hidden
         // generic container in the path.
         builder.set_role(teksilo_core::accesskit::Role::RowGroup);
+        // The body rows' "of M": AccessKit reads an item's set size from the
+        // nearest node above it that carries one, as `TreeTableView`'s pane
+        // does for its root rows. The whole model's count, not the realized
+        // rows', so the number holds while the view scrolls.
+        let count = (self.len_fn)();
+        if count > 0 {
+            builder.set_size_of_set(count);
+        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

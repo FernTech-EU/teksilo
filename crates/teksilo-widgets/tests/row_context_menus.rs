@@ -385,7 +385,7 @@ fn show_menu_on_a_table_row_or_cell_node_opens_the_cell_menu_with_move() {
     use teksilo_core::accesskit::Role;
     // The row starts at its first displayed cell; the last cell is a cell
     // of the second column, whose own menu opens.
-    for (role, app) in [(Role::Row, "Edit First"), (Role::Cell, "Edit Second")] {
+    for (role, app) in [(Role::Row, "Edit First"), (Role::GridCell, "Edit Second")] {
         let (mut tree, _, _, view) = table(2);
         let view = tree.add(view);
         tree.layout(SizeProposal::exact(400.0, 400.0));

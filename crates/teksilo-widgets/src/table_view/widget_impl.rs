@@ -1423,11 +1423,17 @@ impl<T: 'static> Widget for TableView<T> {
         // `is_container_with_selectable_children` — the sole gate on UIA's
         // `ISelectionProvider` — lists `Grid`, `ListBox`, `ListGrid`, `Tree`
         // and `TreeGrid`, and **not** `Table`. Announced as a table, a
-        // multi-select `TableView` exposed no `CanSelectMultiple` and no
-        // `GetSelection` to Narrator, NVDA or JAWS at all. The two roles map
-        // identically on macOS (`NSAccessibilityTableRole`) and AT-SPI
+        // multi-select `TableView` exposed no Selection pattern and no
+        // `CanSelectMultiple` to Narrator, NVDA or JAWS at all. The two roles
+        // map identically on macOS (`NSAccessibilityTableRole`) and AT-SPI
         // (`AtspiRole::Table`), so this is a Windows fix that costs nothing
         // elsewhere.
+        //
+        // The pattern's `GetSelection` (and AT-SPI's `Selection`) is empty
+        // all the same: the adapters list a container's selected *items*
+        // (`NodeRef::items`), and `accesskit_consumer` 0.39 counts no row or
+        // cell role as an item. Each cell's own `SelectionItem.IsSelected` is
+        // what reports the selection.
         //
         // `Role::ListGrid` looks like the closer match — its own doc says it
         // exists for Chromium's `TableView` — but `accesskit_macos` maps it to
@@ -1437,6 +1443,27 @@ impl<T: 'static> Widget for TableView<T> {
         } else {
             teksilo_core::accesskit::Role::Grid
         });
+        // Whether the selection takes more than one row or cell: UIA's
+        // `SelectionCanSelectMultiple` and AT-SPI's multiselectable state,
+        // which read false when unset. Gated the way `TreeTableView` gates
+        // it, on the selection really holding more than one entry: the mode
+        // and a model of the same kind, since `accesskit_windows` raises
+        // `ElementAddedToSelection` rather than `ElementSelected` on a
+        // selection change when this is true.
+        let has_model = match self.selection_mode {
+            TableSelectionMode::MultiRow => self.row_selection.is_some(),
+            TableSelectionMode::MultiCell => self.cell_selection.is_some(),
+            _ => false,
+        };
+        if has_model
+            && super::selection::cardinality(
+                self.selection_mode,
+                self.row_selection.as_ref(),
+                self.cell_selection.as_ref(),
+            ) == crate::common::list_nav::Cardinality::Multi
+        {
+            builder.set_multiselectable(true);
+        }
         if let Some(ref label) = self.a11y_label {
             builder.set_name(label.resolve_now());
         }

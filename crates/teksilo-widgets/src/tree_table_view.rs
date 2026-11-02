@@ -72,8 +72,11 @@
 //! ## Accessibility
 //!
 //! Root emits `Role::TreeGrid`; rows carry `set_level` + `set_expanded`.
-//! ArrowLeft / ArrowRight on the tree column collapse / expand. A full-width
-//! row holds one cell, spanning every column.
+//! Cells are `Role::GridCell` whenever the view has a selection, so the
+//! cell a reader is on says whether its row is selected (Windows exposes
+//! selection on a grid cell, never on a row), and `Role::Cell` under
+//! `TableSelectionMode::None`. ArrowLeft / ArrowRight on the tree column
+//! collapse / expand. A full-width row holds one cell, spanning every column.
 //!
 //! ```ignore
 //! // Column delegates capture closures — use ignore.
@@ -943,9 +946,9 @@ impl<T: 'static> TreeTableView<T> {
     /// width.
     ///
     /// To assistive technology the row is unchanged (`Role::Row` with its
-    /// level, expanded state and position) and holds one `Role::Cell`
-    /// (`Role::GridCell` in the cell modes) at column 1, with a column span of
-    /// every column and the band as its content.
+    /// level, expanded state and position) and holds one `Role::GridCell`
+    /// (`Role::Cell` under `TableSelectionMode::None`) at column 1, with a
+    /// column span of every column and the band as its content.
     pub fn full_width_row(mut self, is_full_width: impl Fn(&T) -> bool + 'static) -> Self {
         self.full_width_row = Some(Rc::new(is_full_width));
         self

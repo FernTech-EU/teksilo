@@ -989,12 +989,29 @@ keyboard reorder is likewise routed through the source.
 - Each header cell: `Role::ColumnHeader` with `column_index` and, on
   the active sort column, `sort_direction`.
 - Each body row: `Role::Row` with `row_index` (1-based; header is row
-  1, first body row is row 2). On `TreeTableView`, the row also carries
+  1, first body row is row 2). On `TableView` the row also carries its
+  position among the body rows, and the body's `RowGroup` the row count, so
+  a screen reader says "2 of 50". On `TreeTableView`, the row also carries
   `level` (1-based depth), `expanded` for non-leaf rows, and its position
-  among its siblings.
-- Each body cell: `Role::Cell` (`Role::GridCell` in the cell-selection
-  modes, where the cell is the selectable unit) with `row_index` and
-  `column_index`, plus `selected` reflecting the current selection.
+  among its siblings. On both, the row's own set size is its cell count,
+  which its cells read as theirs.
+- Each body cell: `Role::GridCell` whenever the view has a selection (in
+  the cell-selection modes the cell is the selectable unit; in the row modes
+  it carries its row's selected state to UI Automation, which exposes none on
+  a row), `Role::Cell` under `TableSelectionMode::None`, with `row_index` and
+  `column_index`, plus `selected` reflecting the current selection. Each
+  cell reports its own selected state (UIA's `SelectionItem.IsSelected`), but
+  the grid's list of what is selected is empty: UIA's
+  `Selection.GetSelection()`, AT-SPI's `Selection` and macOS's selected rows
+  are built from the container's *items*, and AccessKit (`accesskit_consumer`
+  0.39) counts no row or cell role as an item. A screen reader that says how
+  many entries are selected therefore says none. In the multiple-selection
+  modes the grid is `multiselectable` (UIA's `CanSelectMultiple`). On
+  Windows and Linux a cell is named by the text its delegate shows (its
+  labels and images, read through layout containers), as ARIA names a cell
+  from its content; a cell holding a control is not named after it. On macOS
+  the cell has no name: VoiceOver reads a cell from its children, and reads
+  a cell's name and then its children, so a name there was heard twice.
 - A `TreeTableView` full-width row keeps its row node (level, expanded,
   position) and holds **one** cell: column index 1 with a `column_span` of
   every displayed column, the band as its content, and the level and

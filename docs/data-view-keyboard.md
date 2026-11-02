@@ -331,7 +331,10 @@ type-to-edit on bare letters, and the editor wins; the WinForms default
   `Role::Table` is kept for `TableSelectionMode::None`, where the static-structure
   role is the right one.
 - In a cell-selection mode the cells announce `Role::GridCell`, which is the
-  only cell role AccessKit gives the UIA `SelectionItem` pattern.
+  only cell role AccessKit gives the UIA `SelectionItem` pattern. A
+  `TableView` or `TreeTableView` with a row selection does too, so the cell a
+  reader is on says whether its row is selected: UIA has no selection state
+  for a row.
 - Focus and selection are published as two independent facts. `Ctrl`+arrow
   exists precisely to make them disagree, and binding active-descendant to the
   selection would hide disjoint selection from assistive technology. In a
