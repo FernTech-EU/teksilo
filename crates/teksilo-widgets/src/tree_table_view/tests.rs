@@ -1353,6 +1353,54 @@ fn ctrl_space_toggles_the_cursor_row_after_a_ctrl_arrow_move() {
     );
 }
 
+/// Ctrl+Space and Space add the focused row to the rows already selected and
+/// take it out again, leaving the others. Both used to replace the selection
+/// with the focused row alone.
+#[test]
+fn ctrl_space_and_space_add_the_focused_row_to_a_multi_row_selection() {
+    use teksilo_core::event::{Key, Modifiers};
+    for mods in [Modifiers::CTRL, Modifiers::NONE] {
+        let proxy = SortFilterTreeModel::new(wide_tree(6));
+        let selection = teksilo_data::SelectionModel::new(teksilo_data::SelectionMode::Multi);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let id = tree.add(
+            TreeTableView::from_projection(proxy)
+                .add_column(name_col())
+                .selection(selection.clone())
+                .row_height(20.0),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        tree.focus(id);
+        {
+            let any = tree.widget_as_any(id).unwrap();
+            let tt = any.downcast_ref::<TreeTableView<&'static str>>().unwrap();
+            tt.set_focused_cell(0, 0);
+        }
+        selection.select(0);
+        tree.press_key(Key::ArrowDown, Modifiers::SHIFT);
+        assert_eq!(selection.selected_indices(), vec![0, 1]);
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+
+        tree.press_key(Key::Space, mods);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![0, 1, 3],
+            "{mods:?}+Space adds the focused row and keeps the others"
+        );
+
+        tree.press_key(Key::Space, mods);
+        assert_eq!(
+            selection.selected_indices(),
+            vec![0, 1],
+            "{mods:?}+Space takes the focused row out and keeps the others"
+        );
+    }
+}
+
 #[test]
 fn empty_view_renders_when_the_tree_has_no_rows() {
     let proxy = SortFilterTreeModel::new(TreeModel::<&'static str>::new());

@@ -573,6 +573,17 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **Ctrl+Space and Space in a multiple-selection `TableView` or
+  `TreeTableView` add the focused row to the selection, or take it out, and
+  keep the other rows.** They used to leave the focused row selected alone,
+  so a selection could not be assembled one row at a time after Ctrl+arrow
+  moves. Space in a `MultiCell` table does the same for the focused cell.
+  Ctrl+Space on a checkbox cell toggles the row's selection rather than the
+  checkbox, as in a `ListView`. **Behaviour change:** in a `SingleRow` table
+  a second Space keeps the row selected instead of clearing the selection,
+  as in a single-selection `ListView`, and Enter with no `on_row_activate`
+  selects the focused row (or cell) alone and no longer takes a selected one
+  out.
 - **A multiple-selection `TableView` tells screen readers it takes more
   than one row or cell**, as a `TreeTableView` already did. On Windows its
   grid reported `CanSelectMultiple` as false in the `MultiRow` and

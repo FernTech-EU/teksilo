@@ -441,6 +441,67 @@ fn a_body_row_says_its_position_among_the_rows() {
     }
 }
 
+/// After a scroll, the rows realized deep in the table say their own
+/// positions, not the first rows', and the set size stays the model's.
+#[test]
+fn a_body_row_keeps_its_position_after_a_scroll() {
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(500))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    let p = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(p);
+    focus_at(&mut tree, table, 0, 0);
+    tree.press_key(Key::End, Modifiers::COMMAND);
+    tree.layout(p);
+    tree.layout(p);
+    assert_eq!(read_focused_cell(&tree, table).map(|c| c.0), Some(499));
+
+    let consumer = accesskit_consumer::Tree::new(tree.accessibility_tree_snapshot(), true);
+    let filter = accesskit_consumer::common_filter;
+    fn body_rows<'a>(
+        node: accesskit_consumer::NodeRef<'a>,
+        out: &mut Vec<accesskit_consumer::NodeRef<'a>>,
+    ) {
+        if node.role() == Role::Row && node.children().any(|c| c.role() == Role::GridCell) {
+            out.push(node);
+        }
+        for child in node.children() {
+            body_rows(child, out);
+        }
+    }
+    let mut rows = Vec::new();
+    body_rows(consumer.state().root(), &mut rows);
+    assert!(!rows.is_empty());
+    let mut positions: Vec<usize> = Vec::new();
+    for row in &rows {
+        // Both are AccessKit's zero-based numbers, and `row_index` counts the
+        // header row first: body row `i` has row index `i + 1`, position `i`.
+        let row_index = row.data().row_index().expect("a row index");
+        let position = row.position_in_set().expect("a position");
+        assert_eq!(position, row_index - 1, "row {row_index}");
+        assert_eq!(row.size_of_set_from_container(&filter), Some(500));
+        positions.push(position);
+    }
+    assert!(
+        positions.contains(&499),
+        "the last row is realized and says it is the last: {positions:?}"
+    );
+    assert!(
+        positions.iter().all(|&p| p > 400),
+        "only rows near the end are realized: {positions:?}"
+    );
+}
+
 #[test]
 fn rows_under_table_form_a_rowgroup_with_header_alongside() {
     // ARIA hierarchy: `Table > [Row(header), RowGroup > Row(body)*]`.
@@ -1209,6 +1270,207 @@ fn ctrl_space_toggles_the_cursor_row_after_a_ctrl_arrow_move() {
     assert!(
         sel.selected_indices().is_empty(),
         "Ctrl+Space toggles it back off"
+    );
+}
+
+/// Ctrl+Space and Space in a `MultiRow` table add the focused row to the rows
+/// already selected, and take it out again, leaving the others: the "one
+/// Ctrl+Space at a time" assembly the keyboard contract promises. Both used to
+/// replace the selection with the focused row alone.
+#[test]
+fn ctrl_space_and_space_add_the_focused_row_to_a_multi_row_selection() {
+    for mods in [Modifiers::CTRL, Modifiers::NONE] {
+        let model = rows(6);
+        let sel = SelectionModel::new(SelectionMode::Multi);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let table = tree.add(
+            TableView::new(model)
+                .add_column(id_col())
+                .add_column(name_col())
+                .row_height(20.0)
+                .selection_mode(TableSelectionMode::MultiRow)
+                .selection(sel.clone()),
+        );
+        tree.layout(SizeProposal {
+            width: Some(400.0),
+            height: Some(200.0),
+        });
+        focus_at(&mut tree, table, 0, 0);
+        sel.select(0);
+        tree.press_key(Key::ArrowDown, Modifiers::SHIFT);
+        assert_eq!(sel.selected_indices(), vec![0, 1]);
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+        assert_eq!(read_focused_cell(&tree, table), Some((3, 0)));
+
+        tree.press_key(Key::Space, mods);
+        assert_eq!(
+            sel.selected_indices(),
+            vec![0, 1, 3],
+            "{mods:?}+Space adds the focused row and keeps the others"
+        );
+
+        tree.press_key(Key::Space, mods);
+        assert_eq!(
+            sel.selected_indices(),
+            vec![0, 1],
+            "{mods:?}+Space takes the focused row out and keeps the others"
+        );
+    }
+}
+
+/// Enter with no `on_row_activate` selects the focused row alone, the way
+/// `ListView`'s Enter selects before it activates, and never toggles: a
+/// second Enter keeps it selected.
+#[test]
+fn enter_with_nothing_to_activate_selects_the_focused_row_alone() {
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(6))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 0, 0);
+    sel.select(0);
+    tree.press_key(Key::ArrowDown, Modifiers::SHIFT);
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    assert_eq!(sel.selected_indices(), vec![0, 1]);
+
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    assert_eq!(sel.selected_indices(), vec![3], "the focused row alone");
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    assert_eq!(sel.selected_indices(), vec![3], "Enter never toggles");
+}
+
+/// In a `MultiCell` table Enter with nothing to activate selects the focused
+/// cell alone, and never toggles it.
+#[test]
+fn enter_with_nothing_to_activate_selects_the_focused_cell_alone() {
+    let cs = super::CellSelectionModel::new(TableSelectionMode::MultiCell);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(6))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiCell)
+            .cell_selection(cs.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 1, 1);
+    cs.select(0, 0);
+    cs.toggle(1, 1);
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    assert!(cs.is_selected(1, 1));
+    assert!(!cs.is_selected(0, 0), "the focused cell alone");
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    assert!(cs.is_selected(1, 1), "Enter never toggles");
+}
+
+/// Space in a `SingleRow` table selects the focused row and keeps it
+/// selected on a second press, as Space does in a single-selection
+/// `ListView`.
+#[test]
+fn space_in_a_single_row_table_selects_and_keeps_the_row() {
+    let sel = SelectionModel::new(SelectionMode::Single);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(5))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::SingleRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 2, 0);
+    sel.clear();
+    tree.press_key(Key::Space, Modifiers::NONE);
+    assert_eq!(sel.selected_indices(), vec![2]);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    assert_eq!(sel.selected_indices(), vec![2], "a second Space keeps it");
+}
+
+/// Space in a `MultiCell` table adds the focused cell to the cells already
+/// selected and takes it out again, leaving the others.
+#[test]
+fn space_toggles_the_focused_cell_in_a_multi_cell_selection() {
+    let cs = super::CellSelectionModel::new(TableSelectionMode::MultiCell);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(6))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiCell)
+            .cell_selection(cs.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 2, 1);
+    cs.select(0, 0);
+    tree.press_key(Key::Space, Modifiers::NONE);
+    assert!(cs.is_selected(2, 1), "Space adds the focused cell");
+    assert!(cs.is_selected(0, 0), "and keeps the others");
+    tree.press_key(Key::Space, Modifiers::NONE);
+    assert!(!cs.is_selected(2, 1), "Space takes it back out");
+    assert!(cs.is_selected(0, 0), "and still keeps the others");
+}
+
+/// The row Space adds becomes the anchor, so Shift+arrow extends from it and
+/// keeps the rows picked before: "Ctrl+arrow away, Space, Shift+arrow".
+#[test]
+fn shift_arrow_after_space_extends_from_the_row_space_added() {
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(8))
+            .add_column(id_col())
+            .add_column(name_col())
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    tree.layout(SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    });
+    focus_at(&mut tree, table, 0, 0);
+    sel.select(0);
+    for _ in 0..3 {
+        tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    }
+    tree.press_key(Key::Space, Modifiers::NONE);
+    assert_eq!(sel.selected_indices(), vec![0, 3]);
+    tree.press_key(Key::ArrowDown, Modifiers::SHIFT);
+    tree.press_key(Key::ArrowDown, Modifiers::SHIFT);
+    assert_eq!(
+        sel.selected_indices(),
+        vec![0, 3, 4, 5],
+        "extends from row 3 and keeps row 0"
+    );
+    tree.press_key(Key::ArrowUp, Modifiers::SHIFT);
+    assert_eq!(
+        sel.selected_indices(),
+        vec![0, 3, 4],
+        "and shrinks back to it"
     );
 }
 
@@ -5605,6 +5867,50 @@ fn space_checks_the_focused_cell_and_leaves_the_selection_alone() {
         Vec::<usize>::new(),
         "row toggled off"
     );
+}
+
+/// Ctrl+Space on a checkbox cell toggles the row's selection and leaves the
+/// box alone, as Ctrl+Space does on a `ListView` row with a checkbox: Space
+/// is "check this", Ctrl+Space is "select this".
+#[test]
+fn ctrl_space_on_a_checkbox_cell_toggles_the_selection_not_the_box() {
+    use teksilo_data::{SelectionMode, SelectionModel};
+    let checked = teksilo_core::signal::Signal::new(false);
+    let ck = checked.clone();
+    let sel = SelectionModel::new(SelectionMode::Multi);
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let table = tree.add(
+        TableView::new(rows(20))
+            .add_column(id_col())
+            .add_column(
+                Column::<Row>::new("done", lit!("Done"), move |_row, _: &CellContext| {
+                    Box::new(crate::Checkbox::new(ck.clone()))
+                })
+                .width(ColumnWidth::Fixed(60.0)),
+            )
+            .row_height(20.0)
+            .selection_mode(TableSelectionMode::MultiRow)
+            .selection(sel.clone()),
+    );
+    let p = SizeProposal {
+        width: Some(400.0),
+        height: Some(200.0),
+    };
+    tree.layout(p);
+    focus_at(&mut tree, table, 0, 1);
+    sel.select(0);
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+    tree.press_key(Key::ArrowDown, Modifiers::CTRL);
+
+    tree.press_key(Key::Space, Modifiers::CTRL);
+    tree.layout(p);
+    assert!(!checked.get(), "Ctrl+Space does not check the box");
+    assert_eq!(sel.selected_indices(), vec![0, 2], "it adds the row");
+
+    tree.press_key(Key::Space, Modifiers::CTRL);
+    tree.layout(p);
+    assert!(!checked.get());
+    assert_eq!(sel.selected_indices(), vec![0], "and takes it back out");
 }
 
 #[test]

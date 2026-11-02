@@ -31,10 +31,10 @@ as `Linear`.
 | `Shift`+*any of the above* | extend from the anchor | " | " |
 | `Ctrl`+`Shift`+*any* | extend **additively** | " | " |
 | `Ctrl`+`↑`/`↓` | move the cursor only¹ | move the cursor only¹ | move the cursor only¹ |
-| `Space` | **check the row** if it has a checkbox, else toggle (Multi) / select (Single) | **check the tile** if it has a checkbox, else toggle (Multi) / select (Single) | **check the cell** if it has a checkbox, else toggle its selection |
-| `Ctrl`+`Space` | toggle the focused row | toggle the focused tile | **select the column** (`MultiCell`) |
+| `Space` | **check the row** if it has a checkbox, else toggle (Multi) / select (Single) | **check the tile** if it has a checkbox, else toggle (Multi) / select (Single) | **check the cell** if it has a checkbox, else toggle (`MultiCell`) / select (`SingleCell`) |
+| `Ctrl`+`Space` | toggle the focused row, a checkbox row too | toggle the focused tile | **select the column** (`MultiCell`) |
 | `Shift`+`Space` |, |, | **select the row** (`MultiCell`) |
-| `Enter` | activate | activate | activate the row |
+| `Enter` | activate³ | activate | activate the row³ |
 | `Ctrl`+`A` / `Ctrl`+`Shift`+`A` | select all / deselect all (Multi only) | " | " |
 | `Escape` |, | clear the focus ring | end the edit, else clear the ring |
 | `F2` | `ListView` in action mode: step into the row² |, | begin editing |
@@ -47,6 +47,14 @@ navigation key; see the next section.
 ² Only a `ListView` built with `.row_keyboard(RowKeyboard::Actions)`, and only
 on a row holding a control. `Enter` steps in as well when the list has no
 `on_activate`. See [Action mode](#action-mode-listview) below.
+
+³ `ListView` and `TreeView` select the focused row and then activate it.
+`TableView` and `TreeTableView` hand `Enter` to their row activation, and with
+none installed select the focused row (or cell, in a cell mode) alone. `Enter`
+never toggles: a selected row stays selected.
+
+"Select (Single)" keeps the row selected on a second `Space`: a single
+selection is not emptied from the keyboard, in any of the five views.
 
 A `ListView` grouped with `.sections(..)` keeps this table unchanged. Its
 section headers are not items, so every chord moves between items and steps

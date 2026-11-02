@@ -518,12 +518,18 @@ pub(crate) fn build_key_handler(
                 // control is out of the Tab order, so this is the only
                 // keyboard route to it. A cell that publishes no toggle falls
                 // back to the selection, exactly as before.
-                if let Some(cell_id) = cfg
-                    .cell_map
-                    .borrow()
-                    .iter()
-                    .find(|(pos, _)| *pos == (row, col))
-                    .map(|(_, id)| *id)
+                //
+                // Not with Ctrl held: Ctrl+Space toggles the *selection*, on
+                // a checkbox cell too, as `ListView`'s own Ctrl+Space arm
+                // does. It stays on literal `ctrl()` for the reason given
+                // there (⌘Space is Spotlight).
+                if !modifiers.ctrl()
+                    && let Some(cell_id) = cfg
+                        .cell_map
+                        .borrow()
+                        .iter()
+                        .find(|(pos, _)| *pos == (row, col))
+                        .map(|(_, id)| *id)
                 {
                     let fallback_cfg = cfg.clone();
                     ctx.row_space_activate(
@@ -543,7 +549,10 @@ pub(crate) fn build_key_handler(
                 if let Some(ref f) = cfg.on_row_activate {
                     f(row, ctx);
                 } else {
-                    toggle_selection(&cfg, row, col);
+                    // With nothing to activate, Enter selects the focused row
+                    // (or cell) alone, as `ListView`'s Enter selects before
+                    // it activates. Never a toggle: Enter means "this one".
+                    select_focused(&cfg, row, col);
                 }
                 return EventResponse::Handled;
             }
@@ -840,30 +849,53 @@ fn with_navigator_subtree<R>(
     })
 }
 
+/// Space, and Ctrl+Space in a row mode: the focused row (or cell) in or out
+/// of the selection.
+///
+/// In a multiple selection the others stay: this is how a selection is
+/// assembled one row at a time after Ctrl+Arrow walks. `toggle` on the model
+/// adds or removes the one entry and moves the anchor there; a model that is
+/// itself single answers it with a plain select, so a `MultiRow` table handed
+/// one still holds one row. A single selection mode selects the entry, and
+/// keeps it selected when it already is, as `ListView`'s Space does in a
+/// single selection.
 fn toggle_selection(cfg: &KeyHandlerConfig, row: usize, col: usize) {
+    match cfg.selection_mode {
+        TableSelectionMode::MultiRow => {
+            if let Some(ref s) = cfg.selection {
+                s.toggle(row);
+            }
+        }
+        TableSelectionMode::SingleRow => {
+            if let Some(ref s) = cfg.selection {
+                s.select(row);
+            }
+        }
+        TableSelectionMode::MultiCell => {
+            if let Some(ref cs) = cfg.cell_selection {
+                cs.toggle(row, col);
+            }
+        }
+        TableSelectionMode::SingleCell => {
+            if let Some(ref cs) = cfg.cell_selection {
+                cs.select(row, col);
+            }
+        }
+        TableSelectionMode::None => {}
+    }
+}
+
+/// Enter with no row activation: the focused row (or cell) selected alone.
+fn select_focused(cfg: &KeyHandlerConfig, row: usize, col: usize) {
     match cfg.selection_mode {
         TableSelectionMode::SingleRow | TableSelectionMode::MultiRow => {
             if let Some(ref s) = cfg.selection {
-                if s.is_selected(row) {
-                    // Toggle off: a Multi selection model can have it
-                    // both ways; Single mode replaces with empty.
-                    if cfg.selection_mode == TableSelectionMode::MultiRow {
-                        s.toggle(row);
-                    } else {
-                        s.clear();
-                    }
-                } else {
-                    s.select(row);
-                }
+                s.select(row);
             }
         }
         TableSelectionMode::SingleCell | TableSelectionMode::MultiCell => {
             if let Some(ref cs) = cfg.cell_selection {
-                if cs.is_selected(row, col) && cfg.selection_mode == TableSelectionMode::MultiCell {
-                    cs.toggle(row, col);
-                } else {
-                    cs.select(row, col);
-                }
+                cs.select(row, col);
             }
         }
         TableSelectionMode::None => {}
