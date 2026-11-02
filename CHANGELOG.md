@@ -315,7 +315,8 @@ by crate for clarity, not because crates version independently.
   reach the enclosing widget while the control has focus.
 - **A `Splitter` too small for its panes' minimum sizes no longer draws a
   pane outside itself.** The panes shrink to fit and stay in the Tab order
-  and the accessibility tree.
+  and the accessibility tree, and the `DockingLayout` centre no longer
+  paints over a side.
 - **A `Splitter` pane that expands, collapses or hides animates all the way
   without a jump.** A pane with a stretch factor used to animate to its
   stored size and then snap to its share of the room, and a hiding pane

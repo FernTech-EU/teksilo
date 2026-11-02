@@ -18,9 +18,17 @@
 //!                 DockWidget or a ToolBox of DockWidgets)
 //!                 └── DockWidget — the atomic dockable unit
 //! ```
+//!
+//! The centre clips its content, so nothing in it paints over a side. The
+//! clip reaches a focus ring's width past the centre's edge, so a control
+//! flush with that edge keeps its whole ring. Content that overflows the
+//! centre can therefore paint up to that margin, about 6 dp, past it: into
+//! a side's resize-handle gutter, or past the layout's own edge where a side
+//! is hidden.
 
 mod a11y;
 mod activity_bar;
+mod centre;
 mod context_menu;
 mod drag;
 mod geometry;
@@ -232,7 +240,12 @@ impl Widget for DockingLayout {
             } else {
                 ctx.add(RectWidget::new().background(SurfaceRole::Content))
             };
-            ctx.add(crate::primitives::Expand::new().child(inner))
+            // The centre clips its content, so whatever it holds (a
+            // `Splitter` too small for its panes' minimums, an oversized
+            // child) cannot paint over a side; the clip reaches past the
+            // edge by a focus ring's width, so a control flush with the
+            // edge keeps its ring (see `centre`).
+            ctx.add(centre::CentreFrame::new(inner))
         };
 
         let mut ordered = vec![center];

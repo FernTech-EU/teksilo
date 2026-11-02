@@ -3212,3 +3212,206 @@ fn docks_plural_matches_the_singular_chain() {
     assert_eq!(registered(&singular), vec![true, true]);
     assert_eq!(registered(&singular), registered(&plural));
 }
+
+/// N22: a centre holding a `Splitter` too small for its panes' minimums
+/// keeps every pane inside the centre, so nothing in it lands on (or paints
+/// over) the trailing side, and a press in the trailing side reaches the
+/// side's own control.
+#[test]
+fn a_too_small_splitter_in_the_centre_stays_off_the_trailing_side() {
+    use crate::button::Button;
+    use crate::splitter::{PaneDescriptor, Splitter, SplitterModel};
+    use std::rc::Rc;
+    use teksilo_tokens::Orientation;
+
+    let split = SplitterModel::from_panes(
+        vec![
+            PaneDescriptor::new()
+                .size(500.0)
+                .min_size(500.0)
+                .stretch(1.0),
+            PaneDescriptor::new()
+                .size(500.0)
+                .min_size(500.0)
+                .stretch(1.0),
+        ],
+        Orientation::Horizontal,
+    );
+    let model = DockingModel::new();
+    let (lead, dwl) = dock("Lead");
+    let trail = DockWidgetId::fresh();
+    let dwt = DockWidget::new(trail, lit!("Trail"), |_| Button::new(lit!("Inside")));
+    let mut t = tree().with_text_backend(Rc::new(std::cell::RefCell::new(
+        teksilo_canvas::MockTextBackend::new(),
+    )));
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(
+                Splitter::new(split)
+                    .pane(FixedLeaf(100.0, 100.0))
+                    .pane(FixedLeaf(100.0, 100.0)),
+            )
+            .dock(dwl)
+            .dock(dwt),
+    );
+    model.open_dock(lead, DockOpenLocation::side(DockSide::Leading));
+    model.open_dock(trail, DockOpenLocation::side(DockSide::Trailing));
+    let window = SizeProposal::exact(1000.0, 800.0);
+    t.layout(window);
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(window);
+
+    let center = t.children(root)[0];
+    let cb = t.bounds(center);
+    assert!(
+        cb.width < 1000.0,
+        "the centre is narrower than the splitter's floors"
+    );
+    let button = find_role_name(&t, root, Role::Button, "Inside").expect("trailing button");
+    let bb = t.bounds(button);
+    // The centre's clip node, grown past the centre by the focus-ring
+    // margin, holds the content at the centre rectangle.
+    let clip = t.children(center)[0];
+    let mut stack = t.children(clip);
+    while let Some(id) = stack.pop() {
+        let b = t.bounds(id);
+        let overlaps = b.x < bb.x + bb.width
+            && bb.x < b.x + b.width
+            && b.y < bb.y + bb.height
+            && bb.y < b.y + b.height
+            && b.width > 0.0
+            && b.height > 0.0;
+        assert!(
+            !overlaps,
+            "centre descendant {id:?} at {b:?} overlaps the trailing control at {bb:?}"
+        );
+        assert!(
+            b.x + b.width <= cb.x + cb.width + 0.5,
+            "centre descendant {id:?} at {b:?} ends past the centre at {cb:?}"
+        );
+        stack.extend(t.children(id));
+    }
+    assert!(
+        t.widget_clips_children(clip),
+        "the centre clips its content"
+    );
+    let content = t.children(clip)[0];
+    let inner = t.bounds(content);
+    assert!(
+        (inner.x - cb.x).abs() < 0.01
+            && (inner.y - cb.y).abs() < 0.01
+            && (inner.width - cb.width).abs() < 0.01
+            && (inner.height - cb.height).abs() < 0.01,
+        "the content fills the centre exactly: {inner:?} vs {cb:?}"
+    );
+
+    // The hit pin: a press over the trailing control reaches it.
+    let hit = t.hit_test(bb.center()).expect("a hit");
+    let mut at = Some(hit);
+    while at.is_some_and(|id| id != button) {
+        at = t.parent(at.unwrap());
+    }
+    assert_eq!(at, Some(button), "the press reaches the trailing control");
+}
+
+/// The centre's clip reaches past its edge by the theme's focus-ring margin,
+/// so the ring a control flush with the centre's edge paints outside itself
+/// (the IntUI, Fluent and macOS presets all do) is not cut. The second theme
+/// carries Fluent's ring geometry (1 dp off the control, 2 dp wide).
+#[test]
+fn the_centre_clip_leaves_room_for_a_focus_ring() {
+    let intui = teksilo_core::presets::intui::light();
+    let mut fluent_like = teksilo_core::presets::intui::light();
+    fluent_like.shape.focus_ring_offset = 1.0;
+    fluent_like.shape.focus_ring_width = 2.0;
+    for theme in [intui, fluent_like] {
+        let margin = super::centre::focus_ring_margin(&theme.shape);
+        assert!(
+            margin >= theme.shape.focus_ring_envelope() + theme.shape.focus_ring_width,
+            "the margin covers the ring and a halo one ring width outside it"
+        );
+        let model = DockingModel::new();
+        let (id, dw) = dock("Explorer");
+        let mut t = WidgetTree::new().with_theme(theme);
+        let root = t.add(
+            DockingLayout::new(model.clone())
+                .center(FixedLeaf(200.0, 200.0))
+                .dock(dw),
+        );
+        model.open_dock(id, DockOpenLocation::side(DockSide::Trailing));
+        t.layout(SizeProposal::exact(1000.0, 800.0));
+        t.tick_animations(Duration::from_millis(600));
+        t.layout(SizeProposal::exact(1000.0, 800.0));
+
+        let center = t.children(root)[0];
+        let cb = t.bounds(center);
+        let clip = t.children(center)[0];
+        let expected = teksilo_canvas::Rect::new(
+            cb.x - margin,
+            cb.y - margin,
+            cb.width + 2.0 * margin,
+            cb.height + 2.0 * margin,
+        );
+        assert_eq!(t.bounds(clip), expected);
+        let frame = t.render();
+        assert!(
+            frame.draw_order.iter().any(|cmd| matches!(
+                cmd,
+                teksilo_canvas::DrawCommand::SetClip(r) if *r == expected
+            )),
+            "the centre's clip is {expected:?}, past its bounds {cb:?}"
+        );
+        assert!(
+            !frame.draw_order.iter().any(|cmd| matches!(
+                cmd,
+                teksilo_canvas::DrawCommand::SetClip(r) if *r == cb
+            )),
+            "nothing clips the centre at its own bounds"
+        );
+        // A press in the band past the centre's edge reaches nothing in it.
+        let band = teksilo_canvas::Point::new(cb.x + cb.width + margin * 0.5, cb.y + 10.0);
+        let content = t.children(clip)[0];
+        let mut at = t.hit_test(band);
+        while let Some(id) = at {
+            assert!(id != content && id != clip, "the band is not the centre's");
+            at = t.parent(id);
+        }
+    }
+}
+
+/// The clip's margin follows a theme set at runtime: the next layout grows
+/// the clip by the new theme's focus-ring margin.
+#[test]
+fn the_centre_clip_follows_a_theme_change() {
+    let model = DockingModel::new();
+    let mut t = tree();
+    let root = t.add(DockingLayout::new(model).center(FixedLeaf(200.0, 200.0)));
+    let window = SizeProposal::exact(1000.0, 800.0);
+    t.layout(window);
+    let center = t.children(root)[0];
+    let clip = t.children(center)[0];
+    let grown_by = |t: &WidgetTree| t.bounds(center).x - t.bounds(clip).x;
+
+    let before = teksilo_core::presets::intui::light();
+    let first = super::centre::focus_ring_margin(&before.shape);
+    assert!((grown_by(&t) - first).abs() < 0.01);
+
+    let mut wider = before.clone();
+    wider.shape.focus_ring_width += 4.0;
+    let second = super::centre::focus_ring_margin(&wider.shape);
+    assert!(second > first);
+    t.set_theme(wider);
+    t.layout(window);
+    assert!(
+        (grown_by(&t) - second).abs() < 0.01,
+        "the clip grows by the new margin {second}, got {}",
+        grown_by(&t)
+    );
+    let cb = t.bounds(center);
+    let frame = t.render();
+    assert!(frame.draw_order.iter().any(|cmd| matches!(
+        cmd,
+        teksilo_canvas::DrawCommand::SetClip(r)
+            if (r.x - (cb.x - second)).abs() < 0.01 && (r.width - (cb.width + 2.0 * second)).abs() < 0.01
+    )));
+}

@@ -264,6 +264,13 @@ DockingLayout
                 └── DockWidget — the atomic dockable unit
 ```
 
+The centre clips its content, so nothing in it paints over a side. The
+clip reaches a focus ring's width past the centre's edge, so a control
+flush with that edge keeps its whole ring. Content that overflows the
+centre can therefore paint up to that margin, about 6 dp, past it: into
+a side's resize-handle gutter, or past the layout's own edge where a side
+is hidden.
+
 ## Density
 
 The picture above is the widget at `TargetDensity::Compact`, the mouse-and-keyboard ladder. Below is the same subject on the same canvas with only the ladder changed, so what moves is the density and nothing else — where the subject no longer fits, that is what the denser targets cost it at that size. See `docs/density-and-targets.md`.
