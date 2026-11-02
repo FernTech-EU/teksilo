@@ -86,7 +86,7 @@ def empty_edits(run):
                         "entry still supports Text"):
         run.key("BackSpace")
         time.sleep(0.5)
-        probe_into(run, probes, "emptied", "entry", "")
+        probe_into(run, probes, "emptied", "entry", "Username")
     with run.act("type 'c' into the emptied Username", [inserted("entry", "c")],
                  should="the first character is reported inserted"):
         run.type("c")

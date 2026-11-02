@@ -83,7 +83,9 @@ impl Widget for Root {
                 .spacing(12.0)
                 .child(labeled(
                     "Username",
-                    TextInput::new(self.username.clone()).placeholder(lit!("you@example.com")),
+                    TextInput::new(self.username.clone())
+                        .label(lit!("Username"))
+                        .placeholder(lit!("you@example.com")),
                 ))
                 .child(labeled(
                     "Password",

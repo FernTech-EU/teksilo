@@ -418,6 +418,8 @@ by crate for clarity, not because crates version independently.
   next goes after it, as in TextEdit and Word. Typing `abc def`, undoing,
   redoing and typing `Y` gave `abc Ydef`. An undo of a deletion now leaves
   the caret after the text it brings back, where it landed in front of it.
+- **The `password-field` example's Username field has an accessible name.**
+  A screen reader announced it as an unnamed edit field.
 
 #### App
 

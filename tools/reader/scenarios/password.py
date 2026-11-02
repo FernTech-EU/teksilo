@@ -307,7 +307,7 @@ def typing(run):
                  [probe_has(probes, "empty-username", interface="Text")],
                  should="an empty entry already supports Text (character count 0), so its "
                         "first insertion can be reported"):
-        probe_into(run, probes, "empty-username", "entry", "")
+        probe_into(run, probes, "empty-username", "entry", "Username")
     with run.act("type 'bob' into Username (the control: a plain entry)",
                  [event("object:text-changed:insert", role="entry"),
                   inserted("entry", "bob")],
@@ -512,7 +512,7 @@ def caps_leave_on(run):
         time.sleep(0.4)
         run.type("q")
         time.sleep(0.5)
-        probe_into(run, probes, "username", "entry", "")
+        probe_into(run, probes, "username", "entry", "Username")
 
 
 def caps_start_on(run):
@@ -526,7 +526,7 @@ def caps_start_on(run):
                  should="the session's lock is on at launch: 'q' types 'Q'"):
         run.type("q")
         time.sleep(0.5)
-        probe_into(run, probes, "username-on", "entry", "")
+        probe_into(run, probes, "username-on", "entry", "Username")
     with run.act("Tab to Password with Caps Lock on",
                  [focused(role="password text", name="Password"), announced(CAPS),
                   said(CAPS)],
@@ -545,7 +545,7 @@ def caps_start_on(run):
         run.key("End")
         run.type("q")
         time.sleep(0.5)
-        probe_into(run, probes, "username-off", "entry", "")
+        probe_into(run, probes, "username-off", "entry", "Username")
 
 
 def hold(run):
@@ -677,13 +677,13 @@ def copy(run):
                  should="nothing is copied"):
         run.key("Ctrl+a")
         run.key("Ctrl+c")
-    scene_focus(run, "entry", "")
+    scene_focus(run, "entry", "Username")
     with run.act("Ctrl+V into Username",
                  [nothing_leaks("hunter2", tree=True), username_text("masked", None)],
                  should="the masked password was not on the clipboard", tree=True):
         run.key("Ctrl+v")
         time.sleep(0.5)
-        probe_into(run, probes, "masked", "entry", "")
+        probe_into(run, probes, "masked", "entry", "Username")
     # Reveal the Masked field with its own toggle (the third one in tree order).
     with run.act("scene: click the Masked field's toggle through AT-SPI",
                  should="scene setting, not judged"):
@@ -692,14 +692,14 @@ def copy(run):
     with run.act("Ctrl+A, Ctrl+C in the revealed field", should="copy is allowed once revealed"):
         run.key("Ctrl+a")
         run.key("Ctrl+c")
-    scene_focus(run, "entry", "")
+    scene_focus(run, "entry", "Username")
     with run.act("Ctrl+V into Username after copying the revealed field",
                  [username_text("revealed", "hunter2")],
                  should="the revealed password was copied (proves the clipboard works in "
                         "this session, so the masked result above means something)"):
         run.key("Ctrl+v")
         time.sleep(0.5)
-        probe_into(run, probes, "revealed", "entry", "")
+        probe_into(run, probes, "revealed", "entry", "Username")
 
 
 def sign_in(run):
