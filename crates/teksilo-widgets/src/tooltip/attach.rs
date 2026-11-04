@@ -411,6 +411,40 @@ mod tests {
         assert_eq!(carriers, 1, "exactly one node may carry the hint");
     }
 
+    /// A composite tooltip with no label of its own gives its anchor no
+    /// description while hidden: the generic "Tooltip" was read on every row
+    /// of Skribisto's binder, in French as "Infobulle".
+    #[test]
+    fn a_hidden_composite_tooltip_gives_its_anchor_no_generic_description() {
+        fn described(
+            update: &teksilo_core::accesskit::TreeUpdate,
+            id: teksilo_core::WidgetId,
+        ) -> Option<String> {
+            let nid = teksilo_core::accessibility::widget_id_to_node_id(id);
+            update
+                .nodes
+                .iter()
+                .find(|(node_id, _)| *node_id == nid)
+                .and_then(|(_, n)| n.description().map(str::to_owned))
+        }
+
+        let mut tree = tree_with_backend();
+        let button = tree.add(
+            Button::new(lit!("Chapter 3"))
+                .composite_tooltip(crate::primitives::TextWidget::new(lit!("Synopsis"))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let update = tree.sync_accessibility();
+        assert_eq!(described(&update, button), None, "no generic description");
+        assert!(
+            !update
+                .nodes
+                .iter()
+                .any(|(_, n)| n.description() == Some("Tooltip")),
+            "no node is described as a tooltip"
+        );
+    }
+
     /// **A tooltip nobody has hovered is never built.**
     ///
     /// Not built-and-parked — not built. This is the whole reason the three

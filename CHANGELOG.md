@@ -31,6 +31,11 @@ by crate for clarity, not because crates version independently.
   longer in the Tab order.** Its controls left the screen but Tab still
   reached them. They now leave the Tab order as the section starts to close,
   and are dormant (out of the accessibility tree too) once it has closed.
+- **A control with a composite tooltip is no longer described as
+  "Tooltip".** A composite tooltip with no `access_label` gave its control
+  that generic word as a description, which a screen reader read on every
+  row of a list with one per row. Its control is now described by the
+  tooltip's content while it is shown, and by nothing while it is hidden.
 
 ## [0.24.1] - 2026-11-04
 

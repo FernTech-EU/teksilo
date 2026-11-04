@@ -126,8 +126,10 @@ impl CompositeTooltipWidget {
         self
     }
 
-    /// Accessibility label (used for `set_name` on the AT node — the
-    /// `Role::Tooltip`/`Role::Dialog` would otherwise be unnamed).
+    /// Accessibility label: the tooltip's name, and what its anchor is
+    /// described by, shown or hidden. Without one, the anchor is described
+    /// by the body's text while the tooltip is shown and by nothing while it
+    /// is hidden, and a sticky tooltip (a dialog) takes a generic name.
     pub fn access_label(mut self, label: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = label.into();
         self.access_label = Some(ls.resolve_now());
@@ -427,14 +429,20 @@ impl Widget for CompositeTooltipWidget {
         };
         builder.set_role(role);
         // Composite tooltips host arbitrary widget bodies and have no
-        // intrinsic text, so without an explicit `.access_label(...)` the
-        // node would be unnamed. Fall back to a localized generic name —
-        // same approach as `ModalContainer` / `SnackbarWidget`.
-        let name = self
-            .access_label
-            .clone()
-            .unwrap_or_else(|| teksilo_i18n::tr_widget!(a11y_tooltip_name()).resolve_now());
-        builder.set_name(name);
+        // intrinsic text. A tooltip describes its anchor by its name when it
+        // has one, shown or hidden, and by the text of its body otherwise. So
+        // without an explicit `.access_label(...)` it has none, and the anchor
+        // is described by the body while it is shown and by nothing while it
+        // is hidden. The generic "Tooltip" there was read on every row of a
+        // list whose rows carry one. A sticky tooltip is a
+        // dialog, which needs a name, and takes the localized generic one, as
+        // `ModalContainer` / `SnackbarWidget` do.
+        let name = self.access_label.clone().or_else(|| {
+            is_sticky.then(|| teksilo_i18n::tr_widget!(a11y_tooltip_name()).resolve_now())
+        });
+        if let Some(name) = name {
+            builder.set_name(name);
+        }
         if is_sticky {
             builder.add_action(teksilo_core::accesskit::Action::Focus);
         }
