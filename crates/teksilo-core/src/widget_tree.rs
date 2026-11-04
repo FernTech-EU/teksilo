@@ -18,6 +18,7 @@ mod accessibility_description_impl;
 mod accessibility_description_tests;
 mod accessibility_emit_impl;
 mod accessibility_impl;
+mod accessibility_placeholder_impl;
 #[cfg(test)]
 mod accessibility_proxy_tests;
 #[cfg(test)]

@@ -450,6 +450,10 @@ impl WidgetTree {
         // pass, which reads names; after the relation strip, so every target
         // it adds is present.
         super::accessibility_cell_name_impl::name_cells_from_content(&mut nodes, &emitted);
+        // A placeholder that repeats the field's name is read after it, once
+        // more. After the cells are named and before the description pass,
+        // with every `labelled_by` target present.
+        super::accessibility_placeholder_impl::drop_placeholders_repeating_the_name(&mut nodes);
 
         // Last, on the nodes this update carries: a `described_by` relation
         // reaches no screen reader through AccessKit, so its targets' text is

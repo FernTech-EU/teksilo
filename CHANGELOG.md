@@ -25,6 +25,12 @@ by crate for clarity, not because crates version independently.
   dialog. The same holds for a `SceneCard` being edited and for a pending
   question in `ShortcutSettings`, when either is inside a dialog.
 
+- **A field's placeholder is no longer read when it repeats the field's
+  name.** A search field named "Filter the outline" with the placeholder
+  "Filter the outline…" was read twice. A placeholder that says the same as
+  the name, apart from case and a trailing ellipsis, is now left out of the
+  accessibility tree; one that adds something (an example, a format) stays.
+
 #### Widgets
 
 - **A closed `Accordion` section, and anything else in a `Collapse`, is no

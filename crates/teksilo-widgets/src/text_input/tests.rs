@@ -1392,3 +1392,33 @@ fn every_framed_field_claims_the_padding_around_its_line() {
         HexColorInput::new(Signal::new(teksilo_tokens::Color::from_rgb(0.1, 0.2, 0.3))),
     );
 }
+
+/// A placeholder that says what the field's name says is not published:
+/// a screen reader read "Filter the outline, Filter the outline…". One that
+/// adds something stays.
+#[test]
+fn a_placeholder_repeating_the_name_is_not_read_again() {
+    fn placeholder_of(label: &str, placeholder: &str) -> Option<String> {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let _ = tree.add(
+            TextInput::new(Signal::new(String::new()))
+                .label(teksilo_i18n::lit!(label.to_owned()))
+                .placeholder(teksilo_i18n::lit!(placeholder.to_owned())),
+        );
+        tree.layout(SizeProposal::exact(300.0, 40.0));
+        let update = tree.sync_accessibility();
+        update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == teksilo_core::accesskit::Role::TextInput)
+            .and_then(|(_, n)| n.placeholder().map(str::to_owned))
+    }
+    assert_eq!(
+        placeholder_of("Filter the outline", "Filter the outline\u{2026}"),
+        None
+    );
+    assert_eq!(
+        placeholder_of("Deadline", "e.g. 2027-02-03").as_deref(),
+        Some("e.g. 2027-02-03")
+    );
+}
