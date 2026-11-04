@@ -571,6 +571,69 @@ impl WidgetTree {
         true
     }
 
+    /// Offer Escape to what holds the focus inside the overlay Escape would
+    /// close, before that overlay goes: the `on_key_preview` handlers from the
+    /// overlay's content root down to the focused node's parent, root first,
+    /// as the preview pass runs them. `true` when one took the key.
+    ///
+    /// A widget in a dialog that says "Escape comes back here" (a list row
+    /// being edited, a card being edited, a question waiting for an answer)
+    /// takes the key before the dialog does, as a focused element's `keydown`
+    /// in a browser comes before its `<dialog>`'s cancel. Only the overlay
+    /// Escape would close is asked: a popup over the focused control (a combo
+    /// box's list) is that overlay, the focus is not inside it, and it closes
+    /// first. Nothing fires when no such overlay holds the focus, so a handler
+    /// never sees the key twice: either one takes it here, or the overlay
+    /// closes and the key goes no further.
+    fn escape_taken_inside_top_overlay(
+        &mut self,
+        event: &WidgetEvent,
+        ops: &mut dyn crate::window::WindowOps,
+    ) -> bool {
+        let Some((_, content)) = self.overlay_manager.top_escape_target() else {
+            return false;
+        };
+        let Some(focus) = self.focused else {
+            return false;
+        };
+        let mut path = Vec::new();
+        let mut current = self.arena.parent(focus);
+        let mut inside = false;
+        while let Some(id) = current {
+            path.push(id);
+            if id == content {
+                inside = true;
+                break;
+            }
+            current = self.arena.parent(id);
+        }
+        if !inside || !self.arena.is_enabled(focus) {
+            return false;
+        }
+        for &id in path.iter().rev() {
+            let frame = self.arena.local_frame(id);
+            let mut ctx = self
+                .make_event_context(&mut *ops)
+                .with_dispatch_node(id)
+                .with_dispatch_target(focus)
+                .with_local_frame(frame);
+            let response = if let Some(node) = self.arena.get_mut(id) {
+                Self::try_handler_preview(node, event, &mut ctx).unwrap_or(EventResponse::Ignored)
+            } else {
+                EventResponse::Ignored
+            };
+            self.collect_from_ctx(ctx, id);
+            if response == EventResponse::Handled {
+                self.arena.mark_needs_paint(id);
+                // Its release goes where the press went, as for any key the
+                // focused widget's dispatch took.
+                self.note_key_press(focus);
+                return true;
+            }
+        }
+        false
+    }
+
     /// Answer a request to close the window that the user made (Alt+F4, the
     /// title bar's close button, the taskbar's Close) while a modal overlay is
     /// open in it. It does what Escape would and nothing more, as Alt+F4 does
@@ -831,7 +894,8 @@ impl WidgetTree {
             key: Key::Escape, ..
         } = &event
             && !self.overlay_manager.is_empty()
-            && self.dismiss_top_on_escape(&mut *ops)
+            && (self.escape_taken_inside_top_overlay(&event, &mut *ops)
+                || self.dismiss_top_on_escape(&mut *ops))
         {
             return;
         }

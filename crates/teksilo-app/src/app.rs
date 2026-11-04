@@ -8447,6 +8447,87 @@ mod tests {
         );
     }
 
+    /// Escape in a row of a `RowKeyboard::Actions` list inside an in-window
+    /// modal returns to the list, and only the next Escape closes the modal.
+    /// Skribisto's Settings: Escape in a tag's name field closed the whole
+    /// dialog, though the row says Escape returns to the list.
+    #[test]
+    fn escape_in_an_action_row_of_a_modal_returns_to_the_list_first() {
+        use teksilo_core::event::{Key, Modifiers};
+        use teksilo_core::overlay::DismissReason;
+
+        let reasons = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let record = reasons.clone();
+        let names: std::rc::Rc<Vec<teksilo_core::signal::Signal<String>>> = std::rc::Rc::new(
+            (0..3)
+                .map(|_| teksilo_core::signal::Signal::new(String::new()))
+                .collect(),
+        );
+        let list_id = std::rc::Rc::new(std::cell::Cell::new(None));
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let page = tree.add(teksilo_widgets::VStack::new().child(Button::new(lit!("Page"))));
+        tree.set_content_root(page);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let built = list_id.clone();
+        let fields = names.clone();
+        present_in_tree_modal_request(
+            &mut tree,
+            page,
+            ModalRequest::deferred(move |tree| {
+                let fields = fields.clone();
+                let list = teksilo_widgets::ListView::new(
+                    teksilo_data::ListModel::from_vec(vec![0_usize, 1, 2]),
+                    move |_index, item, _selected| {
+                        Box::new(teksilo_widgets::TextInput::new(fields[*item].clone()))
+                    },
+                )
+                .item_height(40.0)
+                .row_keyboard(teksilo_widgets::RowKeyboard::Actions);
+                let id = tree.add(list);
+                built.set(Some(id));
+                tree.add(
+                    teksilo_widgets::FixedSize::new()
+                        .width(300.0)
+                        .height(200.0)
+                        .child(id),
+                )
+            })
+            .presentation(ModalPresentation::InTree)
+            .close_behavior(ModalCloseBehavior::EscapeKey)
+            .on_dismiss(std::rc::Rc::new(move |reason, _| {
+                record.borrow_mut().push(reason)
+            })),
+        );
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        let list = list_id.get().expect("the modal built its list");
+        tree.focus(list);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+
+        tree.press_key(Key::F2, Modifiers::NONE);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        tree.type_text(list, "x");
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(
+            names[0].get(),
+            "x",
+            "precondition: F2 entered the first row"
+        );
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert_eq!(tree.active_overlays().len(), 2, "the modal stayed");
+        assert!(reasons.borrow().is_empty());
+        assert_eq!(tree.focused(), Some(list), "Escape came back to the list");
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        tree.layout(SizeProposal::exact(800.0, 600.0));
+        assert!(
+            tree.active_overlays().is_empty(),
+            "the next Escape closed it"
+        );
+        assert_eq!(*reasons.borrow(), [DismissReason::Escape]);
+    }
+
     /// A modal Escape cannot close stays, and nothing else closes: the
     /// request is spent on it, as Alt+F4 on a dialog with no Cancel.
     #[test]

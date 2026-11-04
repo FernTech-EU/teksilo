@@ -293,3 +293,26 @@ opened over (`ctx.send_intent_from_focus`), once the menu has given focus
 back, so Edit, Copy copies in the focused field. When overlays close, focus
 goes back to where the lowest of them found it. See
 [shortcut-intent-action.md](shortcut-intent-action.md), "Dispatch walk".
+
+## 9. Escape
+
+Escape closes the top overlay that Escape may close (`EscapeKey`,
+`EscapeOrClickOutside`, `PointerLeave`); a `Manual` overlay stops it. A
+tooltip, and an overlay nothing can be done in, go without spending the
+key.
+
+When the focus is inside that overlay, the `on_key_preview` handlers
+between the focus and the overlay's root are asked first, root first, as
+the preview pass asks them. One that takes the key keeps the overlay open.
+This lets something inside a dialog decide what Escape means there:
+
+- a list row in `RowKeyboard::Actions` mode returns to its list;
+- a `SceneCard` being edited stops editing;
+- `ShortcutSettings` answers a pending question with Cancel.
+
+The next Escape, which nothing takes, closes the dialog. As in a browser,
+a focused element's `keydown` comes before its `<dialog>`'s cancel.
+
+A popup over the focused control (a combo box's list) is the overlay
+Escape closes, and the focus is not inside it, so it closes first and asks
+nothing.

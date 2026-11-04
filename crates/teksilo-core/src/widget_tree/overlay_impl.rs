@@ -2809,6 +2809,104 @@ mod tests {
         assert!(!tree.is_visible(content));
     }
 
+    /// A dialog holding a field inside a container that previews Escape,
+    /// shown with `dismiss`. Returns the dialog's content and the field, and
+    /// counts the container's Escapes in `seen`.
+    fn show_dialog_with_escape_preview(
+        tree: &mut WidgetTree,
+        takes: bool,
+        seen: std::rc::Rc<std::cell::Cell<u32>>,
+    ) -> (WidgetId, WidgetId) {
+        let anchor = tree.add(FillWidget::new().focusable());
+        let field = tree.add(FillWidget::new().focusable());
+        let row = tree.add(crate::widget_builder::WidgetBuilder::on_key_preview(
+            StackWidget::new().child(field),
+            move |event, _ctx| {
+                if let WidgetEvent::KeyDown {
+                    key: Key::Escape, ..
+                } = event
+                {
+                    seen.set(seen.get() + 1);
+                    if takes {
+                        return EventResponse::Handled;
+                    }
+                }
+                EventResponse::Ignored
+            },
+        ));
+        let content = tree.add(StackWidget::new().child(row));
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.focus(anchor);
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            content,
+            anchor,
+            crate::overlay::OverlayPlacement::Below,
+            crate::overlay::DismissBehavior::EscapeKey,
+        ));
+        tree.focus(field);
+        (content, field)
+    }
+
+    /// An Escape preview handler between the focus and the root of the
+    /// overlay Escape would close takes the key first: the overlay stays.
+    #[test]
+    fn escape_taken_inside_an_overlay_keeps_it_open() {
+        let mut tree = WidgetTree::new();
+        let seen = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (content, _) = show_dialog_with_escape_preview(&mut tree, true, seen.clone());
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert_eq!(
+            seen.get(),
+            1,
+            "the handler inside the dialog heard Escape once"
+        );
+        assert_eq!(tree.active_overlays().len(), 1, "the dialog stays open");
+        assert!(tree.is_visible(content));
+    }
+
+    /// A preview handler that lets Escape go hears it once, and the overlay
+    /// closes as before.
+    #[test]
+    fn escape_declined_inside_an_overlay_closes_it_once() {
+        let mut tree = WidgetTree::new();
+        let seen = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (content, _) = show_dialog_with_escape_preview(&mut tree, false, seen.clone());
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert_eq!(seen.get(), 1, "heard once, not again after the dismissal");
+        assert!(tree.active_overlays().is_empty());
+        assert!(!tree.is_visible(content));
+    }
+
+    /// A popup over the focused control is the overlay Escape closes, and
+    /// the focus is not inside it: the handler around the control is not
+    /// asked, and the popup goes first.
+    #[test]
+    fn escape_closes_a_popup_over_the_focus_before_its_dialog_handler() {
+        let mut tree = WidgetTree::new();
+        let seen = std::rc::Rc::new(std::cell::Cell::new(0));
+        let (dialog, field) = show_dialog_with_escape_preview(&mut tree, true, seen.clone());
+        let popup = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(200.0, 100.0));
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            popup,
+            field,
+            crate::overlay::OverlayPlacement::Below,
+            crate::overlay::DismissBehavior::EscapeOrClickOutside,
+        ));
+        tree.focus(field);
+
+        tree.press_key(Key::Escape, Modifiers::NONE);
+        assert_eq!(
+            seen.get(),
+            0,
+            "the popup took Escape before the row was asked"
+        );
+        assert!(!tree.is_visible(popup));
+        assert!(tree.is_visible(dialog));
+    }
+
     /// Build two stacked overlays (a submenu over its parent menu) so the
     /// nested-overlay "back" key path (`overlay_manager.len() > 1`) is live.
     fn show_two_nested_overlays(tree: &mut WidgetTree) -> (WidgetId, WidgetId) {

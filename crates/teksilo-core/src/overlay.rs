@@ -1554,8 +1554,20 @@ impl OverlayManager {
     pub fn try_dismiss_top_on_escape(
         &mut self,
     ) -> Option<(OverlayId, Vec<WidgetId>, Option<WidgetId>)> {
-        let target = self
+        let (target, _) = self.top_escape_target()?;
+        let focus_restore = self
             .stack
+            .iter()
+            .find(|o| o.id == target)
+            .and_then(|o| o.focus_restore);
+        let content_ids = self.dismiss_because(target, DismissReason::Escape);
+        Some((target, content_ids, focus_restore))
+    }
+
+    /// The overlay Escape would close now, and its content root: the one
+    /// [`try_dismiss_top_on_escape`](Self::try_dismiss_top_on_escape) closes.
+    pub(crate) fn top_escape_target(&self) -> Option<(OverlayId, WidgetId)> {
+        self.stack
             .iter()
             .rev()
             // An overlay already fading out stays on the stack until its tween
@@ -1566,18 +1578,11 @@ impl OverlayManager {
             .find_map(|o| match o.dismiss {
                 DismissBehavior::EscapeKey
                 | DismissBehavior::EscapeOrClickOutside
-                | DismissBehavior::PointerLeave { .. } => Some(Some(o.id)),
+                | DismissBehavior::PointerLeave { .. } => Some(Some((o.id, o.content_id))),
                 // Opaque to Escape and to everything under it.
                 DismissBehavior::Manual => Some(None),
                 DismissBehavior::ClickOutside => None,
-            })??;
-        let focus_restore = self
-            .stack
-            .iter()
-            .find(|o| o.id == target)
-            .and_then(|o| o.focus_restore);
-        let content_ids = self.dismiss_because(target, DismissReason::Escape);
-        Some((target, content_ids, focus_restore))
+            })?
     }
 
     /// Dismiss every [inert](ActiveOverlay::inert) overlay Escape may close,

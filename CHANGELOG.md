@@ -13,6 +13,18 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Core
+
+- **Escape in a list row being edited inside a dialog returns to the list
+  instead of closing the dialog.** A `RowKeyboard::Actions` row says Escape
+  returns to the list, but inside an in-window modal (a Settings dialog)
+  Escape closed the whole dialog. Now an `on_key_preview` handler between the
+  focus and the dialog takes Escape first, and the next Escape closes the
+  dialog. The same holds for a `SceneCard` being edited and for a pending
+  question in `ShortcutSettings`, when either is inside a dialog.
+
 ## [0.24.1] - 2026-11-04
 
 ### Fixed

@@ -735,6 +735,11 @@ impl HandlerSet {
     /// ancestor of the focused widget (root → parent-of-target)
     /// before the focused widget's `on_key` runs. Return
     /// `EventResponse::Handled` to consume the event.
+    ///
+    /// Inside an overlay Escape would close (a dialog, a popover), the
+    /// handlers between the focus and the overlay's root are offered Escape
+    /// before the overlay closes, and one that takes it keeps the overlay
+    /// open: a list row being edited takes Escape back to its list.
     pub fn on_key_preview(
         mut self,
         f: impl FnMut(&WidgetEvent, &mut EventContext) -> EventResponse + 'static,

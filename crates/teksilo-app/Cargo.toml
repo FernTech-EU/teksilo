@@ -113,6 +113,7 @@ harness = false
 
 [dev-dependencies]
 tempfile = { workspace = true }
+teksilo-data = { workspace = true }
 wgpu = { workspace = true }
 serde = { workspace = true }
 

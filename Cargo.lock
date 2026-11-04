@@ -11679,6 +11679,7 @@ dependencies = [
  "teksilo-automation",
  "teksilo-canvas",
  "teksilo-core",
+ "teksilo-data",
  "teksilo-i18n",
  "teksilo-platform",
  "teksilo-render",
