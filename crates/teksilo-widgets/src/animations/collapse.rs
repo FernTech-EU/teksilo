@@ -22,6 +22,10 @@
 //!
 //! Honors `prefers-reduced-motion`: under reduced motion, progress
 //! snaps to its end value instead of tweening.
+//!
+//! Collapsed content is off the page for the keyboard and assistive
+//! technology too: it leaves the Tab order as soon as it starts to close,
+//! and goes dormant once closed.
 
 use std::cell::Cell;
 
@@ -122,6 +126,17 @@ impl Widget for Collapse {
 
         // Drive the progress tween whenever `expanded` flips. The
         // observer survives across rebuilds via `effect_handles`.
+        // Closed content is not on the page: out of the Tab order from the
+        // moment it starts closing, and dormant (out of paint, focus and the
+        // accessibility tree) once it has closed. Clipped to nothing, it was
+        // still a Tab stop a keyboard user landed on without seeing it.
+        ctx.set_tab_gate(child_id, self.expanded.clone());
+        let shown = self
+            .expanded
+            .zip(&progress)
+            .map(|(expanded, progress)| *expanded || *progress >= COLLAPSED_PROGRESS_EPSILON);
+        ctx.visible_when(child_id, shown);
+
         let collapse_anim = ctx.animate().collapse().standard();
         let progress_for_effect = progress;
         ctx.effect(&self.expanded, move |&expanded| {

@@ -1046,6 +1046,54 @@ mod tests {
         );
     }
 
+    /// A closed section's controls are no Tab stops, and come back when it
+    /// opens. Skribisto's closed "Epigraph" still gave Tab its hidden button
+    /// and field.
+    #[test]
+    fn a_closed_sections_controls_leave_the_tab_order() {
+        use crate::primitives::VStack;
+        use std::time::Duration;
+
+        let expanded = Signal::new(true);
+        let text = Signal::new(String::new());
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let button = tree.add(crate::Button::new(lit!("Source line")));
+        let field = tree.add(crate::TextInput::new(text));
+        let content = tree.add(VStack::new().child(button).child(field));
+        let acc = tree.add(Accordion::new(lit!("Epigraph"), expanded.clone()).content(content));
+        let layout = |tree: &mut WidgetTree| tree.layout(SizeProposal::exact(300.0, 400.0));
+        layout(&mut tree);
+        let open_stops = tree.tab_stops_within(acc).len();
+        assert!(open_stops >= 3, "header, button and field: {open_stops}");
+
+        expanded.set(false);
+        layout(&mut tree);
+        assert_eq!(
+            tree.tab_stops_within(acc).len(),
+            1,
+            "only the header while it closes"
+        );
+        tree.tick_animations(Duration::from_millis(400));
+        layout(&mut tree);
+        assert_eq!(
+            tree.tab_stops_within(acc).len(),
+            1,
+            "only the header once closed"
+        );
+        assert!(!tree.is_visible(content), "the closed content is dormant");
+
+        expanded.set(true);
+        layout(&mut tree);
+        tree.tick_animations(Duration::from_millis(400));
+        layout(&mut tree);
+        assert_eq!(
+            tree.tab_stops_within(acc).len(),
+            open_stops,
+            "back when open"
+        );
+        assert!(tree.is_visible(content));
+    }
+
     #[test]
     fn content_dormant_when_collapsed() {
         use crate::primitives::TextWidget;

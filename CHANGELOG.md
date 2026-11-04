@@ -25,6 +25,13 @@ by crate for clarity, not because crates version independently.
   dialog. The same holds for a `SceneCard` being edited and for a pending
   question in `ShortcutSettings`, when either is inside a dialog.
 
+#### Widgets
+
+- **A closed `Accordion` section, and anything else in a `Collapse`, is no
+  longer in the Tab order.** Its controls left the screen but Tab still
+  reached them. They now leave the Tab order as the section starts to close,
+  and are dormant (out of the accessibility tree too) once it has closed.
+
 ## [0.24.1] - 2026-11-04
 
 ### Fixed
