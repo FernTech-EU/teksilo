@@ -39,6 +39,10 @@ expanded.set(true);  // animates open over `motion.duration_collapse`
 Honors `prefers-reduced-motion`: under reduced motion, progress
 snaps to its end value instead of tweening.
 
+Collapsed content is off the page for the keyboard and assistive
+technology too: it leaves the Tab order as soon as it starts to close,
+and goes dormant once closed.
+
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-widgets/latest/teksilo_widgets/animations/collapse/index.html)
