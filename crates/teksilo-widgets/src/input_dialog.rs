@@ -337,8 +337,13 @@ impl Widget for InputDialogBody {
         self.title_node = Some(title_id);
 
         let mut column = VStack::new().spacing(10.0).child(title_id);
+        // The field is named by the prompt, which says what to type, or by
+        // the title when there is no prompt.
+        let mut field_label = title_id;
         if let Some(p) = &self.prompt {
-            column = column.child(TextWidget::new(p.clone()).style(TextStyleRole::Body));
+            let prompt_id = ctx.add(TextWidget::new(p.clone()).style(TextStyleRole::Body));
+            field_label = prompt_id;
+            column = column.child(prompt_id);
         }
 
         // Live validation. Pushed from an effect on the text rather than bound: the
@@ -394,7 +399,9 @@ impl Widget for InputDialogBody {
             input = input.validation(self.validation.clone());
         }
         let field = input.handle();
-        column = column.child(input);
+        let input_id = ctx.add(input);
+        ctx.access_labelled_by(input_id, field_label);
+        column = column.child(input_id);
 
         // Footer: Spacer + Cancel + OK (right-aligned).
         let on_result_cancel = self.on_result.clone();
@@ -560,6 +567,33 @@ mod tests {
 
     /// Without a validator nothing changes: OK is live from the start, which is what
     /// every existing caller relies on.
+    /// The field is named by the prompt, or by the title without one. It
+    /// was unnamed, so Skribisto's Rename read as a bare "edit".
+    #[test]
+    fn the_field_is_named_by_the_prompt_or_the_title() {
+        fn field_name(mut tree: WidgetTree) -> Option<String> {
+            let field = tree
+                .find_by_role(teksilo_core::accesskit::Role::TextInput)
+                .expect("the dialog has a field");
+            let update = tree.sync_accessibility();
+            let node = |id| {
+                update
+                    .nodes
+                    .iter()
+                    .find(|(nid, _)| *nid == id)
+                    .map(|(_, n)| n)
+            };
+            let field = node(teksilo_core::accessibility::widget_id_to_node_id(field))?;
+            let label = node(*field.labelled_by().first()?)?;
+            label.value().or(label.label()).map(str::to_owned)
+        }
+
+        let (tree, _) = built(InputDialog::new(lit!("Rename")).prompt(lit!("New name")));
+        assert_eq!(field_name(tree).as_deref(), Some("New name"));
+        let (tree, _) = built(InputDialog::new(lit!("Rename")));
+        assert_eq!(field_name(tree).as_deref(), Some("Rename"));
+    }
+
     #[test]
     fn no_validator_leaves_ok_enabled() {
         let (_t, b) = built(InputDialog::new(lit!("T")));

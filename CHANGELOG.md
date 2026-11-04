@@ -36,6 +36,9 @@ by crate for clarity, not because crates version independently.
   that generic word as a description, which a screen reader read on every
   row of a list with one per row. Its control is now described by the
   tooltip's content while it is shown, and by nothing while it is hidden.
+- **An `InputDialog`'s field has a name.** It is named by the dialog's
+  prompt, or by its title when there is no prompt; a screen reader read it
+  as an unnamed edit.
 
 ## [0.24.1] - 2026-11-04
 
