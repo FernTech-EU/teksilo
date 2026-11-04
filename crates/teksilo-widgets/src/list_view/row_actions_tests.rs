@@ -817,6 +817,14 @@ fn a_row_with_a_control_names_the_key_that_enters_it() {
     });
     let rows = row_descriptions(&mut fx.tree);
     assert!(!rows.is_empty());
+    // Key names as this platform spells them (macOS writes glyphs).
+    let named = |key| {
+        crate::keystroke_format::format_keystroke(teksilo_core::shortcut::KeyStroke::new(
+            key,
+            Modifiers::NONE,
+        ))
+    };
+    let (enter, escape) = (named(Key::Enter), named(Key::Escape));
     for (position, description) in rows {
         // `position_in_set` as the consumer reads it: the model index.
         if position < 2 {
@@ -824,7 +832,7 @@ fn a_row_with_a_control_names_the_key_that_enters_it() {
         } else {
             let description = description.expect("a description");
             assert!(
-                description.contains("Enter") && description.contains("Esc"),
+                description.contains(&enter) && description.contains(&escape),
                 "no on_activate: Enter enters ({description})"
             );
         }

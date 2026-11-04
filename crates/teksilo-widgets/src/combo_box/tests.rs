@@ -295,9 +295,15 @@ fn an_altgr_chord_types_but_does_not_navigate() {
         );
     }
 
-    // …and the character path is untouched.
+    // …and the character path is untouched. macOS has no AltGr: Control with
+    // Option is a command there (see `range_nav::is_text_entry_chord_for`).
     tree.press_key(Key::C, altgr);
-    assert_eq!(highlight.get().as_deref(), Some("Cherry"));
+    let typed = if cfg!(target_os = "macos") {
+        None
+    } else {
+        Some("Cherry")
+    };
+    assert_eq!(highlight.get().as_deref(), typed);
 }
 
 #[test]
