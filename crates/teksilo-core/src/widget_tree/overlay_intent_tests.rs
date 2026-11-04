@@ -1212,7 +1212,8 @@ fn a_rebound_standard_edit_an_app_re_registered_reaches_the_field_in_a_modal() {
         .rebind_primary("edit.paste", Some(KeyStroke::ctrl(Key::B)));
     let field = window.modal_edit_field(&[]);
     window.tree.focus(field);
-    window.tree.press_key(Key::B, Modifiers::COMMAND);
+    // A user's rebind is literal: Ctrl+B is physical Ctrl on macOS too.
+    window.press_command("edit.paste");
     assert_eq!(window.calls(), ["edit.paste"]);
 }
 
