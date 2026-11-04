@@ -572,3 +572,23 @@ fn the_forced_paragraph_after_a_heading_is_body_text() {
     e.key(Key::Enter, Modifiers::COMMAND);
     assert_eq!(e.heading_at(6), 0);
 }
+
+/// A table at the very start of the document puts a cell's caret at position
+/// 0 without a block start there: the format probe must not step before it.
+/// Ctrl+B, Enter and typing there all ask for the caret's format.
+#[test]
+fn a_caret_at_the_start_of_a_leading_table_has_a_format() {
+    let mut ed = Editor::new("after", 0);
+    ed.doc.cursor_at(0).insert_table(1, 1).unwrap();
+    ed.settle();
+    ed.handle.select_range(0, 0);
+    ed.settle();
+
+    ed.key(Key::B, Modifiers::COMMAND);
+    ed.type_keys("x");
+    ed.key(Key::Enter, Modifiers::NONE);
+    assert!(
+        ed.text().contains('x'),
+        "typing at the table's start landed"
+    );
+}

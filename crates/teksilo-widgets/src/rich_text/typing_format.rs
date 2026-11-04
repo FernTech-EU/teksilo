@@ -129,8 +129,12 @@ pub(crate) fn caret_format(st: &EditorState) -> TextFormat {
     let position = st.cursor.position();
     let probe = st.document.cursor();
     probe.set_position(position, MoveMode::MoveAnchor);
-    if !probe.at_block_start() {
-        probe.set_position(position - 1, MoveMode::MoveAnchor);
+    // A cell of a table at the document's start is at position 0 without
+    // being at a block start: it answers its own format.
+    if !probe.at_block_start()
+        && let Some(before) = position.checked_sub(1)
+    {
+        probe.set_position(before, MoveMode::MoveAnchor);
     }
     let mut format = probe.char_format().unwrap_or_default();
     if let Some(kept) = pending(st) {

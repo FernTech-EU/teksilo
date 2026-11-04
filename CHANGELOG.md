@@ -13,6 +13,14 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Widgets
+
+- **A `RichTextEditor` no longer panics with its caret in a table at the
+  start of the document.** Toggling a format, pressing Enter or typing there
+  overflowed in 0.24.0 (a panic in a debug build).
+
 ## [0.24.0] - 2026-11-04
 
 ### Added
