@@ -305,6 +305,21 @@ fn a_command_with_no_keystroke_is_still_listed() {
     assert_eq!(listed.len(), 3, "every registered command should be listed");
 }
 
+/// The debug inspector's own shortcuts are no command of the application's,
+/// and the palette leaves them out.
+#[test]
+fn the_debug_inspectors_shortcuts_are_not_listed() {
+    let mut tree = tree_with_commands();
+    tree.shortcut_registry_mut().register(
+        Shortcut::new("__teksilo_inspector.toggle")
+            .name("Toggle Inspector")
+            .build(),
+    );
+    let (_tree, state, _) = mounted(tree, CommandPalette::new());
+    let listed = listed(&state);
+    assert_eq!(listed.len(), 3, "only the application's: {listed:?}");
+}
+
 #[test]
 fn typing_filters_and_ranks_the_rows() {
     let (mut tree, state, root) = mounted(tree_with_commands(), CommandPalette::new());

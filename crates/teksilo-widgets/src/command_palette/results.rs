@@ -81,6 +81,7 @@ pub(super) fn collect_entries(
     let mut scored: Vec<(i32, PaletteEntry)> = ctx
         .shortcut_registry()
         .iter_effective()
+        .filter(|eff| !crate::shortcut_settings::is_debug_tooling(eff.shortcut.id))
         .map(|eff| PaletteCommand {
             id: eff.shortcut.id,
             name: eff.shortcut.name.get(),

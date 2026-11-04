@@ -117,6 +117,15 @@ pub struct ShortcutConflict {
     pub keystroke: KeyStroke,
 }
 
+/// Whether `id` is one of the debug inspector's own shortcuts, which a debug
+/// build registers under the framework's reserved `__teksilo_` prefix. They
+/// are a developer's tool, not the application's commands, so neither this
+/// panel nor the command palette lists them, and their English names never
+/// reach a user. The inspector's own Shortcuts tab still does.
+pub(crate) fn is_debug_tooling(id: &str) -> bool {
+    id.starts_with("__teksilo_")
+}
+
 /// A settings panel for browsing and rebinding application shortcuts.
 ///
 /// See the module documentation for what it shows and how it behaves.

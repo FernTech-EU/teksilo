@@ -167,6 +167,7 @@ fn collect_rows(ctx: &BuildContext, shared: &Shared) -> (Vec<RowData>, Vec<&'sta
     let mut overridden = Vec::new();
     let all: Vec<RowData> = reg
         .iter_effective()
+        .filter(|eff| !super::is_debug_tooling(eff.shortcut.id))
         .map(|eff| {
             let modified = reg.override_for(eff.shortcut.id).is_some();
             if modified {
@@ -625,7 +626,10 @@ impl Widget for ShortcutTable {
         *self.nav.borrow_mut() = NavMap::default();
         self.entries.clear();
 
-        let any_registered = ctx.shortcut_registry().iter_effective().next().is_some();
+        let any_registered = ctx
+            .shortcut_registry()
+            .iter_effective()
+            .any(|eff| !super::is_debug_tooling(eff.shortcut.id));
         let (rows, overridden) = collect_rows(ctx, &shared);
         let has_overrides = !overridden.is_empty();
         *shared.overridden_ids.borrow_mut() = overridden;

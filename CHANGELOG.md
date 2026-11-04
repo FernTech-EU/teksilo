@@ -39,6 +39,10 @@ by crate for clarity, not because crates version independently.
 - **An `InputDialog`'s field has a name.** It is named by the dialog's
   prompt, or by its title when there is no prompt; a screen reader read it
   as an unnamed edit.
+- **`ShortcutSettings` and the `CommandPalette` no longer list the debug
+  inspector's own shortcuts** (F12, Ctrl+P, Ctrl+B and the others a debug
+  build registers). They are a developer's tool, and their names were
+  English in every language.
 
 ## [0.24.1] - 2026-11-04
 

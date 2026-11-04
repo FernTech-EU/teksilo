@@ -617,3 +617,31 @@ fn the_search_field_keeps_its_width_and_gives_way_when_narrow() {
         "Reset all overflows: {edge:?}"
     );
 }
+
+/// The debug inspector's own shortcuts (registered under the reserved
+/// `__teksilo_` prefix) are not the application's commands: the panel does
+/// not list them. Skribisto's debug build showed six of them, in English.
+#[test]
+fn the_debug_inspectors_shortcuts_are_not_listed() {
+    let mut shortcuts = three();
+    shortcuts.push(shortcut(
+        "__teksilo_inspector.pick",
+        "Toggle Picker",
+        cmd(Key::P),
+    ));
+    let h = Harness::new(shortcuts, ShortcutSettings::new());
+    let ids: Vec<&'static str> = h
+        .list()
+        .nav_rows()
+        .iter()
+        .filter_map(|row| match row[0] {
+            FocusKey::Slot(t) => Some(t.id),
+            _ => None,
+        })
+        .collect();
+    assert!(ids.contains(&"app.save"), "the application's are: {ids:?}");
+    assert!(
+        !ids.iter().any(|id| id.starts_with("__teksilo_")),
+        "the inspector's are not: {ids:?}"
+    );
+}
