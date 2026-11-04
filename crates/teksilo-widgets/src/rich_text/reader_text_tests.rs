@@ -345,3 +345,48 @@ fn a_selection_up_to_an_item_holds_no_marker_of_it() {
     assert_eq!(selected(10, 6), "one\n");
     assert_eq!(selected(0, 13), "Intro\n• one\n• two");
 }
+
+/// Down through a list item that wraps reads each of its lines, as Down
+/// through a wrapped paragraph does. The caret Down puts at the start of
+/// the item's second line was reported at the end of its first, so a reader
+/// heard the first line again and the next Down left the item (NVDA round 4,
+/// T30). The line asked for is the one a UIA `ExpandToEnclosingUnit(Line)`
+/// gives on the caret.
+#[test]
+fn down_through_a_wrapped_list_item_reads_each_of_its_lines() {
+    let doc = TextDocument::new();
+    doc.set_markdown(
+        "Intro\n\n- alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu \
+         xi omicron pi rho\n- two\n",
+    )
+    .unwrap()
+    .wait()
+    .unwrap();
+    let mut r = Reader::over(doc, RichTextEditor::read_only);
+    let chars: Vec<char> = r.text().chars().collect();
+    r.handle.select_range(0, 0);
+    let mut heard = Vec::new();
+    for _ in 0..4 {
+        let (start, end) = with_editor(&r.update(), |editor| {
+            let caret = editor.text_selection_focus().unwrap();
+            let start = if caret.is_line_start() {
+                caret
+            } else {
+                caret.backward_to_line_start()
+            };
+            (
+                start.to_global_usv_index(),
+                start.forward_to_line_end().to_global_usv_index(),
+            )
+        });
+        heard.push(chars[start..end].iter().collect::<String>());
+        r.tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    }
+    assert_eq!(heard[0], "Intro\n");
+    assert!(heard[1].starts_with("\u{2022} alpha"), "{heard:?}");
+    assert!(
+        heard[2].ends_with("pi rho\n") && !heard[2].contains("alpha"),
+        "the item's second line, alone: {heard:?}"
+    );
+    assert_eq!(heard[3], "\u{2022} two\n");
+}

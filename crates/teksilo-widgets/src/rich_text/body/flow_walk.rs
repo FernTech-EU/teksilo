@@ -66,6 +66,8 @@ use teksilo_text::text_document::{
     MarkerType, TableSnapshot,
 };
 
+use teksilo_text::CursorAffinity;
+
 use super::state::{EditorState, SyntheticElementRef};
 
 /// Packs a table id plus a row and a column into one element id, so a row and
@@ -844,9 +846,37 @@ impl<'a> FlowWalk<'a> {
             0 => at_start(user),
             offset => emission.position_of(offset),
         };
+        // A caret on a wrap shown at the start of the next line (after Down
+        // from a line's start, or a click there) is in that line's first run,
+        // not at the end of the one before: a reader asked for the caret's
+        // line otherwise heard the line above again, and the next Down left
+        // the paragraph without the rest of it being read. A position the
+        // runs split on one line (a 255-character chunk) is no wrap, and
+        // keeps the earlier run.
+        let line_starts: Vec<usize> = source
+            .lines
+            .iter()
+            .map(|line| line.byte_range.start)
+            .collect();
+        let next_line = self.st.cursor_affinity == CursorAffinity::Upstream && !ranged;
+        let caret_at = |user: usize| {
+            let offset = user - block.position;
+            let starting = (next_line && offset > 0)
+                .then(|| {
+                    emission.runs.iter().find(|run| {
+                        run.char_range.start == offset
+                            && line_starts.contains(&run.byte_range.start)
+                    })
+                })
+                .flatten();
+            match starting {
+                Some(run) => Some((run.id, 0)),
+                None => at(user),
+            }
+        };
         let block_chars = block.text.chars().count();
         if self.user_pos >= block.position && self.user_pos <= block.position + block_chars {
-            self.caret = at(self.user_pos).or(self.caret);
+            self.caret = caret_at(self.user_pos).or(self.caret);
         }
         if self.user_anchor >= block.position && self.user_anchor <= block.position + block_chars {
             self.anchor = at(self.user_anchor).or(self.anchor);

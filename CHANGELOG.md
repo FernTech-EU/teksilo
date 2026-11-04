@@ -45,6 +45,12 @@ by crate for clarity, not because crates version independently.
 - **An `InputDialog`'s field has a name.** It is named by the dialog's
   prompt, or by its title when there is no prompt; a screen reader read it
   as an unnamed edit.
+- **A screen reader reads every line of a wrapped list item in a
+  `RichTextEditor`.** Down from the start of an item that wraps put the caret
+  at the start of its second line, but the editor reported it at the end of
+  the first, so the first line was read again and the next Down left the
+  item: the rest of it could not be reached by arrows. The caret shown at the
+  start of a wrapped line is now reported on that line.
 - **`ShortcutSettings` and the `CommandPalette` no longer list the debug
   inspector's own shortcuts** (F12, Ctrl+P, Ctrl+B and the others a debug
   build registers). They are a developer's tool, and their names were
