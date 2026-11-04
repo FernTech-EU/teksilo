@@ -409,9 +409,12 @@ by crate for clarity, not because crates version independently.
 
 #### Workspace
 
-- Teksilo depends on text-document 1.15 and text-typeset 3.0. text-typeset
+- Teksilo depends on text-document 1.16 and text-typeset 3.1. text-typeset
   3.0 takes ICU4X 2.4, so Teksilo moves to ICU4X 2.4 too (`icu_experimental`
   0.7): an application that pins an ICU4X crate at 2.3 needs to move it.
+  With text-document 1.16 a numbered list keeps the delimiter its markdown
+  source wrote, and a list made in the editor or imported from HTML is
+  numbered "1.", so a screen reader hears "1. first" where it heard "1 first".
 
 ### Removed
 

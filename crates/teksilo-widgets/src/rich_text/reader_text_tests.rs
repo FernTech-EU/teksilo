@@ -271,14 +271,14 @@ fn a_read_only_viewer_separates_paragraphs_too() {
 
 /// A list item's first line starts with its marker as it is painted, a bullet
 /// or a number and a space, nested items included (reader finding text-04).
-/// A markdown numbered list's markers have no full stop: text-document paints
-/// them as the bare number.
+/// A markdown numbered list keeps the delimiter its source wrote, here a full
+/// stop.
 #[test]
 fn a_list_item_is_heard_with_its_marker() {
     let mut r = Reader::markdown("Intro\n\n- one\n- two\n  1. nested\n\n1. first\n2. second\n");
     assert_eq!(
         r.text(),
-        "Intro\n• one\n• two\n1 nested\n1 first\n2 second\n"
+        "Intro\n• one\n• two\n1. nested\n1. first\n2. second\n"
     );
     // The line a reader hears on Down onto the second item.
     let chars: Vec<char> = r.text().chars().collect();

@@ -933,7 +933,7 @@ fn a_list_is_a_list_of_items_with_a_nested_list_in_its_item() {
     // The nested list is inside the item it follows, after that item's text.
     let nested = children_with(&items[1], Role::List);
     assert_eq!(nested.len(), 1, "the nested list is in the second item");
-    assert_eq!(text_under(&items[1]), "• two\n1 two a\n2 two b\n");
+    assert_eq!(text_under(&items[1]), "• two\n1. two a\n2. two b\n");
     let nested_items = children_with(&nested[0], Role::ListItem);
     assert_eq!(nested_items.len(), 2);
     for (i, item) in nested_items.iter().enumerate() {
@@ -951,8 +951,8 @@ fn two_lists_are_two_list_nodes() {
     let lists = children_with(&editor, Role::List);
     assert_eq!(lists.len(), 2);
     assert_eq!(text_under(&lists[0]), "• a\n• b\n");
-    assert_eq!(text_under(&lists[1]), "1 c\n");
-    assert_eq!(text_under(&editor), "• a\n• b\nBetween\n1 c\n");
+    assert_eq!(text_under(&lists[1]), "1. c\n");
+    assert_eq!(text_under(&editor), "• a\n• b\nBetween\n1. c\n");
 }
 
 #[test]

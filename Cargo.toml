@@ -143,8 +143,8 @@ jiff = "0.2"
 # Working against local checkouts is a `[patch.crates-io]` in a gitignored
 # `.cargo/config.toml` — see README, "Development environment". Bump the
 # version here when the sibling publishes; the patch has no version to bump.
-text-document = "1.15"
-text-typeset = "3.0"
+text-document = "1.16"
+text-typeset = "3.1"
 
 # Terminal engine (consumed only by the opt-in `teksilo-terminal` crate,
 # feature-gated so a default workspace build never pulls them). `portable-pty`
