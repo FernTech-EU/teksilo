@@ -45,12 +45,13 @@ use teksilo_core::accessibility::text_runs::{TextRunSource, push_text_runs};
 use teksilo_core::accesskit::{Action, ActionData, NodeId, Role, TextPosition};
 use teksilo_core::event::EventResponse;
 use teksilo_core::widget::EventContext;
-use teksilo_text::RichTextEngine;
 use teksilo_text::text_document::{BlockSnapshot, FlowElementSnapshot, MoveMode};
+use teksilo_text::{CursorAffinity, RichTextEngine};
 
 use super::policy::CodeCommand;
 use super::state::{CodeEditorState, SharedState, SyntheticElementRef};
 use crate::common::editor_runtime::AccessibilityRole;
+use crate::common::wrapped_caret::line_starting_at;
 
 /// Set the role and read-only flag — the header both bodies share.
 pub(crate) fn set_role(st: &CodeEditorState, builder: &mut AccessNodeBuilder) {
@@ -86,6 +87,8 @@ fn user_selection(st: &CodeEditorState) -> (usize, usize) {
 struct WalkAcc {
     user_pos: usize,
     user_anchor: usize,
+    /// A caret, not a selection, shown at the start of the line it wraps to.
+    on_next_line: bool,
     caret_pair: Option<(NodeId, usize)>,
     anchor_pair: Option<(NodeId, usize)>,
     syn_map: HashMap<NodeId, SyntheticElementRef>,
@@ -97,6 +100,7 @@ impl WalkAcc {
         Self {
             user_pos,
             user_anchor,
+            on_next_line: user_pos == user_anchor && st.cursor_affinity == CursorAffinity::Upstream,
             caret_pair: None,
             anchor_pair: None,
             syn_map: HashMap::new(),
@@ -271,11 +275,20 @@ fn emit_block(
     // `position + length` is the end-of-line caret, which the emitter places on
     // the separator's slot — the AT-correct end-of-line focus.
     let end = block.position + block.length;
+    // A caret on a wrap shown at the start of the next line is on that line, at
+    // both ends of the selection (see `wrapped_caret`).
+    let position_of = |user: usize| {
+        let offset = user - block.position;
+        acc.on_next_line
+            .then(|| line_starting_at(&emission, &source, offset))
+            .flatten()
+            .or_else(|| emission.position_of(offset))
+    };
     if acc.user_pos >= block.position && acc.user_pos <= end {
-        acc.caret_pair = emission.position_of(acc.user_pos - block.position);
+        acc.caret_pair = position_of(acc.user_pos);
     }
     if acc.user_anchor >= block.position && acc.user_anchor <= end {
-        acc.anchor_pair = emission.position_of(acc.user_anchor - block.position);
+        acc.anchor_pair = position_of(acc.user_anchor);
     }
 }
 

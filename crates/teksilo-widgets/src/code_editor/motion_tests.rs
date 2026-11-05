@@ -353,6 +353,29 @@ fn wrapped() -> (Driven, usize, usize) {
     (d, first_end, paragraph_end)
 }
 
+/// A caret Home left at the start of a wrapped line is on that line at both
+/// ends of the selection: UIA's `GetSelection` range starts at the anchor, and a
+/// reader expanding its line from there heard the line above.
+#[test]
+fn home_on_a_wrapped_line_is_reported_on_that_line() {
+    let (mut d, first_end, _) = wrapped();
+    d.put(first_end + 3);
+    d.key(Key::Home);
+    assert_eq!(d.caret(), first_end);
+
+    let update = d.tree.sync_accessibility();
+    let selection = update
+        .nodes
+        .iter()
+        .find_map(|(_, node)| node.text_selection())
+        .expect("a selection");
+    assert_eq!(selection.anchor, selection.focus);
+    assert_eq!(selection.focus.character_index, 0, "the line's first run");
+    let st = d.state.borrow();
+    let map = st.synthetic_to_element.borrow();
+    assert_eq!(map[&selection.focus.node].absolute_start, first_end);
+}
+
 /// End stops where the line is drawn to end, at a soft wrap, and stays there.
 #[test]
 fn end_goes_to_the_end_of_the_visual_line() {

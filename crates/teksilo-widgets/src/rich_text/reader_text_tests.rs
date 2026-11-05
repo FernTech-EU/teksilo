@@ -352,6 +352,41 @@ fn a_selection_up_to_an_item_holds_no_marker_of_it() {
 /// heard the first line again and the next Down left the item (NVDA round 4,
 /// T30). The line asked for is the one a UIA `ExpandToEnclosingUnit(Line)`
 /// gives on the caret.
+/// The line a UIA client gets for the caret, by the steps NVDA takes: the start
+/// of the range `GetSelection` returns (which is the selection's anchor when the
+/// two ends are the same place), expanded to a line as `accesskit_windows` does.
+fn uia_line_at_caret(editor: &NodeRef<'_>) -> (usize, usize) {
+    let caret = editor.text_selection().unwrap().start();
+    let start = if caret.is_line_start() {
+        caret
+    } else {
+        caret.backward_to_line_start()
+    };
+    (
+        start.to_global_usv_index(),
+        start.forward_to_line_end().to_global_usv_index(),
+    )
+}
+
+#[test]
+fn home_on_a_wrapped_line_of_an_editable_text_reads_that_line() {
+    let doc = TextDocument::new();
+    doc.set_plain_text(
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho",
+    )
+    .unwrap();
+    let mut r = Reader::over(doc, RichTextEditor::editor);
+    let chars: Vec<char> = r.text().chars().collect();
+    r.handle.select_range(chars.len(), chars.len());
+    r.tree.press_key(Key::Home, Modifiers::NONE);
+    let (start, end) = with_editor(&r.update(), uia_line_at_caret);
+    let line: String = chars[start..end].iter().collect();
+    assert!(
+        line.trim_end().ends_with("pi rho") && !line.starts_with("alpha"),
+        "the last line, alone: {line:?}"
+    );
+}
+
 #[test]
 fn down_through_a_wrapped_list_item_reads_each_of_its_lines() {
     let doc = TextDocument::new();
@@ -367,18 +402,7 @@ fn down_through_a_wrapped_list_item_reads_each_of_its_lines() {
     r.handle.select_range(0, 0);
     let mut heard = Vec::new();
     for _ in 0..4 {
-        let (start, end) = with_editor(&r.update(), |editor| {
-            let caret = editor.text_selection_focus().unwrap();
-            let start = if caret.is_line_start() {
-                caret
-            } else {
-                caret.backward_to_line_start()
-            };
-            (
-                start.to_global_usv_index(),
-                start.forward_to_line_end().to_global_usv_index(),
-            )
-        });
+        let (start, end) = with_editor(&r.update(), uia_line_at_caret);
         heard.push(chars[start..end].iter().collect::<String>());
         r.tree.press_key(Key::ArrowDown, Modifiers::NONE);
     }

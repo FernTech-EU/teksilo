@@ -13,6 +13,16 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Widgets
+
+- **A screen reader on Windows reads the line the caret is on when it is at the
+  start of a wrapped line, in `RichTextEditor` and `PlainTextEditor`.** After
+  Down or Home brought the caret there, NVDA read the line above, so a wrapped
+  paragraph's first line was read twice and its last line never. The fix in
+  0.24.2 moved only one end of the selection, and UIA reads the other.
+
 ## [0.24.2] - 2026-11-04
 
 ### Fixed
