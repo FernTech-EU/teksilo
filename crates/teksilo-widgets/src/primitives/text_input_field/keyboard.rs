@@ -151,22 +151,37 @@ pub(crate) fn handle_key(
             // Word-jump rides ⌥ on macOS and Ctrl elsewhere, and ⌘←/→ reach
             // the field's edges — the single-line reading of "line edge". See
             // `common::text_nav`.
+            //
+            // A character step with a selection goes to the selection's end in
+            // that direction, and no further.
             Key::ArrowLeft => {
-                let op = match caret_step(*modifiers) {
-                    CaretStep::Character => MoveOperation::Left,
-                    CaretStep::Word => MoveOperation::WordLeft,
-                    CaretStep::LineEdge => MoveOperation::Start,
-                };
-                st.cursor.move_position(op, mode, 1);
+                let step = caret_step(*modifiers);
+                if !shift && step == CaretStep::Character && st.cursor.has_selection() {
+                    let start = st.cursor.selection_start();
+                    st.cursor.set_position(start, MoveMode::MoveAnchor);
+                } else {
+                    let op = match step {
+                        CaretStep::Character => MoveOperation::Left,
+                        CaretStep::Word => MoveOperation::WordLeft,
+                        CaretStep::LineEdge => MoveOperation::Start,
+                    };
+                    st.cursor.move_position(op, mode, 1);
+                }
                 true
             }
             Key::ArrowRight => {
-                let op = match caret_step(*modifiers) {
-                    CaretStep::Character => MoveOperation::Right,
-                    CaretStep::Word => MoveOperation::WordRight,
-                    CaretStep::LineEdge => MoveOperation::End,
-                };
-                st.cursor.move_position(op, mode, 1);
+                let step = caret_step(*modifiers);
+                if !shift && step == CaretStep::Character && st.cursor.has_selection() {
+                    let end = st.cursor.selection_end();
+                    st.cursor.set_position(end, MoveMode::MoveAnchor);
+                } else {
+                    let op = match step {
+                        CaretStep::Character => MoveOperation::Right,
+                        CaretStep::Word => MoveOperation::WordRight,
+                        CaretStep::LineEdge => MoveOperation::End,
+                    };
+                    st.cursor.move_position(op, mode, 1);
+                }
                 true
             }
             Key::Home => {

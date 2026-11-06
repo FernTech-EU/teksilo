@@ -29,6 +29,7 @@ use teksilo_text::{CursorAffinity, TextDirection};
 use crate::EditSource;
 use crate::common::composition::position_after_commit;
 use crate::common::text_nav::{self, CaretStep, LineStep};
+use crate::common::wrapped_caret::{affinity_after_step, is_soft_wrap};
 
 use super::clipboard;
 use super::nesting;
@@ -47,16 +48,16 @@ pub(super) enum KeyAction {
     /// a wrap boundary or, if it is, should render at the downstream
     /// (end-of-previous-line) placement. Clears the sticky column AND
     /// resets `cursor_affinity` to `Downstream`. Covers
-    /// Ctrl+Home/Ctrl+End, Backspace/Delete/Enter/typing, paste and the
-    /// Shift+Arrow cell-selection branch, etc. (the plain Left/Right
-    /// arrows carry [`KeyAction::LineEdgeMotion`]).
+    /// Ctrl+Home/Ctrl+End, Enter/typing, paste and the Shift+Arrow
+    /// cell-selection branch, etc. (the plain Left/Right arrows, Backspace
+    /// and Delete carry [`KeyAction::LineEdgeMotion`]).
     ClearPreferredX,
     /// Visual-line edge motion that went through
-    /// [`move_cursor_to_line_edge`], or horizontal motion that had to
-    /// choose a side of a direction seam. The handler already set
-    /// `cursor_affinity` itself, so the post-processing must NOT
-    /// clobber it. Clears the sticky column. Covers non-Ctrl Home/End
-    /// and the Left/Right arrows.
+    /// [`move_cursor_to_line_edge`], or horizontal motion or a removal that
+    /// had to choose a side of a soft wrap or a direction seam. The handler
+    /// already set `cursor_affinity` itself, so the post-processing must NOT
+    /// clobber it. Clears the sticky column. Covers non-Ctrl Home/End, the
+    /// Left/Right arrows, Backspace and Delete.
     LineEdgeMotion,
     /// Vertical motion (Up/Down): the sticky column must be preserved
     /// so repeated vertical presses land on the same visual column.
@@ -335,10 +336,14 @@ pub(super) fn handle_key(
                     let edge = visual_line_edge(&st, VisualDirection::Left);
                     move_cursor_to_line_edge(&mut st, edge, mode);
                     KeyAction::LineEdgeMotion
+                } else if !shift
+                    && settle_without_stepping(&mut st, VisualDirection::Left, caret_motion)
+                {
+                    KeyAction::LineEdgeMotion
                 } else {
                     let op = visual_move(&st, VisualDirection::Left, caret_motion);
                     st.cursor.move_position(op, mode, 1);
-                    settle_affinity_at_seam(&mut st, VisualDirection::Left);
+                    settle_affinity_after_step(&mut st, VisualDirection::Left);
                     KeyAction::LineEdgeMotion
                 }
             }
@@ -349,10 +354,14 @@ pub(super) fn handle_key(
                     let edge = visual_line_edge(&st, VisualDirection::Right);
                     move_cursor_to_line_edge(&mut st, edge, mode);
                     KeyAction::LineEdgeMotion
+                } else if !shift
+                    && settle_without_stepping(&mut st, VisualDirection::Right, caret_motion)
+                {
+                    KeyAction::LineEdgeMotion
                 } else {
                     let op = visual_move(&st, VisualDirection::Right, caret_motion);
                     st.cursor.move_position(op, mode, 1);
-                    settle_affinity_at_seam(&mut st, VisualDirection::Right);
+                    settle_affinity_after_step(&mut st, VisualDirection::Right);
                     KeyAction::LineEdgeMotion
                 }
             }
@@ -433,17 +442,22 @@ pub(super) fn handle_key(
             // so the user can rebind them.
             // --- Editor-preset mutating commands ---
             Key::Backspace if filter.accepts(EditCommandKind::DeletePrev) => {
-                if text_nav::deletes_word(*modifiers) {
-                    // Delete the word to the left — Ctrl+⌫, ⌥⌫ on macOS.
-                    // Select the word, then delete the selection —
-                    // matches the godot reference's delete-word (there is
-                    // no dedicated delete-word API on TextCursor).
-                    if !st.cursor.has_selection() {
-                        st.cursor
-                            .move_position(MoveOperation::WordLeft, MoveMode::KeepAnchor, 1);
-                    }
-                    let _ = st.cursor.remove_selected_text();
-                } else if st.cursor.has_selection() {
+                let word = text_nav::deletes_word(*modifiers);
+                // Delete the word to the left — Ctrl+⌫, ⌥⌫ on macOS.
+                // Select the word, then delete the selection —
+                // matches the godot reference's delete-word (there is
+                // no dedicated delete-word API on TextCursor).
+                if word && !st.cursor.has_selection() {
+                    st.cursor
+                        .move_position(MoveOperation::WordLeft, MoveMode::KeepAnchor, 1);
+                }
+                let landing = if st.cursor.has_selection() {
+                    st.cursor.selection_start()
+                } else {
+                    st.cursor.position().saturating_sub(1)
+                };
+                let affinity = affinity_after_step(&st.engine, st.shown_position(landing));
+                if word || st.cursor.has_selection() {
                     let _ = st.cursor.remove_selected_text();
                 } else if st.cursor.at_block_start()
                     && is_cursor_in_list(&st)
@@ -486,9 +500,17 @@ pub(super) fn handle_key(
                 } else {
                     let _ = st.cursor.delete_previous_char();
                 }
-                KeyAction::ClearPreferredX
+                st.cursor_affinity = affinity;
+                KeyAction::LineEdgeMotion
             }
             Key::Delete if filter.accepts(EditCommandKind::DeleteNext) => {
+                // The caret stays where it is, on the line it is on, unless a
+                // selection goes with the key.
+                let affinity = if st.cursor.has_selection() {
+                    affinity_after_step(&st.engine, st.shown_position(st.cursor.selection_start()))
+                } else {
+                    st.cursor_affinity
+                };
                 if text_nav::deletes_word(*modifiers) {
                     if !st.cursor.has_selection() {
                         st.cursor
@@ -510,7 +532,8 @@ pub(super) fn handle_key(
                 } else {
                     let _ = st.cursor.delete_char();
                 }
-                KeyAction::ClearPreferredX
+                st.cursor_affinity = affinity;
+                KeyAction::LineEdgeMotion
             }
             // The forced paragraph insert (Ctrl+Enter) is not a key here:
             // it is the `format.insert_paragraph` action
@@ -2107,8 +2130,53 @@ fn moves_forward(st: &EditorState, pressed: VisualDirection) -> bool {
     }
 }
 
-/// Pick which side of a direction seam the caret belongs to after a
-/// horizontal move.
+/// Left or Right where the press is answered without a step, which is when it
+/// returns `true`.
+///
+/// With a selection, a character step goes to the selection's end in that
+/// direction, and no further: the selected text was the point, and stepping from
+/// the caret left the caret one character past it, or inside it.
+///
+/// Forward from the end of a wrapped line, where End puts the caret, is the same
+/// position as the start of the next line. The press crosses to that start, as
+/// it does from the character before, or the next line's first character could
+/// not be reached by walking.
+fn settle_without_stepping(
+    st: &mut EditorState,
+    pressed: VisualDirection,
+    step: CaretStep,
+) -> bool {
+    if step != CaretStep::Character {
+        return false;
+    }
+    let forward = moves_forward(st, pressed);
+    if st.cursor.has_selection() {
+        let target = if forward {
+            st.cursor.selection_end()
+        } else {
+            st.cursor.selection_start()
+        };
+        st.cursor.set_position(target, MoveMode::MoveAnchor);
+        st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
+        return true;
+    }
+    if forward
+        && st.cursor_affinity == CursorAffinity::Downstream
+        && is_soft_wrap(&st.engine, st.shown_caret())
+    {
+        st.cursor_affinity = CursorAffinity::Upstream;
+        return true;
+    }
+    false
+}
+
+/// Pick which side of a soft wrap or a direction seam the caret belongs to
+/// after a horizontal move.
+///
+/// On a wrap it is the start of the next line, from either direction: that is
+/// where the next character is, and a step from it leaves the line behind. At
+/// the end of the line above it would have skipped the first character of this
+/// one.
 ///
 /// Where an LTR run meets an RTL one, a single character position has
 /// two visual homes on the same line — often at opposite ends of it —
@@ -2119,13 +2187,14 @@ fn moves_forward(st: &EditorState, pressed: VisualDirection) -> bool {
 /// The rule is that the caret stays on the side the user came *from*:
 /// arriving from the left it attaches to the text before the offset
 /// (downstream), arriving from the right to the text after it
-/// (upstream). Away from a seam affinity is a no-op, so this leaves the
-/// existing value alone rather than resetting it and disturbing the
-/// soft-wrap placement the other handlers maintain.
-fn settle_affinity_at_seam(st: &mut EditorState, pressed: VisualDirection) {
+/// (upstream).
+fn settle_affinity_after_step(st: &mut EditorState, pressed: VisualDirection) {
     let pos = st.shown_caret();
+    if is_soft_wrap(&st.engine, pos) {
+        st.cursor_affinity = CursorAffinity::Upstream;
+        return;
+    }
     if !st.engine.is_direction_boundary_at(pos) {
-        // Not a seam: match what ClearPreferredX would have done.
         st.cursor_affinity = CursorAffinity::Downstream;
         return;
     }

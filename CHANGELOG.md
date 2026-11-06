@@ -22,6 +22,18 @@ by crate for clarity, not because crates version independently.
   Down or Home brought the caret there, NVDA read the line above, so a wrapped
   paragraph's first line was read twice and its last line never. The fix in
   0.24.2 moved only one end of the selection, and UIA reads the other.
+- **It also reads the right line for a selection starting at a soft wrap and for
+  a caret just after a line break**, where it read the line above. Braille routed
+  to the cell after a wrapped line's last character keeps the caret on that line
+  instead of moving it to the next.
+- **Left, Right and Backspace stop at the first character of a wrapped line** in
+  `RichTextEditor`, `PlainTextEditor` and a wrapping `CodeEditor`. Left went from
+  the second character straight to the end of the line above, so the first was
+  never reached, and Backspace and Delete left the caret on the line above.
+  Right from the end of a wrapped line now goes to the start of the next line.
+- **Left and Right with a selection go to its start and its end** in those editors
+  and in every text field. They moved one character from the caret, which could
+  leave it inside the selected text.
 - **A picture in `RichTextEditor` no longer stays blank.** When the first frame
   to paint it never reached the renderer, its pixels were lost, and it took up
   its space and painted nothing for as long as the editor lived.

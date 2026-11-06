@@ -249,6 +249,11 @@ pub(crate) struct CodeEditorState {
     /// merged away, matches nothing. Emptied when a run starts.
     pub sticky_x: Vec<(usize, f32)>,
     pub cursor_affinity: CursorAffinity,
+    /// Whether the primary caret is shown at the start of the next line on a
+    /// soft wrap: the affinity as a signal, because a step can change that side
+    /// and leave the position as it was, and the caret is then drawn elsewhere
+    /// and reported on another line.
+    pub caret_on_next_line: Signal<bool>,
 
     // --- Appearance --------------------------------------------------------
     pub follow_text_scale: bool,
@@ -412,6 +417,7 @@ impl CodeEditorState {
             preferred_x: None,
             sticky_x: Vec::new(),
             cursor_affinity: CursorAffinity::default(),
+            caret_on_next_line: Signal::new(false),
             follow_text_scale: true,
             font_size_scale: 1.0,
             last_font_scale: 1.0,

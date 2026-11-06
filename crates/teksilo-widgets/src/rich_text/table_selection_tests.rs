@@ -1034,3 +1034,22 @@ fn enter_moves_down_a_column_of_a_quoted_table() {
         );
     }
 }
+
+/// Left and Right collapse a cell selection to its ends, as a text selection.
+#[test]
+fn left_and_right_with_a_cell_selection_go_to_its_ends() {
+    let mut m = mount(TABLE_BETWEEN);
+    let from = m.at("a1", 1);
+    let to = m.at("d1", 1);
+    for (key, landing) in [(Key::ArrowLeft, from), (Key::ArrowRight, to)] {
+        m.handle.select_range(from, to);
+        assert!(
+            matches!(m.kind(), SelectionKind::Cells(_)),
+            "{:?}",
+            m.kind()
+        );
+        m.press(key, Modifiers::NONE);
+        assert_eq!(m.kind(), SelectionKind::None, "{key:?}");
+        assert_eq!(m.selection(), (landing, landing), "{key:?}");
+    }
+}

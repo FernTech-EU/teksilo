@@ -164,6 +164,10 @@ impl Widget for CodeEditorBody {
             .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         st.has_selection
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        st.caret_on_next_line
+            .bind_to(self_id, registry, BindingLevel::RepaintOnly);
+        st.caret_on_next_line
+            .bind_to(self_id, registry, BindingLevel::AccessibilityOnly);
         // A caret added or removed changes what is drawn but not the layout.
         st.caret_count
             .bind_to(self_id, registry, BindingLevel::RepaintOnly);
@@ -493,6 +497,8 @@ pub(crate) fn sync_cursor_signals(state: &SharedState) {
     let anchor = st.cursor.anchor();
     let has_sel = st.all_carets().any(|c| c.has_selection());
     let count = 1 + st.extra_carets.len();
+    let on_next_line = st.cursor_affinity == teksilo_text::CursorAffinity::Upstream;
+    let on_next_line_sig = st.caret_on_next_line.clone();
 
     let pos_sig = st.cursor_position.clone();
     let anchor_sig = st.cursor_anchor.clone();
@@ -527,6 +533,7 @@ pub(crate) fn sync_cursor_signals(state: &SharedState) {
 
     pos_sig.set_if_changed(pos);
     anchor_sig.set_if_changed(anchor);
+    on_next_line_sig.set_if_changed(on_next_line);
     sel_sig.set_if_changed(has_sel);
     count_sig.set_if_changed(count);
     bracket_sig.set_if_changed(bracket_val);

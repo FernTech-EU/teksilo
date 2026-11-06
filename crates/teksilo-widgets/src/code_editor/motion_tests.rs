@@ -408,3 +408,126 @@ fn home_goes_to_the_start_of_the_visual_line() {
     d.key(Key::Home);
     assert_eq!(d.caret(), 0);
 }
+
+/// Where a reader's Line unit starts for the caret, in document positions: the
+/// run the selection's anchor is in, as UIA expands it.
+fn reported_run_start(d: &mut Driven) -> (usize, usize) {
+    let update = d.tree.sync_accessibility();
+    let selection = update
+        .nodes
+        .iter()
+        .find_map(|(_, node)| node.text_selection())
+        .expect("a selection");
+    let st = d.state.borrow();
+    let map = st.synthetic_to_element.borrow();
+    (
+        map[&selection.anchor.node].absolute_start,
+        selection.anchor.character_index,
+    )
+}
+
+#[test]
+fn left_and_right_stop_at_the_start_of_a_wrapped_line() {
+    let (mut d, wrap, _) = wrapped();
+    d.put(wrap + 1);
+    d.key(Key::ArrowLeft);
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0), "Left");
+    d.key(Key::ArrowLeft);
+    assert_eq!(d.caret(), wrap - 1);
+
+    d.key(Key::ArrowRight);
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0), "Right");
+    d.key(Key::ArrowRight);
+    assert_eq!(d.caret(), wrap + 1);
+}
+
+/// End leaves the caret at the end of the line; Right from there reaches the
+/// next line's first character before its second.
+#[test]
+fn right_from_the_end_of_a_wrapped_line_reaches_the_start_of_the_next() {
+    let (mut d, wrap, _) = wrapped();
+    d.put(2);
+    d.key(Key::End);
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d).1, wrap, "End, at its run's end");
+    d.key(Key::ArrowRight);
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0));
+    d.key(Key::ArrowRight);
+    assert_eq!(d.caret(), wrap + 1);
+}
+
+#[test]
+fn backspace_and_delete_stay_on_a_wrapped_line() {
+    let (mut d, wrap, _) = wrapped();
+    d.put(wrap + 1);
+    d.key(Key::Backspace);
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0), "Backspace");
+
+    let (mut d, wrap, _) = wrapped();
+    d.put(wrap + 1);
+    d.key(Key::ArrowLeft);
+    d.key(Key::Delete);
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0), "Delete");
+}
+
+#[test]
+fn left_and_right_with_a_selection_go_to_its_ends() {
+    let (mut d, wrap, _) = wrapped();
+    for (anchor, caret) in [(1, 4), (4, 1), (wrap - 2, wrap + 2), (wrap + 2, wrap - 2)] {
+        let (start, end) = (anchor.min(caret), anchor.max(caret));
+        d.put(anchor);
+        d.state
+            .borrow()
+            .cursor
+            .set_position(caret, MoveMode::KeepAnchor);
+        d.key(Key::ArrowLeft);
+        assert_eq!(
+            (d.anchor(), d.caret()),
+            (start, start),
+            "Left {anchor}..{caret}"
+        );
+        d.put(anchor);
+        d.state
+            .borrow()
+            .cursor
+            .set_position(caret, MoveMode::KeepAnchor);
+        d.key(Key::ArrowRight);
+        assert_eq!(
+            (d.anchor(), d.caret()),
+            (end, end),
+            "Right {anchor}..{caret}"
+        );
+    }
+}
+
+/// Every caret collapses to its own selection's end.
+#[test]
+fn left_with_several_selections_collapses_each_to_its_start() {
+    let mut d = Driven::new("aaaaaaaa\nbbbbbbbb");
+    d.put(2);
+    d.state
+        .borrow()
+        .cursor
+        .set_position(4, MoveMode::KeepAnchor);
+    d.add_caret(11);
+    d.state.borrow().extra_carets[0].set_position(13, MoveMode::KeepAnchor);
+    d.key(Key::ArrowLeft);
+    assert_eq!(d.carets(), vec![2, 11]);
+    assert_eq!(d.anchor(), 2);
+}
+
+#[test]
+fn a_selection_starting_at_a_wrap_is_on_the_next_line() {
+    let (mut d, wrap, _) = wrapped();
+    d.put(wrap);
+    d.state
+        .borrow()
+        .cursor
+        .set_position(wrap + 3, MoveMode::KeepAnchor);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0));
+}

@@ -68,7 +68,7 @@ use teksilo_text::text_document::{
 
 use teksilo_text::CursorAffinity;
 
-use crate::common::wrapped_caret::line_starting_at;
+use crate::common::wrapped_caret::{follows_hard_break, line_starting_at};
 
 use super::state::{EditorState, SyntheticElementRef};
 
@@ -849,11 +849,19 @@ impl<'a> FlowWalk<'a> {
             offset => emission.position_of(offset),
         };
         // A caret on a wrap shown at the start of the next line is on that line,
-        // at both ends of the selection (see `wrapped_caret`).
-        let next_line = self.st.cursor_affinity == CursorAffinity::Upstream && !ranged;
+        // at both ends of the selection, and so is one after a hard break and
+        // the lower end of a selection (see `wrapped_caret`).
+        let near_end = self.user_pos.min(self.user_anchor);
+        let upstream = self.st.cursor_affinity == CursorAffinity::Upstream;
         let caret_at = |user: usize| {
+            let offset = user - block.position;
+            let next_line = if ranged {
+                user == near_end
+            } else {
+                upstream || follows_hard_break(&emission, &source, offset)
+            };
             next_line
-                .then(|| line_starting_at(&emission, &source, user - block.position))
+                .then(|| line_starting_at(&emission, &source, offset))
                 .flatten()
                 .or_else(|| at(user))
         };

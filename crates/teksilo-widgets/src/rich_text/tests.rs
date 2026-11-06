@@ -5628,17 +5628,26 @@ mod affinity_tests {
     }
 
     #[test]
-    fn right_arrow_resets_affinity_to_downstream() {
+    fn right_arrow_crosses_a_wrap_then_resets_affinity_to_downstream() {
         let mut we = make_wrapped_editor();
         // Land downstream first (end of line 1, position = boundary).
         synth_pointer_down(&mut we.tree, we.body_right_edge_x, we.line_1_window_y);
         synth_pointer_up(&mut we.tree, we.body_right_edge_x, we.line_1_window_y);
-        // Right moves to N+1.
+        // Right crosses to the start of line 2, at the same position.
         press_key(
             &mut we.tree,
             teksilo_core::event::Key::ArrowRight,
             teksilo_core::event::Modifiers::NONE,
         );
+        assert_eq!(we.state.borrow().cursor.position(), we.boundary_pos);
+        assert_eq!(we.state.borrow().cursor_affinity, CursorAffinity::Upstream);
+        // The next Right moves to N+1.
+        press_key(
+            &mut we.tree,
+            teksilo_core::event::Key::ArrowRight,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        assert_eq!(we.state.borrow().cursor.position(), we.boundary_pos + 1);
         assert_eq!(
             we.state.borrow().cursor_affinity,
             CursorAffinity::Downstream,

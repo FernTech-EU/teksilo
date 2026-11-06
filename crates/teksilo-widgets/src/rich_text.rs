@@ -4987,6 +4987,12 @@ fn handle_access_action_request(
                 let [a, f] = ends.map(|end| st.document_position(end));
                 st.cursor.set_position(a, MoveMode::MoveAnchor);
                 st.cursor.set_position(f, MoveMode::KeepAnchor);
+                // A wrap's position is one offset for two lines, and the run
+                // the reader named says which: braille routed to the end of a
+                // line stays on that line.
+                st.cursor_affinity = crate::common::wrapped_caret::affinity_of_run_position(
+                    sel.focus.character_index,
+                );
                 drop(st);
                 sync_cursor_signals(state);
                 ctx.request_frame();

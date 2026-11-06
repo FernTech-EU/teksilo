@@ -1123,3 +1123,40 @@ fn a_written_composition_is_kept_by_a_click_or_a_passed_key() {
         assert_eq!(f.doc_text(), "hello world", "one step, by key: {by_key}");
     }
 }
+
+/// Left and Right with a selection go to its end in that direction; they used to
+/// step one character from the caret.
+#[test]
+fn left_and_right_with_a_selection_go_to_its_ends() {
+    for (anchor, caret) in [(2, 5), (5, 2)] {
+        for (key, landing) in [(Key::ArrowLeft, 2), (Key::ArrowRight, 5)] {
+            let mut f = Field::new("abcdefgh", caret);
+            {
+                let st = f.state.borrow();
+                st.cursor.set_position(anchor, MoveMode::MoveAnchor);
+                st.cursor.set_position(caret, MoveMode::KeepAnchor);
+            }
+            f.tree.press_key(key, Modifiers::NONE);
+            let st = f.state.borrow();
+            assert_eq!(
+                (st.cursor.anchor(), st.cursor.position()),
+                (landing, landing),
+                "{key:?} from {anchor}..{caret}"
+            );
+        }
+    }
+}
+
+/// Shift extends and a word step goes on from the caret, as they did.
+#[test]
+fn shift_with_a_selection_still_extends_it() {
+    let mut f = Field::new("abcdefgh", 5);
+    {
+        let st = f.state.borrow();
+        st.cursor.set_position(2, MoveMode::MoveAnchor);
+        st.cursor.set_position(5, MoveMode::KeepAnchor);
+    }
+    f.tree.press_key(Key::ArrowLeft, Modifiers::SHIFT);
+    let st = f.state.borrow();
+    assert_eq!((st.cursor.anchor(), st.cursor.position()), (2, 4));
+}

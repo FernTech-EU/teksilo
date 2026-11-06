@@ -414,3 +414,245 @@ fn down_through_a_wrapped_list_item_reads_each_of_its_lines() {
     );
     assert_eq!(heard[3], "\u{2022} two\n");
 }
+
+/// A paragraph that wraps in the reader's width, and the caret at the start of
+/// its second line, at the offset that line starts at.
+fn at_the_second_line() -> (Reader, usize) {
+    let mut r = Reader::plain(
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho \
+         sigma tau upsilon phi chi psi omega alpha beta gamma delta epsilon zeta eta theta iota",
+    );
+    r.handle.select_range(0, 0);
+    r.update();
+    r.tree.press_key(Key::ArrowDown, Modifiers::NONE);
+    r.update();
+    r.tree.press_key(Key::Home, Modifiers::NONE);
+    r.update();
+    let wrap = r.handle.cursor_position();
+    assert!(wrap > 0, "the paragraph wraps");
+    assert_eq!(r.line_start_at_caret(), wrap);
+    (r, wrap)
+}
+
+impl Reader {
+    fn press(&mut self, key: Key) {
+        self.tree.press_key(key, Modifiers::NONE);
+        self.update();
+    }
+
+    /// Where the line a UIA client gets for the caret starts.
+    fn line_start_at_caret(&mut self) -> usize {
+        with_editor(&self.update(), uia_line_at_caret).0
+    }
+
+    /// Put the caret where a reader's `SetTextSelection` names, by a position
+    /// read from the tree, as `Select` on a UIA range does.
+    fn select_position(
+        &mut self,
+        pick: impl FnOnce(&NodeRef<'_>) -> teksilo_core::accesskit::TextPosition,
+    ) {
+        let at = with_editor(&self.update(), pick);
+        let mut ops = teksilo_core::window::NoopWindowOps;
+        assert!(self.tree.dispatch_access_action(
+            widget_id_to_node_id(self.id),
+            Action::SetTextSelection,
+            Some(ActionData::SetTextSelection(TextSelection {
+                anchor: at,
+                focus: at,
+            })),
+            &mut ops,
+        ));
+    }
+}
+
+/// Left, walking back through a wrapped line, stops at its first character and
+/// then goes on to the line above. It used to go from the second character
+/// straight to the end of the line above, so the first was never reached.
+#[test]
+fn left_stops_at_the_start_of_a_wrapped_line() {
+    let (mut r, wrap) = at_the_second_line();
+    r.handle.select_range(wrap + 1, wrap + 1);
+    r.press(Key::ArrowLeft);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap, "on the line it was walking");
+    r.press(Key::ArrowLeft);
+    assert_eq!(r.handle.cursor_position(), wrap - 1);
+    assert_eq!(r.line_start_at_caret(), 0, "on the line above");
+}
+
+#[test]
+fn right_stops_at_the_start_of_a_wrapped_line() {
+    let (mut r, wrap) = at_the_second_line();
+    r.handle.select_range(wrap - 1, wrap - 1);
+    r.press(Key::ArrowRight);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap);
+    r.press(Key::ArrowRight);
+    assert_eq!(r.handle.cursor_position(), wrap + 1);
+}
+
+/// End leaves the caret at the end of the line, at the offset the next line
+/// starts at. Right from there reaches that start, not its second character.
+#[test]
+fn right_from_the_end_of_a_wrapped_line_reaches_the_start_of_the_next() {
+    let (mut r, wrap) = at_the_second_line();
+    r.handle.select_range(3, 3);
+    r.press(Key::End);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), 0, "End stays on its line");
+    r.press(Key::ArrowRight);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap);
+    r.press(Key::ArrowRight);
+    assert_eq!(r.handle.cursor_position(), wrap + 1);
+}
+
+#[test]
+fn a_word_step_onto_a_wrap_is_on_the_line_of_that_word() {
+    let (mut r, wrap) = at_the_second_line();
+    r.handle.select_range(wrap + 2, wrap + 2);
+    r.tree.press_key(Key::ArrowLeft, Modifiers::CTRL);
+    r.update();
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap);
+}
+
+/// Backspace on a line's second character leaves the caret on that line. It
+/// used to take the writer to the end of the line above.
+#[test]
+fn backspace_stays_on_a_wrapped_line() {
+    let (mut r, wrap) = at_the_second_line();
+    r.handle.select_range(wrap + 1, wrap + 1);
+    r.press(Key::Backspace);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap);
+}
+
+#[test]
+fn deleting_a_selection_from_the_start_of_a_wrapped_line_stays_on_it() {
+    let (mut r, wrap) = at_the_second_line();
+    r.handle.select_range(wrap, wrap + 2);
+    r.press(Key::Delete);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap);
+}
+
+/// Delete does not move the caret, on either side of a wrap.
+#[test]
+fn delete_leaves_the_caret_on_the_line_it_is_on() {
+    let (mut r, wrap) = at_the_second_line();
+    r.press(Key::Delete);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap, "from the start of the line");
+
+    r.handle.select_range(3, 3);
+    r.press(Key::End);
+    let end = r.handle.cursor_position();
+    r.press(Key::Delete);
+    assert_eq!(r.handle.cursor_position(), end);
+    assert_eq!(r.line_start_at_caret(), 0, "from the end of the line above");
+}
+
+#[test]
+fn left_and_right_with_a_selection_go_to_its_ends() {
+    let (mut r, wrap) = at_the_second_line();
+    for (anchor, caret) in [(6, 16), (16, 6), (wrap - 3, wrap + 3), (wrap + 3, wrap - 3)] {
+        let (start, end) = (anchor.min(caret), anchor.max(caret));
+        r.handle.select_range(anchor, caret);
+        r.press(Key::ArrowLeft);
+        assert_eq!(
+            r.handle.selection(),
+            (start, start),
+            "Left from {anchor}..{caret}"
+        );
+        r.handle.select_range(anchor, caret);
+        r.press(Key::ArrowRight);
+        assert_eq!(
+            r.handle.selection(),
+            (end, end),
+            "Right from {anchor}..{caret}"
+        );
+    }
+}
+
+/// Only the character step collapses to an end: Shift extends, and a word step
+/// goes on from the caret, as they did.
+#[test]
+fn shift_and_word_steps_with_a_selection_are_not_collapsed_to_its_ends() {
+    let mut r = Reader::plain("alpha beta gamma delta");
+    r.handle.select_range(6, 16);
+    r.tree.press_key(Key::ArrowLeft, Modifiers::SHIFT);
+    r.update();
+    assert_eq!(r.handle.selection(), (6, 15));
+    r.handle.select_range(6, 16);
+    r.tree.press_key(Key::ArrowLeft, Modifiers::CTRL);
+    r.update();
+    assert_eq!(r.handle.selection(), (11, 11));
+}
+
+/// A selection starting at a wrap holds the next line's first character, so its
+/// start is on that line: UIA reads the selection's line from its start, and
+/// NVDA+L read the line above. A selection ending there ends on the line above.
+#[test]
+fn a_selection_is_on_the_lines_of_the_text_it_holds() {
+    let (mut r, wrap) = at_the_second_line();
+    r.handle.select_range(wrap, wrap + 4);
+    assert_eq!(r.line_start_at_caret(), wrap, "forward from the wrap");
+    r.handle.select_range(wrap + 4, wrap);
+    assert_eq!(r.line_start_at_caret(), wrap, "backward to the wrap");
+
+    r.handle.select_range(wrap - 4, wrap);
+    assert_eq!(r.line_start_at_caret(), 0, "up to the wrap");
+    let upper = with_editor(&r.update(), |editor| {
+        editor.text_selection().unwrap().end().to_global_usv_index()
+    });
+    assert_eq!(upper, wrap, "the selection still ends at the wrap");
+}
+
+/// Braille routing to the cell after a line's last character is a reader's
+/// selection at the end of that line's last run. The caret stays on that line,
+/// whichever side the caret was on before.
+#[test]
+fn a_reader_placing_the_caret_at_a_lines_end_stays_on_that_line() {
+    let (mut r, wrap) = at_the_second_line();
+    let line_end = with_editor(&r.update(), |editor| {
+        editor
+            .document_range()
+            .start()
+            .forward_to_line_end()
+            .to_raw()
+    });
+    r.select_position(|_| line_end);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), 0, "the line it was routed on");
+}
+
+/// And one put at the start of a line's first run is on that line, after End
+/// left the caret on the line above.
+#[test]
+fn a_reader_placing_the_caret_at_a_lines_start_stays_on_that_line() {
+    let (mut r, wrap) = at_the_second_line();
+    let line_start = with_editor(&r.update(), |editor| {
+        editor.text_selection().unwrap().start().to_raw()
+    });
+    r.handle.select_range(3, 3);
+    r.press(Key::End);
+    assert_eq!(r.line_start_at_caret(), 0);
+    r.select_position(|_| line_start);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap);
+}
+
+/// The position after a line break is on the next line. There is no wrap to
+/// choose a side of, and it used to read as the line above.
+#[test]
+fn a_caret_after_a_line_break_is_on_the_next_line() {
+    let text: String = format!("one{LINE_SEPARATOR}two");
+    let mut r = Reader::plain(&text);
+    r.handle.select_range(4, 4);
+    assert_eq!(r.line_start_at_caret(), 4, "after the break");
+    r.handle.select_range(3, 3);
+    assert_eq!(r.line_start_at_caret(), 0, "before the break");
+    r.handle.select_range(4, 6);
+    assert_eq!(r.line_start_at_caret(), 4, "a selection starting after it");
+}

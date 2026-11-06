@@ -51,7 +51,9 @@ use teksilo_text::{CursorAffinity, RichTextEngine};
 use super::policy::CodeCommand;
 use super::state::{CodeEditorState, SharedState, SyntheticElementRef};
 use crate::common::editor_runtime::AccessibilityRole;
-use crate::common::wrapped_caret::line_starting_at;
+use crate::common::wrapped_caret::{
+    affinity_of_run_position, follows_hard_break, line_starting_at,
+};
 
 /// Set the role and read-only flag — the header both bodies share.
 pub(crate) fn set_role(st: &CodeEditorState, builder: &mut AccessNodeBuilder) {
@@ -276,10 +278,18 @@ fn emit_block(
     // the separator's slot — the AT-correct end-of-line focus.
     let end = block.position + block.length;
     // A caret on a wrap shown at the start of the next line is on that line, at
-    // both ends of the selection (see `wrapped_caret`).
+    // both ends of the selection, and so is one after a hard break and the lower
+    // end of a selection (see `wrapped_caret`).
+    let (user_anchor, user_pos) = (acc.user_anchor, acc.user_pos);
+    let on_next_line = acc.on_next_line;
     let position_of = |user: usize| {
         let offset = user - block.position;
-        acc.on_next_line
+        let next_line = if user_anchor != user_pos {
+            user == user_anchor.min(user_pos)
+        } else {
+            on_next_line || follows_hard_break(&emission, &source, offset)
+        };
+        next_line
             .then(|| line_starting_at(&emission, &source, offset))
             .flatten()
             .or_else(|| emission.position_of(offset))
@@ -327,6 +337,7 @@ pub(crate) fn handle_access_action(
                             (st.document_position(anchor), st.document_position(focus));
                         st.cursor.set_position(anchor, MoveMode::MoveAnchor);
                         st.cursor.set_position(focus, MoveMode::KeepAnchor);
+                        st.cursor_affinity = affinity_of_run_position(sel.focus.character_index);
                     }
                     super::sync_cursor_signals(state);
                     ctx.request_frame();

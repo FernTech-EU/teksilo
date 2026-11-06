@@ -43,6 +43,7 @@ use super::state::{CodeEditorState, SharedState};
 use super::sync_cursor_signals;
 use crate::common::editor_runtime::CaretPolicy;
 use crate::common::text_nav::{CaretStep, LineStep, caret_step, deletes_word, line_step};
+use crate::common::wrapped_caret::{affinity_after_step, is_soft_wrap};
 
 /// What the dispatch decided, so the epilogue knows what to preserve.
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -237,8 +238,8 @@ pub(super) fn handle_key(
             Key::ArrowLeft if filter.accepts(horizontal_command(caret_step(*modifiers), false)) => {
                 match caret_step(*modifiers) {
                     CaretStep::LineEdge => smart_home(&mut st, mode),
-                    CaretStep::Word => move_every_caret(&mut st, MoveOperation::WordLeft, mode),
-                    CaretStep::Character => move_every_caret(&mut st, MoveOperation::Left, mode),
+                    CaretStep::Word => step_every_caret(&mut st, MoveOperation::WordLeft, mode),
+                    CaretStep::Character => step_every_caret(&mut st, MoveOperation::Left, mode),
                 }
                 KeyAction::ClearPreferredX
             }
@@ -249,7 +250,7 @@ pub(super) fn handle_key(
                     CaretStep::Character => Some(MoveOperation::Right),
                 };
                 match op {
-                    Some(op) => move_every_caret(&mut st, op, mode),
+                    Some(op) => step_every_caret(&mut st, op, mode),
                     None => motion::move_to_line_end(&mut st, mode),
                 }
                 KeyAction::ClearPreferredX
@@ -676,6 +677,47 @@ fn move_every_caret(st: &mut CodeEditorState, op: MoveOperation, mode: MoveMode)
     st.merge_collided_carets();
 }
 
+/// Left or Right, by a character or a word.
+///
+/// A character step with a selection goes to the selection's end in that
+/// direction, and no further. Forward from the end of a wrapped line, where End
+/// puts the caret, crosses to the start of the next line at the same position.
+/// A step that lands on a wrap is at the start of the next line, from either
+/// direction, so no line's first character is skipped. Only the primary caret
+/// has an affinity.
+fn step_every_caret(st: &mut CodeEditorState, op: MoveOperation, mode: MoveMode) {
+    let by_character = matches!(op, MoveOperation::Left | MoveOperation::Right);
+    let forward = matches!(op, MoveOperation::Right);
+    if by_character && mode == MoveMode::MoveAnchor {
+        if st.extra_carets.is_empty()
+            && !st.cursor.has_selection()
+            && forward
+            && st.cursor_affinity == CursorAffinity::Downstream
+            && is_soft_wrap(&st.engine, st.shown_caret())
+        {
+            st.cursor_affinity = CursorAffinity::Upstream;
+            return;
+        }
+        for i in 0..=st.extra_carets.len() {
+            let c = caret_at(st, i);
+            if c.has_selection() {
+                let target = if forward {
+                    c.selection_end()
+                } else {
+                    c.selection_start()
+                };
+                c.set_position(target, MoveMode::MoveAnchor);
+            } else {
+                c.move_position(op, mode, 1);
+            }
+        }
+        st.merge_collided_carets();
+    } else {
+        move_every_caret(st, op, mode);
+    }
+    st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
+}
+
 /// Home: to the first non-whitespace character, or to column 0 if already
 /// there.
 ///
@@ -807,6 +849,7 @@ enum Direction {
 /// the carets not yet handled. One undo step for the whole batch.
 fn delete_at_every_caret(st: &mut CodeEditorState, dir: Direction, by_word: bool) {
     let multi = !st.extra_carets.is_empty();
+    let affinity = affinity_after_delete(st, dir, by_word);
     if multi {
         st.cursor.begin_edit_block();
     }
@@ -821,6 +864,31 @@ fn delete_at_every_caret(st: &mut CodeEditorState, dir: Direction, by_word: bool
         st.cursor.end_edit_block();
     }
     st.merge_collided_carets();
+    st.cursor_affinity = affinity;
+}
+
+/// The affinity the primary caret has after a removal, read from the layout
+/// before it. A removal that lands on a wrap leaves the caret at the start of
+/// the next line, where the text after it is, as a step does. Delete with
+/// nothing selected does not move the caret, so it stays on the line it is on.
+fn affinity_after_delete(st: &CodeEditorState, dir: Direction, by_word: bool) -> CursorAffinity {
+    if !st.extra_carets.is_empty() {
+        return CursorAffinity::Downstream;
+    }
+    let landing = if st.cursor.has_selection() {
+        st.cursor.selection_start()
+    } else {
+        match (dir, by_word) {
+            (Direction::Forward, _) => return st.cursor_affinity,
+            (Direction::Backward, false) => st.cursor.position().saturating_sub(1),
+            (Direction::Backward, true) => {
+                let trial = st.cursor.clone();
+                trial.move_position(MoveOperation::WordLeft, MoveMode::MoveAnchor, 1);
+                trial.position()
+            }
+        }
+    };
+    affinity_after_step(&st.engine, st.shown_position(landing))
 }
 
 fn delete_one(st: &mut CodeEditorState, i: usize, dir: Direction, by_word: bool) {
