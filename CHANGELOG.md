@@ -37,7 +37,9 @@ by crate for clarity, not because crates version independently.
 - **Undoing or redoing a format in `RichTextEditor` shows on screen and counts as
   a change.** Taking back bold left the word painted bold and the format state
   stale, and did not fire `on_change`, so an app saving on change wrote nothing.
-  Teksilo now needs text-document 1.16.1.
+  Undoing a change to a list was the same: the screen and a screen reader kept
+  the old structure until the next typed letter. Teksilo now needs text-document
+  1.16.1.
 - **A picture in `RichTextEditor` no longer stays blank.** When the first frame
   to paint it never reached the renderer, its pixels were lost, and it took up
   its space and painted nothing for as long as the editor lived.

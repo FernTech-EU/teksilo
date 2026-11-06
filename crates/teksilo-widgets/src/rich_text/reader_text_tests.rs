@@ -294,6 +294,27 @@ fn a_list_item_is_heard_with_its_marker() {
     assert_eq!(line, "• two\n");
 }
 
+/// Undoing a change to a list reaches a reader at once, in both directions,
+/// with no key pressed after it. The document was already right, but nothing
+/// said so until the next typed letter, so the screen, NVDA and braille went
+/// on describing the old structure. Needs text-document 1.16.1.
+#[test]
+fn undoing_a_list_change_is_heard_without_another_key() {
+    let mut r = Reader::markdown("- one\n");
+    assert_eq!(r.text(), "• one\n");
+
+    // Backspace at the item's start takes it out of its list.
+    r.handle.select_range(0, 0);
+    r.update();
+    r.press(Key::Backspace);
+    assert_eq!(r.text(), "one\n");
+
+    r.handle.undo();
+    assert_eq!(r.text(), "• one\n", "undo gives the marker back");
+    r.handle.redo();
+    assert_eq!(r.text(), "one\n", "redo takes it away again");
+}
+
 /// The marker is one character no document position is. The caret at an
 /// item's start is reported after it, on the item's text; a reader's caret
 /// put on it lands at the item's start; every position still round-trips.
