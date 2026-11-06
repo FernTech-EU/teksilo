@@ -22,6 +22,9 @@ by crate for clarity, not because crates version independently.
   Down or Home brought the caret there, NVDA read the line above, so a wrapped
   paragraph's first line was read twice and its last line never. The fix in
   0.24.2 moved only one end of the selection, and UIA reads the other.
+- **A picture in `RichTextEditor` no longer stays blank.** When the first frame
+  to paint it never reached the renderer, its pixels were lost, and it took up
+  its space and painted nothing for as long as the editor lived.
 
 ## [0.24.2] - 2026-11-04
 

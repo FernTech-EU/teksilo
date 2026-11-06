@@ -691,10 +691,33 @@ mod image_paint_tests {
         assert_eq!(image_draws(&frame), 0);
     }
 
-    /// Repainting must not re-upload: the second frame draws from the texture
-    /// registered by the first.
+    /// The pixels travel only in the frame that carries them, so every paint
+    /// must carry them. A first frame that never reaches the renderer (refused,
+    /// or redone to recover from glyph eviction) would otherwise leave the
+    /// second frame drawing a texture nothing ever uploaded, which paints a
+    /// blank of the right size for good.
     #[test]
-    fn a_second_paint_draws_without_re_uploading() {
+    fn a_second_paint_still_carries_the_pixels() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "photo.png", "image/png", &red_png())
+            .unwrap();
+        let mut cache = ImageCache::new();
+
+        // The first frame is dropped here, as a refused frame is.
+        drop(run(&doc, &mut cache, &[quad("photo.png")]));
+        let second = run(&doc, &mut cache, &[quad("photo.png")]);
+
+        assert_eq!(second.pending_images.len(), 1, "the upload was lost");
+        assert_eq!(second.pending_images[0].name, "photo.png");
+        assert_eq!(image_draws(&second), 1);
+    }
+
+    /// Carrying the pixels on every paint must cost a reference, not a decode
+    /// or a copy of the image.
+    #[test]
+    fn repeated_paints_share_one_decoded_buffer() {
+        use teksilo_canvas::ImagePixels;
+
         let doc = TextDocument::new();
         doc.add_resource(ResourceType::Image, "photo.png", "image/png", &red_png())
             .unwrap();
@@ -703,12 +726,14 @@ mod image_paint_tests {
         let first = run(&doc, &mut cache, &[quad("photo.png")]);
         let second = run(&doc, &mut cache, &[quad("photo.png")]);
 
-        assert_eq!(first.pending_images.len(), 1);
-        assert!(
-            second.pending_images.is_empty(),
-            "already-registered pixels must not be uploaded again"
-        );
-        assert_eq!(image_draws(&second), 1, "but it must still draw");
+        let (ImagePixels::Shared(a), ImagePixels::Shared(b)) = (
+            &first.pending_images[0].pixels,
+            &second.pending_images[0].pixels,
+        ) else {
+            panic!("the cache queues shared pixels");
+        };
+        assert!(std::sync::Arc::ptr_eq(a, b));
+        assert_eq!(cache.len(), 1);
     }
 
     /// Two references to one image in a single frame upload once and draw twice.
@@ -723,23 +748,6 @@ mod image_paint_tests {
 
         assert_eq!(frame.pending_images.len(), 1);
         assert_eq!(image_draws(&frame), 2);
-    }
-
-    /// After the renderer loses its textures the decode is kept but the upload
-    /// is redone — decoding again would be far more expensive.
-    #[test]
-    fn invalidating_registrations_re_uploads_without_re_decoding() {
-        let doc = TextDocument::new();
-        doc.add_resource(ResourceType::Image, "photo.png", "image/png", &red_png())
-            .unwrap();
-        let mut cache = ImageCache::new();
-
-        run(&doc, &mut cache, &[quad("photo.png")]);
-        cache.invalidate_registrations();
-        let frame = run(&doc, &mut cache, &[quad("photo.png")]);
-
-        assert_eq!(frame.pending_images.len(), 1, "re-uploaded");
-        assert_eq!(cache.len(), 1, "still only one decoded entry");
     }
 
     /// Eviction reports what it dropped so the caller can free GPU textures;

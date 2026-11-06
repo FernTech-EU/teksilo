@@ -52,20 +52,11 @@ pub type ImageResolver = Rc<dyn Fn(&str) -> Option<(String, Vec<u8>)>>;
 /// display only — the document keeps whatever the writer inserted.
 pub const MAX_DISPLAY_EDGE: u32 = 2048;
 
-/// One resolved entry: the decoded display-resolution pixels, plus whether the
-/// canvas has been told about them yet.
-struct Entry {
-    icon: RasterIcon,
-    /// Cleared by [`ImageCache::invalidate_registrations`] when the surface that
-    /// owned the texture goes away, so the next paint re-uploads.
-    registered: bool,
-}
-
-/// Name → decoded pixels, with negative caching for names that resolve to
-/// nothing.
+/// Name → decoded display-resolution pixels, with negative caching for names
+/// that resolve to nothing.
 #[derive(Default)]
 pub struct ImageCache {
-    entries: HashMap<String, Option<Entry>>,
+    entries: HashMap<String, Option<RasterIcon>>,
 }
 
 impl std::fmt::Debug for ImageCache {
@@ -93,7 +84,7 @@ impl ImageCache {
         document: &TextDocument,
         name: &str,
         resolver: Option<&ImageResolver>,
-    ) -> Option<&mut Entry> {
+    ) -> Option<&RasterIcon> {
         if !self.entries.contains_key(name) {
             let mut bytes = document.resource(name).ok().flatten();
             // Nothing under that name: ask the host, and keep what it gives us
@@ -109,20 +100,20 @@ impl ImageCache {
             }
             let decoded = bytes
                 .and_then(|bytes| RasterIcon::decode(&bytes).ok())
-                .map(|icon| {
-                    // Cap only what the GPU sees; the document keeps the original.
-                    let icon = icon.downsample_to_max(MAX_DISPLAY_EDGE).unwrap_or(icon);
-                    Entry {
-                        icon,
-                        registered: false,
-                    }
-                });
+                // Cap only what the GPU sees; the document keeps the original.
+                .map(|icon| icon.downsample_to_max(MAX_DISPLAY_EDGE).unwrap_or(icon));
             self.entries.insert(name.to_string(), decoded);
         }
-        self.entries.get_mut(name).and_then(|e| e.as_mut())
+        self.entries.get(name).and_then(|e| e.as_ref())
     }
 
-    /// Ensure the canvas can draw `name`, uploading the pixels the first time.
+    /// Ensure the canvas can draw `name`, queuing its pixels in this frame.
+    ///
+    /// Every paint queues them, because an upload travels only in the frame
+    /// that carries it: a frame that never reaches the renderer (a refused
+    /// frame, a frame redone to recover from glyph eviction) takes the pixels
+    /// with it, and the next frame's draw would then have nothing to sample.
+    /// Queuing costs one `Arc` clone, and the renderer skips a name it holds.
     ///
     /// Returns `false` when the image could not be resolved, so the caller can
     /// skip emitting a draw command that would reference nothing.
@@ -133,21 +124,15 @@ impl ImageCache {
         name: &str,
         resolver: Option<&ImageResolver>,
     ) -> bool {
-        let Some(entry) = self.resolve(document, name, resolver) else {
+        let Some(icon) = self.resolve(document, name, resolver) else {
             return false;
         };
-        // `registered` tracks this cache's own uploads; `has_pending_image`
-        // catches a second widget in the same frame having already queued the
-        // same key, which would otherwise upload identical pixels twice.
-        if !entry.registered && !canvas.has_pending_image(name) {
-            canvas.ensure_shared_image_registered(
-                name,
-                entry.icon.width(),
-                entry.icon.height(),
-                std::sync::Arc::clone(entry.icon.shared_pixels()),
-            );
-        }
-        entry.registered = true;
+        canvas.ensure_shared_image_registered(
+            name,
+            icon.width(),
+            icon.height(),
+            std::sync::Arc::clone(icon.shared_pixels()),
+        );
         true
     }
 
@@ -156,24 +141,12 @@ impl ImageCache {
         self.entries
             .get(name)
             .and_then(|e| e.as_ref())
-            .map(|e| (e.icon.width(), e.icon.height()))
+            .map(|icon| (icon.width(), icon.height()))
     }
 
     /// Drop every cached entry — used when the document is replaced wholesale.
     pub fn clear(&mut self) {
         self.entries.clear();
-    }
-
-    /// Forget which images have been uploaded without discarding the decoded
-    /// pixels. The next paint re-registers them.
-    ///
-    /// Needed because textures live in the renderer, which may drop them
-    /// independently of this cache (surface loss, device reset); keeping the
-    /// decode but redoing the upload is much cheaper than decoding again.
-    pub fn invalidate_registrations(&mut self) {
-        for entry in self.entries.values_mut().flatten() {
-            entry.registered = false;
-        }
     }
 
     /// Drop entries whose names are not in `live`, returning the names dropped
