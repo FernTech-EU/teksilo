@@ -443,8 +443,8 @@ pub(super) fn handle_key(
             // --- Editor-preset mutating commands ---
             Key::Backspace if filter.accepts(EditCommandKind::DeletePrev) => {
                 let word = text_nav::deletes_word(*modifiers);
-                // Delete the word to the left — Ctrl+⌫, ⌥⌫ on macOS.
-                // Select the word, then delete the selection —
+                // Delete the word to the left: Ctrl+⌫, ⌥⌫ on macOS.
+                // Select the word, then delete the selection, which
                 // matches the godot reference's delete-word (there is
                 // no dedicated delete-word API on TextCursor).
                 if word && !st.cursor.has_selection() {

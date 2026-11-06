@@ -4856,6 +4856,47 @@ fn format_version_bumps_on_format_only_edits() {
     );
 }
 
+/// Undoing a format is a change of the document like making it: the word has to
+/// be painted plain, a format panel has to read again and a host saving on change
+/// has to hear of it. text-document before 1.16.1 reported nothing but its undo
+/// stack, so the word stayed painted bold and Ctrl+S wrote nothing.
+#[test]
+fn undoing_and_redoing_a_format_reports_it() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("abc").unwrap();
+    let (editor, fired) = with_on_change_probe(RichTextEditor::editor(doc.clone()));
+    let handle = editor.handle();
+    let fmt_ver = editor.format_version();
+
+    let mut tree = WidgetTree::new();
+    let id = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    focus_editor(&mut tree, id);
+    press_key(
+        &mut tree,
+        teksilo_core::event::Key::A,
+        teksilo_core::event::Modifiers::COMMAND,
+    );
+    press_key(
+        &mut tree,
+        teksilo_core::event::Key::B,
+        teksilo_core::event::Modifiers::COMMAND,
+    );
+    tick_past_debounce(&mut tree);
+
+    for (step, act) in [("undo", 0), ("redo", 1)] {
+        let (version, changes) = (fmt_ver.get(), fired.get());
+        if act == 0 {
+            handle.undo();
+        } else {
+            handle.redo();
+        }
+        tick_past_debounce(&mut tree);
+        assert!(fmt_ver.get() > version, "{step} must bump format_version");
+        assert!(fired.get() > changes, "{step} must fire on_change");
+    }
+}
+
 // Horizontal caret-visibility (ensure_caret_h_visible_locked): no
 // dedicated test here. The behaviour is fully exercised under a
 // real typesetter in apps that run `wrap_mode(WrapMode::None)`; a
