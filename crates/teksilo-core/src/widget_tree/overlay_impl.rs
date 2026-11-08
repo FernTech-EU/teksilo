@@ -2024,12 +2024,14 @@ impl WidgetTree {
 
     /// Laid-out bounds of an open overlay's content surface.
     ///
-    /// This is the size the overlay pass actually measured — taken with an
-    /// *unbounded* proposal, independent of the host tree's own proposal — so
-    /// it is the right thing to assert against for content that must cap or
-    /// wrap itself (tooltips against `TOOLTIP_MAX_WIDTH`, popovers against
-    /// their max height). Reading `bounds(content_id)` instead would report
-    /// whatever the surrounding layout handed the widget.
+    /// This is the rectangle the overlay pass placed the content at: its
+    /// width measured with an *unbounded* proposal, independent of the host
+    /// tree's own proposal, then narrowed or widened by the placement, and
+    /// its height measured again at that width. So it is the right thing to
+    /// assert against for content that must cap or wrap itself (tooltips
+    /// against `TOOLTIP_MAX_WIDTH`, popovers against their max height).
+    /// Reading `bounds(content_id)` instead would report whatever the
+    /// surrounding layout handed the widget.
     pub fn overlay_content_bounds(
         &self,
         id: crate::overlay::OverlayId,

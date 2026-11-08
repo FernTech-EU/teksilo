@@ -516,6 +516,40 @@ impl WidgetTree {
         self.layout_with_ops(proposal, &mut noop);
     }
 
+    /// What overlay content `content_id` answers to `proposal`, measured the
+    /// way the overlay pass sizes it: straight `layout_response`, so dormant
+    /// descendants fall out through `child_size`.
+    fn measure_overlay_content(
+        &self,
+        content_id: WidgetId,
+        proposal: SizeProposal,
+        base_theme: &crate::styles::Theme,
+        interaction_anchors: &[WidgetId],
+    ) -> teksilo_canvas::Size {
+        let resolved_theme = self.arena.resolve_theme(content_id, base_theme);
+        let extras = crate::widget::LayoutExtras {
+            focused: self.focused,
+            interaction_anchors,
+            shortcut_registry: Some(&self.shortcut_registry),
+            overlay_manager: Some(&self.overlay_manager),
+        };
+        let ctx = LayoutContext {
+            theme: &resolved_theme,
+            layout_direction: self.layout_direction,
+            scale_factor: self.device_scale_factor,
+            text_scale: self.effective_text_scale,
+            text_backend: self.text_backend.as_ref(),
+            arena: Some(&self.arena),
+            extras: Some(extras),
+            stack_main_axis: None,
+        };
+        let node = self
+            .arena
+            .get(content_id)
+            .expect("content_id from active arena children");
+        node.widget.layout_response(proposal, &ctx).size
+    }
+
     /// Measure the intrinsic size of the primary (non-overlay) content root(s)
     /// at `proposal` — e.g. `{ width: Some(w), height: None }` for the natural
     /// height at a fixed width. Mirrors the overlay intrinsic pass below: it
@@ -768,38 +802,15 @@ impl WidgetTree {
                 continue;
             }
             let overlay_id = self.overlay_manager.find_by_content(*content_id);
-            let intrinsic = {
-                let resolved_theme = self.arena.resolve_theme(*content_id, &base_theme);
-                let extras = crate::widget::LayoutExtras {
-                    focused: self.focused,
-                    interaction_anchors: &interaction_anchors,
-                    shortcut_registry: Some(&self.shortcut_registry),
-                    overlay_manager: Some(&self.overlay_manager),
-                };
-                let ctx = LayoutContext {
-                    theme: &resolved_theme,
-                    layout_direction: self.layout_direction,
-                    scale_factor: self.device_scale_factor,
-                    text_scale: self.effective_text_scale,
-                    text_backend: self.text_backend.as_ref(),
-                    arena: Some(&self.arena),
-                    extras: Some(extras),
-                    stack_main_axis: None,
-                };
-                let node = self
-                    .arena
-                    .get(*content_id)
-                    .expect("content_id from active arena children");
-                node.widget
-                    .layout_response(
-                        SizeProposal {
-                            width: None,
-                            height: None,
-                        },
-                        &ctx,
-                    )
-                    .size
-            };
+            let intrinsic = self.measure_overlay_content(
+                *content_id,
+                SizeProposal {
+                    width: None,
+                    height: None,
+                },
+                &base_theme,
+                &interaction_anchors,
+            );
             if let Some(overlay_id) = overlay_id {
                 self.overlay_manager
                     .set_content_bounds(overlay_id, intrinsic);
@@ -811,15 +822,51 @@ impl WidgetTree {
                     viewport,
                     self.layout_direction,
                 );
+                // Height for width. The measurement above leaves the width
+                // open, and a paragraph with no width to wrap at measures as
+                // one line; but the content is laid out below at the width
+                // its placement settled on, which can be narrower (a
+                // `Centered` modal clamped to a small window) or simply the
+                // width the content itself only decides once it is given
+                // one (a `MessageBox` whose text column is an
+                // `Expand::horizontal`). Either way the paragraph wraps there
+                // and spills past an overlay sized to one line, and a click
+                // on what spilled lands outside the overlay. So ask the
+                // content for its height at the width it will really have,
+                // the way a native dialog window sizing itself to its
+                // content already does (`size_to_content_target` in
+                // teksilo-app), and place the overlay again when it differs.
+                let placed_width = self
+                    .overlay_content_bounds(overlay_id)
+                    .map_or(0.0, |bounds| bounds.width);
+                if placed_width > 0.0 {
+                    let fitted = self.measure_overlay_content(
+                        *content_id,
+                        SizeProposal {
+                            width: Some(placed_width),
+                            height: None,
+                        },
+                        &base_theme,
+                        &interaction_anchors,
+                    );
+                    if (fitted.height - intrinsic.height).abs() > 0.5 {
+                        self.overlay_manager.set_content_bounds(
+                            overlay_id,
+                            teksilo_canvas::Size::new(intrinsic.width, fitted.height),
+                        );
+                        let anchor_bounds = |id: WidgetId| -> Option<Rect> {
+                            self.arena.is_active(id).then(|| self.arena.bounds(id))
+                        };
+                        self.overlay_manager.position_overlays(
+                            anchor_bounds,
+                            viewport,
+                            self.layout_direction,
+                        );
+                    }
+                }
             }
             let overlay_bounds = overlay_id
-                .and_then(|overlay_id| {
-                    self.overlay_manager
-                        .stack
-                        .iter()
-                        .find(|overlay| overlay.id == overlay_id)
-                        .map(|overlay| overlay.bounds)
-                })
+                .and_then(|overlay_id| self.overlay_content_bounds(overlay_id))
                 .unwrap_or(Rect::ZERO);
             // Use the positioned overlay_bounds for layout, not the intrinsic
             // size. For `Below` / `BelowPreferred` (and any other placement
@@ -1359,6 +1406,124 @@ mod tests {
         tree.layout(SizeProposal::exact(400.0, 300.0));
         let bounds = tree.overlay_content_bounds(id).expect("placed");
         assert_eq!(bounds.y, 0.0, "pinned to the top of the usable band");
+    }
+
+    /// A paragraph: one line of `natural_width` when the width is left open,
+    /// and as many `line_height` lines as it takes at a given width, the shape
+    /// of every wrapping text.
+    #[derive(Debug)]
+    struct Paragraph {
+        natural_width: f32,
+        line_height: f32,
+    }
+
+    impl Widget for Paragraph {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            let (width, lines) = match proposal.width {
+                Some(w) if w > 0.0 => (
+                    w.min(self.natural_width),
+                    (self.natural_width / w).ceil().max(1.0),
+                ),
+                _ => (self.natural_width, 1.0),
+            };
+            Size::new(width, lines * self.line_height).into()
+        }
+    }
+
+    /// A modal wider than the window is laid out at the window's width, where
+    /// its paragraph wraps. The overlay must be as tall as the wrapped
+    /// paragraph, not as the one line it measured with its width left open:
+    /// whatever spilled below would paint outside it, and a click there would
+    /// count as a click outside the modal.
+    #[test]
+    fn a_modal_clamped_to_the_window_takes_its_wrapped_height() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(Paragraph {
+            natural_width: 600.0,
+            line_height: 20.0,
+        });
+        let id = tree.show_overlay(crate::overlay::OverlayRequest::new(
+            content,
+            anchor,
+            crate::overlay::OverlayPlacement::Centered,
+            crate::overlay::DismissBehavior::Manual,
+        ));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let bounds = tree.overlay_content_bounds(id).expect("placed");
+        assert_eq!(bounds.width, 400.0, "clamped to the window");
+        assert_eq!(
+            bounds.height, 40.0,
+            "600 of text at 400 wide is two lines of 20: {bounds:?}"
+        );
+        assert_eq!(bounds.y, 130.0, "and centred as two lines: (300 - 40) / 2");
+        assert_eq!(
+            tree.bounds(content),
+            bounds,
+            "the content is laid out at the rectangle it was measured for"
+        );
+    }
+
+    /// Content that only takes a width once it is given one: narrow with its
+    /// width left open, and at a given width as wide as that and as tall as
+    /// it takes to hold a fixed area, the way a text column inside an
+    /// `Expand` reports itself.
+    #[derive(Debug)]
+    struct FillsGivenWidth {
+        open_size: Size,
+        area: f32,
+    }
+
+    impl Widget for FillsGivenWidth {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            match proposal.width {
+                Some(w) if w > 0.0 => Size::new(w, self.area / w).into(),
+                _ => self.open_size.into(),
+            }
+        }
+    }
+
+    /// An anchored overlay widened to its anchor takes the height its
+    /// content has at that width, and the second placement that height
+    /// asks for leaves it where its anchor puts it.
+    #[test]
+    fn an_overlay_widened_to_its_anchor_takes_its_height_there_and_stays_below_it() {
+        let mut tree = WidgetTree::new();
+        let anchor = tree.add(FillWidget::new());
+        let content = tree.add(FillsGivenWidth {
+            open_size: Size::new(100.0, 60.0),
+            area: 6000.0,
+        });
+        let id = tree.show_overlay(crate::overlay::OverlayRequest::new(
+            content,
+            anchor,
+            crate::overlay::OverlayPlacement::Below,
+            crate::overlay::DismissBehavior::Manual,
+        ));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        let anchor_bounds = tree.bounds(anchor);
+        let bounds = tree.overlay_content_bounds(id).expect("placed");
+        assert_eq!(bounds.width, anchor_bounds.width, "as wide as its anchor");
+        assert_eq!(
+            bounds.height, 15.0,
+            "6000 at 400 wide is 15 tall: {bounds:?}"
+        );
+        assert_eq!(bounds.x, anchor_bounds.x, "aligned with its anchor");
+        assert!(
+            bounds.y >= anchor_bounds.y + anchor_bounds.height,
+            "still below its anchor {anchor_bounds:?}: {bounds:?}"
+        );
+        assert_eq!(tree.bounds(content), bounds);
     }
 
     /// A safe area does the same for the reason a notch exists.
