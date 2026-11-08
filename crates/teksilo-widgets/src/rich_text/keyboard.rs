@@ -2645,6 +2645,75 @@ pub(crate) fn neighbour_line_center_y(
     fallback()
 }
 
+/// The y a hit test at `x` should probe to land on the line one step
+/// `direction` from the caret drawn at `caret`, starting from `guess`, what
+/// [`neighbour_line_center_y`] found; `None` when nothing is that way.
+///
+/// The guess is a line found through the positions next to the caret's line,
+/// and around a table the next position is not the next line down. Between a
+/// paragraph and the table after it stand the table's own positions, which
+/// have no line of their own and are drawn at the end of the paragraph before;
+/// in a table row, the position after a cell's last line is the next cell, on
+/// the same row. The guess then falls back to one caret height on, which with
+/// line or paragraph spacing lands in the paragraph's own band or the gap
+/// under it, where the hit test answers with the line the caret is on: Down
+/// from the line above a table, or from a cell of its last row, did nothing.
+///
+/// So the guess is kept only when a hit test there lands on a line past the
+/// caret's. Otherwise the band from the caret's edge onwards is probed in
+/// small steps, and the first probe that lands past the caret names the line:
+/// the cell under `x` in a table's first row going down into it, the paragraph
+/// after a table going down out of its last row. Its middle is returned rather
+/// than the probe's y, which can be in a cell's padding, where the hit test
+/// answers with the cell's start whatever the x.
+fn line_under_x(
+    engine: &teksilo_text::RichTextEngine,
+    x: f32,
+    guess: f32,
+    direction: i32,
+    caret: [f32; 4],
+) -> Option<f32> {
+    // The middle of the line a hit at `y` lands on, if that line is past the
+    // caret's. Compared by the middle, so a line beside the caret's in the
+    // next cell of the row, drawn a little higher or lower in another size,
+    // does not count as the next one.
+    let landed_past = |y: f32| {
+        let hit = engine.hit_test(x, y)?;
+        let line = engine.caret_rect(hit.position, hit.affinity);
+        if line[3] <= 0.0 {
+            return None;
+        }
+        let middle = line[1] + line[3] * 0.5;
+        let past = if direction > 0 {
+            middle > caret[1] + caret[3]
+        } else {
+            middle < caret[1]
+        };
+        past.then_some(middle)
+    };
+    if landed_past(guess).is_some() {
+        return Some(guess);
+    }
+    let (top, bottom) = engine.content_band_screen();
+    // A step under half the smallest line a caret is drawn on cannot pass over
+    // a line, and few enough probes cross a tall table row.
+    let step = (caret[3] * 0.25).clamp(1.0, 4.0);
+    let mut y = if direction > 0 {
+        caret[1] + caret[3]
+    } else {
+        caret[1]
+    };
+    loop {
+        y += direction as f32 * step;
+        if y < top || y > bottom {
+            return None;
+        }
+        if let Some(middle) = landed_past(y) {
+            return Some(middle);
+        }
+    }
+}
+
 fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
     if !st.engine.has_full_layout() {
         return;
@@ -2661,6 +2730,7 @@ fn move_cursor_vertical(st: &mut EditorState, direction: i32, mode: MoveMode) {
 
     let Some(target_y) =
         neighbour_line_center_y(&st.engine, st.cursor_affinity, pos, direction, caret)
+            .and_then(|guess| line_under_x(&st.engine, x, guess, direction, caret))
     else {
         return;
     };
