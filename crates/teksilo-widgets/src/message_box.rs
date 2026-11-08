@@ -506,6 +506,13 @@ fn severity_icon_size(tokens: &InputTokens) -> f32 {
 /// still fits a laptop display beneath a header and a button row.
 const DETAILS_MAX_HEIGHT: f32 = 220.0;
 
+/// The narrowest a box is, and the width its text wraps at when nothing
+/// proposes one: the width `present` asks a native dialog window for.
+const MIN_WIDTH: f32 = 460.0;
+
+/// The shortest a box is.
+const MIN_HEIGHT: f32 = 140.0;
+
 const DEFAULT_INTENT_NAME: &str = "messagebox.accept_default";
 const ESCAPE_INTENT_NAME: &str = "messagebox.escape";
 
@@ -880,7 +887,7 @@ impl MessageBox {
             .presentation(ModalPresentation::Auto)
             .close_behavior(close_behavior)
             .title(title)
-            .size(460, 140)
+            .size(MIN_WIDTH as u32, MIN_HEIGHT as u32)
             .on_dismiss(on_dismiss),
         );
     }
@@ -1135,18 +1142,45 @@ impl Widget for MessageBox {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        // Enforce a 460×140 floor without clamping the forwarded
-        // proposal: the overlay's intrinsic-measurement pass calls us
-        // with (None, None), and a Spacer-bearing VStack child would
-        // otherwise collapse to the proposal height. Letting the child
-        // see the unmodified proposal lets it report its real natural
-        // size — required so the overlay grows when the "Show details"
-        // accordion expands.
-        let child = self
-            .root_child_id
-            .and_then(|id| ctx.child_size(id, proposal))
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0));
-        Size::new(child.width.max(460.0), child.height.max(140.0)).into()
+        // Enforce the floor without clamping the forwarded height: the
+        // overlay's intrinsic-measurement pass calls us with (None, None),
+        // and a Spacer-bearing VStack child would otherwise collapse to the
+        // proposal height. Letting the child see the open height lets it
+        // report its real natural height, which the overlay needs to grow
+        // when the "Show details" accordion expands.
+        //
+        // The width is another matter. Left open, it would measure every
+        // paragraph as one line (a wrapping text has no width to wrap at),
+        // while the box is then laid out at its own width and the text wraps
+        // there: the box was as tall as single lines and its last lines and
+        // its buttons hung below it. So an open width is measured at the
+        // width the box takes, the floor, as a native dialog window of this
+        // box is; and when the content still wants more than that (a row of
+        // many buttons), at that width once more, so the height reported is
+        // the height at the width the box is given.
+        let measure = |proposal: SizeProposal| {
+            self.root_child_id
+                .and_then(|id| ctx.child_size(id, proposal))
+                .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
+        };
+        let child = match proposal.width {
+            Some(_) => measure(proposal),
+            None => {
+                let at_floor = measure(SizeProposal {
+                    width: Some(MIN_WIDTH),
+                    height: proposal.height,
+                });
+                if at_floor.width > MIN_WIDTH {
+                    measure(SizeProposal {
+                        width: Some(at_floor.width),
+                        height: proposal.height,
+                    })
+                } else {
+                    at_floor
+                }
+            }
+        };
+        Size::new(child.width.max(MIN_WIDTH), child.height.max(MIN_HEIGHT)).into()
     }
 
     fn place_children(
@@ -1870,6 +1904,259 @@ mod tests {
             tree.find_by_label(&StandardButton::Ok.default_label().resolve_now())
                 .is_some(),
             "the button row must survive an expanded details pane"
+        );
+    }
+
+    /// Present `mb` the way `teksilo_app::present_in_tree_modal_request`
+    /// does in a window of `window_width` by `window_height`: a scrim over
+    /// the whole window, then the box as a `Centered` overlay above it, so
+    /// the box gets the size the overlay pass measures for it.
+    /// (`present_and_lay_out` lays the box out as a root, at the whole
+    /// window, which never shows how tall the box takes itself to be.)
+    /// Returns the box's content id and the window it was laid out in.
+    fn present_as_overlay(
+        tree: &mut WidgetTree,
+        mb: MessageBox,
+        window_width: f32,
+        window_height: f32,
+    ) -> (WidgetId, Rect) {
+        use crate::button::Button as Btn;
+        use teksilo_core::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+        let window = Rect::new(0.0, 0.0, window_width, window_height);
+        let proposal = SizeProposal::exact(window.width, window.height);
+        let mb_cell: Rc<RefCell<Option<MessageBox>>> = Rc::new(RefCell::new(Some(mb)));
+        let mb_for_closure = mb_cell.clone();
+        let trigger = tree.add(Btn::new(lit!("Open")).on_activate_fn(move |ctx| {
+            if let Some(mb) = mb_for_closure.borrow_mut().take() {
+                mb.present(ctx);
+            }
+        }));
+        tree.layout(proposal);
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: teksilo_core::accesskit::Action::Click,
+            target: Some(trigger),
+            target_node: teksilo_core::accessibility::root_node_id(),
+            data: None,
+        });
+        let request = tree.drain_pending_modal_requests().pop().unwrap().request;
+        let dismiss = match request.close_behavior {
+            ModalCloseBehavior::ClickOutside => DismissBehavior::ClickOutside,
+            ModalCloseBehavior::EscapeKey => DismissBehavior::EscapeKey,
+            ModalCloseBehavior::EscapeOrClickOutside => DismissBehavior::EscapeOrClickOutside,
+            ModalCloseBehavior::Manual => DismissBehavior::Manual,
+        };
+        let click_to_dismiss = matches!(
+            request.close_behavior,
+            ModalCloseBehavior::ClickOutside | ModalCloseBehavior::EscapeOrClickOutside
+        );
+        let content_id = match request.content {
+            ModalContent::Deferred(builder) => builder(tree),
+            ModalContent::ExistingWidget(_) => panic!("MessageBox must use deferred content"),
+        };
+        tree.set_dormant(content_id);
+        let dismiss_target = Rc::new(Cell::new(None));
+        let scrim = tree.add(
+            crate::dialog::ModalScrim::new()
+                .dismiss_target(dismiss_target.clone())
+                .click_to_dismiss(click_to_dismiss),
+        );
+        let scrim_overlay = tree.show_overlay(OverlayRequest::new(
+            scrim,
+            trigger,
+            OverlayPlacement::FullViewport,
+            DismissBehavior::Manual,
+        ));
+        tree.activate(content_id);
+        let mut modal =
+            OverlayRequest::new(content_id, trigger, OverlayPlacement::Centered, dismiss);
+        modal.on_dismiss = request.on_dismiss;
+        let modal_overlay = tree.show_overlay(modal);
+        tree.overlay_manager_mut()
+            .set_parent_overlay(scrim_overlay, Some(modal_overlay));
+        dismiss_target.set(Some(modal_overlay));
+        tree.layout(proposal);
+        if let Some(id) = tree.widget_initial_focus_hint(content_id) {
+            tree.focus(id);
+        }
+        (content_id, window)
+    }
+
+    /// The header texts of the box (title, text, informative text) and its
+    /// buttons, each a rectangle in the tree's own bounds space. A button's
+    /// own label is not a header text.
+    fn texts_and_buttons(tree: &WidgetTree, content: WidgetId) -> (Vec<Rect>, Vec<Rect>) {
+        let (mut texts, mut buttons) = (Vec::new(), Vec::new());
+        let mut stack = vec![content];
+        while let Some(id) = stack.pop() {
+            let is = |name: &str| tree.widget_type_name(id).is_some_and(|t| t.ends_with(name));
+            if is("::Button") {
+                buttons.push(tree.bounds(id));
+                continue;
+            }
+            if is("TextWidget") {
+                texts.push(tree.bounds(id));
+            }
+            stack.extend(tree.children(id));
+        }
+        (texts, buttons)
+    }
+
+    /// The `MessageBox` node inside the dialog panel an overlay shows.
+    fn message_box_in(tree: &WidgetTree, content: WidgetId) -> WidgetId {
+        let mut stack = vec![content];
+        while let Some(id) = stack.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|t| t.ends_with("::MessageBox"))
+            {
+                return id;
+            }
+            stack.extend(tree.children(id));
+        }
+        panic!("no MessageBox under {content:?}");
+    }
+
+    /// A wrapping question, the shape of the one T47 was found on.
+    fn quit_without_saving(captured: &Rc<RefCell<Option<MessageBoxResult>>>) -> MessageBox {
+        let captured_for_handler = captured.clone();
+        MessageBox::warning(lit!("Quit without saving Starforgers?"))
+            .text(lit!(
+                "Starforgers could not be saved. The disk may be full or write-protected, \
+                 or a network drive or USB key may have been disconnected."
+            ))
+            .informative_text(lit!(
+                "Without saving, the changes made since the last successful save are lost. \
+                 Cancel keeps the work open with all its changes, so you can try again or \
+                 keep them somewhere else with Save As."
+            ))
+            .buttons(MessageBoxButtons::OkCancel)
+            .on_result(move |r, _ctx| {
+                *captured_for_handler.borrow_mut() = Some(r);
+            })
+    }
+
+    /// The box shown as `content` in `window` holds its wrapped text and,
+    /// below the last line, its buttons; and a pointer press on Ok, at its
+    /// centre, chooses Ok rather than landing outside the modal.
+    fn assert_holds_text_and_buttons(
+        tree: &mut WidgetTree,
+        content: WidgetId,
+        window: Rect,
+        captured: &Rc<RefCell<Option<MessageBoxResult>>>,
+    ) {
+        let panel = tree.bounds(content);
+        let (texts, buttons) = texts_and_buttons(tree, content);
+        assert!(
+            texts.len() >= 3,
+            "title, text and informative text: {texts:?}"
+        );
+        assert_eq!(buttons.len(), 2, "Ok and Cancel: {buttons:?}");
+        let text_bottom = texts
+            .iter()
+            .map(|t| t.y + t.height)
+            .fold(f32::MIN, f32::max);
+        let buttons_top = buttons.iter().map(|b| b.y).fold(f32::MAX, f32::min);
+        let lines_tall = texts.iter().any(|t| t.height > 16.0 * 2.0);
+        assert!(lines_tall, "the paragraphs wrap in this box: {texts:?}");
+        assert!(
+            text_bottom <= buttons_top,
+            "the last line ({text_bottom}) ends above the buttons ({buttons_top})"
+        );
+        for b in &buttons {
+            assert!(
+                b.x >= panel.x
+                    && b.y >= panel.y
+                    && b.x + b.width <= panel.x + panel.width + 0.5
+                    && b.y + b.height <= panel.y + panel.height + 0.5,
+                "button {b:?} lies inside the box {panel:?}"
+            );
+        }
+        assert!(
+            panel.x >= window.x
+                && panel.y >= window.y
+                && panel.x + panel.width <= window.x + window.width + 0.5
+                && panel.y + panel.height <= window.y + window.height + 0.5,
+            "the box {panel:?} fits the window {window:?}"
+        );
+
+        let ok = tree
+            .find_by_label(&StandardButton::Ok.default_label().resolve_now())
+            .expect("the Ok button");
+        let ok_bounds = tree.bounds(ok);
+        tree.tap_with(
+            teksilo_tokens::PointerKind::Mouse,
+            teksilo_canvas::Point::new(
+                ok_bounds.x + ok_bounds.width / 2.0,
+                ok_bounds.y + ok_bounds.height / 2.0,
+            ),
+        );
+        let result = captured.borrow().expect("the box answered");
+        assert_eq!(result.button, StandardButton::Ok, "{result:?}");
+        assert_eq!(result.dismissal, MessageBoxDismissal::Button);
+    }
+
+    fn mock_text_tree() -> WidgetTree {
+        WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(Rc::new(
+                RefCell::new(teksilo_canvas::MockTextBackend::new()),
+            ))
+    }
+
+    /// A box whose text wraps is as tall as the wrapped text: its buttons
+    /// sit inside it, below the last line, and a pointer can press them.
+    /// Measured with its width left open, each paragraph used to count as
+    /// one line, so the box was too short, its buttons hung below it, and a
+    /// click on one landed outside the modal and closed it as Cancel.
+    #[test]
+    fn a_box_whose_text_wraps_holds_its_text_and_its_buttons() {
+        let mut tree = mock_text_tree();
+        let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
+        let mb = quit_without_saving(&captured);
+        let (content, window) = present_as_overlay(&mut tree, mb, 1200.0, 800.0);
+        assert_holds_text_and_buttons(&mut tree, content, window, &captured);
+    }
+
+    /// In a window narrower than the box, the box is narrowed to the window
+    /// and its text wraps at that narrower width, into more lines than the
+    /// box measured on its own: the box is still as tall as the text it
+    /// then holds.
+    #[test]
+    fn a_box_narrowed_to_its_window_holds_its_text_and_its_buttons() {
+        let mut tree = mock_text_tree();
+        let captured: Rc<RefCell<Option<MessageBoxResult>>> = Rc::new(RefCell::new(None));
+        let mb = quit_without_saving(&captured);
+        let (content, window) = present_as_overlay(&mut tree, mb, 400.0, 800.0);
+        assert!(
+            tree.bounds(content).width <= window.width,
+            "the box is narrowed to the window: {:?}",
+            tree.bounds(content)
+        );
+        assert_holds_text_and_buttons(&mut tree, content, window, &captured);
+    }
+
+    /// A box with long text wraps it at the width a native dialog window of
+    /// the box opens at, whether it shows in its own window or over the
+    /// page, rather than growing to one line as wide as the page.
+    #[test]
+    fn a_box_with_long_text_wraps_at_the_width_of_its_native_window() {
+        let mut tree = mock_text_tree();
+        let mb = MessageBox::plain(lit!("Starforgers"))
+            .text(lit!(
+                "Starforgers could not be saved. The disk may be full or write-protected, \
+                 or a network drive or USB key may have been disconnected."
+            ))
+            .buttons(MessageBoxButtons::Ok);
+        let (content, _) = present_as_overlay(&mut tree, mb, 1200.0, 800.0);
+        let message_box = tree.bounds(message_box_in(&tree, content));
+        assert_eq!(
+            message_box.width, MIN_WIDTH,
+            "the box keeps the width its native window opens at: {message_box:?}"
+        );
+        let (texts, _) = texts_and_buttons(&tree, content);
+        assert!(
+            texts.iter().any(|t| t.height > 16.0 * 2.0),
+            "and its text wraps there: {texts:?}"
         );
     }
 
