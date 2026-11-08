@@ -369,6 +369,9 @@ pub(super) fn handle_key(
             Key::ArrowUp if filter.accepts(EditCommandKind::MoveUp) => {
                 if shift && try_extend_cell_selection(&mut st, 0, -1) {
                     KeyAction::ClearPreferredX
+                } else if line_motion == LineStep::ParagraphStart {
+                    step_to_paragraph_start(&mut st, false, mode);
+                    KeyAction::LineEdgeMotion
                 } else {
                     match vertical_op(line_motion, false) {
                         Some(op) => {
@@ -385,6 +388,9 @@ pub(super) fn handle_key(
             Key::ArrowDown if filter.accepts(EditCommandKind::MoveDown) => {
                 if shift && try_extend_cell_selection(&mut st, 0, 1) {
                     KeyAction::ClearPreferredX
+                } else if line_motion == LineStep::ParagraphStart {
+                    step_to_paragraph_start(&mut st, true, mode);
+                    KeyAction::LineEdgeMotion
                 } else {
                     match vertical_op(line_motion, true) {
                         Some(op) => {
@@ -2126,10 +2132,125 @@ fn vertical_op(step: LineStep, downward: bool) -> Option<MoveOperation> {
     match (step, downward) {
         (LineStep::Document, false) => Some(MoveOperation::Start),
         (LineStep::Document, true) => Some(MoveOperation::End),
-        (LineStep::Paragraph, false) => Some(MoveOperation::StartOfBlock),
-        (LineStep::Paragraph, true) => Some(MoveOperation::EndOfBlock),
-        (LineStep::Line, _) => None,
+        (LineStep::ParagraphEdge, false) => Some(MoveOperation::StartOfBlock),
+        (LineStep::ParagraphEdge, true) => Some(MoveOperation::EndOfBlock),
+        // The caller routes `ParagraphStart` to `step_to_paragraph_start`
+        // before asking here: no single primitive goes to the previous
+        // paragraph's start only when the caret already stands at this one's.
+        // Should a caller forget, the caret moves a line, not somewhere
+        // unexpected.
+        (LineStep::ParagraphStart, _) | (LineStep::Line, _) => None,
     }
+}
+
+/// Where `Ctrl+↑` / `Ctrl+↓` take the caret on Windows and Linux, as Word,
+/// WordPad and the GTK and Qt text views do: up, to the start of the caret's
+/// paragraph, or of the paragraph before when the caret already stands there;
+/// down, to the start of the next paragraph, or to the end of the last one.
+/// With `KeepAnchor` the selection grows to there.
+///
+/// The paragraphs are the document's blocks in reading order, so the step
+/// walks list items one by one and goes into and out of a quotation as into
+/// any other paragraph. A table cell is the exception: a step from inside one
+/// stops at the cell's first paragraph's start or last paragraph's end, as the
+/// macOS `⌥↑/↓` step stops at its paragraph's edges, and Tab, Shift+Tab or
+/// the plain arrows move on to the next cell. A step from outside a table goes
+/// into the cell next to it, as Down does. A selection that already holds a
+/// table whole (its anchor outside it) is not kept in a cell either: Shift
+/// with the step goes on past the table.
+///
+/// The blocks are read as a caret reads them (`block_at_caret`), never with
+/// text-document's `StartOfBlock` / `PreviousBlock` from the caret: at the end
+/// of a paragraph those read the separator after it, which belongs to the
+/// next paragraph, so `StartOfBlock` there went to the next paragraph's start.
+fn step_to_paragraph_start(st: &mut EditorState, downward: bool, mode: MoveMode) {
+    let caret = st.cursor.position();
+    let Ok(here) = st.document.block_at_caret(caret) else {
+        return;
+    };
+    let span = BlockSpan {
+        start: here.start,
+        end: here.start + here.length,
+    };
+    let neighbour = if downward {
+        // An independent cursor, so asking where a block step lands leaves the
+        // editor's caret and selection alone (see `TextCursor::clone`). It
+        // steps from the block's start, where a character index and a caret
+        // offset agree, so `NextBlock` steps from this paragraph and not the
+        // next one. `NextBlock` also steps over a table's anchor into the
+        // first cell, and stops at the end of the main text rather than going
+        // on into the footnote bodies after it.
+        let probe = st.cursor.clone();
+        probe.set_position(span.start, MoveMode::MoveAnchor);
+        probe.move_position(MoveOperation::NextBlock, MoveMode::MoveAnchor, 1);
+        st.document.block_at_caret(probe.position()).ok()
+    } else {
+        // The position before the paragraph (or before the caret, when it
+        // stands on a table's anchor ahead of the paragraph it reads as) is
+        // in the paragraph before: at its end, or at the start of an empty
+        // one.
+        caret
+            .min(span.start)
+            .checked_sub(1)
+            .and_then(|before| st.document.block_at_caret(before).ok())
+    }
+    .filter(|block| block.block_id != here.block_id);
+    let confining = confining_cell(st, here.block_id);
+    let neighbour = neighbour
+        .filter(|block| confining.is_none() || cell_of_block(st, block.block_id) == confining)
+        .map(|block| block.start);
+    let target = paragraph_start_target(downward, caret, span, neighbour);
+    if target != caret {
+        move_moving_end(st, target, mode);
+    }
+    // A paragraph's start or end is never a soft wrap; asked anyway, so the
+    // caret is drawn where a step would draw it should a layout say otherwise.
+    st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
+}
+
+/// A paragraph's extent, in caret positions.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct BlockSpan {
+    start: usize,
+    end: usize,
+}
+
+/// The decision of [`step_to_paragraph_start`], apart from the document:
+/// `caret` in the paragraph `here`, `neighbour` the start of the paragraph the
+/// step may go to (the next one going down, the one before going up), `None`
+/// when there is none it may go to.
+fn paragraph_start_target(
+    downward: bool,
+    caret: usize,
+    here: BlockSpan,
+    neighbour: Option<usize>,
+) -> usize {
+    if downward {
+        neighbour.unwrap_or(here.end)
+    } else if caret > here.start {
+        here.start
+    } else {
+        neighbour.unwrap_or(caret.min(here.start))
+    }
+}
+
+/// The table cell a paragraph step from the caret's block (`block_id`) must
+/// stay in, if any: the caret's cell, when the selection's fixed end is in it
+/// too (or there is no selection).
+fn confining_cell(st: &EditorState, block_id: usize) -> Option<(usize, usize, usize)> {
+    let cell = cell_of_block(st, block_id)?;
+    let anchor = st.cursor.anchor();
+    if anchor == st.cursor.position() {
+        return Some(cell);
+    }
+    let anchor_block = st.document.block_at_caret(anchor).ok()?;
+    (cell_of_block(st, anchor_block.block_id) == Some(cell)).then_some(cell)
+}
+
+/// The table cell holding block `block_id`, as `(table, row, column)`.
+fn cell_of_block(st: &EditorState, block_id: usize) -> Option<(usize, usize, usize)> {
+    let cell = st.document.block_by_id(block_id)?.table_cell()?;
+    Some((cell.table.id(), cell.row, cell.column))
 }
 
 /// Which *logical* line edge the user pressed towards.
@@ -2868,7 +2989,7 @@ mod motion_tests {
     // The chord → motion reading lives in `common::text_nav` and is tested
     // there against both conventions. These cover the other half: that each
     // motion, once resolved, reaches the right primitive — including the two
-    // (`LineEdge`, `Document`, `Paragraph`) that no chord on a Linux host can
+    // (`LineEdge`, `Document`, `ParagraphEdge`) that no chord on a Linux host can
     // produce, and that a macOS run would otherwise be the first to exercise.
 
     #[test]
@@ -2925,13 +3046,57 @@ mod motion_tests {
             Some(MoveOperation::End)
         );
         assert_eq!(
-            vertical_op(LineStep::Paragraph, false),
+            vertical_op(LineStep::ParagraphEdge, false),
             Some(MoveOperation::StartOfBlock)
         );
         assert_eq!(
-            vertical_op(LineStep::Paragraph, true),
+            vertical_op(LineStep::ParagraphEdge, true),
             Some(MoveOperation::EndOfBlock)
         );
+    }
+
+    #[test]
+    fn a_paragraph_start_step_is_never_a_single_primitive() {
+        // The caller routes it to `step_to_paragraph_start`; asked here, it is
+        // not mistaken for the macOS step to the paragraph's edge.
+        assert_eq!(vertical_op(LineStep::ParagraphStart, false), None);
+        assert_eq!(vertical_op(LineStep::ParagraphStart, true), None);
+    }
+
+    const MIDDLE: BlockSpan = BlockSpan { start: 10, end: 20 };
+
+    #[test]
+    fn a_paragraph_step_up_goes_to_this_paragraph_start_first() {
+        assert_eq!(paragraph_start_target(false, 15, MIDDLE, Some(3)), 10);
+        assert_eq!(paragraph_start_target(false, 20, MIDDLE, Some(3)), 10);
+    }
+
+    #[test]
+    fn a_paragraph_step_up_from_a_start_goes_to_the_one_before() {
+        assert_eq!(paragraph_start_target(false, 10, MIDDLE, Some(3)), 3);
+        // The first paragraph (or a cell's first): the caret stays.
+        assert_eq!(paragraph_start_target(false, 10, MIDDLE, None), 10);
+    }
+
+    #[test]
+    fn a_paragraph_step_down_goes_to_the_next_start_from_anywhere() {
+        for caret in [10, 15, 20] {
+            assert_eq!(paragraph_start_target(true, caret, MIDDLE, Some(21)), 21);
+        }
+    }
+
+    #[test]
+    fn a_paragraph_step_down_from_the_last_paragraph_goes_to_its_end() {
+        assert_eq!(paragraph_start_target(true, 10, MIDDLE, None), 20);
+        assert_eq!(paragraph_start_target(true, 20, MIDDLE, None), 20);
+    }
+
+    #[test]
+    fn a_caret_ahead_of_its_paragraph_steps_up_from_where_it_stands() {
+        // On a table's anchor the caret reads as in the first cell, whose
+        // start lies after it: going up must not move it forward.
+        assert_eq!(paragraph_start_target(false, 8, MIDDLE, Some(3)), 3);
+        assert_eq!(paragraph_start_target(false, 8, MIDDLE, None), 8);
     }
 
     #[test]

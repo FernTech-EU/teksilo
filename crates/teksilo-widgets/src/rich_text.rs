@@ -114,6 +114,8 @@ mod links_tests;
 mod lists_tests;
 #[cfg(test)]
 mod nesting_tests;
+#[cfg(all(test, not(target_os = "macos")))]
+mod paragraph_step_tests;
 #[cfg(test)]
 mod reader_text_tests;
 #[cfg(test)]

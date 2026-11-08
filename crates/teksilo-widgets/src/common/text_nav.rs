@@ -5,7 +5,8 @@
 //!
 //! Desktop platforms do not merely disagree about *which modifier* carries a
 //! text-navigation chord — they lay the motions out differently. Windows and
-//! Linux put word-jump on `Ctrl+←/→` and line edges on bare `Home`/`End`.
+//! Linux put word-jump on `Ctrl+←/→`, the paragraph on `Ctrl+↑/↓` and line
+//! edges on bare `Home`/`End`.
 //! macOS uses three distinct modifiers on the arrows themselves: `⌥←/→` for
 //! word, `⌘←/→` for the line edge, `⌘↑/↓` for the document, `⌥↑/↓` for the
 //! paragraph. So a single "is the accelerator held?" boolean cannot express
@@ -35,7 +36,8 @@ use teksilo_core::event::Modifiers;
 pub(crate) enum TextNavConvention {
     /// macOS: `⌥` for word / paragraph, `⌘` for line / document.
     Mac,
-    /// Windows and Linux: `Ctrl` for word, `Home`/`End` for the line edge.
+    /// Windows and Linux: `Ctrl` for word and paragraph, `Home`/`End` for the
+    /// line edge.
     PcStyle,
 }
 
@@ -67,10 +69,18 @@ pub(crate) enum CaretStep {
 pub(crate) enum LineStep {
     /// One visual line — the unmodified arrow.
     Line,
-    /// The start or end of the paragraph (block).
+    /// The edge of the paragraph (block) in the direction pressed: its start
+    /// going up, its end going down. macOS `⌥↑/↓`.
     ///
     /// Never produced under [`TextNavConvention::PcStyle`].
-    Paragraph,
+    ParagraphEdge,
+    /// A paragraph start: going up, the start of the caret's paragraph, or of
+    /// the one before it when the caret is already there; going down, the
+    /// start of the next paragraph. `Ctrl+↑/↓` in Word, WordPad, and the GTK
+    /// and Qt text views, and what NVDA reads a paragraph after.
+    ///
+    /// Never produced under [`TextNavConvention::Mac`].
+    ParagraphStart,
     /// The start or end of the document.
     ///
     /// Never produced under [`TextNavConvention::PcStyle`], where the document
@@ -120,14 +130,22 @@ pub(crate) fn line_step_for(convention: TextNavConvention, modifiers: Modifiers)
             if modifiers.super_key() {
                 LineStep::Document
             } else if modifiers.alt() {
-                LineStep::Paragraph
+                LineStep::ParagraphEdge
             } else {
                 LineStep::Line
             }
         }
-        // Windows scrolls the view on Ctrl+↑/↓ without moving the caret, which
-        // is a viewport concern rather than a motion; nothing to report here.
-        TextNavConvention::PcStyle => LineStep::Line,
+        // The same modifier as the word step, as Word and the GTK and Qt text
+        // views read it. A screen reader leans on it: NVDA reads the paragraph
+        // the caret lands in after Ctrl+↑/↓, so a caret that moved only a line
+        // had it read the same paragraph again on every press.
+        TextNavConvention::PcStyle => {
+            if modifiers.ctrl() {
+                LineStep::ParagraphStart
+            } else {
+                LineStep::Line
+            }
+        }
     }
 }
 
@@ -234,14 +252,35 @@ mod tests {
     #[test]
     fn mac_vertical_arrows_reach_the_paragraph_and_the_document() {
         assert_eq!(line_step_for(Mac, Modifiers::NONE), LineStep::Line);
-        assert_eq!(line_step_for(Mac, ALT), LineStep::Paragraph);
+        assert_eq!(line_step_for(Mac, ALT), LineStep::ParagraphEdge);
         assert_eq!(line_step_for(Mac, SUPER), LineStep::Document);
     }
 
     #[test]
-    fn pc_style_vertical_arrows_are_always_one_line() {
-        for m in [Modifiers::NONE, CTRL, ALT, SUPER] {
+    fn pc_style_puts_the_paragraph_step_on_ctrl() {
+        assert_eq!(line_step_for(PcStyle, CTRL), LineStep::ParagraphStart);
+        assert_eq!(
+            line_step_for(PcStyle, CTRL | SHIFT),
+            LineStep::ParagraphStart
+        );
+    }
+
+    #[test]
+    fn pc_style_vertical_arrows_without_ctrl_are_one_line() {
+        // The document edges are Ctrl+Home / Ctrl+End there, and Alt+↑/↓ is
+        // an application's (Skribisto steps between documents with it).
+        for m in [Modifiers::NONE, ALT, SUPER, SHIFT] {
             assert_eq!(line_step_for(PcStyle, m), LineStep::Line);
+        }
+    }
+
+    #[test]
+    fn each_convention_has_one_paragraph_step_of_its_own() {
+        // macOS stops at the edges of the caret's paragraph, Windows and Linux
+        // at paragraph starts; neither chord reaches the other's motion.
+        for m in [Modifiers::NONE, CTRL, ALT, SUPER, ALT | SUPER, CTRL | ALT] {
+            assert_ne!(line_step_for(Mac, m), LineStep::ParagraphStart);
+            assert_ne!(line_step_for(PcStyle, m), LineStep::ParagraphEdge);
         }
     }
 
@@ -288,6 +327,7 @@ mod tests {
         } else {
             assert_eq!(TextNavConvention::CURRENT, PcStyle);
             assert_eq!(caret_step(CTRL), CaretStep::Word);
+            assert_eq!(line_step(CTRL), LineStep::ParagraphStart);
         }
     }
 }
