@@ -566,7 +566,16 @@ fn line_pieces(line: &SourceLine, base_direction: TextDirection) -> Vec<Piece> {
 /// one alone was silent instead of "blank", and the caret on the break said
 /// nothing. The break stays one character either way, so every offset a
 /// reader computes is unchanged; only its text differs from the source's.
+///
+/// A break is one source character, or a `\r\n`: that is every hard break of
+/// UAX #14, and what `LineEnd::HardBreak` promises. A longer one would be
+/// reported as one character and shift every reader offset after it, so a
+/// layout that hands one in is caught here in a debug build.
 fn reported_break(source: &str) -> &str {
+    debug_assert!(
+        source == "\r\n" || source.chars().count() == 1,
+        "a hard break is one character or a \\r\\n, not {source:?}"
+    );
     if source == "\r\n" { source } else { "\n" }
 }
 
@@ -1535,6 +1544,25 @@ mod tests {
         assert_eq!(children[0].1.character_lengths(), &[1, 1, 1]);
         assert_eq!(children[1].1.value(), Some("\n"));
         assert_eq!(children[1].1.character_lengths(), &[1]);
+    }
+
+    /// A layout that reports two line feeds as one break would have them
+    /// heard as one character and every offset after them shifted by one;
+    /// a debug build says so where it happens instead.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "a hard break is one character")]
+    fn a_break_of_two_characters_that_is_not_crlf_is_caught() {
+        let text = "ab\n\ncd";
+        let source = unmeasured(
+            text,
+            &[
+                (0..4, LineEnd::HardBreak { chars: 2, bytes: 2 }),
+                (4..6, LineEnd::EndOfText),
+            ],
+            0,
+        );
+        push_text_runs(&mut label_builder(), None, &source);
     }
 
     #[test]

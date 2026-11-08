@@ -725,6 +725,15 @@ pub(crate) fn emit_root_transform(root: &mut accesskit::Node, device_scale_facto
 /// Not when an ancestor is a content transform (a `SceneView`): the children
 /// of such a node, and everything below them, are described in its content
 /// space, which the transform on the boundary child projects.
+///
+/// The walk starts at the owner's parent, not at the owner, on purpose. A
+/// content transform moves a node's *arena* children only: the walker puts
+/// the transform on each of those children and none on the node itself, whose
+/// box stays a viewport in its parent's space. The node's own synthetic
+/// children hang off that untransformed node, so a rect it states relative to
+/// its own origin is in the same space as its box. (A `SceneView`, the one
+/// content transform, gives each item node a transform of its own, which
+/// `snap_text_run_top` declines to touch in any case.)
 pub(super) fn reports_in_window_space(arena: &WidgetArena, owner: WidgetId) -> bool {
     let mut current = arena.parent(owner);
     while let Some(id) = current {
@@ -761,9 +770,27 @@ const RUN_TOP_LIFT: f64 = 1.0 / 64.0;
 /// onto the cursor moved the caret one line up, and from the end of a
 /// wrapped line to the start of the line it was on.
 ///
-/// The run's box shrinks at the top by a little over a pixel at most, and
-/// stays inside the line: nothing drawn moves, and the editor's hit test is
-/// left alone. The bottom is untouched, so the line still meets the next.
+/// The run's box shrinks at the top by a little over a device pixel at most
+/// (up to `1 + RUN_TOP_MARGIN + RUN_TOP_LIFT`), and stays inside the line:
+/// nothing drawn moves, and the editor's hit test is left alone. The bottom
+/// is untouched, so two lines' boxes no longer meet: each run loses a
+/// different amount, and a gap of up to that much opens between a line's
+/// box and the one below it. Nothing a reader clicks lies in the gap, since
+/// a click goes to a character's top-left corner, which is the row this
+/// picks.
+///
+/// Truncation goes toward zero, so on a monitor above or left of the primary,
+/// where the client origin is negative, the click lands on the row *after*
+/// the chosen one. Any line with two whole rows below the margin holds both,
+/// which is every line a reader routes on. A line its node cuts down to a
+/// sliver with room for one row only (scrolled almost out of an editor) is
+/// still snapped, because no reported top truncates into one row from both
+/// signs. Where the origin is not negative the click stays on the line. Where
+/// it is, the click lands on the next row: the next line when the node cuts
+/// the sliver at its top, and just past the node when it cuts it at its
+/// bottom. Leaving the top where it was would be worse at the top edge,
+/// where it is above the node for either sign and the click reaches some
+/// other widget.
 ///
 /// Only for a run whose box the root's scale alone takes to the screen (the
 /// window's client origin is whole pixels, so the window's pixel grid is the
@@ -796,6 +823,11 @@ pub(crate) fn snap_text_run_top(
     let Some(mut rect) = node.bounds() else {
         return;
     };
+    // A box with an edge that is not a number is garbage from upstream:
+    // snapping its top would only make a finite part of it look meaningful.
+    if !(rect.y0.is_finite() && rect.y1.is_finite()) {
+        return;
+    }
     let scale = f64::from(device_scale_factor);
     if !(scale.is_finite() && scale > 0.0) {
         return;
@@ -4558,6 +4590,85 @@ mod tests {
         assert_eq!(vertical.bounds().unwrap().y0, 10.3);
     }
 
+    /// A box with an edge that is not a number keeps the top it was given:
+    /// a snapped finite top on an endless box would pass for a measured one.
+    #[test]
+    fn a_run_with_an_edge_that_is_not_a_number_keeps_its_top() {
+        for bottom in [f64::INFINITY, f64::NAN] {
+            let mut node = run_at(10.3, bottom);
+            snap_text_run_top(&mut node, 1.5, None);
+            assert_eq!(node.bounds().unwrap().y0, 10.3, "bottom {bottom}");
+        }
+    }
+
+    /// Where the client truncates the reported top to, as a window pixel
+    /// row: NVDA's `int()` goes toward zero, so on a monitor above or left
+    /// of the primary (a negative client origin) it rounds up.
+    fn clicked_row(reported_top: f64, scale: f64, client: f64) -> f64 {
+        (reported_top * scale + client).trunc() - client
+    }
+
+    /// A line its node cuts down to a sliver at the node's top edge, with
+    /// room for one pixel row only. Where the client origin is not negative
+    /// the click lands on that row; where it is, on the row after it, which
+    /// is the next line but still inside the node. Leaving the top where the
+    /// line really starts would put both clicks above the node, on whatever
+    /// widget is there.
+    #[test]
+    fn a_sliver_of_a_line_at_the_top_of_its_node_is_clicked_inside_the_node() {
+        let owner = accesskit::Rect {
+            x0: 0.0,
+            y0: 100.0,
+            x1: 200.0,
+            y1: 300.0,
+        };
+        // The line runs from 90 to 102: two device pixels of it show.
+        let mut node = run_at(90.0, 102.0);
+        snap_text_run_top(&mut node, 1.0, Some(owner));
+        let top = node.bounds().unwrap().y0;
+
+        assert_eq!(clicked_row(top, 1.0, 0.0), 101.0, "on the sliver");
+        assert_eq!(clicked_row(top, 1.0, 217.0), 101.0, "on the sliver");
+        let below_primary = clicked_row(top, 1.0, -1080.0);
+        assert_eq!(below_primary, 102.0, "on the next line, as documented");
+        assert!(
+            (owner.y0..owner.y1).contains(&below_primary),
+            "still inside the node"
+        );
+    }
+
+    /// A line with two whole rows below the margin holds the click for
+    /// either sign of the client origin, however little of it the node shows.
+    #[test]
+    fn a_line_with_two_rows_inside_its_node_holds_the_click_for_any_client_origin() {
+        for scale in [1.0f32, 1.25, 1.5, 1.75, 2.0, 2.25, 3.0] {
+            let s = f64::from(scale);
+            for step in 0..200 {
+                let owner_top = 100.0 + f64::from(step) * 0.0371;
+                let owner = accesskit::Rect {
+                    x0: 0.0,
+                    y0: owner_top,
+                    x1: 200.0,
+                    y1: 400.0,
+                };
+                // Just enough of the line shows for two rows past the margin.
+                let first = (owner_top * s + RUN_TOP_MARGIN).ceil();
+                let bottom = (first + 2.0) / s;
+                let mut node = run_at(owner_top - 9.0, bottom);
+                snap_text_run_top(&mut node, scale, Some(owner));
+                let top = node.bounds().unwrap().y0;
+                for client in [0.0, 217.0, -1080.0, -1440.0] {
+                    let row = clicked_row(top, s, client);
+                    assert!(
+                        row / s > owner_top && row + 1.0 <= bottom * s,
+                        "scale {scale}, node top {owner_top}, client {client}: \
+                         row {row} is outside the visible line"
+                    );
+                }
+            }
+        }
+    }
+
     /// A label laid out at no size, whose measured text runs out of its
     /// corner: what a `Grid` cell gives a label it has no room for.
     #[derive(Debug)]
@@ -4573,44 +4684,51 @@ mod tests {
         }
 
         fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-            use teksilo_canvas::{CharGeom, LineEnd, TextDirection, TextGeometry, TextLine};
-            use teksilo_canvas::{Point, TextLineSegment};
-            builder.set_role(accesskit::Role::Label);
-            let line = TextLine {
-                index: 0,
+            push_one_letter_line(builder, 16.0, teksilo_canvas::Point::ZERO);
+        }
+    }
+
+    /// Report a label holding one letter, `A`, on one measured line
+    /// `height` tall whose top-left is at `origin` in the widget's space.
+    fn push_one_letter_line(
+        builder: &mut AccessNodeBuilder,
+        height: f32,
+        origin: teksilo_canvas::Point,
+    ) {
+        use teksilo_canvas::TextLineSegment;
+        use teksilo_canvas::{CharGeom, LineEnd, TextDirection, TextGeometry, TextLine};
+        builder.set_role(accesskit::Role::Label);
+        let line = TextLine {
+            index: 0,
+            byte_range: 0..1,
+            char_range: 0..1,
+            rect: [0.0, 0.0, 8.0, height],
+            baseline: height * 0.75,
+            caret_x: 0.0,
+            segments: vec![TextLineSegment {
                 byte_range: 0..1,
                 char_range: 0..1,
-                rect: [0.0, 0.0, 8.0, 16.0],
-                baseline: 12.0,
-                caret_x: 0.0,
-                segments: vec![TextLineSegment {
-                    byte_range: 0..1,
-                    char_range: 0..1,
-                    direction: TextDirection::LeftToRight,
-                    rect: [0.0, 0.0, 8.0, 16.0],
-                    characters: vec![CharGeom {
-                        position: 0.0,
-                        width: 8.0,
-                    }],
+                direction: TextDirection::LeftToRight,
+                rect: [0.0, 0.0, 8.0, height],
+                characters: vec![CharGeom {
+                    position: 0.0,
+                    width: 8.0,
                 }],
-                end: LineEnd::EndOfText,
-                truncation: None,
-            };
-            let geometry = TextGeometry {
-                lines: vec![line],
-                dropped_lines: 0,
-                source_len: 1,
-                rendered_text: None,
-                links: Vec::new(),
-            };
-            let source = crate::accessibility::text_runs::TextRunSource::from_geometry(
-                "A",
-                &geometry,
-                Point::ZERO,
-                0,
-            );
-            crate::accessibility::text_runs::push_text_runs(builder, None, &source);
-        }
+            }],
+            end: LineEnd::EndOfText,
+            truncation: None,
+        };
+        let geometry = TextGeometry {
+            lines: vec![line],
+            dropped_lines: 0,
+            source_len: 1,
+            rendered_text: None,
+            links: Vec::new(),
+        };
+        let source = crate::accessibility::text_runs::TextRunSource::from_geometry(
+            "A", &geometry, origin, 0,
+        );
+        crate::accessibility::text_runs::push_text_runs(builder, None, &source);
     }
 
     /// A container that gives its child no room, at its own origin.
@@ -4636,6 +4754,98 @@ mod tests {
             for child in children.iter_mut() {
                 child.origin = bounds.origin();
                 child.size = teksilo_canvas::Size::new(0.0, 0.0);
+            }
+        }
+    }
+
+    /// A label whose line is scrolled partly out of it at the top, the way
+    /// an editor shows the line it has scrolled half past.
+    #[derive(Debug)]
+    struct ScrolledLabel {
+        scrolled_by: f32,
+    }
+
+    impl Widget for ScrolledLabel {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            teksilo_canvas::Size::new(120.0, 40.0).into()
+        }
+
+        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+            push_one_letter_line(
+                builder,
+                16.94,
+                teksilo_canvas::Point::new(0.0, -self.scrolled_by),
+            );
+        }
+    }
+
+    /// A container that sets its child down `offset` from its own top.
+    #[derive(Debug)]
+    struct OffsetCell {
+        offset: f32,
+    }
+
+    impl Widget for OffsetCell {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: teksilo_canvas::Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = teksilo_canvas::Point::new(bounds.x, bounds.y + self.offset);
+                child.size = teksilo_canvas::Size::new(120.0, 40.0);
+            }
+        }
+    }
+
+    /// A line its node cuts at the top is clicked on the first pixel row the
+    /// node shows, not on the row the line really starts on, which is above
+    /// the node and belongs to whatever widget is there.
+    #[test]
+    fn a_line_scrolled_half_out_of_its_node_is_clicked_inside_the_node() {
+        for scale in [1.0f32, 1.25, 1.5, 1.75, 2.0] {
+            let s = f64::from(scale);
+            for (offset, scrolled_by) in [(40.4, 8.3), (17.6, 0.7), (63.0, 12.45)] {
+                let mut tree = WidgetTree::new();
+                tree.set_device_scale_factor(scale);
+                let cell = tree.add(OffsetCell { offset });
+                let label = tree.add_child(cell, ScrolledLabel { scrolled_by });
+                tree.layout(SizeProposal::exact(200.0, 200.0));
+                let node_box = tree.bounds(label);
+                let node_top = f64::from(node_box.y);
+                let line_top = node_top - f64::from(scrolled_by);
+                let line_bottom = line_top + 16.94;
+
+                let update = tree.sync_accessibility();
+                let run = update
+                    .nodes
+                    .iter()
+                    .find(|(_, n)| n.role() == Role::TextRun)
+                    .map(|(_, n)| n.bounds().unwrap())
+                    .expect("the label reports a run");
+                for client in [0.0, 217.0, -1080.0] {
+                    let row = clicked_row(run.y0, s, client);
+                    assert!(
+                        row / s > node_top && (row + 1.0) / s <= line_bottom,
+                        "scale {scale}, node top {node_top}, client {client}: \
+                         row {row} is not on the part of the line the node shows"
+                    );
+                }
+                assert!(run.y0 > line_top, "only the reported top moved down");
             }
         }
     }
