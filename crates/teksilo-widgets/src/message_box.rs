@@ -1002,6 +1002,12 @@ impl Widget for MessageBox {
             // accordion keeps the text dormant, so it is neither a Tab stop nor in the
             // accessibility tree.
             //
+            // The document has no name of its own. The accordion's region around it
+            // is named by the toggle, and a screen reader announces that region as
+            // focus enters it: naming the document too had NVDA say "Show details"
+            // once for the region and again for the document. Unnamed, focus is
+            // heard as the region's name, then "document" and the text.
+            //
             // The document follows the locale, as the label it replaces did.
             let document = TextDocument::new();
             let resolved = text.to_signal();
@@ -1016,7 +1022,6 @@ impl Widget for MessageBox {
             // see that constant. The estimate gives the box a near height before the
             // text is first laid out, so it does not open at one line and then jump.
             let viewer = RichTextEditor::read_only(document)
-                .label(label.clone())
                 .tab_key(TabKey::MoveFocus)
                 .text_color(TextRole::Secondary)
                 .min_lines(1)
@@ -2386,7 +2391,8 @@ mod tests {
             SAVE_FAILED_DETAILS,
             "its text is the details, whole"
         );
-        assert_eq!(focus.label().as_deref(), Some(show_details.as_str()));
+        // Its name, or rather the lack of one, is
+        // `the_focused_details_hear_the_toggles_label_once`.
 
         let mut toggle = None;
         let mut stack = vec![state.root()];
@@ -2447,6 +2453,76 @@ mod tests {
             long > 150.0 && long < 260.0,
             "a hundred lines are capped and scroll: the box grew by {long} px"
         );
+    }
+
+    /// The focused details document carries no name: the region around it is
+    /// named by the toggle, and a screen reader announces that region as focus
+    /// enters it. NVDA said "Show details" for the region and again for the
+    /// document on Tab, because the document carried the toggle's label too.
+    #[test]
+    fn the_focused_details_hear_the_toggles_label_once() {
+        use teksilo_core::accesskit::Role;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let content = present_and_lay_out(&mut tree, save_failed_with_details(SAVE_FAILED_DETAILS));
+        let proposal = SizeProposal::exact(800.0, 600.0);
+        let show_details = teksilo_i18n::tr_widget!(messagebox_show_details()).resolve_now();
+
+        toggle_details(&mut tree, proposal);
+        let stops = tree.tab_stops_within(content);
+        assert_eq!(stops.len(), 4, "the details are a Tab stop: {stops:?}");
+        tree.focus(stops[1]);
+        let update = tree.sync_accessibility();
+        let consumer = accesskit_consumer::Tree::new(update.clone(), true);
+        let state = consumer.state();
+        let focus = state.focus().expect("the details hold the focus");
+        assert_eq!(focus.role(), Role::Document);
+
+        let mut chain = vec![focus];
+        let mut node = focus.parent();
+        while let Some(n) = node {
+            chain.push(n);
+            node = n.parent();
+        }
+        let named: Vec<Role> = chain
+            .iter()
+            .filter(|n| n.label().as_deref() == Some(show_details.as_str()))
+            .map(|n| n.role())
+            .collect();
+        assert!(
+            named.contains(&Role::Region) && !named.contains(&Role::Document),
+            "the region around the details carries the toggle's label, the document does not: {named:?}"
+        );
+        assert_eq!(
+            focus.label(),
+            None,
+            "the document itself is unnamed: the region names it"
+        );
+
+        // The toggle still says what it controls.
+        let mut toggle = None;
+        let mut stack = vec![state.root()];
+        while let Some(node) = stack.pop() {
+            if node.role() == Role::Button && node.label().as_deref() == Some(&show_details) {
+                toggle = Some(node);
+            }
+            stack.extend(node.children());
+        }
+        let toggle = toggle.expect("the toggle in the tree");
+        let region = chain
+            .iter()
+            .find(|n| n.role() == Role::Region)
+            .expect("the region");
+        assert!(
+            toggle.controls().any(|c| c.id() == region.id()),
+            "the toggle controls the region"
+        );
+
+        // Nothing the framework audits for is broken by an unnamed document.
+        use teksilo_core::accessibility::audit;
+        assert!(audit::duplicate_label_leaks(&update).is_empty());
+        assert!(audit::focusable_nodes_hidden(&update).is_empty());
+        assert!(audit::labels_without_text_ranges(&update).is_empty());
+        assert!(audit::text_range_divergences(&update).is_empty());
     }
 
     #[test]
