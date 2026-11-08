@@ -604,14 +604,14 @@ impl CodeEditorHandle {
     /// unable to make it do anything. Ctrl+Z inside the widget always worked;
     /// this is the same command from outside.
     pub fn undo(&self) {
-        let st = self.state.borrow();
-        let _ = st.document.undo();
+        keyboard::history_step(&mut self.state.borrow_mut(), keyboard::HistoryStep::Undo);
+        sync_cursor_signals(&self.state);
     }
 
     /// Redo this editor's last undone edit.
     pub fn redo(&self) {
-        let st = self.state.borrow();
-        let _ = st.document.redo();
+        keyboard::history_step(&mut self.state.borrow_mut(), keyboard::HistoryStep::Redo);
+        sync_cursor_signals(&self.state);
     }
 
     /// Copy the selection to the clipboard.

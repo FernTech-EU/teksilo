@@ -519,16 +519,8 @@ pub(super) fn run_standard_edit(
             StandardEdit::Paste | StandardEdit::PastePlain => {
                 clipboard::paste(&mut st, ctx);
             }
-            StandardEdit::Undo => {
-                // Undoing text under several carets would leave them pointing
-                // at offsets the undone edit invented; collapse first.
-                st.clear_extra_carets();
-                let _ = st.document.undo();
-            }
-            StandardEdit::Redo => {
-                st.clear_extra_carets();
-                let _ = st.document.redo();
-            }
+            StandardEdit::Undo => history_step(&mut st, HistoryStep::Undo),
+            StandardEdit::Redo => history_step(&mut st, HistoryStep::Redo),
             _ => return false,
         }
     }
@@ -537,6 +529,38 @@ pub(super) fn run_standard_edit(
     // completion popup re-evaluates (and dismisses) as after any edit.
     completion::react(state, ctx, Trigger::Edited);
     true
+}
+
+/// Which way [`history_step`] goes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum HistoryStep {
+    Undo,
+    Redo,
+}
+
+/// Undo or redo one step, and show the caret on the line its text is on now.
+///
+/// Undoing text under several carets would leave them pointing at offsets the
+/// undone edit invented, so the extra carets go first.
+///
+/// The document puts the caret back at a position, and a position on a soft
+/// wrap is on two lines. The caret is put at the start of the next line, as
+/// after a step or a removal ([`affinity_after_step`]): undoing a Backspace at
+/// the start of a wrapped line otherwise showed the caret at the end of the
+/// line above, and a reader asked for the caret's line read that line.
+/// text-document keeps no affinity in its history, so an edit made at the end
+/// of a wrapped line (after End) comes back at the start of the next one: the
+/// same position, on the line after.
+///
+/// The layout is stale after the step, so it is brought up to date first.
+pub(super) fn history_step(st: &mut CodeEditorState, step: HistoryStep) {
+    st.clear_extra_carets();
+    let _ = match step {
+        HistoryStep::Undo => st.document.undo(),
+        HistoryStep::Redo => st.document.redo(),
+    };
+    super::frame_loop::catch_up_layout(st);
+    st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
 }
 
 /// Run one of the editor's own [`CodeShortcut`] commands, as its `code.*`

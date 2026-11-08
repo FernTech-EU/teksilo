@@ -475,6 +475,31 @@ fn backspace_and_delete_stay_on_a_wrapped_line() {
     assert_eq!(reported_run_start(&mut d), (wrap, 0), "Delete");
 }
 
+/// Undo after a Backspace at the start of a wrapped line puts the caret back
+/// on that line, from the key and from the handle. It was reported on the line
+/// above.
+#[test]
+fn undoing_a_change_at_a_wrap_puts_the_caret_on_the_line_below() {
+    let (mut d, wrap, _) = wrapped();
+    d.put(wrap + 1);
+    d.key(Key::ArrowLeft);
+    d.key(Key::Backspace);
+    assert_eq!(d.caret(), wrap - 1);
+    d.key_with(Key::Z, Modifiers::COMMAND);
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0), "Ctrl+Z");
+
+    let handle = super::CodeEditorHandle {
+        state: d.state.clone(),
+    };
+    handle.redo();
+    d.settle();
+    handle.undo();
+    d.settle();
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0), "the handle's undo");
+}
+
 #[test]
 fn left_and_right_with_a_selection_go_to_its_ends() {
     let (mut d, wrap, _) = wrapped();

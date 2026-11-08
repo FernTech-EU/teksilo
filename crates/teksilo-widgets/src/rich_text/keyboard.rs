@@ -877,23 +877,54 @@ pub(super) fn run_standard_edit(
                 clipboard::paste_unformatted(&mut st, ctx);
                 KeyAction::ClearPreferredX
             }
+            // `history_step` sets the caret's side of a wrap, which
+            // `LineEdgeMotion` keeps (it clears the sticky column too).
             StandardEdit::Undo => {
-                crate::common::input_trace::traced_history_step(&st.document, "undo", || {
-                    st.document.undo()
-                });
-                KeyAction::ClearPreferredX
+                history_step(&mut st, HistoryStep::Undo);
+                KeyAction::LineEdgeMotion
             }
             StandardEdit::Redo => {
-                crate::common::input_trace::traced_history_step(&st.document, "redo", || {
-                    st.document.redo()
-                });
-                KeyAction::ClearPreferredX
+                history_step(&mut st, HistoryStep::Redo);
+                KeyAction::LineEdgeMotion
             }
             _ => return false,
         }
     };
     finish_key_action(state, ctx, action);
     true
+}
+
+/// Which way [`history_step`] goes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum HistoryStep {
+    Undo,
+    Redo,
+}
+
+/// Undo or redo one step, and show the caret on the line its text is on now.
+///
+/// The document puts the caret back at a position, and a position on a soft
+/// wrap is on two lines. The caret is put at the start of the next line, as
+/// after a character step or a removal ([`affinity_after_step`]): undoing a
+/// Backspace or a letter typed at the start of a wrapped line otherwise showed
+/// the caret at the end of the line above, and a reader asked for the caret's
+/// line read that line. text-document keeps no affinity in its history, so an
+/// edit made at the end of a wrapped line (after End) comes back at the start
+/// of the next one: the same position, on the line after.
+///
+/// The layout is stale after the step, so it is brought up to date first.
+pub(super) fn history_step(st: &mut EditorState, step: HistoryStep) {
+    let document = st.document.clone();
+    match step {
+        HistoryStep::Undo => {
+            crate::common::input_trace::traced_history_step(&document, "undo", || document.undo());
+        }
+        HistoryStep::Redo => {
+            crate::common::input_trace::traced_history_step(&document, "redo", || document.redo());
+        }
+    }
+    super::frame_loop::catch_up_layout(st);
+    st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
 }
 
 /// Run one of the editor's own [`FormatShortcut`] commands, as its `format.*`

@@ -549,6 +549,42 @@ fn backspace_stays_on_a_wrapped_line() {
     assert_eq!(r.line_start_at_caret(), wrap);
 }
 
+/// Undoing a Backspace at the start of a wrapped line (which takes the space
+/// before the wrap, so the text wraps elsewhere until the undo) puts the caret
+/// back at the start of that line. It was shown at the end of the line above,
+/// and a reader asked for the caret's line read that one.
+#[test]
+fn undoing_a_change_at_a_wrap_puts_the_caret_on_the_line_below() {
+    let (mut r, wrap) = at_the_second_line();
+    r.press(Key::Backspace);
+    assert_eq!(r.handle.cursor_position(), wrap - 1);
+    r.tree.press_key(Key::Z, Modifiers::COMMAND);
+    r.update();
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap, "the line after the wrap");
+
+    // Redone and undone again from the handle, as a host's Edit menu does.
+    r.handle.redo();
+    r.update();
+    r.handle.undo();
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap, "from the handle too");
+}
+
+/// The same after a letter typed at the start of a wrapped line.
+#[test]
+fn undoing_a_letter_typed_at_a_wrap_puts_the_caret_on_the_line_below() {
+    let (mut r, wrap) = at_the_second_line();
+    r.tree.type_text(r.id, "x");
+    r.update();
+    let typed = r.doc.to_plain_text().unwrap();
+    assert_eq!(typed.chars().nth(wrap), Some('x'));
+    r.tree.press_key(Key::Z, Modifiers::COMMAND);
+    r.update();
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap);
+}
+
 #[test]
 fn deleting_a_selection_from_the_start_of_a_wrapped_line_stays_on_it() {
     let (mut r, wrap) = at_the_second_line();
