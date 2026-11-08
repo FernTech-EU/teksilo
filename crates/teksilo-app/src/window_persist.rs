@@ -26,10 +26,12 @@
 //! Auto-persistence is a strict opt-in: a window only participates
 //! while it has a string id (its [`WindowConfig`]'s `id(...)`, or one
 //! given since with `EventContext::set_window_string_id`) *and* a
-//! `WindowStateService` is registered. The savers read the id each time
-//! they save, so a renamed window is saved under its new id, and
-//! [`move_saved_geometry`] moves its row there at the rename. Modal dialogs and ephemeral
-//! popovers are thus naturally excluded — they don't carry stable ids.
+//! `WindowStateService` is registered. The savers are installed on every
+//! window, and read the id each time they save: a window without one saves
+//! nothing, a renamed window is saved under its new id, and
+//! [`move_saved_geometry`] moves its row there at the rename. Modal dialogs
+//! and popovers are left out while they have no id, which they usually do
+//! not; one given an id is saved like any other window.
 
 use teksilo_core::ObserverHandle;
 use teksilo_core::{Signal, WindowConfig, WindowState};

@@ -681,6 +681,10 @@ Once it returns `Ok`:
   the window's current geometry is saved under the new id, replacing any row
   already there, the row under the old id is forgotten, and every later move
   or resize is saved under the new id.
+- The exception is an old id another open window still has, which happens
+  when two windows were opened with one id (nothing refuses that at open).
+  Then `find_window(old)` finds that other window, and the row under the old
+  id stays: it is that window's row, and it goes on saving there.
 - A window opened without an id gets one, and from then on is found and
   saved by it.
 

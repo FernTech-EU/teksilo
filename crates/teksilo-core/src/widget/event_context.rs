@@ -1431,6 +1431,11 @@ impl<'ops> EventContext<'ops> {
     ///   old id is forgotten, and every later move or resize is saved under
     ///   `new_id`. A window opened with `new_id` after a restart comes back
     ///   where this one was left.
+    /// - The exception is an old id another open window still has, which
+    ///   happens when two windows were opened with one id (nothing refuses
+    ///   that at open). Then [`find_window`](Self::find_window) finds that
+    ///   other window under the old id, and the row under the old id stays:
+    ///   it is that window's row, and it goes on saving there.
     ///
     /// A window opened without an id gets one this way, and from then on is
     /// found by it and, when the app saves window geometry, saved under it.

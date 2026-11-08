@@ -347,7 +347,9 @@ mod tests {
     }
 
     /// When a second window still has the old id (it was opened twice), the
-    /// id now names that one, and its geometry row stays.
+    /// id now names that one, and its geometry row stays: it is the other
+    /// window's row, which it goes on saving to, and the renamed window's
+    /// moves no longer land there.
     #[test]
     fn the_old_id_stays_with_another_window_that_has_it() {
         let dir = tempfile::tempdir().unwrap();
@@ -356,7 +358,10 @@ mod tests {
             window(1, Some("old"), (800, 600)),
             window(2, Some("old"), (640, 480)),
         ];
-        let _savers = crate::window_persist::install_persist_observers(&live[1], service.clone());
+        let _savers_1 = crate::window_persist::install_persist_observers(&live[0], service.clone());
+        let _savers_2 = crate::window_persist::install_persist_observers(&live[1], service.clone());
+        // Window 1 is the last to save under the id the two share.
+        live[0].set_size_from_os((820, 610));
         let mut ids = opened(&live);
 
         ids.rename(TeksiloWindowId::new(2), "new".into(), &live, Some(&service))
@@ -364,9 +369,25 @@ mod tests {
 
         assert_eq!(ids.find("old"), Some(TeksiloWindowId::new(1)));
         assert_eq!(ids.find("new"), Some(TeksiloWindowId::new(2)));
-        assert!(
-            service.state_for("old").is_some(),
-            "window 1 still saves there"
+        let size = |label: &str| service.state_for(label).map(|s| (s.width, s.height));
+        assert_eq!(
+            size("old"),
+            Some((820, 610)),
+            "the rename leaves window 1's row where it is"
         );
+        assert_eq!(
+            size("new"),
+            Some((640, 480)),
+            "window 2 is saved under its new id"
+        );
+
+        live[1].set_size_from_os((700, 500));
+        live[0].set_size_from_os((900, 680));
+        assert_eq!(
+            size("new"),
+            Some((700, 500)),
+            "window 2 saves under its new id"
+        );
+        assert_eq!(size("old"), Some((900, 680)), "window 1 still saves there");
     }
 }
