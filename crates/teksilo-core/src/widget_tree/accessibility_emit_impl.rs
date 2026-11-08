@@ -783,11 +783,13 @@ impl WidgetTree {
         {
             let local: std::collections::HashSet<accesskit::NodeId> =
                 synthetic_local_bounds.iter().map(|(sid, _)| *sid).collect();
+            let owner_box = ak_node.bounds();
             for (syn_id, syn_node) in synthetic_children.iter_mut() {
                 if local.contains(syn_id) {
                     super::accessibility_impl::snap_text_run_top(
                         syn_node,
                         self.device_scale_factor,
+                        owner_box,
                     );
                 }
             }

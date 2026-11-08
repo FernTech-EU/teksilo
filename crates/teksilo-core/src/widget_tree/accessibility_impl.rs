@@ -374,7 +374,8 @@ impl WidgetTree {
                 // The same snap the walk applies, from the unsnapped rect:
                 // a moved line's top falls inside a different pixel.
                 if reports_in_window_space(&self.arena, owner) {
-                    snap_text_run_top(node, self.device_scale_factor);
+                    let owner_box = to_accesskit_rect(self.arena.bounds(owner));
+                    snap_text_run_top(node, self.device_scale_factor, Some(owner_box));
                 }
             } else if let Some(rect) = node.bounds() {
                 node.set_bounds(accesskit::Rect {
@@ -747,7 +748,8 @@ const RUN_TOP_MARGIN: f64 = 0.125;
 const RUN_TOP_LIFT: f64 = 1.0 / 64.0;
 
 /// Move a text run's reported top down onto the first whole device pixel row
-/// that lies inside its line.
+/// that lies inside its line and inside `owner`, the box of the node the run
+/// belongs to.
 ///
 /// A screen reader that clicks on a character clicks at the top-left of the
 /// box the platform reports for it, and makes that point whole pixels first:
@@ -768,7 +770,20 @@ const RUN_TOP_LIFT: f64 = 1.0 / 64.0;
 /// screen's): one under a content transform has a grid this cannot see.
 /// Only for horizontal text, whose character positions run along x: a
 /// vertical run's positions are measured from its top.
-pub(crate) fn snap_text_run_top(node: &mut accesskit::Node, device_scale_factor: f32) {
+///
+/// The row has to lie inside the owner as well: a click outside the node
+/// never reaches its widget, so a row there is no better than the old top,
+/// and moving the top onto it could take the run off its node altogether. A
+/// label laid out at no size, its text overflowing from its corner, keeps a
+/// run that only touches its node's box; a snapped top a pixel down left the
+/// run outside the node, so nothing a reader reviewed was where the node is.
+/// Where the owner cuts a line off at the top (a line scrolled half out of
+/// an editor), the row is the first one the node shows.
+pub(crate) fn snap_text_run_top(
+    node: &mut accesskit::Node,
+    device_scale_factor: f32,
+    owner: Option<accesskit::Rect>,
+) {
     if node.role() != accesskit::Role::TextRun || node.transform().is_some() {
         return;
     }
@@ -785,10 +800,14 @@ pub(crate) fn snap_text_run_top(node: &mut accesskit::Node, device_scale_factor:
     if !(scale.is_finite() && scale > 0.0) {
         return;
     }
-    let row = (rect.y0 * scale + RUN_TOP_MARGIN).ceil();
-    if row + 1.0 > rect.y1 * scale {
-        // No whole pixel row inside the box: a caret-shaped or unmeasured
-        // run, which nobody clicks on.
+    let (top, bottom) = match owner {
+        Some(owner) => (rect.y0.max(owner.y0), rect.y1.min(owner.y1)),
+        None => (rect.y0, rect.y1),
+    };
+    let row = (top * scale + RUN_TOP_MARGIN).ceil();
+    if row + 1.0 > bottom * scale {
+        // No whole pixel row inside both: a caret-shaped or unmeasured run,
+        // or one its node does not show, which nobody clicks on.
         return;
     }
     rect.y0 = (row + RUN_TOP_LIFT) / scale;
@@ -4503,7 +4522,7 @@ mod tests {
                 let top = 3.0 + f64::from(step) * 0.173;
                 let bottom = top + 16.939453;
                 let mut node = run_at(top, bottom);
-                snap_text_run_top(&mut node, scale);
+                snap_text_run_top(&mut node, scale, None);
                 let rect = node.bounds().unwrap();
                 // On a monitor left of or above the primary, the client origin
                 // is negative, and `int()` truncates toward zero.
@@ -4530,12 +4549,115 @@ mod tests {
     #[test]
     fn a_run_too_thin_to_hold_a_pixel_row_or_running_down_keeps_its_top() {
         let mut thin = run_at(10.3, 10.3);
-        snap_text_run_top(&mut thin, 1.5);
+        snap_text_run_top(&mut thin, 1.5, None);
         assert_eq!(thin.bounds().unwrap().y0, 10.3);
 
         let mut vertical = run_at(10.3, 40.0);
         vertical.set_text_direction(accesskit::TextDirection::TopToBottom);
-        snap_text_run_top(&mut vertical, 1.5);
+        snap_text_run_top(&mut vertical, 1.5, None);
         assert_eq!(vertical.bounds().unwrap().y0, 10.3);
+    }
+
+    /// A label laid out at no size, whose measured text runs out of its
+    /// corner: what a `Grid` cell gives a label it has no room for.
+    #[derive(Debug)]
+    struct OverflowingLabel;
+
+    impl Widget for OverflowingLabel {
+        fn layout_response(
+            &self,
+            _proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            teksilo_canvas::Size::new(0.0, 0.0).into()
+        }
+
+        fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+            use teksilo_canvas::{CharGeom, LineEnd, TextDirection, TextGeometry, TextLine};
+            use teksilo_canvas::{Point, TextLineSegment};
+            builder.set_role(accesskit::Role::Label);
+            let line = TextLine {
+                index: 0,
+                byte_range: 0..1,
+                char_range: 0..1,
+                rect: [0.0, 0.0, 8.0, 16.0],
+                baseline: 12.0,
+                caret_x: 0.0,
+                segments: vec![TextLineSegment {
+                    byte_range: 0..1,
+                    char_range: 0..1,
+                    direction: TextDirection::LeftToRight,
+                    rect: [0.0, 0.0, 8.0, 16.0],
+                    characters: vec![CharGeom {
+                        position: 0.0,
+                        width: 8.0,
+                    }],
+                }],
+                end: LineEnd::EndOfText,
+                truncation: None,
+            };
+            let geometry = TextGeometry {
+                lines: vec![line],
+                dropped_lines: 0,
+                source_len: 1,
+                rendered_text: None,
+                links: Vec::new(),
+            };
+            let source = crate::accessibility::text_runs::TextRunSource::from_geometry(
+                "A",
+                &geometry,
+                Point::ZERO,
+                0,
+            );
+            crate::accessibility::text_runs::push_text_runs(builder, None, &source);
+        }
+    }
+
+    /// A container that gives its child no room, at its own origin.
+    #[derive(Debug)]
+    struct NoRoomCell;
+
+    impl Widget for NoRoomCell {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn place_children(
+            &self,
+            bounds: teksilo_canvas::Rect,
+            _proposal: SizeProposal,
+            children: &mut [crate::widget::WidgetPlacement],
+            _ctx: &LayoutContext,
+        ) {
+            for child in children.iter_mut() {
+                child.origin = bounds.origin();
+                child.size = teksilo_canvas::Size::new(0.0, 0.0);
+            }
+        }
+    }
+
+    /// A run that only touches its node's box keeps touching it: the snapped
+    /// top is a row inside the node too, and a node with no row to give
+    /// leaves the run's top where it was, rather than a pixel off the node.
+    #[test]
+    fn a_label_laid_out_at_no_size_keeps_its_run_on_its_node() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let mut tree = WidgetTree::new();
+            tree.set_device_scale_factor(scale);
+            let cell = tree.add(NoRoomCell);
+            let label = tree.add_child(cell, OverflowingLabel);
+            tree.layout(SizeProposal::exact(200.0, 100.0));
+            assert_eq!(tree.bounds(label).width, 0.0, "the label has no size");
+            let update = tree.sync_accessibility();
+            assert_eq!(
+                crate::accessibility::audit::text_range_divergences(&update),
+                Vec::new(),
+                "scale {scale}"
+            );
+        }
     }
 }

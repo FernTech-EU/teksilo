@@ -34,8 +34,8 @@
 //!   it — a magnifier stops tracking the whole label, not part of it.
 //!   The rects stay exactly what was measured here; the tree walk then
 //!   moves the top of each run given in local rects onto a whole device
-//!   pixel inside its line (`snap_text_run_top`), because a screen reader
-//!   clicks on the truncated top-left of a character's box.
+//!   pixel inside its line and its node (`snap_text_run_top`), because a
+//!   screen reader clicks on the truncated top-left of a character's box.
 //! - Runs sharing a visual line are linked through `next_on_line` /
 //!   `previous_on_line`, symmetrically, and never dangle.
 //! - Ids are derived from (byte offset, byte length, caller seed) and
