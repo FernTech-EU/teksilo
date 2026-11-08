@@ -292,7 +292,8 @@ fn initial_window_focus(
 /// Per-window state managed by the WindowManager.
 pub(crate) struct ManagedWindow {
     pub teksilo_id: TeksiloWindowId,
-    pub string_id: Option<String>,
+    // The window's string id lives in `state` alone (`state.string_id()`),
+    // because the app can change it while the window is open.
     pub tree: WidgetTree,
     /// Reactive per-window state shared with the `WidgetTree` and
     /// accessible from handlers via
@@ -823,8 +824,10 @@ pub struct WindowManager {
     /// the IME is allowed: the post-dispatch settle applies it again then.
     ime_cursor_areas: HashMap<TeksiloWindowId, teksilo_canvas::Rect>,
     /// Stable string-id → id lookup, populated whenever a config carries
-    /// `id(...)`. Used by `WindowOps::find_window`.
-    string_to_id: HashMap<String, TeksiloWindowId>,
+    /// `id(...)` and kept in step on close and on
+    /// [`set_window_string_id`](Self::set_window_string_id). Used by
+    /// `WindowOps::find_window`.
+    string_to_id: crate::window_identity::StringIds,
     /// Next allocatable `TeksiloWindowId`. Bumped by `alloc_id`; never
     /// reused after a window closes.
     next_id: u64,
@@ -874,6 +877,11 @@ pub struct WindowManager {
     /// the focus and was minimised as it was taken out, for a dialog opened
     /// over it. See [`knows_focused`](Self::knows_focused).
     taken_out: HashMap<TeksiloWindowId, TakenOut>,
+    /// The state of each window a handler runs in, out of the map
+    /// meanwhile, so the handler can still rename it (the usual case: Save
+    /// As in a document window renames that window). See
+    /// [`live_states`](Self::live_states).
+    taken_out_states: HashMap<TeksiloWindowId, WindowState>,
     /// Windows that took the focus this turn: their modal child is raised
     /// at its end ([`refocus_after_turn`](Self::refocus_after_turn)).
     refocus_due: Vec<TeksiloWindowId>,
@@ -1108,7 +1116,7 @@ impl WindowManager {
             ime_composition_finished: std::collections::HashSet::new(),
             late_ime_commits: HashMap::new(),
             ime_cursor_areas: HashMap::new(),
-            string_to_id: HashMap::new(),
+            string_to_id: crate::window_identity::StringIds::default(),
             next_id: 1,
             pending_closes: Vec::new(),
             theme,
@@ -1123,6 +1131,7 @@ impl WindowManager {
             owed_app_dialogs_due: false,
             raise_next_modal: false,
             taken_out: HashMap::new(),
+            taken_out_states: HashMap::new(),
             refocus_due: Vec::new(),
             app_menu_declarations: None,
             a11y_prefs,
@@ -2062,14 +2071,14 @@ impl WindowManager {
             // `find_window` can name only one of them, so a debug build says
             // so.
             #[cfg(debug_assertions)]
-            if let Some(open) = self.string_to_id.get(sid) {
+            if let Some(open) = self.string_to_id.find(sid) {
                 eprintln!(
                     "teksilo-app: a window with id `{sid}` is already open ({open:?}); \
                      `find_window(\"{sid}\")` now finds the new one. Look the id up \
                      before opening it to raise the open window instead"
                 );
             }
-            self.string_to_id.insert(sid.clone(), teksilo_id);
+            self.string_to_id.opened(sid, teksilo_id);
         }
         let wants_custom_chrome = config.decorations.wants_custom_chrome_host();
         let is_modal = config.is_modal();
@@ -2660,19 +2669,18 @@ impl WindowManager {
             }
         }
 
-        // Install the auto-save observers if persistence is wired and
-        // this window opted in by carrying a stable id. The handles
-        // outlive the function via `ManagedWindow._persist_handles`.
-        let persist_handles = match (&persist_service, &config.string_id) {
-            (Some(svc), Some(label)) => {
-                crate::window_persist::install_persist_observers(&state, svc.clone(), label.clone())
-            }
-            _ => Vec::new(),
+        // Install the auto-save observers if persistence is wired. They save
+        // only while the window has a stable id, the one it opened with or
+        // one the app gives it later (`set_window_string_id`), so a window
+        // opened without one is saved from the moment it gets one. The
+        // handles outlive the function via `ManagedWindow._persist_handles`.
+        let persist_handles = match &persist_service {
+            Some(svc) => crate::window_persist::install_persist_observers(&state, svc.clone()),
+            None => Vec::new(),
         };
 
         let managed = ManagedWindow {
             teksilo_id,
-            string_id: config.string_id,
             tree,
             state,
             platform_window: pw,
@@ -2939,21 +2947,15 @@ impl WindowManager {
             crate::input_loop::release_contacts(&mut managed.translation_state, now);
             // The id goes with the window, unless another one opened with
             // it is still open: then the newest of those has it.
-            if let Some(sid) = managed.string_id.as_deref() {
-                match self
+            let string_id = managed.state.string_id();
+            if let Some(sid) = string_id.as_deref() {
+                let live = self
                     .windows
                     .values()
-                    .filter(|other| other.string_id.as_deref() == Some(sid))
-                    .map(|other| other.teksilo_id)
-                    .max_by_key(|id| id.raw())
-                {
-                    Some(other) => {
-                        self.string_to_id.insert(sid.to_owned(), other);
-                    }
-                    None => {
-                        self.string_to_id.remove(sid);
-                    }
-                }
+                    .map(|other| &other.state)
+                    .chain(self.taken_out_states.values())
+                    .filter(|other| other.id() != teksilo_id);
+                self.string_to_id.released(sid, live);
             }
             // Unblock the parent if this was the modal blocking it, and not
             // an earlier one a second modal has since replaced there.
@@ -2964,7 +2966,7 @@ impl WindowManager {
                 self.modal_blocked.remove(&parent_id);
             }
             if let Some(hook) = managed.on_removed.take() {
-                removed_hook = Some((hook, managed.string_id.clone()));
+                removed_hook = Some((hook, string_id));
             }
         }
         // Also remove any modal children blocking this window
@@ -4126,6 +4128,8 @@ impl WindowManager {
     /// enclosing winit event returns.
     pub(crate) fn take_managed(&mut self, id: winit::window::WindowId) -> Option<ManagedWindow> {
         let managed = self.windows.remove(&id)?;
+        self.taken_out_states
+            .insert(managed.teksilo_id, managed.state.clone());
         self.taken_out.insert(
             managed.teksilo_id,
             TakenOut {
@@ -4152,6 +4156,7 @@ impl WindowManager {
         id: winit::window::WindowId,
         mut managed: ManagedWindow,
     ) {
+        self.taken_out_states.remove(&managed.teksilo_id);
         // Restored while out (`WindowOps::focus_window` on the dispatching
         // window): what the manager knows follows.
         if let Some(taken) = self.taken_out.remove(&managed.teksilo_id)
@@ -4212,7 +4217,36 @@ impl WindowManager {
 
     /// Find a window by its string ID.
     pub fn find_window(&self, string_id: &str) -> Option<TeksiloWindowId> {
-        self.string_to_id.get(string_id).copied()
+        self.string_to_id.find(string_id)
+    }
+
+    /// Give the open window `window` the string id `new_id`; see
+    /// [`EventContext::set_window_string_id`](teksilo_core::widget::EventContext::set_window_string_id).
+    /// Works for the window a handler is running in too, which is out of
+    /// the map meanwhile.
+    pub(crate) fn set_window_string_id(
+        &mut self,
+        window: TeksiloWindowId,
+        new_id: String,
+    ) -> Result<(), teksilo_core::WindowStringIdError> {
+        let service: Option<teksilo_settings::WindowStateService> =
+            self.app_context_template.as_ref().and_then(|t| {
+                t.app_state::<teksilo_settings::WindowStateService>()
+                    .cloned()
+            });
+        let live = self.live_states();
+        self.string_to_id
+            .rename(window, new_id, &live, service.as_ref())
+    }
+
+    /// Every open window's state, the windows a handler runs in (out of the
+    /// map meanwhile) included.
+    fn live_states(&self) -> Vec<WindowState> {
+        self.windows
+            .values()
+            .map(|managed| managed.state.clone())
+            .chain(self.taken_out_states.values().cloned())
+            .collect()
     }
 
     /// Whether a window is blocked by a modal child.
@@ -5352,6 +5386,14 @@ impl teksilo_core::WindowOps for WindowOpsImpl<'_> {
 
     fn find_window(&self, string_id: &str) -> Option<TeksiloWindowId> {
         self.wm.find_window(string_id)
+    }
+
+    fn set_window_string_id(
+        &mut self,
+        window: TeksiloWindowId,
+        new_id: String,
+    ) -> Result<(), teksilo_core::WindowStringIdError> {
+        self.wm.set_window_string_id(window, new_id)
     }
 
     fn window_state(&self, id: TeksiloWindowId) -> Option<teksilo_core::WindowState> {
@@ -7601,5 +7643,111 @@ mod activation_token_slot_tests {
         wm.end_dispatch_activation();
         assert_eq!(wm.focus_command_token.as_deref(), Some("event"));
         assert!(!wm.holds_dispatch_activation_token());
+    }
+}
+
+#[cfg(test)]
+mod string_id_tests {
+    use super::*;
+    use std::any::{Any, TypeId};
+    use teksilo_core::{WindowPlacement, WindowStateInit, WindowStringIdError};
+    use teksilo_settings::{PerWindowState, WindowStateService};
+
+    fn state(id: u64, string_id: &str, size: (u32, u32)) -> WindowState {
+        WindowState::new(WindowStateInit {
+            id: TeksiloWindowId::new(id),
+            string_id: Some(string_id.into()),
+            placement: WindowPlacement::Floating,
+            title: String::new(),
+            size,
+            position: (10, 20),
+            focused: true,
+            resizable: true,
+            always_on_top: false,
+        })
+    }
+
+    fn service(dir: &tempfile::TempDir) -> WindowStateService {
+        WindowStateService::open_at(
+            dir.path().join("window_state.toml"),
+            std::time::Duration::ZERO,
+        )
+        .unwrap()
+    }
+
+    /// A window manager whose app saves window geometry in `service`, as
+    /// `SettingsBundle::with_window_state(true)` sets it up.
+    fn manager_saving_in(service: &WindowStateService) -> WindowManager {
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        let mut registry: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+        registry.insert(
+            TypeId::of::<WindowStateService>(),
+            Box::new(service.clone()),
+        );
+        wm.set_app_context_template(Rc::new(TreeAppContext::empty().with_app_state(registry)));
+        wm
+    }
+
+    /// The window a Save As handler runs in is out of the map while it
+    /// runs, and is the one the handler renames: the manager still finds
+    /// it, the lookup follows, and its saved geometry moves with it.
+    #[test]
+    fn the_window_a_handler_runs_in_can_be_renamed() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = service(&dir);
+        service
+            .record(PerWindowState {
+                label: "/a/Novel.skrib".into(),
+                x: 10,
+                y: 20,
+                width: 1000,
+                height: 700,
+                placement: WindowPlacement::Floating,
+            })
+            .unwrap();
+        let mut wm = manager_saving_in(&service);
+        let me = state(1, "/a/Novel.skrib", (1000, 700));
+        // What `create_window` and `take_managed` leave behind for it.
+        wm.taken_out_states.insert(me.id(), me.clone());
+        wm.string_to_id.opened("/a/Novel.skrib", me.id());
+
+        wm.set_window_string_id(me.id(), "/a/Novel 2.skrib".into())
+            .unwrap();
+
+        assert_eq!(wm.find_window("/a/Novel 2.skrib"), Some(me.id()));
+        assert_eq!(wm.find_window("/a/Novel.skrib"), None);
+        assert_eq!(me.string_id().as_deref(), Some("/a/Novel 2.skrib"));
+        let moved = service.state_for("/a/Novel 2.skrib").expect("row moved");
+        assert_eq!((moved.width, moved.height), (1000, 700));
+        assert!(service.state_for("/a/Novel.skrib").is_none());
+    }
+
+    /// Another open window's id is refused, the window a handler runs in
+    /// counting as open, and a window that is not open cannot be renamed.
+    #[test]
+    fn an_id_held_by_the_window_a_handler_runs_in_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut wm = manager_saving_in(&service(&dir));
+        let running = state(1, "a", (800, 600));
+        let other = state(2, "b", (800, 600));
+        for window in [&running, &other] {
+            wm.taken_out_states.insert(window.id(), window.clone());
+            wm.string_to_id
+                .opened(&window.string_id().unwrap(), window.id());
+        }
+
+        assert_eq!(
+            wm.set_window_string_id(other.id(), "a".into()),
+            Err(WindowStringIdError::HeldByAnotherWindow {
+                string_id: "a".into(),
+                holder: running.id(),
+            })
+        );
+        assert_eq!(
+            wm.set_window_string_id(TeksiloWindowId::new(9), "c".into()),
+            Err(WindowStringIdError::NoSuchWindow(TeksiloWindowId::new(9)))
+        );
+        assert_eq!(wm.find_window("a"), Some(running.id()));
+        assert_eq!(wm.find_window("b"), Some(other.id()));
     }
 }

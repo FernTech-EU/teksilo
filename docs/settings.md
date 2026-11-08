@@ -57,6 +57,10 @@ Cloned handles share state. Register additional handles with `.app_state(...)`;
   on the monitor it was on, else centred on the primary, and inside that
   monitor's work area, its title bar included: clear of the taskbar, the Dock
   and the menu bar, the panels. Wayland controls final window placement.
+- When the window's id must change while it is open (a document window keyed
+  by its path, after Save As), call `EventContext::set_window_string_id`: the
+  saved geometry moves to the new id and later changes are saved there. See
+  the [multi-window guide](multi-window.md#ergonomic-patterns).
 
 ## Concurrent writes and reloads
 

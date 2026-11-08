@@ -1406,6 +1406,62 @@ impl<'ops> EventContext<'ops> {
         self.window_ops.as_deref()?.find_window(string_id)
     }
 
+    /// Change the string id of the open window `window` to `new_id`.
+    ///
+    /// For a window whose id names what it shows, when what it shows moves:
+    /// a document window keyed by its file's path after Save As, after a
+    /// backup is restored into it, or when it switches to another document
+    /// in place. Without it the window keeps the old id:
+    /// [`find_window`](Self::find_window) still finds it under the old path
+    /// (so opening the file left behind raises the moved window instead of
+    /// opening it), and its geometry is still saved under the old id (so
+    /// after a restart the document at its new place opens at the default
+    /// size).
+    ///
+    /// Once it returns `Ok`:
+    ///
+    /// - [`find_window`](Self::find_window) finds the window under `new_id`
+    ///   and no longer under its old id, and
+    ///   [`WindowState::string_id`](crate::window::WindowState::string_id)
+    ///   reads `new_id`. A window opened later with the old id is a new
+    ///   window, as for an id no window has.
+    /// - When the app saves window geometry (a `SettingsBundle` with
+    ///   `with_window_state(true)`), the window's current geometry is saved
+    ///   under `new_id`, replacing any row already there, the row under the
+    ///   old id is forgotten, and every later move or resize is saved under
+    ///   `new_id`. A window opened with `new_id` after a restart comes back
+    ///   where this one was left.
+    ///
+    /// A window opened without an id gets one this way, and from then on is
+    /// found by it and, when the app saves window geometry, saved under it.
+    ///
+    /// Renaming a window to the id it already has changes nothing and is
+    /// `Ok`. It refuses, changing nothing, with
+    /// [`WindowStringIdError::HeldByAnotherWindow`](crate::window::WindowStringIdError::HeldByAnotherWindow)
+    /// when another open window has `new_id`, with
+    /// [`NoSuchWindow`](crate::window::WindowStringIdError::NoSuchWindow)
+    /// when `window` is not open, and with
+    /// [`Unsupported`](crate::window::WindowStringIdError::Unsupported)
+    /// outside an application (a standalone tree).
+    ///
+    /// To rename the window a handler runs in, pass its own id:
+    ///
+    /// ```ignore
+    /// if let Some(me) = ctx.window().map(|w| w.id()) {
+    ///     ctx.set_window_string_id(me, window_id_for(&new_path))?;
+    /// }
+    /// ```
+    pub fn set_window_string_id(
+        &mut self,
+        window: crate::window::TeksiloWindowId,
+        new_id: impl Into<String>,
+    ) -> Result<(), crate::window::WindowStringIdError> {
+        match self.window_ops.as_deref_mut() {
+            Some(ops) => ops.set_window_string_id(window, new_id.into()),
+            None => Err(crate::window::WindowStringIdError::Unsupported),
+        }
+    }
+
     /// Read the [`WindowState`](crate::window::WindowState) for a
     /// specific window.
     pub fn window_state(
@@ -2689,6 +2745,7 @@ mod multi_window_tests {
         open_calls: RefCell<Vec<WindowConfig>>,
         focus_calls: RefCell<Vec<TeksiloWindowId>>,
         close_calls: RefCell<Vec<TeksiloWindowId>>,
+        rename_calls: RefCell<Vec<(TeksiloWindowId, String)>>,
         /// Each quit asked for, `true` for a forced one, in order.
         quit_calls: RefCell<Vec<bool>>,
         cancel_quit_calls: RefCell<usize>,
@@ -2730,8 +2787,25 @@ mod multi_window_tests {
             self.states
                 .borrow()
                 .iter()
-                .find(|s| s.string_id() == Some(string_id))
+                .find(|s| s.string_id().as_deref() == Some(string_id))
                 .map(|s| s.id())
+        }
+
+        fn set_window_string_id(
+            &mut self,
+            window: TeksiloWindowId,
+            new_id: String,
+        ) -> Result<(), crate::window::WindowStringIdError> {
+            self.rename_calls
+                .borrow_mut()
+                .push((window, new_id.clone()));
+            let states = self.states.borrow();
+            let state = states
+                .iter()
+                .find(|s| s.id() == window)
+                .ok_or(crate::window::WindowStringIdError::NoSuchWindow(window))?;
+            state.string_id_signal().set(Some(new_id));
+            Ok(())
         }
 
         fn window_state(&self, id: TeksiloWindowId) -> Option<WindowState> {
@@ -2840,7 +2914,7 @@ mod multi_window_tests {
         let mut noop = NoopWindowOps;
         let ctx = EventContext::new().with_window_context(&mut noop, Some(state.clone()));
         assert_eq!(ctx.window().unwrap().id(), TeksiloWindowId::new(1));
-        assert_eq!(ctx.window().unwrap().string_id(), Some("main"));
+        assert_eq!(ctx.window().unwrap().string_id().as_deref(), Some("main"));
     }
 
     #[test]
@@ -2876,6 +2950,42 @@ mod multi_window_tests {
         let ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
         assert_eq!(ctx.find_window("foo"), Some(TeksiloWindowId::new(7)));
         assert!(ctx.find_window("missing").is_none());
+    }
+
+    /// The rename reaches the window operations with the window and the id
+    /// asked for, and comes back as they answer.
+    #[test]
+    fn set_window_string_id_routes_through_ops() {
+        let mut ops = RecordingOps::default();
+        let main_state = make_state(1, Some("old"));
+        ops.states.borrow_mut().push(main_state.clone());
+        {
+            let mut ctx = EventContext::new().with_window_context(&mut ops, Some(main_state));
+            let me = ctx.window().map(|w| w.id()).unwrap();
+            assert_eq!(ctx.set_window_string_id(me, "new"), Ok(()));
+            assert_eq!(ctx.find_window("new"), Some(me));
+            assert_eq!(ctx.find_window("old"), None);
+        }
+        assert_eq!(
+            ops.rename_calls.borrow().as_slice(),
+            &[(TeksiloWindowId::new(1), "new".to_string())]
+        );
+    }
+
+    /// Window operations that predate the method, and a context with none,
+    /// say they cannot rename instead of pretending they did.
+    #[test]
+    fn set_window_string_id_is_unsupported_without_an_application() {
+        let mut noop = NoopWindowOps;
+        let mut ctx = EventContext::new().with_window_context(&mut noop, Some(make_state(1, None)));
+        assert_eq!(
+            ctx.set_window_string_id(TeksiloWindowId::new(1), "doc"),
+            Err(crate::window::WindowStringIdError::Unsupported)
+        );
+        assert_eq!(
+            EventContext::new().set_window_string_id(TeksiloWindowId::new(1), "doc"),
+            Err(crate::window::WindowStringIdError::Unsupported)
+        );
     }
 
     #[test]

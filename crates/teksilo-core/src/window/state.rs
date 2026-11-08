@@ -54,7 +54,7 @@ impl std::fmt::Debug for WindowState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WindowState")
             .field("id", &self.inner.id)
-            .field("string_id", &self.inner.string_id)
+            .field("string_id", &self.inner.string_id.get())
             .field("placement", &self.inner.placement.get())
             .field("title", &self.inner.title.get())
             .field("size", &self.inner.size.get())
@@ -89,7 +89,12 @@ pub struct WindowStateInit {
 
 pub(crate) struct WindowStateInner {
     id: TeksiloWindowId,
-    string_id: Option<String>,
+    /// The stable string id, which the window manager changes when the app
+    /// renames the window (`WindowOps::set_window_string_id`). A signal of
+    /// its own, rather than a field of this struct read through the state,
+    /// so the geometry savers can hold it without holding the state: see
+    /// [`WindowState::string_id_signal`].
+    string_id: Signal<Option<String>>,
 
     placement: Signal<WindowPlacement>,
     title: Signal<String>,
@@ -190,7 +195,7 @@ impl WindowState {
     pub fn new(init: WindowStateInit) -> Self {
         let inner = Rc::new(WindowStateInner {
             id: init.id,
-            string_id: init.string_id,
+            string_id: Signal::new(init.string_id),
             placement: Signal::new(init.placement),
             title: Signal::new(init.title),
             size: Signal::new(init.size),
@@ -276,8 +281,28 @@ impl WindowState {
         self.inner.id
     }
 
-    pub fn string_id(&self) -> Option<&str> {
-        self.inner.string_id.as_deref()
+    /// The stable string id the window is known by: the one it was opened
+    /// with ([`WindowConfig::id`](super::WindowConfig::id)), or the one it
+    /// was given since with
+    /// [`EventContext::set_window_string_id`](crate::widget::EventContext::set_window_string_id).
+    /// `None` for a window that never had one.
+    pub fn string_id(&self) -> Option<String> {
+        self.inner.string_id.get()
+    }
+
+    /// The signal holding [`string_id`](Self::string_id), for the window
+    /// manager: it writes the new id there when the window is renamed, and
+    /// the geometry savers read it each time they save, so they save under
+    /// the id the window has now. A saver holds this signal and not the
+    /// whole state, which would make a reference cycle through the state's
+    /// own observers.
+    ///
+    /// Do not set it from an app: the window manager's lookup table and
+    /// the saved geometry would not follow. Rename a window with
+    /// [`EventContext::set_window_string_id`](crate::widget::EventContext::set_window_string_id).
+    #[doc(hidden)]
+    pub fn string_id_signal(&self) -> &Signal<Option<String>> {
+        &self.inner.string_id
     }
 
     pub fn placement(&self) -> &Signal<WindowPlacement> {
@@ -735,7 +760,7 @@ mod tests {
     fn id_and_string_id_accessors() {
         let state = WindowState::new(init(42));
         assert_eq!(state.id(), TeksiloWindowId::new(42));
-        assert_eq!(state.string_id(), Some("test"));
+        assert_eq!(state.string_id().as_deref(), Some("test"));
     }
 
     #[test]

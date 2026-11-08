@@ -435,7 +435,7 @@ pub struct WindowState { inner: Rc<WindowStateInner> }
 
 impl WindowState {
     pub fn id(&self) -> TeksiloWindowId;
-    pub fn string_id(&self) -> Option<&str>;
+    pub fn string_id(&self) -> Option<String>; // follows set_window_string_id
 
     // Writable signals. App-side writes queue a `WindowCommand` to the
     // OS; OS-initiated writes flow back through `*_from_os` setters
@@ -561,6 +561,9 @@ impl EventContext<'_> {
     pub fn open_window(&mut self, config: WindowConfig) -> TeksiloWindowId;
     pub fn open_modal(&mut self, request: ModalRequest) -> Option<TeksiloWindowId>;
     pub fn find_window(&self, string_id: &str) -> Option<TeksiloWindowId>;
+    pub fn set_window_string_id(&mut self, window: TeksiloWindowId,
+                                new_id: impl Into<String>)
+        -> Result<(), WindowStringIdError>;                 // a document moved
     pub fn focus_window(&mut self, id: TeksiloWindowId);
     pub fn close_window(&mut self);                         // current window, GUARDED
     pub fn close_window_forced(&mut self);                  // current window, bypasses the guard
@@ -649,6 +652,43 @@ Nothing is deferred.
     );
 })
 ```
+
+**When the document moves** (Save As, a backup restored into the window, a
+switch to another document in place): give the window its new id with
+`ctx.set_window_string_id`. Until then it keeps the id it was opened with,
+so `find_window` still finds it under the old path (opening the file left
+behind raises the moved window instead of opening it), and its geometry is
+still saved under the old id (after a restart, the document at its new place
+opens at the default size).
+
+```rust
+// In the window's own Save As handler, once the file is written.
+if let Some(me) = ctx.window().map(|w| w.id()) {
+    let new_wid = format!("doc:{}", new_path.display());
+    if let Err(err) = ctx.set_window_string_id(me, new_wid) {
+        // `HeldByAnotherWindow`: another open window shows that file.
+        log::warn!("{err}");
+    }
+}
+```
+
+Once it returns `Ok`:
+
+- `find_window(new)` finds the window and `find_window(old)` does not; a
+  window opened later with the old id is a new window. `WindowState::string_id`
+  reads the new id.
+- When the app saves window geometry (`SettingsBundle::with_window_state(true)`),
+  the window's current geometry is saved under the new id, replacing any row
+  already there, the row under the old id is forgotten, and every later move
+  or resize is saved under the new id.
+- A window opened without an id gets one, and from then on is found and
+  saved by it.
+
+It refuses, changing nothing, when another open window has the new id
+(`WindowStringIdError::HeldByAnotherWindow`) and when the window is not open
+(`NoSuchWindow`). Renaming a window to the id it has is `Ok` and changes
+nothing. Outside an application (a standalone tree, the headless sink) it
+answers `Unsupported`.
 
 **Opening a window from a background thread** (`on_external_with_ctx`):
 
@@ -1400,7 +1440,8 @@ pub trait WindowOps {
     fn windows(&self) -> Vec<WindowState>;
     fn focus_window(&mut self, id: TeksiloWindowId);
     fn close_window_by_id(&mut self, id: TeksiloWindowId);
-    // …plus defaulted hooks: activation tokens, the parent window
+    // …plus defaulted hooks: renaming a window (`set_window_string_id`,
+    // `Unsupported` by default), activation tokens, the parent window
     // handle (file dialogs), the IME cursor area, outbound OS drags,
     // soft-keyboard support, and the quit (quit, quit_forced,
     // quit_in_progress, quit_source, cancel_quit).
@@ -1479,7 +1520,8 @@ Standalone `WidgetTree`s without an attached app use `NoopWindowOps`:
 A handler that calls `ctx.open_window(...)` from any of these paths
 panics (by design, the test has no event loop to create a window in).
 `ctx.find_window`, `ctx.window_state`, `ctx.windows` return `None` /
-empty.
+empty, and `ctx.set_window_string_id` returns
+`Err(WindowStringIdError::Unsupported)`.
 
 `teksilo-app` uses the `_with_ops` variants internally so real apps get
 fully-threaded ops on every code path.

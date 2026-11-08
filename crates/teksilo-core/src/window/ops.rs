@@ -20,6 +20,7 @@
 use super::config::WindowConfig;
 use super::id::TeksiloWindowId;
 use super::state::WindowState;
+use super::string_id::WindowStringIdError;
 use crate::raw_handle::ParentHandle;
 
 /// App-level window operations exposed to handlers.
@@ -38,6 +39,23 @@ pub trait WindowOps {
     /// (`WindowConfig::id`). Returns `None` if no live window carries
     /// that id.
     fn find_window(&self, string_id: &str) -> Option<TeksiloWindowId>;
+
+    /// Give the open window `window` the string id `new_id`, in place of
+    /// the one it was opened with (or as its first, for a window opened
+    /// without one). See
+    /// [`EventContext::set_window_string_id`](crate::widget::EventContext::set_window_string_id)
+    /// for what it changes and when it refuses.
+    ///
+    /// Default implementation: [`WindowStringIdError::Unsupported`], so an
+    /// implementation written before this method existed keeps compiling
+    /// and says plainly that it cannot rename.
+    fn set_window_string_id(
+        &mut self,
+        _window: TeksiloWindowId,
+        _new_id: String,
+    ) -> Result<(), WindowStringIdError> {
+        Err(WindowStringIdError::Unsupported)
+    }
 
     /// Read the reactive state for a specific window.
     fn window_state(&self, id: TeksiloWindowId) -> Option<WindowState>;

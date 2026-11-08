@@ -24,8 +24,11 @@
 //!    write.
 //!
 //! Auto-persistence is a strict opt-in: a window only participates
-//! when its [`WindowConfig`] has a non-empty `id(...)` *and* a
-//! `WindowStateService` is registered. Modal dialogs and ephemeral
+//! while it has a string id (its [`WindowConfig`]'s `id(...)`, or one
+//! given since with `EventContext::set_window_string_id`) *and* a
+//! `WindowStateService` is registered. The savers read the id each time
+//! they save, so a renamed window is saved under its new id, and
+//! [`move_saved_geometry`] moves its row there at the rename. Modal dialogs and ephemeral
 //! popovers are thus naturally excluded — they don't carry stable ids.
 
 use teksilo_core::ObserverHandle;
@@ -236,13 +239,18 @@ fn fit_in_work_area(
 }
 
 /// Install observers on `state`'s size / position / placement signals
-/// that record into `service` under `label`. Returns the handles —
-/// drop them to stop tracking. Caller stashes them on the
+/// that record into `service` under the window's string id. Returns the
+/// handles: drop them to stop tracking. Caller stashes them on the
 /// `ManagedWindow` so they live as long as the window itself.
+///
+/// The id is read each time they save, not once here, because the app can
+/// change it while the window is open
+/// (`EventContext::set_window_string_id`): from then on the window's
+/// geometry is saved under its new id. A window with no id saves nothing
+/// until it is given one.
 pub(crate) fn install_persist_observers(
     state: &WindowState,
     service: WindowStateService,
-    label: String,
 ) -> Vec<ObserverHandle> {
     let mut handles = Vec::with_capacity(3);
 
@@ -250,7 +258,7 @@ pub(crate) fn install_persist_observers(
     // window's actual creation geometry — important because the OS
     // may have clamped or repositioned the saved values further
     // (DPI rounding, snap-to-grid window managers, etc.).
-    record_snapshot(&service, state, &label);
+    record_snapshot(&service, state);
 
     // We deliberately capture the three child signals *by value*
     // instead of cloning the whole `WindowState`. `WindowState` is
@@ -269,66 +277,85 @@ pub(crate) fn install_persist_observers(
     // the closure keeps the *signal innards* alive (harmless — the
     // OS-sync observers would have done that anyway) without
     // pinning `WindowStateInner`.
-    let placement = state.placement().clone();
-    let size = state.size().clone();
-    let position = state.position().clone();
+    // The string id is held the same way, as the signal it lives in.
+    let geometry = Geometry {
+        label: state.string_id_signal().clone(),
+        placement: state.placement().clone(),
+        size: state.size().clone(),
+        position: state.position().clone(),
+    };
 
-    handles.push(observe(
-        state.size(),
-        service.clone(),
-        placement.clone(),
-        size.clone(),
-        position.clone(),
-        label.clone(),
-    ));
-    handles.push(observe(
-        state.position(),
-        service.clone(),
-        placement.clone(),
-        size.clone(),
-        position.clone(),
-        label.clone(),
-    ));
-    handles.push(observe(
-        state.placement(),
-        service,
-        placement,
-        size,
-        position,
-        label,
-    ));
+    handles.push(observe(state.size(), service.clone(), geometry.clone()));
+    handles.push(observe(state.position(), service.clone(), geometry.clone()));
+    handles.push(observe(state.placement(), service, geometry));
     handles
+}
+
+/// The window's string id is changing to the one `state` now has: save its
+/// current geometry under that id, replacing whatever row is there, and
+/// forget the row under `forget` (its old id), when given. Called by
+/// [`StringIds::rename`](crate::window_identity::StringIds::rename), which
+/// leaves `forget` out when another open window still has the old id.
+pub(crate) fn move_saved_geometry(
+    service: &WindowStateService,
+    state: &WindowState,
+    forget: Option<&str>,
+) {
+    record_snapshot(service, state);
+    if let Some(old) = forget {
+        let _ = service.forget(old);
+    }
+}
+
+/// What a saver reads each time it saves; see
+/// [`install_persist_observers`] for why these are signals and not the
+/// window's state.
+#[derive(Clone)]
+struct Geometry {
+    label: Signal<Option<String>>,
+    placement: Signal<teksilo_core::WindowPlacement>,
+    size: Signal<(u32, u32)>,
+    position: Signal<(i32, i32)>,
+}
+
+impl Geometry {
+    /// The row to save, or `None` while the window has no id.
+    fn row(&self) -> Option<PerWindowState> {
+        let label = self.label.get()?;
+        let (width, height) = self.size.get();
+        let (x, y) = self.position.get();
+        Some(PerWindowState {
+            label,
+            x,
+            y,
+            width,
+            height,
+            placement: self.placement.get(),
+        })
+    }
 }
 
 fn observe<T: Clone + 'static>(
     signal: &Signal<T>,
     service: WindowStateService,
-    placement: Signal<teksilo_core::WindowPlacement>,
-    size: Signal<(u32, u32)>,
-    position: Signal<(i32, i32)>,
-    label: String,
+    geometry: Geometry,
 ) -> ObserverHandle {
     signal.observe(move |_| {
-        let (w, h) = size.get();
-        let (x, y) = position.get();
-        let placement = placement.get();
-        let _ = service.record(PerWindowState {
-            label: label.clone(),
-            x,
-            y,
-            width: w,
-            height: h,
-            placement,
-        });
+        if let Some(row) = geometry.row() {
+            let _ = service.record(row);
+        }
     })
 }
 
-fn record_snapshot(service: &WindowStateService, state: &WindowState, label: &str) {
+fn record_snapshot(service: &WindowStateService, state: &WindowState) {
+    let Some(label) = state.string_id() else {
+        return;
+    };
     let (w, h) = state.size().get();
     let (x, y) = state.position().get();
     let placement = state.placement().get();
     let _ = service.record(PerWindowState {
-        label: label.to_string(),
+        label,
         x,
         y,
         width: w,

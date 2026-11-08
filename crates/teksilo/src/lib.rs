@@ -231,7 +231,7 @@ pub mod prelude {
     pub use teksilo_core::{
         CloseDecision, CloseResponse, DecorationsMode, ModalConfig, QuitSource, SizeToContent,
         TeksiloWindowId, UserAttentionKind, WindowCommand, WindowConfig, WindowPlacement,
-        WindowRemovedCallback, WindowRemovedEvent, WindowState,
+        WindowRemovedCallback, WindowRemovedEvent, WindowState, WindowStringIdError,
     };
 
     // i18n (architecture §12)

@@ -30,6 +30,7 @@ pub mod ops;
 pub mod placement;
 pub mod quit_source;
 pub mod state;
+pub mod string_id;
 
 pub use close_decision::{CloseAnswer, CloseDecision, CloseDecisionReceipt};
 pub use command::{UserAttentionKind, WindowCommand};
@@ -47,3 +48,4 @@ pub use ops::{NoopWindowOps, SoftKeyboardSupport, WindowOps};
 pub use placement::WindowPlacement;
 pub use quit_source::QuitSource;
 pub use state::WindowState;
+pub use string_id::WindowStringIdError;

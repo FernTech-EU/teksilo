@@ -2660,7 +2660,7 @@ impl TeksiloAppHandler {
                 .iter()
                 .map(|m| WindowInfo {
                     id: m.teksilo_id.raw(),
-                    label: m.string_id.clone(),
+                    label: m.state.string_id(),
                     title: Some(m.state.title().get()),
                     focused: m.focused,
                 })

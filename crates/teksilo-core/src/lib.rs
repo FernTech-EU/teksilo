@@ -153,7 +153,7 @@ pub use window::{
     CloseBlockedCallback, CloseDecision, CloseGuard, CloseResponse, DecorationsMode, ModalConfig,
     NoopWindowOps, PostRootBuilder, QuitSource, RootBuilder, SizeToContent, TeksiloWindowId,
     UserAttentionKind, WindowCommand, WindowConfig, WindowIcon, WindowOps, WindowPlacement,
-    WindowRemovedCallback, WindowRemovedEvent, WindowState,
+    WindowRemovedCallback, WindowRemovedEvent, WindowState, WindowStringIdError,
 };
 pub use window_chrome::{
     ControlTarget, HitRegions, PlatformError, PlatformTitleBarHost, ResizeBorders, ResizeEdge,

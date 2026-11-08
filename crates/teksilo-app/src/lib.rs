@@ -16,6 +16,7 @@ pub mod native_theme;
 pub(crate) mod quit;
 pub(crate) mod redraw_gate;
 pub mod window_config;
+pub(crate) mod window_identity;
 pub mod window_manager;
 pub(crate) mod window_persist;
 pub(crate) mod window_recency;
