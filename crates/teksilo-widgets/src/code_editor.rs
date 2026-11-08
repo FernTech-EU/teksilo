@@ -602,7 +602,8 @@ impl CodeEditorHandle {
     /// The handle could report [`can_undo`](Self::can_undo) long before it could
     /// *act* on it, which left a host able to light an Undo button here and
     /// unable to make it do anything. Ctrl+Z inside the widget always worked;
-    /// this is the same command from outside.
+    /// this is the same command from outside. With nothing to undo it does
+    /// nothing, and leaves every caret where it was.
     pub fn undo(&self) {
         keyboard::history_step(&mut self.state.borrow_mut(), keyboard::HistoryStep::Undo);
         sync_cursor_signals(&self.state);

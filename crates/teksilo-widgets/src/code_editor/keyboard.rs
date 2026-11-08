@@ -32,7 +32,7 @@ use crate::editor_shortcuts::CodeShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_i18n::tr_widget;
 use teksilo_text::CursorAffinity;
-use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
+use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType, TextDocument};
 
 use super::clipboard;
 use super::completion::{self, Trigger};
@@ -542,7 +542,10 @@ pub(super) enum HistoryStep {
 /// Undo or redo one step, and show the caret on the line its text is on now.
 ///
 /// Undoing text under several carets would leave them pointing at offsets the
-/// undone edit invented, so the extra carets go first.
+/// undone edit invented, so the extra carets go first. With nothing to undo
+/// (or redo) nothing moves, so they stay, and so does the caret's side of a
+/// wrap: End on a wrapped line shows it at the end of that line, and an undo
+/// that did nothing showed it at the start of the next one.
 ///
 /// The document puts the caret back at a position, and a position on a soft
 /// wrap is on two lines. The caret is put at the start of the next line, as
@@ -555,13 +558,29 @@ pub(super) enum HistoryStep {
 ///
 /// The layout is stale after the step, so it is brought up to date first.
 pub(super) fn history_step(st: &mut CodeEditorState, step: HistoryStep) {
-    st.clear_extra_carets();
+    let steps = history_has_step(&st.document, step);
+    if steps {
+        st.clear_extra_carets();
+    }
     let _ = match step {
         HistoryStep::Undo => st.document.undo(),
         HistoryStep::Redo => st.document.redo(),
     };
-    super::frame_loop::catch_up_layout(st);
-    st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
+    if steps {
+        super::frame_loop::catch_up_layout(st);
+        st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
+    }
+}
+
+/// Whether `step` would change `document`: a step is on its stack, or text a
+/// composition wrote, which every undo and redo takes out first, is there.
+/// Asked before the step: after it, the stack has moved.
+fn history_has_step(document: &TextDocument, step: HistoryStep) -> bool {
+    document.has_transient_edits()
+        || match step {
+            HistoryStep::Undo => document.can_undo(),
+            HistoryStep::Redo => document.can_redo(),
+        }
 }
 
 /// Run one of the editor's own [`CodeShortcut`] commands, as its `code.*`

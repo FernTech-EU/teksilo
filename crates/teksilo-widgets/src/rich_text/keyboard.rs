@@ -22,7 +22,7 @@ use crate::editor_shortcuts::FormatShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_text::text_document::{
     BlockFormat, InsertionOrigin, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef,
-    TextCursor, TextFormat,
+    TextCursor, TextDocument, TextFormat,
 };
 use teksilo_text::{CursorAffinity, TextDirection};
 
@@ -924,8 +924,13 @@ pub(super) enum HistoryStep {
 /// of the next one: the same position, on the line after.
 ///
 /// The layout is stale after the step, so it is brought up to date first.
+///
+/// With nothing to undo (or redo) the document does not move, and neither does
+/// the caret: End on a wrapped line shows it at the end of that line, and an
+/// undo that did nothing showed it at the start of the next one.
 pub(super) fn history_step(st: &mut EditorState, step: HistoryStep) {
     let document = st.document.clone();
+    let steps = history_has_step(&document, step);
     match step {
         HistoryStep::Undo => {
             crate::common::input_trace::traced_history_step(&document, "undo", || document.undo());
@@ -934,8 +939,21 @@ pub(super) fn history_step(st: &mut EditorState, step: HistoryStep) {
             crate::common::input_trace::traced_history_step(&document, "redo", || document.redo());
         }
     }
-    super::frame_loop::catch_up_layout(st);
-    st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
+    if steps {
+        super::frame_loop::catch_up_layout(st);
+        st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
+    }
+}
+
+/// Whether `step` would change `document`: a step is on its stack, or text a
+/// composition wrote, which every undo and redo takes out first, is there.
+/// Asked before the step: after it, the stack has moved.
+fn history_has_step(document: &TextDocument, step: HistoryStep) -> bool {
+    document.has_transient_edits()
+        || match step {
+            HistoryStep::Undo => document.can_undo(),
+            HistoryStep::Redo => document.can_redo(),
+        }
 }
 
 /// Run one of the editor's own [`FormatShortcut`] commands, as its `format.*`

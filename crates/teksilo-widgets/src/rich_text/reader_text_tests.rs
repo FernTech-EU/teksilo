@@ -721,6 +721,56 @@ fn undoing_a_letter_typed_at_a_wrap_puts_the_caret_on_the_line_below() {
     assert_eq!(r.line_start_at_caret(), wrap);
 }
 
+/// An undo or a redo with nothing to take back leaves the caret where it is
+/// shown: End leaves it at the end of the first line, at the offset the next
+/// line starts at, and an undo that did nothing put it at the start of the
+/// next line. From the key and from the handle.
+#[test]
+fn an_undo_with_nothing_to_undo_leaves_the_caret_on_its_line() {
+    let (mut r, wrap) = at_the_second_line();
+    r.handle.select_range(3, 3);
+    r.press(Key::End);
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), 0, "End stays on its line");
+    assert!(!r.doc.can_undo() && !r.doc.can_redo(), "no history");
+
+    r.tree.press_key(Key::Z, Modifiers::COMMAND);
+    r.update();
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), 0, "Ctrl+Z");
+    r.tree
+        .press_key(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT);
+    r.update();
+    assert_eq!(r.line_start_at_caret(), 0, "Ctrl+Shift+Z");
+
+    r.handle.undo();
+    assert_eq!(r.line_start_at_caret(), 0, "the handle's undo");
+    r.handle.redo();
+    assert_eq!(r.line_start_at_caret(), 0, "the handle's redo");
+    assert_eq!(r.handle.cursor_position(), wrap);
+}
+
+/// A composition's text is not on the undo stack, but every undo takes it out
+/// first. From the handle, with nothing else to undo, that still moves the
+/// caret, so its side of a wrap is set again: back at the start of the second
+/// line, it is shown there.
+#[test]
+fn an_undo_that_takes_out_a_composition_puts_the_caret_on_its_line() {
+    let (mut r, wrap) = at_the_second_line();
+    r.tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "xyz".to_string(),
+        cursor: None,
+        replacement: None,
+    });
+    r.update();
+    assert!(r.doc.has_transient_edits() && !r.doc.can_undo());
+    assert_eq!(r.handle.cursor_position(), wrap + 3);
+    r.handle.undo();
+    assert!(!r.doc.has_transient_edits(), "the composition is taken out");
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap);
+}
+
 #[test]
 fn deleting_a_selection_from_the_start_of_a_wrapped_line_stays_on_it() {
     let (mut r, wrap) = at_the_second_line();

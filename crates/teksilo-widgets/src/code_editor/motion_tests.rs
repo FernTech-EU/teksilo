@@ -500,6 +500,84 @@ fn undoing_a_change_at_a_wrap_puts_the_caret_on_the_line_below() {
     assert_eq!(reported_run_start(&mut d), (wrap, 0), "the handle's undo");
 }
 
+/// An undo or a redo with nothing to take back moves nothing: End leaves the
+/// caret at the end of the first line, at the offset the next line starts at,
+/// and an undo that did nothing reported it at the start of the next line. From
+/// the keys and from the handle.
+#[test]
+fn an_undo_with_nothing_to_undo_leaves_the_caret_on_its_line() {
+    let (mut d, wrap, _) = wrapped();
+    d.put(2);
+    d.key(Key::End);
+    assert_eq!(reported_run_start(&mut d), (0, wrap), "End, on its line");
+    assert!(!d.doc.can_undo() && !d.doc.can_redo(), "no history");
+
+    d.key_with(Key::Z, Modifiers::COMMAND);
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (0, wrap), "Ctrl+Z");
+    d.key_with(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(reported_run_start(&mut d), (0, wrap), "Ctrl+Shift+Z");
+
+    let handle = super::CodeEditorHandle {
+        state: d.state.clone(),
+    };
+    handle.undo();
+    d.settle();
+    assert_eq!(reported_run_start(&mut d), (0, wrap), "the handle's undo");
+    handle.redo();
+    d.settle();
+    assert_eq!(reported_run_start(&mut d), (0, wrap), "the handle's redo");
+}
+
+/// A composition's text is not on the undo stack, but every undo takes it out
+/// first. From the handle, with nothing else to undo, that still moves the
+/// caret, so its side of a wrap is set again: back at the start of the second
+/// line, it is reported there.
+#[test]
+fn an_undo_that_takes_out_a_composition_puts_the_caret_on_its_line() {
+    let (mut d, wrap, _) = wrapped();
+    d.put(wrap + 2);
+    d.key(Key::Home);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0), "Home");
+    d.tree.dispatch_event(WidgetEvent::ImeComposition {
+        text: "xyz".to_string(),
+        cursor: None,
+        replacement: None,
+    });
+    d.settle();
+    assert!(d.doc.has_transient_edits() && !d.doc.can_undo());
+    assert_eq!(d.caret(), wrap + 3);
+
+    let handle = super::CodeEditorHandle {
+        state: d.state.clone(),
+    };
+    handle.undo();
+    d.settle();
+    assert!(!d.doc.has_transient_edits(), "the composition is taken out");
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0), "the handle's undo");
+}
+
+/// The extra carets stay when an undo or a redo has nothing to take back: a
+/// host's Edit menu calling the handle with an empty history dropped them.
+#[test]
+fn an_undo_with_nothing_to_undo_keeps_the_extra_carets() {
+    let mut d = Driven::new("abc\ndef\nghi");
+    d.put(1);
+    d.add_caret(5);
+    d.add_caret(9);
+    let handle = super::CodeEditorHandle {
+        state: d.state.clone(),
+    };
+    handle.undo();
+    handle.redo();
+    d.settle();
+    assert_eq!(d.carets(), vec![1, 5, 9], "the handle");
+    d.key_with(Key::Z, Modifiers::COMMAND);
+    d.key_with(Key::Z, Modifiers::COMMAND | Modifiers::SHIFT);
+    assert_eq!(d.carets(), vec![1, 5, 9], "the keys");
+}
+
 /// Ctrl+Right stops at the next word's start, which may start a wrapped line:
 /// the caret is then reported on that line.
 #[test]
