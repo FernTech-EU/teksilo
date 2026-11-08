@@ -10,6 +10,8 @@
 //! without dragging the underlying crate name (`jiff`) into the public
 //! surface.
 
+#[cfg(test)]
+mod caret_blink_cost_tests;
 pub(crate) mod column_geometry;
 pub(crate) mod composition;
 pub(crate) mod conformance_box;
