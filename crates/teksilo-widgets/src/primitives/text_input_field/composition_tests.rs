@@ -1192,6 +1192,16 @@ fn a_word_step_forward_reaches_the_next_words_start() {
     assert_eq!(f.caret(), 2);
 }
 
+/// A word step counts characters, not bytes, through accented words.
+#[test]
+fn a_word_step_forward_through_accented_words_counts_characters() {
+    let mut f = Field::new("déjà été là", 1);
+    f.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
+    assert_eq!(f.caret(), by_convention(5, 4));
+    f.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
+    assert_eq!(f.caret(), by_convention(9, 8));
+}
+
 /// A masked field is one word, as on every desktop platform: a word step goes
 /// to its edge and a word delete removes everything to that edge, so the
 /// steps tell nothing about where the hidden text has its spaces. Revealed, it

@@ -684,6 +684,20 @@ fn a_word_selection_and_a_word_delete_reach_the_next_words_start() {
     assert_eq!(r.handle.cursor_position(), 2);
 }
 
+/// A word step counts characters, not bytes, through accented words: the
+/// landings are character offsets in the document.
+#[test]
+fn a_word_step_forward_through_accented_words_counts_characters() {
+    let mut r = Reader::plain("déjà été là");
+    r.handle.select_range(1, 1);
+    r.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
+    r.update();
+    assert_eq!(r.handle.cursor_position(), by_convention(5, 4));
+    r.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
+    r.update();
+    assert_eq!(r.handle.cursor_position(), by_convention(9, 8));
+}
+
 /// Backspace on a line's second character leaves the caret on that line. It
 /// used to take the writer to the end of the line above.
 #[test]

@@ -1053,3 +1053,31 @@ fn left_and_right_with_a_cell_selection_go_to_its_ends() {
         assert_eq!(m.selection(), (landing, landing), "{key:?}");
     }
 }
+
+/// Ctrl+Right in a table steps as in any paragraph, a cell's text being one:
+/// from the table's anchor (which stands in the first cell, before its text)
+/// and from inside a cell it stops at the cell's end after its last word, from
+/// there it goes to the next cell's start, and from the last cell's end to
+/// the paragraph after the table. Windows and Linux only: macOS's `⌥→` is
+/// text-document's own word move.
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn a_word_step_forward_goes_through_a_table_cell_by_cell() {
+    let mut m = mount(TABLE_BETWEEN);
+    let steps = [
+        (12, m.at("a1", 2), "from the table's anchor"),
+        (m.at("a1", 0), m.at("a1", 2), "from a cell's start"),
+        (m.at("a1", 2), m.at("b1", 0), "from a cell's end"),
+        (m.at("b1", 2), m.at("c1", 0), "from a row's last cell"),
+        (
+            m.at("d1", 2),
+            m.at("Gamma delta.", 0),
+            "from the table's end",
+        ),
+    ];
+    for (from, to, what) in steps {
+        m.caret(from);
+        m.press(Key::ArrowRight, Modifiers::CTRL);
+        assert_eq!(m.selection(), (to, to), "{what}");
+    }
+}

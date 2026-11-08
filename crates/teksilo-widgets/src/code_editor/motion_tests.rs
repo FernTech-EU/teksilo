@@ -613,6 +613,17 @@ fn a_word_selection_and_a_word_delete_reach_the_next_words_start() {
     assert_eq!(d.caret(), 2);
 }
 
+/// A word step counts characters, not bytes, through accented words.
+#[test]
+fn a_word_step_forward_through_accented_words_counts_characters() {
+    let mut d = Driven::new("déjà été là");
+    d.put(1);
+    d.key_with(Key::ArrowRight, WORD_MODIFIER);
+    assert_eq!(d.caret(), by_convention(5, 4));
+    d.key_with(Key::ArrowRight, WORD_MODIFIER);
+    assert_eq!(d.caret(), by_convention(9, 8));
+}
+
 #[test]
 fn left_and_right_with_a_selection_go_to_its_ends() {
     let (mut d, wrap, _) = wrapped();

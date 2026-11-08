@@ -183,6 +183,9 @@ mod tests {
         // and the word's end is before the space ending this one.
         let text = "word word word";
         assert_eq!((step(PcStyle, text, 7), step(Mac, text, 7)), (10, 9));
+        let text = "déjà été là";
+        assert_eq!((step(PcStyle, text, 1), step(Mac, text, 1)), (5, 4));
+        assert_eq!((step(PcStyle, text, 5), step(Mac, text, 4)), (9, 8));
 
         for (convention, left) in [(PcStyle, "albeta gamma"), (Mac, "al beta gamma")] {
             let document = TextDocument::new();
