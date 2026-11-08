@@ -155,6 +155,9 @@ pub(crate) fn handle_key(
             //
             // A character step with a selection goes to the selection's end in
             // that direction, and no further.
+            //
+            // A masked field is one word, as on every desktop platform: its
+            // words would tell where the hidden text has its spaces.
             Key::ArrowLeft => {
                 let step = caret_step(*modifiers);
                 if !shift && step == CaretStep::Character && st.cursor.has_selection() {
@@ -163,6 +166,7 @@ pub(crate) fn handle_key(
                 } else {
                     let op = match step {
                         CaretStep::Character => MoveOperation::Left,
+                        CaretStep::Word if st.should_mask() => MoveOperation::Start,
                         CaretStep::Word => MoveOperation::WordLeft,
                         CaretStep::LineEdge => MoveOperation::Start,
                     };
@@ -178,6 +182,7 @@ pub(crate) fn handle_key(
                 } else {
                     let op = match step {
                         CaretStep::Character => MoveOperation::Right,
+                        CaretStep::Word if st.should_mask() => MoveOperation::End,
                         CaretStep::Word => MoveOperation::WordRight,
                         CaretStep::LineEdge => MoveOperation::End,
                     };
@@ -204,8 +209,12 @@ pub(crate) fn handle_key(
             Key::Backspace if !read_only => {
                 if deletes_word(*modifiers) {
                     if !st.cursor.has_selection() {
-                        st.cursor
-                            .move_position(MoveOperation::WordLeft, MoveMode::KeepAnchor, 1);
+                        let op = if st.should_mask() {
+                            MoveOperation::Start
+                        } else {
+                            MoveOperation::WordLeft
+                        };
+                        st.cursor.move_position(op, MoveMode::KeepAnchor, 1);
                     }
                     let _ = st.cursor.remove_selected_text();
                 } else if st.cursor.has_selection() {
@@ -218,12 +227,12 @@ pub(crate) fn handle_key(
             Key::Delete if !read_only => {
                 if deletes_word(*modifiers) {
                     if !st.cursor.has_selection() {
-                        word_step::move_cursor(
-                            &st.document,
-                            &st.cursor,
-                            MoveOperation::WordRight,
-                            MoveMode::KeepAnchor,
-                        );
+                        let op = if st.should_mask() {
+                            MoveOperation::End
+                        } else {
+                            MoveOperation::WordRight
+                        };
+                        word_step::move_cursor(&st.document, &st.cursor, op, MoveMode::KeepAnchor);
                     }
                     let _ = st.cursor.remove_selected_text();
                 } else if st.cursor.has_selection() {

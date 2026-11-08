@@ -1186,3 +1186,36 @@ fn a_word_step_forward_reaches_the_next_words_start() {
     assert_eq!(f.doc_text(), "albeta gamma");
     assert_eq!(f.caret(), 2);
 }
+
+/// A masked field is one word, as on every desktop platform: a word step goes
+/// to its edge and a word delete removes everything to that edge, so the
+/// steps tell nothing about where the hidden text has its spaces. Revealed, it
+/// has words again.
+#[test]
+fn a_masked_field_is_one_word() {
+    let masked = |caret| {
+        let f = Field::new("my long pass", caret);
+        f.state.borrow_mut().secure = true;
+        f
+    };
+    let mut f = masked(5);
+    f.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
+    assert_eq!(f.caret(), 12);
+    f.tree.press_key(Key::ArrowLeft, Modifiers::CTRL);
+    assert_eq!(f.caret(), 0);
+
+    let mut f = masked(5);
+    f.tree.press_key(Key::Backspace, Modifiers::CTRL);
+    f.settle();
+    assert_eq!(f.doc_text(), "ng pass");
+
+    let mut f = masked(5);
+    f.tree.press_key(Key::Delete, Modifiers::CTRL);
+    f.settle();
+    assert_eq!(f.doc_text(), "my lo");
+
+    let mut f = masked(5);
+    f.state.borrow_mut().revealed = Some(Signal::new(true));
+    f.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
+    assert_eq!(f.caret(), 8, "revealed, the next word's start");
+}
