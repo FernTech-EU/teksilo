@@ -189,7 +189,8 @@ Undo this editor's last edit.
 The handle could report `can_undo` long before it could
 *act* on it, which left a host able to light an Undo button here and
 unable to make it do anything. Ctrl+Z inside the widget always worked;
-this is the same command from outside.
+this is the same command from outside. With nothing to undo it does
+nothing, and leaves every caret where it was.
 
 <a id="codeeditorhandle-redo"></a>
 

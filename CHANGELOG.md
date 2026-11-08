@@ -62,6 +62,15 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A message box's "Show details" text can be reached with Tab once shown**,
+  read and reviewed by a screen reader, selected and copied. It was a plain
+  label that only a screen reader's object navigation reached. The details
+  pane is now as tall as its text, up to a dozen lines past which it scrolls,
+  instead of a fixed height that left most of it blank under a short error.
+- **Down from the line above a table goes into its first row, and Down from
+  its last row goes to the text after it**, in `RichTextEditor`, also when the
+  text has line or paragraph spacing. The caret stayed where it was, so a
+  screen reader repeated the line as if the text ended there.
 - **Shift with an arrow key inside a table cell of several paragraphs selects
   text in the cell** in `RichTextEditor`. At the start or end of a paragraph
   in the middle of the cell it selected a range of cells instead. Only the
@@ -76,7 +85,9 @@ by crate for clarity, not because crates version independently.
 - **On Windows and Linux, Ctrl+Up and Ctrl+Down move by paragraph in
   `RichTextEditor`**, to the start of the current or previous paragraph and to
   the start of the next one, with Shift extending the selection, as in Word.
-  They moved one line, so a screen reader read the whole paragraph on every
+  A line break made with Shift+Enter also starts a paragraph for this step, as
+  it does for a screen reader, so the lines after it are read. They moved one
+  line, so a screen reader read the whole paragraph on every
   press. Inside a table cell the step stops at the cell's edges.
 - **After Backspace at a list item's start, or Ctrl+Z / Ctrl+Y of a change that
   adds or removes a list marker, a braille display shows the changed line at

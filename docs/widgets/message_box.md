@@ -498,7 +498,10 @@ Secondary, explanatory text rendered below the primary text in
 
 Detailed text hidden behind a "Show details" `Accordion` —
 for technical diagnostics (stack traces, error codes). Matches
-Qt's `setDetailedText`.
+Qt's `setDetailedText`: once shown, the details are a read-only
+text the user can Tab to, read with a screen reader, select and
+copy. The pane is as tall as the text, up to a dozen lines, past
+which it scrolls.
 
 <a id="messagebox-buttons"></a>
 
