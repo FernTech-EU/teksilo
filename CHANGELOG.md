@@ -71,6 +71,9 @@ by crate for clarity, not because crates version independently.
   activate command on its text (such as a message box's details), no longer
   collapses the section.** The accordion took every Space, Enter and assistive
   click its content left unhandled.
+- **Enter on a message box's "Show details" toggle shows or hides the
+  details**, as Space does. It answered the question with the default button
+  and closed the box.
 - **A message box's "Show details" text can be reached with Tab once shown**,
   read and reviewed by a screen reader, selected and copied. It was a plain
   label that only a screen reader's object navigation reached. The details

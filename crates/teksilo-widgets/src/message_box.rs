@@ -119,6 +119,7 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::action::Action;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{Key, Modifiers};
+use teksilo_core::intent::IntentResponse;
 use teksilo_core::modal::{ModalCloseBehavior, ModalPresentation, ModalRequest};
 use teksilo_core::shortcut::{KeyStroke, Shortcut};
 use teksilo_core::signal::Signal;
@@ -551,6 +552,10 @@ struct State {
     /// shortcut so it can answer for the button the user is standing on
     /// rather than for the default. Rebuilt on every `build`.
     button_ids: RefCell<Vec<(WidgetId, StandardButton)>>,
+    /// The "Show details" toggle, when the box has details. Enter there
+    /// expands or collapses them, as Space does, instead of answering with
+    /// the default button. Rebuilt on every `build`.
+    details_toggle: Cell<Option<WidgetId>>,
     /// Guards against multiple result-callback invocations when a
     /// button click races the Escape shortcut.
     fired: Cell<bool>,
@@ -565,6 +570,7 @@ impl State {
             default_button: Cell::new(None),
             buttons: RefCell::new(Vec::new()),
             button_ids: RefCell::new(Vec::new()),
+            details_toggle: Cell::new(None),
             fired: Cell::new(false),
         })
     }
@@ -1073,8 +1079,11 @@ impl Widget for MessageBox {
 
         let mut stack = VStack::new().spacing(16.0);
         stack = stack.child(ctx.add_boxed(header));
+        state.details_toggle.set(None);
         if let Some(det) = detailed_child {
-            stack = stack.child(ctx.add_boxed(det));
+            let toggle = ctx.add_boxed(det);
+            state.details_toggle.set(Some(toggle));
+            stack = stack.child(toggle);
         }
         if let Some(cb) = checkbox_child {
             stack = stack.child(ctx.add_boxed(cb));
@@ -1111,8 +1120,8 @@ impl Widget for MessageBox {
 
         {
             let state_enter = state.clone();
-            ctx.register_action(
-                Action::new(DEFAULT_INTENT_NAME).on_invoke(move |_intent, ctx| {
+            ctx.register_action(Action::new(DEFAULT_INTENT_NAME).on_invoke_with_response(
+                move |_intent, ctx| {
                     // The focused button wins, and only then the default.
                     //
                     // This shortcut is widget-scoped, and a scoped shortcut is
@@ -1129,12 +1138,21 @@ impl Widget for MessageBox {
                     // `Button` already activates on Enter itself, so this is
                     // only about which of the two answers the key, never about
                     // making the button work.
+                    //
+                    // The "Show details" toggle is a button too but no answer:
+                    // Enter there is passed on, so it reaches the toggle and
+                    // shows or hides the details, as it does on any button.
+                    if ctx.focused().is_some() && ctx.focused() == state_enter.details_toggle.get()
+                    {
+                        return IntentResponse::Propagated;
+                    }
                     let focused = ctx.focused().and_then(|id| state_enter.button_for(id));
                     if let Some(kind) = focused.or_else(|| state_enter.default_button.get()) {
                         state_enter.fire(kind, MessageBoxDismissal::Button, ctx);
                     }
-                }),
-            );
+                    IntentResponse::Handled
+                },
+            ));
             ctx.register_shortcut(
                 Shortcut::new(DEFAULT_INTENT_NAME)
                     .primary(KeyStroke::new(Key::Enter, Modifiers::NONE))
@@ -2455,13 +2473,6 @@ mod tests {
         );
     }
 
-    /// Focus on the shown details speaks the toggle's label once, from the
-    /// region around them. A screen reader announces every ancestor of the new
-    /// focus that the old focus did not share, then the focus itself: NVDA used
-    /// to say "Show details" for the region and again for the document on Tab,
-    /// and three times on Shift+Tab, because the details sat inside the toggle
-    /// button (a button may hold no focusable content) and the document carried
-    /// the toggle's label as well.
     /// Reading the shown details does not hide them. The details document
     /// handles neither a screen reader's default action nor Space, and both
     /// bubbled up to the accordion around it, which collapsed: NVDA's activate
@@ -2511,6 +2522,51 @@ mod tests {
         );
     }
 
+    /// Enter on the "Show details" toggle shows and hides the details, as
+    /// Space does, and does not answer the question. The box's Enter shortcut
+    /// answers for a focused answer button or else for the default, and it used
+    /// to answer for the default with the focus on the toggle too, closing the
+    /// box as Cancel.
+    #[test]
+    fn enter_on_the_details_toggle_shows_and_hides_them() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let content = present_and_lay_out(&mut tree, save_failed_with_details(SAVE_FAILED_DETAILS));
+        let proposal = SizeProposal::exact(800.0, 600.0);
+        let hidden = tree.tab_stops_within(content);
+        assert_eq!(hidden.len(), 3, "the details start hidden: {hidden:?}");
+        let toggle = hidden[0];
+
+        tree.focus(toggle);
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        settle(&mut tree, proposal);
+        let shown = tree.tab_stops_within(content);
+        assert_eq!(
+            shown.len(),
+            4,
+            "Enter on the toggle shows the details: {shown:?}"
+        );
+        assert_eq!(
+            tree.focused(),
+            Some(toggle),
+            "the focus stays on the toggle"
+        );
+
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        settle(&mut tree, proposal);
+        assert_eq!(
+            tree.tab_stops_within(content),
+            hidden,
+            "Enter on the toggle again hides them, and the box is still open"
+        );
+    }
+
+    /// Focus on the shown details speaks the toggle's label once, from the
+    /// region around them. A screen reader announces every ancestor of the new
+    /// focus that the old focus did not share, then the focus itself: NVDA used
+    /// to say "Show details" for the region and again for the document on Tab,
+    /// and three times on Shift+Tab, because the details sat inside the toggle
+    /// button (a button may hold no focusable content) and the document carried
+    /// the toggle's label as well.
     #[test]
     fn the_focused_details_hear_the_toggles_label_once() {
         use teksilo_core::accesskit::Role;
