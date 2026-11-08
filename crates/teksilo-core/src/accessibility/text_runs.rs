@@ -23,6 +23,9 @@
 //!   run — a `\r\n` being one character whose `character_lengths` entry
 //!   is 2 — and never a run of its own beside text on the same line. A
 //!   line with no text at all still gets the one run its break rides.
+//!   Every break other than a `\r\n` is reported as a `\n`, whatever the
+//!   source holds (a LINE SEPARATOR, a lone `\r`), because that is the
+//!   break AccessKit and the screen readers behind it understand.
 //! - Every run carries `bounds`, `text_direction`, `character_positions`
 //!   and `character_widths`, real when measured and degenerate when not.
 //!   `Range::bounding_boxes()` discards the boxes it has already
@@ -552,6 +555,21 @@ fn line_pieces(line: &SourceLine, base_direction: TextDirection) -> Vec<Piece> {
     pieces
 }
 
+/// The text a hard break is reported as: a `\r\n` as itself, every other break
+/// as `\n`.
+///
+/// A layout ends a line at any hard break of UAX #14, and a rich text's
+/// Shift+Enter is a LINE SEPARATOR (U+2028), but AccessKit reads a line break
+/// as a `\n` or a `\r\n` ending a line's last run, and so do the screen
+/// readers behind it. NVDA hears a line as blank only when it holds nothing
+/// but spaces, `\n`, `\r` or NUL, and has no name for U+2028: a line holding
+/// one alone was silent instead of "blank", and the caret on the break said
+/// nothing. The break stays one character either way, so every offset a
+/// reader computes is unchanged; only its text differs from the source's.
+fn reported_break(source: &str) -> &str {
+    if source == "\r\n" { source } else { "\n" }
+}
+
 /// Byte offsets of every character boundary in `slice`, plus its length.
 fn char_offsets(slice: &str) -> Vec<usize> {
     let mut offsets: Vec<usize> = slice.char_indices().map(|(i, _)| i).collect();
@@ -848,10 +866,10 @@ fn emit_runs(
                 }
             }
             if carries_break {
-                let break_slice = &text[body_end..body_end + break_bytes];
-                value.push_str(break_slice);
+                let heard = reported_break(&text[body_end..body_end + break_bytes]);
+                value.push_str(heard);
                 // AccessKit counts a `\r\n` as one character of length 2.
-                character_lengths.push(break_bytes as u8);
+                character_lengths.push(heard.len() as u8);
             }
 
             let chunk_char_start = char_cursor - line_char_start;
@@ -1487,6 +1505,36 @@ mod tests {
                 .sum::<usize>(),
             value.len()
         );
+    }
+
+    /// A line separator ends its line as a `\n`, one character of one byte,
+    /// on a line of its own as after text: NVDA hears a line holding only
+    /// U+2028 as nothing at all, not as blank.
+    #[test]
+    fn a_line_separator_is_reported_as_a_line_feed() {
+        let text = "ab\u{2028}\u{2028}cd";
+        let source = unmeasured(
+            text,
+            &[
+                (0..5, LineEnd::HardBreak { chars: 1, bytes: 3 }),
+                (5..8, LineEnd::HardBreak { chars: 1, bytes: 3 }),
+                (8..10, LineEnd::EndOfText),
+            ],
+            0,
+        );
+
+        let mut b = label_builder();
+        let emission = push_text_runs(&mut b, None, &source);
+        assert_eq!(emission.value, "ab\n\ncd");
+        let chars: Vec<_> = emission.runs.iter().map(|r| r.char_range.clone()).collect();
+        assert_eq!(chars, [0..3, 3..4, 4..6], "one character per break");
+        assert_eq!(emission.runs[1].byte_range, 5..5);
+
+        let (_, _, children, _) = b.build(owner());
+        assert_eq!(children[0].1.value(), Some("ab\n"));
+        assert_eq!(children[0].1.character_lengths(), &[1, 1, 1]);
+        assert_eq!(children[1].1.value(), Some("\n"));
+        assert_eq!(children[1].1.character_lengths(), &[1]);
     }
 
     #[test]

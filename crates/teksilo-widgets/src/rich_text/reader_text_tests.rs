@@ -145,7 +145,7 @@ fn a_readers_offset_is_the_document_position() {
     r.handle.select_range(4, 4);
     assert!(r.handle.insert_line_break());
     let len = r.document_len();
-    assert_eq!(r.text(), format!("café{LINE_SEPARATOR} one\n\nde\n"));
+    assert_eq!(r.text(), "café\n one\n\nde\n");
     for position in 0..=len {
         assert_eq!(r.offset_of(position), position, "caret at {position}");
     }
@@ -676,4 +676,81 @@ fn a_caret_after_a_line_break_is_on_the_next_line() {
     assert_eq!(r.line_start_at_caret(), 0, "before the break");
     r.handle.select_range(4, 6);
     assert_eq!(r.line_start_at_caret(), 4, "a selection starting after it");
+}
+
+/// A line break inside a paragraph (Shift+Enter, a U+2028 in the document)
+/// reaches a reader as the line feed a paragraph's end is, one character: NVDA
+/// has no name for U+2028, so the caret just before one said nothing, and a
+/// line holding only one was silent where an empty paragraph's is "blank".
+#[test]
+fn a_line_break_reaches_a_reader_as_a_line_feed() {
+    let mut breaks = Reader::plain(&format!("a{LINE_SEPARATOR}{LINE_SEPARATOR}b"));
+    assert_eq!(breaks.text(), "a\n\nb\n");
+    let mut paragraphs = Reader::plain("a\n\nb");
+    assert_eq!(paragraphs.text(), breaks.text(), "as two Enter read");
+
+    // The caret just before the first break is on the break.
+    let text: Vec<char> = breaks.text().chars().collect();
+    assert_eq!(text[breaks.offset_of(1)], '\n');
+}
+
+/// The line a UIA client gets for the caret at `position`: where it starts,
+/// its text and its boxes.
+fn line_with_boxes_at(
+    r: &mut Reader,
+    position: usize,
+) -> (usize, String, Vec<teksilo_core::accesskit::Rect>) {
+    r.handle.select_range(position, position);
+    with_editor(&r.update(), |editor| {
+        let (start, _) = uia_line_at_caret(editor);
+        let start = editor.text_position_from_global_usv_index(start).unwrap();
+        let mut line = start.to_degenerate_range();
+        line.set_end(start.forward_to_line_end());
+        (
+            start.to_global_usv_index(),
+            line.text(),
+            line.bounding_boxes(),
+        )
+    })
+}
+
+/// The empty line between two line breaks reads as an empty paragraph's line
+/// does: one break character, with a box on that line, below the line above
+/// and above the line below.
+#[test]
+fn an_empty_line_between_two_line_breaks_reads_as_an_empty_paragraph() {
+    let mut breaks = Reader::plain(&format!("a{LINE_SEPARATOR}{LINE_SEPARATOR}b"));
+    let (start, text, boxes) = line_with_boxes_at(&mut breaks, 2);
+    assert_eq!((start, text.as_str()), (2, "\n"), "the caret's line");
+    assert_eq!(boxes.len(), 1, "the line has a box");
+    let (_, _, above) = line_with_boxes_at(&mut breaks, 0);
+    let (_, _, below) = line_with_boxes_at(&mut breaks, 3);
+    assert!(boxes[0].y1 > boxes[0].y0, "a box as tall as a line");
+    assert!(above[0].y1 <= boxes[0].y0 && boxes[0].y1 <= below[0].y0);
+
+    let mut paragraphs = Reader::plain("a\n\nb");
+    assert_eq!(
+        line_with_boxes_at(&mut paragraphs, 2),
+        (start, text, boxes),
+        "as an empty paragraph's line"
+    );
+}
+
+/// Every position of a text with line breaks, the empty line between two of
+/// them included, is the same offset for a reader, both ways, and the caret on
+/// the empty line is on that line.
+#[test]
+fn every_position_around_line_breaks_round_trips() {
+    let mut r = Reader::plain(&format!("one{LINE_SEPARATOR}{LINE_SEPARATOR}two"));
+    for position in 0..=r.document_len() {
+        let offset = r.offset_of(position);
+        assert_eq!(offset, position, "caret at {position}");
+        assert_eq!(r.select_from_reader(offset), position, "offset {offset}");
+    }
+    r.handle.select_range(4, 4);
+    assert_eq!(r.line_start_at_caret(), 4, "the caret on the empty line");
+    r.handle.select_range(5, 5);
+    assert_eq!(r.line_start_at_caret(), 5, "after the second break");
+    r.handle.select_range(3, 3);
+    assert_eq!(r.line_start_at_caret(), 0, "before the first break");
 }

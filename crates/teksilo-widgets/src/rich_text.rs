@@ -5020,9 +5020,11 @@ fn handle_access_action_request(
             self::frame_loop::flush_pending_chars(&mut st);
             st.cursor.select(SelectionType::Document);
             // The whole text, as the assistive technology read and edited it:
-            // a `\n` there ends a paragraph and a U+2028 breaks a line, as
-            // AccessKit reads a run's value, so the paragraphs come back as
-            // blocks rather than as one block holding newlines.
+            // a `\n` there ends a paragraph and a U+2028 breaks a line, so the
+            // paragraphs come back as blocks rather than as one block holding
+            // newlines. The runs report a line break as a `\n` too (the break
+            // a reader understands), so a line break read back and set again
+            // comes back as a paragraph: the text alone cannot tell them apart.
             let arrived = self::clipboard::insert_plain_text(&st, value.as_ref());
             // For some people this **is** typing — dictation, a braille display —
             // and it is reported as itself rather than as `Keyboard` or as

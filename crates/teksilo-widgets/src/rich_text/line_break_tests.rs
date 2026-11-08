@@ -567,17 +567,19 @@ fn accessibility_reads_the_separator_as_a_hard_break() {
         .iter()
         .map(|n| n.value().unwrap_or_default().to_string())
         .collect();
+    // A reader gets the break as the line feed it understands: NVDA has no
+    // name for U+2028 and hears a line holding only one as nothing at all.
     assert_eq!(
         values,
-        [format!("abc{LS}"), "def\n".to_string()],
+        ["abc\n".to_string(), "def\n".to_string()],
         "two lines, the break ending the first as one character, the \
          paragraph's own ending the second"
     );
     let first = runs[0];
     assert_eq!(
         first.character_lengths().last().copied(),
-        Some(LS.len_utf8() as u8),
-        "the break is one character of three bytes"
+        Some(1),
+        "the break is one character of one byte"
     );
     assert_eq!(first.character_lengths().len(), 4);
 }
