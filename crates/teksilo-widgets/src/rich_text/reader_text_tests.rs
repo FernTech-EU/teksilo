@@ -344,14 +344,19 @@ fn a_list_change_at_the_caret_raises_a_caret_event() {
         )
     };
 
+    // Each leg leaves the caret at the item's start in the document: what
+    // moves is only the reader's offset, by the marker.
     let (raised, events) = step(&mut r, "Backspace", &|r| r.press(Key::Backspace));
     assert_eq!(r.text(), "Intro\none two\n");
+    assert_eq!(r.handle.cursor_position(), item, "Backspace");
     assert!(raised, "{events}");
     let (raised, events) = step(&mut r, "undo", &|r| r.handle.undo());
     assert_eq!(r.text(), "Intro\n• one two\n");
+    assert_eq!(r.handle.cursor_position(), item, "undo");
     assert!(raised, "{events}");
     let (raised, events) = step(&mut r, "redo", &|r| r.handle.redo());
     assert_eq!(r.text(), "Intro\none two\n");
+    assert_eq!(r.handle.cursor_position(), item, "redo");
     assert!(raised, "{events}");
 
     // The same with the caret inside the item's text: the undo gives the
@@ -369,6 +374,74 @@ fn a_list_change_at_the_caret_raises_a_caret_event() {
     // Nothing in the frame after a change raises it again.
     let (raised, events) = step(&mut r, "next frame", &|_| {});
     assert!(!raised, "{events}");
+}
+
+/// An item put in above the caret's renumbers the caret's item, its "2."
+/// becoming "3.", and leaves the caret at the same place in the item's text.
+/// A reader is told the caret moved, as for a marker that comes or goes, so
+/// NVDA rebuilds a braille line that still showed "2.".
+#[test]
+fn a_renumbered_item_at_the_caret_raises_a_caret_event() {
+    use crate::common::heard_test::{Uia, UiaRecorder};
+
+    let mut r = Reader::markdown("1. one\n2. two\n");
+    let two = "one\n".chars().count();
+    let inside = two + "t".chars().count();
+    r.handle.select_range(inside, inside);
+    r.update();
+    let before = r.text();
+    assert!(before.contains("2. two"), "{before:?}");
+    let editor = with_editor(&r.update(), |editor| editor.role());
+    let mut adapter = UiaRecorder::attach(&mut r.tree);
+    let selection_changed = Uia::TextSelectionChanged(editor);
+
+    // A new item after the first, written by the application.
+    let above = r.doc.cursor_at(two - 1);
+    above.insert_block().unwrap();
+    above.insert_text("one and a half").unwrap();
+    let after = r.text();
+    assert!(after.contains("3. two"), "{after:?}");
+    let moved_by = "one and a half\n".chars().count();
+    assert_eq!(
+        r.handle.cursor_position(),
+        inside + moved_by,
+        "the caret stays in its item's text"
+    );
+    let events = adapter.frame(&mut r.tree);
+    assert!(events.contains(&selection_changed), "{events:?}");
+}
+
+/// Ticking the box of the caret's task item changes its marker and nothing
+/// else: a reader is told the caret moved, so the braille line shows the
+/// new box. The editor has no gesture of its own for the box, so the
+/// application ticks it through the document, as a host's own control would.
+#[test]
+fn a_task_ticked_at_the_caret_raises_a_caret_event() {
+    use crate::common::heard_test::{Uia, UiaRecorder};
+    use teksilo_text::text_document::{BlockFormat, MarkerType};
+
+    let mut r = Reader::markdown("- [ ] buy milk\n");
+    let inside = "buy ".chars().count();
+    r.handle.select_range(inside, inside);
+    r.update();
+    let before = r.text();
+    assert!(before.starts_with('\u{2610}'), "{before:?}");
+    let editor = with_editor(&r.update(), |editor| editor.role());
+    let mut adapter = UiaRecorder::attach(&mut r.tree);
+    let selection_changed = Uia::TextSelectionChanged(editor);
+
+    r.doc
+        .cursor_at(inside)
+        .set_block_format(&BlockFormat {
+            marker: Some(MarkerType::Checked),
+            ..Default::default()
+        })
+        .unwrap();
+    let after = r.text();
+    assert!(after.starts_with('\u{2611}'), "{after:?}");
+    assert_eq!(r.handle.cursor_position(), inside, "the caret stays put");
+    let events = adapter.frame(&mut r.tree);
+    assert!(events.contains(&selection_changed), "{events:?}");
 }
 
 /// A change after the caret leaves the selection the adapter holds alone, so
