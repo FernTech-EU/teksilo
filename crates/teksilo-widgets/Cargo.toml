@@ -77,6 +77,10 @@ open = { workspace = true }
 # persistent archive can round-trip `jiff::Timestamp` through TOML.
 jiff = { workspace = true, features = ["serde"] }
 thiserror = { workspace = true }
+# The words a forward word step stops at (`common::word_step`): the same
+# Unicode word boundaries text-document's own word moves use, so Ctrl+Right
+# and Ctrl+Left stop at the same word starts.
+unicode-segmentation = { workspace = true }
 # text-typeset + text-document come through teksilo-text's re-exports
 # (`teksilo_text::text_document`, `teksilo_text::RichTextEngine`, …).
 # Widgets never name either crate directly, keeping teksilo-widgets's

@@ -58,4 +58,5 @@ pub(crate) mod tree_a11y;
 pub(crate) mod tree_expand;
 pub(crate) mod type_ahead;
 pub(crate) mod viewport;
+pub(crate) mod word_step;
 pub(crate) mod wrapped_caret;

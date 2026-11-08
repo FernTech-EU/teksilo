@@ -131,6 +131,30 @@ pub(crate) fn line_step_for(convention: TextNavConvention, modifiers: Modifiers)
     }
 }
 
+/// Where a word step forward stops: `Ctrl+→`, `Ctrl+Shift+→` and `Ctrl+Delete`
+/// elsewhere, `⌥→`, `⌥⇧→` and `⌥⌦` on macOS.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ForwardWordStop {
+    /// The end of the word: macOS, where `⌥→` stops after the word's last
+    /// letter.
+    WordEnd,
+    /// The start of the next word, past the rest of this one and the spaces
+    /// after it: Windows and Linux editors (Word, Notepad, Qt's `NextWord`,
+    /// GTK). A screen reader then reads the word the caret lands in, so a
+    /// stop at a word's end read the word just left again.
+    NextWordStart,
+}
+
+/// Where a forward word step stops under `convention`. The editors ask
+/// through [`word_step::move_cursor`](super::word_step::move_cursor), which
+/// moves the caret there.
+pub(crate) fn forward_word_stop_for(convention: TextNavConvention) -> ForwardWordStop {
+    match convention {
+        TextNavConvention::Mac => ForwardWordStop::WordEnd,
+        TextNavConvention::PcStyle => ForwardWordStop::NextWordStart,
+    }
+}
+
 /// Whether `Backspace` / `Delete` with `modifiers` held removes a whole word.
 ///
 /// `⌥⌫` on macOS, `Ctrl+⌫` elsewhere. macOS additionally binds `⌘⌫` to
@@ -245,6 +269,15 @@ mod tests {
         // chord falls through to a plain single-character delete.
         assert!(!deletes_word_for(Mac, SUPER));
         assert!(!deletes_word_for(Mac, ALT | SUPER));
+    }
+
+    #[test]
+    fn a_word_step_forward_stops_at_the_word_end_only_on_mac() {
+        assert_eq!(forward_word_stop_for(Mac), ForwardWordStop::WordEnd);
+        assert_eq!(
+            forward_word_stop_for(PcStyle),
+            ForwardWordStop::NextWordStart
+        );
     }
 
     #[test]

@@ -538,6 +538,47 @@ fn a_word_step_onto_a_wrap_is_on_the_line_of_that_word() {
     assert_eq!(r.line_start_at_caret(), wrap);
 }
 
+/// Ctrl+Right stops at the start of the next word, as Windows and Linux editors
+/// do, and the next word may start a wrapped line: the caret is then at the
+/// start of that line, where a reader reads it. It used to stop at the end of
+/// the word, before the space, and never reached a wrap.
+#[test]
+fn a_word_step_forward_lands_on_the_next_words_start_on_its_line() {
+    let (mut r, wrap) = at_the_second_line();
+    r.handle.select_range(wrap - 3, wrap - 3);
+    r.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
+    r.update();
+    assert_eq!(r.handle.cursor_position(), wrap);
+    assert_eq!(r.line_start_at_caret(), wrap, "the line of that word");
+
+    r.handle.select_range(0, 0);
+    r.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
+    r.update();
+    assert_eq!(
+        r.handle.cursor_position(),
+        6,
+        "alpha beta: the start of beta"
+    );
+}
+
+/// Ctrl+Shift+Right selects up to the next word's start, and Ctrl+Delete
+/// removes the rest of the word and the space after it.
+#[test]
+fn a_word_selection_and_a_word_delete_reach_the_next_words_start() {
+    let mut r = Reader::plain("alpha beta gamma");
+    r.handle.select_range(2, 2);
+    r.tree
+        .press_key(Key::ArrowRight, Modifiers::CTRL | Modifiers::SHIFT);
+    r.update();
+    assert_eq!(r.handle.selection(), (2, 6));
+
+    r.handle.select_range(2, 2);
+    r.tree.press_key(Key::Delete, Modifiers::CTRL);
+    r.update();
+    assert_eq!(r.doc.to_plain_text().unwrap(), "albeta gamma");
+    assert_eq!(r.handle.cursor_position(), 2);
+}
+
 /// Backspace on a line's second character leaves the caret on that line. It
 /// used to take the writer to the end of the line above.
 #[test]

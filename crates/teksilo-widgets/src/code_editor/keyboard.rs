@@ -43,6 +43,7 @@ use super::state::{CodeEditorState, SharedState};
 use super::sync_cursor_signals;
 use crate::common::editor_runtime::CaretPolicy;
 use crate::common::text_nav::{CaretStep, LineStep, caret_step, deletes_word, line_step};
+use crate::common::word_step;
 use crate::common::wrapped_caret::{affinity_after_step, is_soft_wrap};
 
 /// What the dispatch decided, so the epilogue knows what to preserve.
@@ -694,9 +695,9 @@ fn caret_moved(state: &SharedState, ctx: &mut EventContext) -> EventResponse {
 
 /// Move every caret, then merge any that collided.
 fn move_every_caret(st: &mut CodeEditorState, op: MoveOperation, mode: MoveMode) {
-    st.cursor.move_position(op, mode, 1);
-    for c in &mut st.extra_carets {
-        c.move_position(op, mode, 1);
+    word_step::move_cursor(&st.document, &st.cursor, op, mode);
+    for c in &st.extra_carets {
+        word_step::move_cursor(&st.document, c, op, mode);
     }
     st.merge_collided_carets();
 }
@@ -916,13 +917,14 @@ fn affinity_after_delete(st: &CodeEditorState, dir: Direction, by_word: bool) ->
 }
 
 fn delete_one(st: &mut CodeEditorState, i: usize, dir: Direction, by_word: bool) {
+    let document = st.document.clone();
     let c = caret_at(st, i);
     if by_word && !c.has_selection() {
         let op = match dir {
             Direction::Backward => MoveOperation::WordLeft,
             Direction::Forward => MoveOperation::WordRight,
         };
-        c.move_position(op, MoveMode::KeepAnchor, 1);
+        word_step::move_cursor(&document, c, op, MoveMode::KeepAnchor);
     }
     if c.has_selection() {
         let _ = c.remove_selected_text();

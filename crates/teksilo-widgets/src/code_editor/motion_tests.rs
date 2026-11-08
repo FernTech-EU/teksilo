@@ -500,6 +500,32 @@ fn undoing_a_change_at_a_wrap_puts_the_caret_on_the_line_below() {
     assert_eq!(reported_run_start(&mut d), (wrap, 0), "the handle's undo");
 }
 
+/// Ctrl+Right stops at the next word's start, which may start a wrapped line:
+/// the caret is then reported on that line.
+#[test]
+fn a_word_step_forward_lands_on_the_next_words_start_on_its_line() {
+    let (mut d, wrap, _) = wrapped();
+    d.put(wrap - 3);
+    d.key_with(Key::ArrowRight, Modifiers::CTRL);
+    assert_eq!(d.caret(), wrap);
+    assert_eq!(reported_run_start(&mut d), (wrap, 0));
+}
+
+/// Ctrl+Shift+Right selects up to the next word's start, and Ctrl+Delete
+/// removes the rest of the word and the space after it.
+#[test]
+fn a_word_selection_and_a_word_delete_reach_the_next_words_start() {
+    let mut d = Driven::new("alpha beta gamma");
+    d.put(2);
+    d.key_with(Key::ArrowRight, Modifiers::CTRL | Modifiers::SHIFT);
+    assert_eq!((d.anchor(), d.caret()), (2, 6));
+
+    d.put(2);
+    d.key_with(Key::Delete, Modifiers::CTRL);
+    assert_eq!(d.doc.to_plain_text().unwrap(), "albeta gamma");
+    assert_eq!(d.caret(), 2);
+}
+
 #[test]
 fn left_and_right_with_a_selection_go_to_its_ends() {
     let (mut d, wrap, _) = wrapped();

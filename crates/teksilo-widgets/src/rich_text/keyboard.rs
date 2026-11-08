@@ -29,6 +29,7 @@ use teksilo_text::{CursorAffinity, TextDirection};
 use crate::EditSource;
 use crate::common::composition::position_after_commit;
 use crate::common::text_nav::{self, CaretStep, LineStep};
+use crate::common::word_step;
 use crate::common::wrapped_caret::{affinity_after_step, is_soft_wrap};
 
 use super::clipboard;
@@ -342,7 +343,7 @@ pub(super) fn handle_key(
                     KeyAction::LineEdgeMotion
                 } else {
                     let op = visual_move(&st, VisualDirection::Left, caret_motion);
-                    st.cursor.move_position(op, mode, 1);
+                    word_step::move_cursor(&st.document, &st.cursor, op, mode);
                     settle_affinity_after_step(&mut st, VisualDirection::Left);
                     KeyAction::LineEdgeMotion
                 }
@@ -360,7 +361,7 @@ pub(super) fn handle_key(
                     KeyAction::LineEdgeMotion
                 } else {
                     let op = visual_move(&st, VisualDirection::Right, caret_motion);
-                    st.cursor.move_position(op, mode, 1);
+                    word_step::move_cursor(&st.document, &st.cursor, op, mode);
                     settle_affinity_after_step(&mut st, VisualDirection::Right);
                     KeyAction::LineEdgeMotion
                 }
@@ -513,8 +514,12 @@ pub(super) fn handle_key(
                 };
                 if text_nav::deletes_word(*modifiers) {
                     if !st.cursor.has_selection() {
-                        st.cursor
-                            .move_position(MoveOperation::WordRight, MoveMode::KeepAnchor, 1);
+                        word_step::move_cursor(
+                            &st.document,
+                            &st.cursor,
+                            MoveOperation::WordRight,
+                            MoveMode::KeepAnchor,
+                        );
                     }
                     let _ = st.cursor.remove_selected_text();
                 } else if st.cursor.has_selection() {
@@ -2099,7 +2104,8 @@ fn visual_move(st: &EditorState, pressed: VisualDirection, step: CaretStep) -> M
 /// The stepping primitive for a horizontal motion already resolved to a
 /// direction. Split from [`visual_move`] so the table is testable without an
 /// `EditorState` — and, more to the point, on a host whose platform never
-/// produces `CaretStep::LineEdge`.
+/// produces `CaretStep::LineEdge`. Run it with [`word_step::move_cursor`],
+/// which takes `WordRight` to where this platform's word step stops.
 fn horizontal_op(forward: bool, step: CaretStep) -> MoveOperation {
     match (forward, step) {
         (true, CaretStep::Word) => MoveOperation::WordRight,

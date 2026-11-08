@@ -1160,3 +1160,29 @@ fn shift_with_a_selection_still_extends_it() {
     let st = f.state.borrow();
     assert_eq!((st.cursor.anchor(), st.cursor.position()), (2, 4));
 }
+
+/// Ctrl+Right stops at the start of the next word, as Windows and Linux fields
+/// do; Ctrl+Shift+Right selects up to it, and Ctrl+Delete removes the rest of
+/// the word and the space after it. They used to stop at the word's end.
+#[test]
+fn a_word_step_forward_reaches_the_next_words_start() {
+    let mut f = Field::new("alpha beta gamma", 2);
+    f.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
+    assert_eq!(f.caret(), 6);
+    f.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
+    assert_eq!(f.caret(), 11);
+
+    let mut f = Field::new("alpha beta gamma", 2);
+    f.tree
+        .press_key(Key::ArrowRight, Modifiers::CTRL | Modifiers::SHIFT);
+    {
+        let st = f.state.borrow();
+        assert_eq!((st.cursor.anchor(), st.cursor.position()), (2, 6));
+    }
+
+    let mut f = Field::new("alpha beta gamma", 2);
+    f.tree.press_key(Key::Delete, Modifiers::CTRL);
+    f.settle();
+    assert_eq!(f.doc_text(), "albeta gamma");
+    assert_eq!(f.caret(), 2);
+}

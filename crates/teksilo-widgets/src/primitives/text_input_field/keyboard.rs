@@ -17,6 +17,7 @@ use teksilo_text::text_document::{MoveMode, MoveOperation, SelectionType};
 use crate::EditSource;
 use crate::common::composition::position_after_commit;
 use crate::common::text_nav::{CaretStep, caret_step, deletes_word};
+use crate::common::word_step;
 
 use super::state::{SharedState, TextInputState, sync_cursor_signals};
 
@@ -165,7 +166,7 @@ pub(crate) fn handle_key(
                         CaretStep::Word => MoveOperation::WordLeft,
                         CaretStep::LineEdge => MoveOperation::Start,
                     };
-                    st.cursor.move_position(op, mode, 1);
+                    word_step::move_cursor(&st.document, &st.cursor, op, mode);
                 }
                 true
             }
@@ -180,7 +181,7 @@ pub(crate) fn handle_key(
                         CaretStep::Word => MoveOperation::WordRight,
                         CaretStep::LineEdge => MoveOperation::End,
                     };
-                    st.cursor.move_position(op, mode, 1);
+                    word_step::move_cursor(&st.document, &st.cursor, op, mode);
                 }
                 true
             }
@@ -217,8 +218,12 @@ pub(crate) fn handle_key(
             Key::Delete if !read_only => {
                 if deletes_word(*modifiers) {
                     if !st.cursor.has_selection() {
-                        st.cursor
-                            .move_position(MoveOperation::WordRight, MoveMode::KeepAnchor, 1);
+                        word_step::move_cursor(
+                            &st.document,
+                            &st.cursor,
+                            MoveOperation::WordRight,
+                            MoveMode::KeepAnchor,
+                        );
                     }
                     let _ = st.cursor.remove_selected_text();
                 } else if st.cursor.has_selection() {
