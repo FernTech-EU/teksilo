@@ -62,6 +62,8 @@ mod composition_tests;
 #[cfg(test)]
 mod motion_tests;
 #[cfg(test)]
+mod route_click_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod touch_tests;

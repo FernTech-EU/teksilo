@@ -117,6 +117,8 @@ mod nesting_tests;
 #[cfg(test)]
 mod reader_text_tests;
 #[cfg(test)]
+pub(crate) mod route_click_tests;
+#[cfg(test)]
 mod table_selection_tests;
 #[cfg(test)]
 mod tests;
