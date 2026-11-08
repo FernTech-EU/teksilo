@@ -3482,9 +3482,22 @@ fn heard_since(t: &WidgetTree, mark: u64) -> Vec<String> {
         .collect()
 }
 
+/// The name focus is heard by: the focused widget's own, or, for a composite
+/// whose node is only structure (an accordion header), the name of the node
+/// it publishes focus on.
 fn focused_name(t: &WidgetTree) -> Option<String> {
     let id = t.focused()?;
-    t.accessibility_node(id).name().map(str::to_owned)
+    if let Some(name) = t.accessibility_node(id).name() {
+        return Some(name.to_owned());
+    }
+    let mut stack = t.children(id);
+    while let Some(child) = stack.pop() {
+        if t.focusable_composite_behind(child) == Some(id) {
+            return t.accessibility_node(child).name().map(str::to_owned);
+        }
+        stack.extend(t.children(child));
+    }
+    None
 }
 
 /// A centre with a focusable field, the place a user works in.

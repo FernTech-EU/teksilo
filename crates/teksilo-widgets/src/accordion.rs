@@ -17,9 +17,12 @@
 //!
 //! The header is announced as `Role::Button` with `aria-expanded` reflecting the
 //! current state, and `aria-controls` pointing at the content region
-//! (`Role::Region`). Space/Enter toggle the disclosure; AT "click" actions are
-//! also handled. The focus ring appears only on keyboard focus (not on pointer
-//! clicks), matching the IntUI convention.
+//! (`Role::Region`). The button, the trailing slot's controls and the region are
+//! siblings in the accessibility tree, as in the WAI-ARIA disclosure pattern: a
+//! button holds nothing a screen reader can focus, so focus in the content is
+//! announced with the region's name only. Space/Enter toggle the disclosure; AT
+//! "click" actions are also handled. The focus ring appears only on keyboard
+//! focus (not on pointer clicks), matching the IntUI convention.
 //!
 //! ```rust
 //! # use teksilo_widgets::accordion::Accordion;
@@ -140,6 +143,86 @@ impl Widget for AccordionRegion {
 }
 
 // ---------------------------------------------------------------------------
+// AccordionHeader: the node a screen reader meets as the disclosure button.
+// ---------------------------------------------------------------------------
+
+/// The header row's accessibility node: the disclosure `Role::Button`.
+///
+/// The button is this node rather than the accordion's own because a button
+/// may hold nothing an assistive technology can focus (ARIA's children
+/// presentational rule; UIA lists a button's descendants all the same). The
+/// accordion's own node is the parent of everything it draws, its content
+/// region and the trailing slot's controls included, so a button there put
+/// the region inside the button: a screen reader entering the content
+/// announced the button's name before the region's, and NVDA said a message
+/// box's "Show details" three times on Shift+Tab into its details. Here the
+/// button, the trailing slot and the region are siblings, as in the WAI-ARIA
+/// disclosure pattern.
+///
+/// The accordion keeps the focus and the handlers, and names this node as its
+/// [`accessibility_proxy`](Widget::accessibility_proxy): focus on the
+/// accordion is published here, an assistive Click bubbles up to the
+/// accordion's handler, and an `.access_*` override on the accordion lands on
+/// the button.
+#[derive(Debug)]
+struct AccordionHeader {
+    title: LocalizedString,
+    expanded: Signal<bool>,
+    /// The content region, set once the accordion has built it, for the
+    /// button's `aria-controls`.
+    region_id: std::rc::Rc<std::cell::Cell<Option<WidgetId>>>,
+    child: WidgetId,
+}
+
+impl Widget for AccordionHeader {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        ctx: &LayoutContext,
+    ) -> teksilo_core::widget::LayoutResponse {
+        // Layout-transparent: forward the row's whole response.
+        ctx.child_layout_response(self.child, proposal)
+            .unwrap_or_else(|| proposal.resolve(0.0, 0.0).into())
+    }
+
+    fn place_children(
+        &self,
+        bounds: Rect,
+        _proposal: SizeProposal,
+        children: &mut [WidgetPlacement],
+        _ctx: &LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
+        builder.set_role(teksilo_core::accesskit::Role::Button);
+        // Resolve at walk time: the AT tree re-walks on locale change.
+        builder.set_name(self.title.resolve_now());
+        builder.set_expanded(self.expanded.get());
+        builder.add_action(teksilo_core::accesskit::Action::Click);
+        builder.add_action(teksilo_core::accesskit::Action::Focus);
+        if let Some(region_id) = self.region_id.get() {
+            builder.push_controlled(teksilo_core::accessibility::widget_id_to_node_id(region_id));
+        }
+    }
+
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        // The title is hidden (the button carries it) and the chevrons are
+        // decoration. The trailing slot's controls are the accordion's to
+        // place, beside this button rather than inside it.
+        Some(Vec::new())
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.child]
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Accordion widget
 // ---------------------------------------------------------------------------
 
@@ -203,6 +286,12 @@ pub struct Accordion {
     root_child_id: Option<WidgetId>,
     /// Region wrapper ID — used for `aria-controls` on the header button.
     region_id: Option<WidgetId>,
+    /// The header's accessibility node, the disclosure button. See
+    /// [`AccordionHeader`].
+    header_id: Option<WidgetId>,
+    /// The trailing slot as built (its `DeadZone` wrapper), placed beside the
+    /// button in the accessibility tree.
+    trailing_slot_id: Option<WidgetId>,
     /// Optional override for the header foreground color (title text +
     /// chevron icon). When `None`, the accordion uses [`TextRole::Primary`].
     /// Set this when the accordion is embedded inside a surface that uses a
@@ -256,6 +345,8 @@ impl Accordion {
             pending_content: None,
             root_child_id: None,
             region_id: None,
+            header_id: None,
+            trailing_slot_id: None,
             title_color: None,
             title_style: None,
             orientation: AccordionOrientation::Vertical,
@@ -381,10 +472,11 @@ impl Widget for Accordion {
         let header_focused = ctx.signal(false);
         let kb_focused = header_focused.and(&ctx.focus_visible());
 
-        // Refresh this node's announced `aria-expanded` whenever the state
-        // flips — from a tap, the keyboard, or an external `expanded.set(...)`.
-        // Without binding the signal to the accordion's own node the
-        // `accessibility()` output isn't re-queried, so the announced state
+        // Refresh the header button's announced `aria-expanded` whenever the
+        // state flips, from a tap, the keyboard, or an external `expanded.set(...)`.
+        // An accessibility-level binding marks the whole accessibility tree for
+        // a re-walk, so binding it to the accordion's own node is enough. Without
+        // it the header's `accessibility()` output isn't re-queried, so the announced state
         // would go stale (same mechanism Button uses for its disclosure
         // pattern).
         self.expanded.bind_to(
@@ -495,11 +587,20 @@ impl Widget for Accordion {
                     accordion_corner_radius,
                 )),
         );
-        let header_with_ring = ctx.add(
+        let header_ring = ctx.add(
             crate::primitives::ZStack::new()
                 .child(focus_rect_id)
                 .child(header),
         );
+        let region_slot = std::rc::Rc::new(std::cell::Cell::new(None));
+        let header_with_ring = ctx.add(AccordionHeader {
+            title: self.title.clone(),
+            expanded: self.expanded.clone(),
+            region_id: region_slot.clone(),
+            child: header_ring,
+        });
+        self.header_id = Some(header_with_ring);
+        self.trailing_slot_id = trailing_id;
 
         if self.fill {
             // Fill mode: the header + a `FillBody` are laid out by the accordion
@@ -518,6 +619,7 @@ impl Widget for Accordion {
             if let Some(content_id) = self.content_id {
                 let region_id = ctx.add(AccordionRegion::new(self.title.clone(), content_id));
                 self.region_id = Some(region_id);
+                region_slot.set(Some(region_id));
                 let body = ctx.add(FillBody::new(region_id));
                 self.fill_body_id = Some(body);
             }
@@ -528,6 +630,7 @@ impl Widget for Accordion {
             let content_wrapper = self.content_id.map(|content_id| {
                 let region_id = ctx.add(AccordionRegion::new(self.title.clone(), content_id));
                 self.region_id = Some(region_id);
+                region_slot.set(Some(region_id));
                 if horizontal {
                     ctx.visible_when(region_id, self.expanded.clone());
                     region_id
@@ -666,15 +769,25 @@ impl Widget for Accordion {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::Button);
-        // Resolve at walk time — the AT tree re-walks on locale change.
-        builder.set_name(self.title.resolve_now());
-        builder.set_expanded(self.expanded.get());
-        builder.add_action(teksilo_core::accesskit::Action::Click);
-        builder.add_action(teksilo_core::accesskit::Action::Focus);
-        if let Some(region_id) = self.region_id {
-            builder.push_controlled(teksilo_core::accessibility::widget_id_to_node_id(region_id));
-        }
+        // Structure only: the disclosure button is the header's node (see
+        // `AccordionHeader`), and this one is pruned so the button, the
+        // trailing slot and the region read as siblings.
+        builder.set_role(teksilo_core::accesskit::Role::GenericContainer);
+    }
+
+    fn accessibility_proxy(&self) -> Option<WidgetId> {
+        self.header_id
+    }
+
+    fn accessibility_children(&self) -> Option<Vec<WidgetId>> {
+        // The button, then the trailing slot's controls, then the content:
+        // the reading order of the header row and what it discloses. A
+        // collapsed region is dormant, and the walker leaves a dormant id out.
+        let header = self.header_id?;
+        let mut ids = vec![header];
+        ids.extend(self.trailing_slot_id);
+        ids.extend(self.region_id);
+        Some(ids)
     }
 
     fn children(&self) -> Vec<WidgetId> {
@@ -918,9 +1031,30 @@ mod tests {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
         let acc = tree.add(Accordion::new(lit!("Details"), expanded));
         tree.layout(SizeProposal::exact(300.0, 200.0));
-        let info = tree.accessibility_node(acc);
+        // The accordion's own node is structure; its header is the button.
+        let header = header_button(&tree, acc);
+        let info = tree.accessibility_node(header);
+        assert_eq!(info.role(), teksilo_core::accesskit::Role::Button);
         assert_eq!(info.name(), Some("Details"));
         assert!(info.is_expanded());
+    }
+
+    /// The header node that is the accordion's disclosure button.
+    fn header_button(tree: &WidgetTree, acc: WidgetId) -> WidgetId {
+        let own = tree.accessibility_node(acc);
+        assert_eq!(
+            own.role(),
+            teksilo_core::accesskit::Role::GenericContainer,
+            "the accordion's own node is structure"
+        );
+        let mut stack = vec![acc];
+        while let Some(id) = stack.pop() {
+            if tree.accessibility_node(id).role() == teksilo_core::accesskit::Role::Button {
+                return id;
+            }
+            stack.extend(tree.children(id));
+        }
+        panic!("the accordion has a header button");
     }
 
     #[test]
@@ -961,13 +1095,126 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 200.0));
         // Realize the AT tree once so the binding is in place.
         let _ = tree.sync_accessibility();
-        assert!(!tree.accessibility_node(acc).is_expanded());
+        let header = header_button(&tree, acc);
+        assert!(!tree.accessibility_node(header).is_expanded());
 
         expanded.set(true);
         let _ = tree.sync_accessibility();
         assert!(
-            tree.accessibility_node(acc).is_expanded(),
+            tree.accessibility_node(header).is_expanded(),
             "announced expanded state must follow an external set"
+        );
+    }
+
+    /// The header button, the trailing slot's controls and the content region
+    /// are siblings in the tree an adapter is handed, as in the WAI-ARIA
+    /// disclosure pattern. The region used to be inside the button (the
+    /// accordion's own node was the button and the parent of all it draws),
+    /// so a screen reader entering the content announced the button's name,
+    /// then the region's, then the control's: NVDA said a message box's "Show
+    /// details" three times on Shift+Tab into its details.
+    #[test]
+    fn the_header_button_holds_neither_the_content_nor_the_trailing_slot() {
+        use crate::button::Button;
+        use accesskit_consumer::{Tree, common_filter};
+        use teksilo_core::accesskit::Role;
+
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let acc = tree.add(
+            Accordion::new(lit!("Section"), expanded.clone())
+                .trailing(Button::new(lit!("More")))
+                .content(Button::new(lit!("Inside"))),
+        );
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        tree.tick_animations(std::time::Duration::from_millis(400));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+
+        // Focus on the accordion is published on its button, by its title.
+        tree.focus(acc);
+        let consumer = Tree::new(tree.sync_accessibility(), true);
+        let state = consumer.state();
+        let focus = state.focus().expect("the header holds the focus");
+        assert_eq!(focus.role(), Role::Button);
+        assert_eq!(focus.label().as_deref(), Some("Section"));
+        assert_eq!(focus.data().is_expanded(), Some(true));
+        assert_eq!(
+            focus.filtered_children(&common_filter).count(),
+            0,
+            "the button holds nothing"
+        );
+
+        let find = |label: &str| {
+            let mut stack = vec![state.root()];
+            while let Some(node) = stack.pop() {
+                if node.label().as_deref() == Some(label) && node.role() != Role::Label {
+                    return node;
+                }
+                stack.extend(node.children());
+            }
+            panic!("no node named {label}");
+        };
+        // As an adapter sees it: the structural containers (the accordion's
+        // own node among them) are filtered out.
+        let ancestors = |node: accesskit_consumer::NodeRef<'_>| {
+            let mut roles = Vec::new();
+            let mut current = node.filtered_parent(&common_filter);
+            while let Some(n) = current {
+                roles.push((n.role(), n.label()));
+                current = n.filtered_parent(&common_filter);
+            }
+            roles
+        };
+        let inside = find("Inside");
+        assert_eq!(
+            ancestors(inside),
+            vec![
+                (Role::Region, Some("Section".to_string())),
+                (Role::Window, None)
+            ],
+            "the content sits in the region, beside the button"
+        );
+        let more = find("More");
+        assert_eq!(
+            ancestors(more),
+            vec![(Role::Window, None)],
+            "the trailing slot's control sits beside the button"
+        );
+        let region = inside.filtered_parent(&common_filter).expect("the region");
+        assert!(
+            focus.controls().any(|c| c.id() == region.id()),
+            "the button still says which region it controls"
+        );
+        let order: Vec<Option<String>> = state
+            .root()
+            .filtered_children(&common_filter)
+            .map(|n| n.label())
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                Some("Section".to_string()),
+                Some("More".to_string()),
+                Some("Section".to_string()),
+            ],
+            "button, trailing control, region: the header row's reading order"
+        );
+
+        // Collapsed, the region leaves the tree, and the published button
+        // says so without a rebuild.
+        expanded.set(false);
+        tree.tick_animations(std::time::Duration::from_millis(400));
+        tree.layout(SizeProposal::exact(300.0, 200.0));
+        let consumer = Tree::new(tree.sync_accessibility(), true);
+        let state = consumer.state();
+        let focus = state.focus().expect("the header holds the focus");
+        assert_eq!(focus.data().is_expanded(), Some(false));
+        assert!(
+            state
+                .root()
+                .filtered_children(&common_filter)
+                .all(|n| n.role() != Role::Region),
+            "a collapsed region is out of the tree"
         );
     }
 

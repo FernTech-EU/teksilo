@@ -2455,10 +2455,13 @@ mod tests {
         );
     }
 
-    /// The focused details document carries no name: the region around it is
-    /// named by the toggle, and a screen reader announces that region as focus
-    /// enters it. NVDA said "Show details" for the region and again for the
-    /// document on Tab, because the document carried the toggle's label too.
+    /// Focus on the shown details speaks the toggle's label once, from the
+    /// region around them. A screen reader announces every ancestor of the new
+    /// focus that the old focus did not share, then the focus itself: NVDA used
+    /// to say "Show details" for the region and again for the document on Tab,
+    /// and three times on Shift+Tab, because the details sat inside the toggle
+    /// button (a button may hold no focusable content) and the document carried
+    /// the toggle's label as well.
     #[test]
     fn the_focused_details_hear_the_toggles_label_once() {
         use teksilo_core::accesskit::Role;
@@ -2483,14 +2486,20 @@ mod tests {
             chain.push(n);
             node = n.parent();
         }
+        let roles: Vec<Role> = chain.iter().map(|n| n.role()).collect();
+        assert!(
+            !roles.contains(&Role::Button),
+            "the details are no descendant of a button: {roles:?}"
+        );
         let named: Vec<Role> = chain
             .iter()
             .filter(|n| n.label().as_deref() == Some(show_details.as_str()))
             .map(|n| n.role())
             .collect();
-        assert!(
-            named.contains(&Role::Region) && !named.contains(&Role::Document),
-            "the region around the details carries the toggle's label, the document does not: {named:?}"
+        assert_eq!(
+            named,
+            vec![Role::Region],
+            "only the region around the details carries the toggle's label"
         );
         assert_eq!(
             focus.label(),
@@ -2498,7 +2507,8 @@ mod tests {
             "the document itself is unnamed: the region names it"
         );
 
-        // The toggle still says what it controls.
+        // The toggle is still the details' neighbour, and still says what it
+        // controls.
         let mut toggle = None;
         let mut stack = vec![state.root()];
         while let Some(node) = stack.pop() {
