@@ -5,7 +5,9 @@
 //! WordPad and the GTK and Qt text views: up to the start of the caret's
 //! paragraph, or of the one before from a start; down to the start of the next
 //! paragraph. NVDA reads the paragraph the caret lands in after either key, so
-//! a caret that moved only a line had it read the same paragraph again.
+//! a caret that moved only a line had it read the same paragraph again. A line
+//! break inside a block (Shift+Enter) ends a paragraph for the step as it does
+//! for NVDA.
 //!
 //! macOS keeps its own `⌥↑/↓` (to the edges of the caret's paragraph), so
 //! these run only where the PC convention is the build's.
@@ -567,4 +569,189 @@ fn ctrl_up_in_a_document_that_starts_with_a_table_stays_in_its_first_cell() {
         e.ctrl_up();
         assert_eq!(e.caret(), from, "nothing comes before the table's anchor");
     }
+}
+
+// A line break inside a block (Shift+Enter, a LINE SEPARATOR in the text) is
+// reported to a screen reader as a line feed, so NVDA ends its paragraph there
+// and reads, after a step, only up to the break. The step therefore stops just
+// after each break, or the text after it is never read by Ctrl+Up/Down.
+
+const LS: char = teksilo_text::text_document::LINE_SEPARATOR;
+
+/// An editor over `text`, checked to have `blocks` blocks (its line breaks
+/// stay inside their block).
+fn with_breaks(text: &str, blocks: usize) -> Editor {
+    let e = Editor::plain(text);
+    assert_eq!(
+        e.doc.block_count(),
+        blocks,
+        "precondition: a line break does not split its block"
+    );
+    e
+}
+
+#[test]
+fn ctrl_down_stops_after_a_line_break() {
+    // "Verse one" 0..9, the break at 9, "verse two" 10..19, "Next." at 20.
+    let text = format!("Verse one{LS}verse two\nNext.");
+    for from in [0, 4, 9] {
+        let mut e = with_breaks(&text, 2);
+        e.handle.select_range(from, from);
+        e.settle();
+        e.ctrl_down();
+        assert_eq!(e.caret(), 10, "from {from}, to the line after the break");
+        e.ctrl_down();
+        assert_eq!(e.caret(), 20, "then the next paragraph");
+    }
+}
+
+#[test]
+fn ctrl_up_stops_after_a_line_break() {
+    let text = format!("Verse one{LS}verse two\nNext.");
+    let mut e = with_breaks(&text, 2);
+    e.handle.select_range(15, 15);
+    e.settle();
+    e.ctrl_up();
+    assert_eq!(e.caret(), 10, "the start of the line after the break");
+    e.ctrl_up();
+    assert_eq!(e.caret(), 0, "then the start of the text before it");
+
+    // From the next paragraph's start, up goes to the last line before it,
+    // not past it to the block's start.
+    e.handle.select_range(20, 20);
+    e.settle();
+    e.ctrl_up();
+    assert_eq!(e.caret(), 10);
+    e.ctrl_up();
+    assert_eq!(e.caret(), 0);
+}
+
+#[test]
+fn ctrl_steps_stop_after_each_of_two_line_breaks() {
+    // "one" 0..3, a break at 3, "two" 4..7, a break at 7, "three" 8..13,
+    // "After." at 14.
+    let mut e = with_breaks(&format!("one{LS}two{LS}three\nAfter."), 2);
+    e.handle.select_range(1, 1);
+    e.settle();
+    for stop in [4, 8, 14] {
+        e.ctrl_down();
+        assert_eq!(e.caret(), stop);
+    }
+    for stop in [8, 4, 0] {
+        e.ctrl_up();
+        assert_eq!(e.caret(), stop);
+    }
+}
+
+#[test]
+fn ctrl_steps_stop_on_the_empty_line_between_two_line_breaks() {
+    // NVDA reads the empty line between two breaks as a blank paragraph, so
+    // the step stops there as at an empty paragraph. "one" 0..3, breaks at 3
+    // and 4, "three" 5..10, "After." at 11.
+    let mut e = with_breaks(&format!("one{LS}{LS}three\nAfter."), 2);
+    e.handle.select_range(0, 0);
+    e.settle();
+    for stop in [4, 5, 11] {
+        e.ctrl_down();
+        assert_eq!(e.caret(), stop);
+    }
+    for stop in [5, 4, 0] {
+        e.ctrl_up();
+        assert_eq!(e.caret(), stop);
+    }
+}
+
+#[test]
+fn ctrl_steps_stop_after_a_line_break_that_ends_its_block() {
+    // "one" 0..3, a break at 3 ending the block at 4, "After." at 5: the
+    // empty last line of the block is a stop, read as blank.
+    let mut e = with_breaks(&format!("one{LS}\nAfter."), 2);
+    e.handle.select_range(1, 1);
+    e.settle();
+    e.ctrl_down();
+    assert_eq!(e.caret(), 4);
+    e.ctrl_down();
+    assert_eq!(e.caret(), 5);
+    e.ctrl_up();
+    assert_eq!(e.caret(), 4);
+    e.ctrl_up();
+    assert_eq!(e.caret(), 0);
+}
+
+#[test]
+fn ctrl_down_past_the_last_line_break_of_the_document_goes_to_its_end() {
+    let mut e = with_breaks(&format!("one{LS}two"), 1);
+    e.handle.select_range(0, 0);
+    e.settle();
+    e.ctrl_down();
+    assert_eq!(e.caret(), 4);
+    e.ctrl_down();
+    assert_eq!(e.caret(), 7, "the end of the last paragraph");
+    e.ctrl_down();
+    assert_eq!(e.caret(), 7, "nothing follows it");
+}
+
+#[test]
+fn shift_ctrl_steps_select_to_a_line_break() {
+    let text = format!("Verse one{LS}verse two\nNext.");
+    let mut e = with_breaks(&text, 2);
+    e.handle.select_range(0, 0);
+    e.settle();
+    e.press(Key::ArrowDown, Modifiers::CTRL | Modifiers::SHIFT);
+    assert_eq!(e.anchor(), 0, "the selection keeps its start");
+    assert_eq!(e.caret(), 10, "and grows to the line after the break");
+    e.press(Key::ArrowDown, Modifiers::CTRL | Modifiers::SHIFT);
+    assert_eq!(e.caret(), 20);
+    e.press(Key::ArrowUp, Modifiers::CTRL | Modifiers::SHIFT);
+    assert_eq!(e.caret(), 10, "back to the line after the break");
+    assert_eq!(e.anchor(), 0);
+
+    e.handle.select_range(15, 15);
+    e.settle();
+    e.press(Key::ArrowUp, Modifiers::CTRL | Modifiers::SHIFT);
+    assert_eq!(e.anchor(), 15);
+    assert_eq!(e.caret(), 10, "up to the start of the line after the break");
+    assert_eq!(e.handle.selected_text(), "verse");
+}
+
+#[test]
+fn a_line_break_in_a_table_cell_is_a_stop_and_the_cell_still_keeps_the_step() {
+    let doc = TextDocument::new();
+    doc.set_markdown(TABLE).unwrap().wait().unwrap();
+    // "alpha", a break, then "omega", in the first cell.
+    let mut e = Editor::over(doc);
+    let end_of_alpha = e.position_of("alpha") + "alpha".len();
+    let cursor = e.doc.cursor_at(end_of_alpha);
+    cursor.insert_line_break().unwrap();
+    cursor.insert_text("omega").unwrap();
+    e.settle();
+    let alpha = e.position_of("alpha");
+    let omega = e.position_of("omega");
+    assert_eq!(
+        omega,
+        end_of_alpha + 1,
+        "precondition: one break before omega"
+    );
+    assert_eq!(
+        e.doc.block_at_caret(omega).unwrap().start,
+        alpha,
+        "precondition: the break stays in the cell's paragraph"
+    );
+
+    e.caret_at("alpha", 2);
+    e.ctrl_down();
+    assert_eq!(e.caret(), omega, "the line after the break");
+    let end_of_cell = omega + "omega".len();
+    e.ctrl_down();
+    assert_eq!(e.caret(), end_of_cell, "the cell's end, not the next cell");
+    e.ctrl_down();
+    assert_eq!(e.caret(), end_of_cell, "the cell keeps the step");
+
+    e.caret_at("omega", 3);
+    e.ctrl_up();
+    assert_eq!(e.caret(), omega);
+    e.ctrl_up();
+    assert_eq!(e.caret(), alpha);
+    e.ctrl_up();
+    assert_eq!(e.caret(), alpha, "the cell keeps the step");
 }

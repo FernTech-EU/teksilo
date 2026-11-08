@@ -2167,6 +2167,18 @@ fn vertical_op(step: LineStep, downward: bool) -> Option<MoveOperation> {
 /// down, to the start of the next paragraph, or to the end of the last one.
 /// With `KeepAnchor` the selection grows to there.
 ///
+/// A line break inside a block (Shift+Enter, a LINE SEPARATOR in the text)
+/// ends a paragraph here too: the position just after it is a paragraph
+/// start. A screen reader is told such a break is a line feed, so NVDA ends
+/// its paragraph there and reads, after the step, the text from the caret
+/// to the next break only. Stepping over the break as over any other
+/// character left the text after it unread by `Ctrl+↑/↓`; a verse or an
+/// address split with Shift+Enter lost its later lines. Two breaks in a row
+/// hold an empty line between them, which NVDA reads as blank, so the step
+/// stops there as at an empty paragraph. Only the caret's block and the one
+/// before it are read for their breaks, so a press costs one paragraph's
+/// text, not the document's.
+///
 /// The paragraphs are the document's blocks in reading order, so the step
 /// walks list items one by one and goes into and out of a quotation as into
 /// any other paragraph. A table cell is the exception: a step from inside one
@@ -2196,6 +2208,7 @@ fn step_to_paragraph_start(st: &mut EditorState, downward: bool, mode: MoveMode)
         start: here.start,
         end: here.start + here.length,
     };
+    let breaks = line_starts_after_breaks(st, &here);
     let neighbour = adjacent_paragraph(st, &here, caret, downward);
     let confining = if caret < span.start {
         None
@@ -2203,15 +2216,63 @@ fn step_to_paragraph_start(st: &mut EditorState, downward: bool, mode: MoveMode)
         confining_cell(st, here.block_id)
     };
     let neighbour = neighbour
-        .filter(|block| confining.is_none() || cell_of_block(st, block.block_id) == confining)
-        .map(|block| block.start);
-    let target = paragraph_start_target(downward, caret, span, neighbour);
+        .filter(|block| confining.is_none() || cell_of_block(st, block.block_id) == confining);
+    // Going down the step lands on the next block's start, its first line.
+    // Going up it lands on the previous block's last line, which starts after
+    // that block's last break; that block is read only when the step goes up
+    // out of this one.
+    let leaves_upward = !downward && caret <= span.start;
+    let neighbour = neighbour.map(|block| {
+        if !leaves_upward {
+            block.start
+        } else {
+            line_starts_after_breaks(st, &block)
+                .last()
+                .copied()
+                .unwrap_or(block.start)
+        }
+    });
+    let target = paragraph_start_target(downward, caret, span, &breaks, neighbour);
     if target != caret {
         move_moving_end(st, target, mode);
     }
-    // A paragraph's start or end is never a soft wrap; asked anyway, so the
-    // caret is drawn where a step would draw it should a layout say otherwise.
+    // A paragraph's start or end, or the position after a line break, is
+    // never a soft wrap; asked anyway, so the caret is drawn where a step
+    // would draw it should a layout say otherwise.
     st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
+}
+
+/// The caret positions just after each hard line break inside `block`, in
+/// order: where a screen reader starts a new paragraph within it (see
+/// [`step_to_paragraph_start`]). Empty for a block with no break, the common
+/// case. Reads this one block's text and nothing else.
+fn line_starts_after_breaks(st: &EditorState, block: &BlockInfo) -> Vec<usize> {
+    st.document
+        .block_by_id(block.block_id)
+        .map(|b| line_starts_after_breaks_in(&b.text(), block.start))
+        .unwrap_or_default()
+}
+
+/// [`line_starts_after_breaks`] over a block's `text`, the block starting at
+/// caret position `start`. A hard break is any mandatory break of UAX #14,
+/// the set a layout ends a line at and the accessibility text runs report as
+/// a line feed; a `\r\n` is one break, ending after its `\n`. The document
+/// turns a paragraph break into a new block, so in practice the break found
+/// here is the LINE SEPARATOR Shift+Enter inserts.
+fn line_starts_after_breaks_in(text: &str, start: usize) -> Vec<usize> {
+    let mut starts = Vec::new();
+    let mut chars = text.chars().enumerate().peekable();
+    while let Some((i, c)) = chars.next() {
+        let is_break = match c {
+            '\r' => chars.peek().is_none_or(|&(_, next)| next != '\n'),
+            '\n' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}' => true,
+            _ => false,
+        };
+        if is_break {
+            starts.push(start + i + 1);
+        }
+    }
+    starts
 }
 
 /// The paragraph after (`downward`) or before the caret's paragraph `here`,
@@ -2263,25 +2324,37 @@ struct BlockSpan {
 }
 
 /// The decision of [`step_to_paragraph_start`], apart from the document:
-/// `caret` in the paragraph `here`, `neighbour` the start of the paragraph the
-/// step may go to (the next one going down, the one before going up), `None`
-/// when there is none it may go to. A caret ahead of `here` (on a table's
-/// anchor, reading as the first cell) has `here`'s start as the next start
-/// below it.
+/// `caret` in the block `here`, `breaks` the positions just after the line
+/// breaks inside `here` (each one a paragraph start, in order), `neighbour`
+/// the paragraph start in the next block the step may go to going down (that
+/// block's start), or in the block before going up (the start of its last
+/// line), `None` when there is none it may go to. A caret ahead of `here` (on
+/// a table's anchor, reading as the first cell) has `here`'s start as the
+/// next start below it.
 fn paragraph_start_target(
     downward: bool,
     caret: usize,
     here: BlockSpan,
+    breaks: &[usize],
     neighbour: Option<usize>,
 ) -> usize {
     if downward {
         if caret < here.start {
             here.start
         } else {
-            neighbour.unwrap_or(here.end)
+            breaks
+                .iter()
+                .copied()
+                .find(|&at| at > caret)
+                .or(neighbour)
+                .unwrap_or(here.end)
         }
     } else if caret > here.start {
-        here.start
+        breaks
+            .iter()
+            .copied()
+            .rfind(|&at| at < caret)
+            .unwrap_or(here.start)
     } else {
         neighbour.unwrap_or(caret.min(here.start))
     }
@@ -3141,36 +3214,39 @@ mod motion_tests {
 
     #[test]
     fn a_paragraph_step_up_goes_to_this_paragraph_start_first() {
-        assert_eq!(paragraph_start_target(false, 15, MIDDLE, Some(3)), 10);
-        assert_eq!(paragraph_start_target(false, 20, MIDDLE, Some(3)), 10);
+        assert_eq!(paragraph_start_target(false, 15, MIDDLE, &[], Some(3)), 10);
+        assert_eq!(paragraph_start_target(false, 20, MIDDLE, &[], Some(3)), 10);
     }
 
     #[test]
     fn a_paragraph_step_up_from_a_start_goes_to_the_one_before() {
-        assert_eq!(paragraph_start_target(false, 10, MIDDLE, Some(3)), 3);
+        assert_eq!(paragraph_start_target(false, 10, MIDDLE, &[], Some(3)), 3);
         // The first paragraph (or a cell's first): the caret stays.
-        assert_eq!(paragraph_start_target(false, 10, MIDDLE, None), 10);
+        assert_eq!(paragraph_start_target(false, 10, MIDDLE, &[], None), 10);
     }
 
     #[test]
     fn a_paragraph_step_down_goes_to_the_next_start_from_anywhere() {
         for caret in [10, 15, 20] {
-            assert_eq!(paragraph_start_target(true, caret, MIDDLE, Some(21)), 21);
+            assert_eq!(
+                paragraph_start_target(true, caret, MIDDLE, &[], Some(21)),
+                21
+            );
         }
     }
 
     #[test]
     fn a_paragraph_step_down_from_the_last_paragraph_goes_to_its_end() {
-        assert_eq!(paragraph_start_target(true, 10, MIDDLE, None), 20);
-        assert_eq!(paragraph_start_target(true, 20, MIDDLE, None), 20);
+        assert_eq!(paragraph_start_target(true, 10, MIDDLE, &[], None), 20);
+        assert_eq!(paragraph_start_target(true, 20, MIDDLE, &[], None), 20);
     }
 
     #[test]
     fn a_caret_ahead_of_its_paragraph_steps_up_from_where_it_stands() {
         // On a table's anchor the caret reads as in the first cell, whose
         // start lies after it: going up must not move it forward.
-        assert_eq!(paragraph_start_target(false, 8, MIDDLE, Some(3)), 3);
-        assert_eq!(paragraph_start_target(false, 8, MIDDLE, None), 8);
+        assert_eq!(paragraph_start_target(false, 8, MIDDLE, &[], Some(3)), 3);
+        assert_eq!(paragraph_start_target(false, 8, MIDDLE, &[], None), 8);
     }
 
     #[test]
@@ -3178,8 +3254,49 @@ mod motion_tests {
         // Going down from a table's anchor, the first cell's start is the
         // nearest paragraph start below the caret; the next paragraph, or the
         // cell's end, would skip it.
-        assert_eq!(paragraph_start_target(true, 8, MIDDLE, Some(21)), 10);
-        assert_eq!(paragraph_start_target(true, 8, MIDDLE, None), 10);
+        assert_eq!(paragraph_start_target(true, 8, MIDDLE, &[], Some(21)), 10);
+        assert_eq!(paragraph_start_target(true, 8, MIDDLE, &[], None), 10);
+    }
+
+    #[test]
+    fn a_paragraph_step_stops_after_each_line_break_in_the_block() {
+        // Breaks at 13 and 16: the lines start at 10, 14 and 17.
+        let breaks = [14, 17];
+        for (downward, caret, neighbour, target) in [
+            (true, 10, Some(21), 14),
+            (true, 13, Some(21), 14),
+            (true, 14, Some(21), 17),
+            (true, 17, Some(21), 21),
+            (true, 17, None, 20),
+            (false, 20, Some(3), 17),
+            (false, 17, Some(3), 14),
+            (false, 15, Some(3), 14),
+            (false, 14, Some(3), 10),
+            (false, 10, Some(3), 3),
+        ] {
+            assert_eq!(
+                paragraph_start_target(downward, caret, MIDDLE, &breaks, neighbour),
+                target,
+                "{} from {caret}",
+                if downward { "down" } else { "up" },
+            );
+        }
+    }
+
+    #[test]
+    fn every_hard_break_of_a_block_starts_a_line_and_a_crlf_one() {
+        assert_eq!(line_starts_after_breaks_in("plain", 5), Vec::<usize>::new());
+        assert_eq!(line_starts_after_breaks_in("ab\u{2028}cd", 10), vec![13]);
+        assert_eq!(
+            line_starts_after_breaks_in("a\u{2028}\u{2028}b\u{2028}", 0),
+            vec![2, 3, 5]
+        );
+        assert_eq!(
+            line_starts_after_breaks_in("a\u{b}b\u{c}c\u{85}d\u{2029}e\nf\rg", 0),
+            vec![2, 4, 6, 8, 10, 12]
+        );
+        // A `\r\n` is one break, ending after its `\n`.
+        assert_eq!(line_starts_after_breaks_in("a\r\nb", 0), vec![3]);
     }
 
     #[test]

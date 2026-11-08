@@ -81,6 +81,11 @@ pub(crate) enum LineStep {
     /// in). `Ctrl+↑/↓` in Word, WordPad, and the GTK and Qt text views, and
     /// what NVDA reads a paragraph after.
     ///
+    /// A line break inside a paragraph (Shift+Enter) counts as a paragraph
+    /// boundary here: the position just after it is a start. A screen reader
+    /// hears the break as a line feed and ends its paragraph there, so a step
+    /// over it would leave the text after the break unread.
+    ///
     /// Never produced under [`TextNavConvention::Mac`].
     ParagraphStart,
     /// The start or end of the document.
