@@ -315,6 +315,101 @@ fn undoing_a_list_change_is_heard_without_another_key() {
     assert_eq!(r.text(), "one\n", "redo takes it away again");
 }
 
+/// Taking an item out of its list, and its undo and redo, tell a reader the
+/// caret moved, as UIA's `TextSelectionChanged`. The caret stays at the
+/// item's start in the document, but the reader's offset moves by the
+/// marker's two characters, and NVDA rebuilds its braille line only on a
+/// caret event: without one the display kept the old line until the next
+/// key. The event is raised only when the selection the adapter holds
+/// changes (`accesskit_windows` `node.rs`, `enqueue_property_implied_events`).
+#[test]
+fn a_list_change_at_the_caret_raises_a_caret_event() {
+    use crate::common::heard_test::{Uia, UiaRecorder};
+
+    let mut r = Reader::markdown("Intro\n\n- one two\n");
+    let item = "Intro\n".chars().count();
+    r.handle.select_range(item, item);
+    r.update();
+    let editor = with_editor(&r.update(), |editor| editor.role());
+    let mut adapter = UiaRecorder::attach(&mut r.tree);
+    let selection_changed = Uia::TextSelectionChanged(editor);
+    let mut step = |r: &mut Reader, name: &str, act: &dyn Fn(&mut Reader)| {
+        act(r);
+        r.update();
+        let events = adapter.frame(&mut r.tree);
+        (
+            events.contains(&selection_changed),
+            format!("{name}: {events:?}"),
+        )
+    };
+
+    let (raised, events) = step(&mut r, "Backspace", &|r| r.press(Key::Backspace));
+    assert_eq!(r.text(), "Intro\none two\n");
+    assert!(raised, "{events}");
+    let (raised, events) = step(&mut r, "undo", &|r| r.handle.undo());
+    assert_eq!(r.text(), "Intro\n• one two\n");
+    assert!(raised, "{events}");
+    let (raised, events) = step(&mut r, "redo", &|r| r.handle.redo());
+    assert_eq!(r.text(), "Intro\none two\n");
+    assert!(raised, "{events}");
+
+    // The same with the caret inside the item's text: the undo gives the
+    // item its marker back and leaves the caret where it was. (A redo from
+    // there puts the caret back at the item's start, which moves it anyway.)
+    let inside = item + "one ".chars().count();
+    let _ = step(&mut r, "caret inside", &|r| {
+        r.handle.select_range(inside, inside)
+    });
+    let (raised, events) = step(&mut r, "undo, caret inside", &|r| r.handle.undo());
+    assert_eq!(r.text(), "Intro\n• one two\n");
+    assert_eq!(r.handle.cursor_position(), inside);
+    assert!(raised, "{events}");
+
+    // Nothing in the frame after a change raises it again.
+    let (raised, events) = step(&mut r, "next frame", &|_| {});
+    assert!(!raised, "{events}");
+}
+
+/// A change after the caret leaves the selection the adapter holds alone, so
+/// a reader is not told the caret moved when it did not, and a letter typed
+/// and undone each move it, as before.
+#[test]
+fn an_edit_that_does_not_move_the_caret_raises_no_caret_event() {
+    use crate::common::heard_test::{Uia, UiaRecorder};
+
+    let mut r = Reader::markdown("- one\n- two\n");
+    r.handle.select_range(1, 1);
+    r.update();
+    let editor = with_editor(&r.update(), |editor| editor.role());
+    let mut adapter = UiaRecorder::attach(&mut r.tree);
+    let selection_changed = Uia::TextSelectionChanged(editor);
+
+    // Text added to the item after the caret's.
+    r.doc.cursor_at(r.document_len()).insert_text("!").unwrap();
+    r.update();
+    assert_eq!(r.text(), "• one\n• two!\n");
+    assert_eq!(r.handle.cursor_position(), 1);
+    let events = adapter.frame(&mut r.tree);
+    assert!(
+        events.iter().any(|e| matches!(e, Uia::TextChanged(_))),
+        "{events:?}"
+    );
+    assert!(!events.contains(&selection_changed), "{events:?}");
+
+    r.tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::X,
+        modifiers: Modifiers::NONE,
+        text: Some("x".into()),
+    });
+    r.update();
+    let events = adapter.frame(&mut r.tree);
+    assert!(events.contains(&selection_changed), "typing: {events:?}");
+    r.handle.undo();
+    r.update();
+    let events = adapter.frame(&mut r.tree);
+    assert!(events.contains(&selection_changed), "undo: {events:?}");
+}
+
 /// The marker is one character no document position is. The caret at an
 /// item's start is reported after it, on the item's text; a reader's caret
 /// put on it lands at the item's start; every position still round-trips.

@@ -104,6 +104,42 @@ fn margin_marker(block: &BlockSnapshot) -> Option<String> {
     }
 }
 
+/// The seed of a block's run ids: its id, mixed with its margin marker when
+/// it has one.
+///
+/// A screen reader hears the marker as text at the start of the item's first
+/// line, but the marker is no character of the document, so taking a block
+/// out of its list (Backspace at an item's start, or the undo of making it an
+/// item) leaves the caret at the same document position, and so at the same
+/// run and character index when the run ids stay. The adapter tells a reader
+/// the caret moved only when the selection it holds, a run and an index,
+/// changes (`accesskit_windows` raises `TextSelectionChanged` from that
+/// comparison alone), and NVDA rebuilds its braille line only on that event:
+/// the display kept the old line, without or with the bullet, until the next
+/// key. Mixing the marker in gives the block's runs new ids whenever its
+/// marker comes, goes or changes (a renumbering, a task's box ticked), so a
+/// caret in the block is reported on a new run and the reader re-reads its
+/// line. A block whose marker stays keeps its ids, so an edit elsewhere
+/// raises nothing at its caret.
+fn run_seed(block_id: u64, marker: Option<&str>) -> u64 {
+    let Some(marker) = marker else {
+        return block_id;
+    };
+    // FNV-1a over the id and the marker's bytes: deterministic, so the ids
+    // are the same from one walk to the next while nothing changes.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in block_id
+        .to_le_bytes()
+        .iter()
+        .chain([0xff].iter())
+        .chain(marker.as_bytes())
+    {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash
+}
+
 /// Count every list's items in `elements`, tables and frames included.
 fn count_list_items(sizes: &mut HashMap<usize, usize>, elements: &[FlowElementSnapshot]) {
     let mut blocks = Vec::new();
@@ -692,6 +728,8 @@ impl<'a> FlowWalk<'a> {
             0.0,
             self.st.engine.default_line_height(),
         );
+        let marker = margin_marker(block);
+        let seed = run_seed(block.block_id as u64, marker.as_deref());
         let marker_box = lines.first().map_or(unlaid, |line| {
             Rect::new(
                 origin.x + line.rect[0],
@@ -703,7 +741,7 @@ impl<'a> FlowWalk<'a> {
         let mut source = if lines.is_empty() {
             // Not laid out: the text is still announced, and still ends its
             // paragraph, with a caret-shaped box rather than none at all.
-            let mut flat = TextRunSource::flat(&text, block.block_id as u64);
+            let mut flat = TextRunSource::flat(&text, seed);
             flat.lines[0].end = LineEnd::HardBreak { chars: 1, bytes: 1 };
             flat.with_fallback_rect(unlaid)
         } else {
@@ -714,7 +752,7 @@ impl<'a> FlowWalk<'a> {
                 rendered_text: None,
                 links: Vec::new(),
             };
-            TextRunSource::from_geometry(&text, &geometry, origin, block.block_id as u64)
+            TextRunSource::from_geometry(&text, &geometry, origin, seed)
         };
 
         // An inline object is one character of the document, its U+FFFC in
@@ -750,7 +788,6 @@ impl<'a> FlowWalk<'a> {
         // the same reason, and a heading there goes inside it too: hung off
         // the editor, a heading opening a quote was read after the quote.
         let id = block.block_id as u64;
-        let marker = margin_marker(block);
         let heading_level = block.block_format.heading_level;
         let mut marker_run = None;
         let parent = if let Some(cell_text) = cell_text {
