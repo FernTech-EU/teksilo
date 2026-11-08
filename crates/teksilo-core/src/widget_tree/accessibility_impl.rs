@@ -371,6 +371,11 @@ impl WidgetTree {
                     local.width,
                     local.height,
                 )));
+                // The same snap the walk applies, from the unsnapped rect:
+                // a moved line's top falls inside a different pixel.
+                if reports_in_window_space(&self.arena, owner) {
+                    snap_text_run_top(node, self.device_scale_factor);
+                }
             } else if let Some(rect) = node.bounds() {
                 node.set_bounds(accesskit::Rect {
                     x0: rect.x0 + delta.x as f64,
@@ -711,6 +716,83 @@ impl WidgetTree {
 /// not the same quantity, so it does not belong here.
 pub(crate) fn emit_root_transform(root: &mut accesskit::Node, device_scale_factor: f32) {
     root.set_transform(accesskit::Affine::scale(device_scale_factor as f64));
+}
+
+/// Whether the rectangles `owner` writes for its synthetic children are in
+/// window space, so the root's scale alone takes them to the screen.
+///
+/// Not when an ancestor is a content transform (a `SceneView`): the children
+/// of such a node, and everything below them, are described in its content
+/// space, which the transform on the boundary child projects.
+pub(super) fn reports_in_window_space(arena: &WidgetArena, owner: WidgetId) -> bool {
+    let mut current = arena.parent(owner);
+    while let Some(id) = current {
+        if arena.get(id).is_some_and(|n| n.content_transform) {
+            return false;
+        }
+        current = arena.parent(id);
+    }
+    true
+}
+
+/// The least distance, in device pixels, between a line's real top and the
+/// pixel row its run reports as its top. Large enough that no rounding in the
+/// two paths a point travels (out through the adapter, back in through the
+/// pointer event) can put it above the line.
+const RUN_TOP_MARGIN: f64 = 0.125;
+
+/// How far into its pixel row the reported top sits, in device pixels, so
+/// that the adapter's `top * scale` rounding a hair low cannot truncate it
+/// to the row above.
+const RUN_TOP_LIFT: f64 = 1.0 / 64.0;
+
+/// Move a text run's reported top down onto the first whole device pixel row
+/// that lies inside its line.
+///
+/// A screen reader that clicks on a character clicks at the top-left of the
+/// box the platform reports for it, and makes that point whole pixels first:
+/// NVDA truncates each UIA double with `int()`. A line's top seldom falls on
+/// a device pixel (a 16.94 px line height, an editor 7.6 px down the window,
+/// a 1.25 scale), so the truncated top was the last pixel row of the line
+/// above, and the click landed there. That is what NVDA's braille routing
+/// does when the routed cell is the cursor's own ("activate"), so routing
+/// onto the cursor moved the caret one line up, and from the end of a
+/// wrapped line to the start of the line it was on.
+///
+/// The run's box shrinks at the top by a little over a pixel at most, and
+/// stays inside the line: nothing drawn moves, and the editor's hit test is
+/// left alone. The bottom is untouched, so the line still meets the next.
+///
+/// Only for a run whose box the root's scale alone takes to the screen (the
+/// window's client origin is whole pixels, so the window's pixel grid is the
+/// screen's): one under a content transform has a grid this cannot see.
+/// Only for horizontal text, whose character positions run along x: a
+/// vertical run's positions are measured from its top.
+pub(crate) fn snap_text_run_top(node: &mut accesskit::Node, device_scale_factor: f32) {
+    if node.role() != accesskit::Role::TextRun || node.transform().is_some() {
+        return;
+    }
+    if matches!(
+        node.text_direction(),
+        Some(accesskit::TextDirection::TopToBottom | accesskit::TextDirection::BottomToTop)
+    ) {
+        return;
+    }
+    let Some(mut rect) = node.bounds() else {
+        return;
+    };
+    let scale = f64::from(device_scale_factor);
+    if !(scale.is_finite() && scale > 0.0) {
+        return;
+    }
+    let row = (rect.y0 * scale + RUN_TOP_MARGIN).ceil();
+    if row + 1.0 > rect.y1 * scale {
+        // No whole pixel row inside the box: a caret-shaped or unmeasured
+        // run, which nobody clicks on.
+        return;
+    }
+    rect.y0 = (row + RUN_TOP_LIFT) / scale;
+    node.set_bounds(rect);
 }
 
 #[cfg(test)]
@@ -4394,5 +4476,66 @@ mod tests {
         tree.layout(SizeProposal::exact(200.0, 100.0));
         let _ = tree.sync_accessibility();
         assert!(!tree.announce_unless_widget_speaks(container, "3 results"));
+    }
+
+    // ── a run's top on a whole device pixel ───────────────────────────────
+
+    fn run_at(top: f64, bottom: f64) -> accesskit::Node {
+        let mut node = accesskit::Node::new(Role::TextRun);
+        node.set_text_direction(accesskit::TextDirection::LeftToRight);
+        node.set_bounds(accesskit::Rect {
+            x0: 10.0,
+            y0: top,
+            x1: 60.0,
+            y1: bottom,
+        });
+        node
+    }
+
+    /// The top a client truncates out of a run's reported box is a pixel row
+    /// inside the run's line, a little below its real top, wherever the line
+    /// starts and whatever the scale; the rest of the box is left alone.
+    #[test]
+    fn a_runs_reported_top_truncates_to_a_pixel_row_inside_its_line() {
+        for scale in [1.0f32, 1.25, 1.5, 1.75, 2.0, 2.25, 3.0] {
+            let s = f64::from(scale);
+            for step in 0..400 {
+                let top = 3.0 + f64::from(step) * 0.173;
+                let bottom = top + 16.939453;
+                let mut node = run_at(top, bottom);
+                snap_text_run_top(&mut node, scale);
+                let rect = node.bounds().unwrap();
+                // On a monitor left of or above the primary, the client origin
+                // is negative, and `int()` truncates toward zero.
+                for client in [0.0, 217.0, -1080.0] {
+                    let row = (rect.y0 * s + client).trunc() - client;
+                    assert!(
+                        row / s > top + 1e-3,
+                        "scale {scale}, top {top}: row {row} is not below the top"
+                    );
+                    assert!(
+                        row + 1.0 <= bottom * s,
+                        "scale {scale}, top {top}: row {row} is past the line"
+                    );
+                }
+                assert!(rect.y0 - top <= 1.15 / s, "the box loses at most a pixel");
+                assert_eq!((rect.x0, rect.x1, rect.y1), (10.0, 60.0, bottom));
+            }
+        }
+    }
+
+    /// A run with no whole pixel row inside it (a caret-shaped box) and a
+    /// vertical run, whose characters are measured from its top, keep the top
+    /// they were given.
+    #[test]
+    fn a_run_too_thin_to_hold_a_pixel_row_or_running_down_keeps_its_top() {
+        let mut thin = run_at(10.3, 10.3);
+        snap_text_run_top(&mut thin, 1.5);
+        assert_eq!(thin.bounds().unwrap().y0, 10.3);
+
+        let mut vertical = run_at(10.3, 40.0);
+        vertical.set_text_direction(accesskit::TextDirection::TopToBottom);
+        snap_text_run_top(&mut vertical, 1.5);
+        assert_eq!(vertical.bounds().unwrap().y0, 10.3);
     }
 }

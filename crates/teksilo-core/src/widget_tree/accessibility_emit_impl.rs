@@ -772,7 +772,26 @@ impl WidgetTree {
         // The fourth element — the widget-local rects of any synthetic
         // children — is what lets a pure translation re-place the runs
         // without a full walk. Recorded by `sync_accessibility`.
-        let (node_id, ak_node, synthetic_children, synthetic_local_bounds) = builder.build(id);
+        let (node_id, ak_node, mut synthetic_children, synthetic_local_bounds) = builder.build(id);
+        // Text runs laid out in the widget's own space are put on whole
+        // device pixels here, where the scale is known; a re-placement after
+        // a scroll does the same from the same local rects. A run handed in
+        // with absolute bounds is left as it is: a scroll shifts it by a
+        // delta, which would carry a snapped top off its pixel.
+        if !synthetic_local_bounds.is_empty()
+            && super::accessibility_impl::reports_in_window_space(&self.arena, id)
+        {
+            let local: std::collections::HashSet<accesskit::NodeId> =
+                synthetic_local_bounds.iter().map(|(sid, _)| *sid).collect();
+            for (syn_id, syn_node) in synthetic_children.iter_mut() {
+                if local.contains(syn_id) {
+                    super::accessibility_impl::snap_text_run_top(
+                        syn_node,
+                        self.device_scale_factor,
+                    );
+                }
+            }
+        }
         nodes.push((node_id, ak_node));
         local_bounds.extend(synthetic_local_bounds);
         // Merge the widget's emitted synthetic children into the
