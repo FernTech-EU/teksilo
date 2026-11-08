@@ -13,7 +13,25 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Core
+
+- **`EventContext::set_window_string_id` gives an open window a new string id**,
+  for a document window whose file moved (Save As, a restored backup, a project
+  switched in place). `find_window` then finds it under the new id only, and
+  its saved size and position move to the new id, so it comes back at its size
+  after a restart. It refuses an id another open window holds
+  (`WindowStringIdError`). `WindowOps` has a matching method, which answers
+  `Unsupported` unless an implementor provides it.
+
 ### Changed
+
+#### Core
+
+- **`WindowState::string_id()` returns `Option<String>` instead of
+  `Option<&str>`**, because a window's string id can now change while it is
+  open. Compare with `.as_deref() == Some("...")`.
 
 #### Widgets
 
@@ -49,6 +67,14 @@ by crate for clarity, not because crates version independently.
   Ctrl+Shift+Right and Ctrl+Delete reach it, as in other Windows and Linux
   editors. It stopped at the end of the current word. Option+Right on macOS
   still stops at the end of the word.
+- **On Windows and Linux, Ctrl+Up and Ctrl+Down move by paragraph in
+  `RichTextEditor`**, to the start of the current or previous paragraph and to
+  the start of the next one, with Shift extending the selection, as in Word.
+  They moved one line, so a screen reader read the whole paragraph on every
+  press. Inside a table cell the step stops at the cell's edges.
+- **After Backspace at a list item's start, or Ctrl+Z / Ctrl+Y of a change that
+  adds or removes a list marker, a braille display shows the changed line at
+  once.** It kept the old line until the next key.
 - **A `MessageBox` whose text wraps is as tall as its text, so its buttons sit
   inside it.** They could hang below the box, where a mouse click closed it as
   Cancel instead of choosing the button. Its text now wraps at the same width
