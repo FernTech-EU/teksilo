@@ -131,11 +131,14 @@ use teksilo_tokens::{Alignment, HAlignment, InputTokens, TargetRole, VAlignment}
 use crate::accordion::Accordion;
 use crate::button::{Button, ButtonVariant};
 use crate::checkbox::Checkbox;
+use crate::common::editor_runtime::TabKey;
 use crate::dialog::ModalContainer;
 use crate::primitives::{Expand, HStack, Spacer, TextWidget, VStack};
-use crate::scroll_area::ScrollArea;
+use crate::rich_text::RichTextEditor;
 use crate::severity_badge::{SeverityBadge, SeverityIconKind};
 use teksilo_core::styles::density::dp;
+use teksilo_text::text_document::TextDocument;
+use teksilo_tokens::TextRole;
 
 // ── Severity ────────────────────────────────────────────────────────
 
@@ -497,14 +500,15 @@ fn severity_icon_size(tokens: &InputTokens) -> f32 {
     dp(SEVERITY_ICON_SIZE, TargetRole::Target, tokens)
 }
 
-/// How tall the expanded "Show details" pane is allowed to grow before it scrolls.
+/// How many lines the expanded "Show details" pane grows to before it scrolls.
 ///
-/// `detailed_text` is where callers put the things that have no length bound — a stack
-/// trace, an OS error dump, a list of every affected row — so without a cap the accordion
+/// `detailed_text` is where callers put the things that have no length bound: a stack
+/// trace, an OS error dump, a list of every affected row. Without a cap the accordion
 /// simply grew the dialog until it ran off the bottom of the screen, taking the buttons
-/// with it. Tall enough for a dozen lines of `small` text, short enough that the dialog
-/// still fits a laptop display beneath a header and a button row.
-const DETAILS_MAX_HEIGHT: f32 = 220.0;
+/// with it. A dozen lines is short enough that the dialog still fits a laptop display
+/// beneath a header and a button row. Shorter details take only the lines they need: the
+/// pane used to be a fixed height, which left most of it blank under a one-line error.
+const DETAILS_MAX_LINES: u32 = 12;
 
 /// The narrowest a box is, and the width its text wraps at when nothing
 /// proposes one: the width `present` asks a native dialog window for.
@@ -743,7 +747,10 @@ impl MessageBox {
 
     /// Detailed text hidden behind a "Show details" [`Accordion`] —
     /// for technical diagnostics (stack traces, error codes). Matches
-    /// Qt's `setDetailedText`.
+    /// Qt's `setDetailedText`: once shown, the details are a read-only
+    /// text the user can Tab to, read with a screen reader, select and
+    /// copy. The pane is as tall as the text, up to a dozen lines, past
+    /// which it scrolls.
     pub fn detailed_text(mut self, text: impl Into<LocalizedString>) -> Self {
         self.detailed_text = Some(text.into());
         self
@@ -987,19 +994,36 @@ impl Widget for MessageBox {
         let detailed_child: Option<Box<dyn Widget>> = self.detailed_text.clone().map(|text| {
             let expanded = ctx.signal(false);
             let label: LocalizedString = teksilo_i18n::tr_widget!(messagebox_show_details());
-            let body = TextWidget::new(text)
-                .style(theme.typography.small.clone())
-                .color(theme.colors.text_secondary);
-            // Capped and scrollable rather than free-growing: see `DETAILS_MAX_HEIGHT`.
-            // `preferred_height` caps the height only when the parent proposes an
-            // unconstrained one — which a hugging dialog does — while leaving the width to
-            // follow the content, so short details still size to themselves and never
-            // acquire a scroll bar they do not need.
-            let scroller = ScrollArea::new()
-                .child(body)
-                .preferred_height(DETAILS_MAX_HEIGHT);
+            // The details are a read-only text a keyboard can reach, as in Qt's
+            // `QMessageBox`: once shown, a Tab stop right after the toggle, read by a
+            // screen reader on focus and reviewable by character, word and line, and
+            // selectable for copying an error code into a bug report. A plain label
+            // here was reachable only by object navigation. While hidden, the
+            // accordion keeps the text dormant, so it is neither a Tab stop nor in the
+            // accessibility tree.
+            //
+            // The document follows the locale, as the label it replaces did.
+            let document = TextDocument::new();
+            let resolved = text.to_signal();
+            let _ = document.set_plain_text(&resolved.get());
+            {
+                let document = document.clone();
+                ctx.effect(&resolved, move |text: &String| {
+                    let _ = document.set_plain_text(text);
+                });
+            }
+            // As tall as the text, up to `DETAILS_MAX_LINES`, past which it scrolls:
+            // see that constant. The estimate gives the box a near height before the
+            // text is first laid out, so it does not open at one line and then jump.
+            let viewer = RichTextEditor::read_only(document)
+                .label(label.clone())
+                .tab_key(TabKey::MoveFocus)
+                .text_color(TextRole::Secondary)
+                .min_lines(1)
+                .max_lines(DETAILS_MAX_LINES)
+                .estimate_height_before_layout(true);
             let accordion: Box<dyn Widget> =
-                Box::new(Accordion::new(label, expanded).content(scroller));
+                Box::new(Accordion::new(label, expanded).content(viewer));
             accordion
         });
 
@@ -1868,13 +1892,11 @@ mod tests {
     /// The pane is where callers put the things with no length bound — a stack trace, an OS
     /// error dump, a list of every affected row — and it used to be a bare `TextWidget` in
     /// the accordion, so expanding it grew the dialog until the button row went off the
-    /// bottom of the screen. It is capped and scrollable now (`DETAILS_MAX_HEIGHT`).
+    /// bottom of the screen. It is capped and scrollable now (`DETAILS_MAX_LINES`).
     ///
     /// This pins the reachable half: a hundred lines of detail still build, expand and
-    /// re-lay out with the buttons intact. The *height* cap itself is not asserted here —
-    /// `WidgetTree` exposes no laid-out geometry to widget tests, so there is nothing to
-    /// measure against; that half is the `ScrollArea::preferred_height` contract, which
-    /// `scroll_area` owns and tests.
+    /// re-lay out with the buttons intact. The height cap is
+    /// `the_details_pane_is_as_tall_as_its_text_up_to_a_cap`.
     #[test]
     fn a_long_details_pane_expands_and_keeps_the_dialog_intact() {
         let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
@@ -2241,6 +2263,189 @@ mod tests {
             panel.x + panel.width <= window.x + window.width + 0.5
                 && panel.y + panel.height <= window.y + window.height + 0.5,
             "the box {panel:?} fits the window {window:?}"
+        );
+    }
+
+    /// The details of the save-failed question in Skribisto, which a writer with
+    /// NVDA could open but not read.
+    const SAVE_FAILED_DETAILS: &str = "writing 'C:\\Users\\writer\\Documents\\book.skrib': \
+         persisting the project: Access is denied. (os error 5)";
+
+    fn save_failed_with_details(details: &str) -> MessageBox {
+        MessageBox::warning(lit!("Quit without saving?"))
+            .text(lit!("The work could not be saved."))
+            .detailed_text(lit!(details.to_string()))
+            .buttons(MessageBoxButtons::OkCancel)
+    }
+
+    /// Activate the "Show details" toggle as a screen reader would, and let the
+    /// disclosure finish opening (or closing) at `proposal`.
+    fn toggle_details(tree: &mut WidgetTree, proposal: SizeProposal) {
+        let toggle = tree
+            .find_by_label(&teksilo_i18n::tr_widget!(messagebox_show_details()).resolve_now())
+            .expect("the Show details toggle");
+        tree.dispatch_event(WidgetEvent::AccessAction {
+            action: teksilo_core::accesskit::Action::Click,
+            target: Some(toggle),
+            target_node: teksilo_core::accessibility::root_node_id(),
+            data: None,
+        });
+        settle(tree, proposal);
+    }
+
+    /// Run the disclosure's tween to its end and lay out until the text has a
+    /// real layout (a text surface lays its text out when it is first drawn).
+    fn settle(tree: &mut WidgetTree, proposal: SizeProposal) {
+        tree.layout(proposal);
+        tree.tick_animations(std::time::Duration::from_millis(400));
+        tree.layout(proposal);
+        let _ = tree.render();
+        tree.layout(proposal);
+        let _ = tree.render();
+        tree.layout(proposal);
+    }
+
+    /// Shown, the details are one Tab stop, right after the toggle and before
+    /// the buttons, as a read-only text in a Qt message box is; hidden, they are
+    /// none. They used to be a plain label: a keyboard user heard "expanded" and
+    /// nothing else, and only object navigation reached the text.
+    #[test]
+    fn the_details_are_a_tab_stop_after_their_toggle_only_while_shown() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let content = present_and_lay_out(&mut tree, save_failed_with_details(SAVE_FAILED_DETAILS));
+        let proposal = SizeProposal::exact(800.0, 600.0);
+
+        let hidden = tree.tab_stops_within(content);
+        assert_eq!(hidden.len(), 3, "the toggle, Ok and Cancel: {hidden:?}");
+
+        toggle_details(&mut tree, proposal);
+        let shown = tree.tab_stops_within(content);
+        assert_eq!(
+            shown.len(),
+            4,
+            "the details join the Tab order when shown: {shown:?}"
+        );
+        assert_eq!(shown[0], hidden[0], "the toggle comes first");
+        assert_eq!(&shown[2..], &hidden[1..], "then the buttons, as before");
+        assert!(
+            !hidden.contains(&shown[1]),
+            "the new stop, right after the toggle, is the details"
+        );
+
+        toggle_details(&mut tree, proposal);
+        assert_eq!(
+            tree.tab_stops_within(content),
+            hidden,
+            "hidden again, the details leave the Tab order"
+        );
+    }
+
+    /// Focused, the details are a read-only text surface a screen reader can
+    /// read and review: a document with the details as its text, inside the
+    /// region the toggle says it controls. Hidden, no such node is in the tree.
+    #[test]
+    fn the_shown_details_are_a_readable_document_the_toggle_controls() {
+        use teksilo_core::accesskit::Role;
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let content = present_and_lay_out(&mut tree, save_failed_with_details(SAVE_FAILED_DETAILS));
+        let proposal = SizeProposal::exact(800.0, 600.0);
+        let show_details = teksilo_i18n::tr_widget!(messagebox_show_details()).resolve_now();
+
+        let roles_with_details = |tree: &mut WidgetTree| -> Vec<Role> {
+            let consumer = accesskit_consumer::Tree::new(tree.sync_accessibility(), true);
+            let state = consumer.state();
+            let mut found = Vec::new();
+            let mut stack = vec![state.root()];
+            while let Some(node) = stack.pop() {
+                if node.supports_text_ranges()
+                    && node.document_range().text().contains("os error 5")
+                {
+                    found.push(node.role());
+                }
+                stack.extend(node.children());
+            }
+            found
+        };
+        assert!(
+            !roles_with_details(&mut tree).contains(&Role::Document),
+            "hidden details are no document a reader can reach"
+        );
+
+        toggle_details(&mut tree, proposal);
+        let stops = tree.tab_stops_within(content);
+        assert_eq!(stops.len(), 4, "the details are a Tab stop: {stops:?}");
+        tree.focus(stops[1]);
+        let consumer = accesskit_consumer::Tree::new(tree.sync_accessibility(), true);
+        let state = consumer.state();
+        let focus = state.focus().expect("the details hold the focus");
+        assert_eq!(focus.role(), Role::Document, "a read-only text surface");
+        assert!(focus.supports_text_ranges(), "reviewable by character");
+        // A paragraph's text ends with its break, as in any document.
+        assert_eq!(
+            focus.document_range().text().trim_end_matches('\n'),
+            SAVE_FAILED_DETAILS,
+            "its text is the details, whole"
+        );
+        assert_eq!(focus.label().as_deref(), Some(show_details.as_str()));
+
+        let mut toggle = None;
+        let mut stack = vec![state.root()];
+        while let Some(node) = stack.pop() {
+            if node.role() == Role::Button && node.label().as_deref() == Some(&show_details) {
+                toggle = Some(node);
+            }
+            stack.extend(node.children());
+        }
+        let toggle = toggle.expect("the toggle in the tree");
+        assert_eq!(toggle.data().is_expanded(), Some(true));
+        let controls_the_details = toggle.controls().any(|controlled| {
+            let mut node = Some(focus);
+            while let Some(n) = node {
+                if n.id() == controlled.id() {
+                    return true;
+                }
+                node = n.parent();
+            }
+            false
+        });
+        assert!(
+            controls_the_details,
+            "the toggle's controls relation reaches the details"
+        );
+    }
+
+    /// The shown details are as tall as their text, up to a cap past which they
+    /// scroll. The pane used to be a fixed 220 px whatever it held, so one line
+    /// of an OS error left some 160 px of blank space above the buttons.
+    #[test]
+    fn the_details_pane_is_as_tall_as_its_text_up_to_a_cap() {
+        let shown_growth = |details: &str| -> f32 {
+            let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+            let (content, window) =
+                present_as_overlay(&mut tree, save_failed_with_details(details), 1200.0, 900.0);
+            let proposal = SizeProposal::exact(window.width, window.height);
+            settle(&mut tree, proposal);
+            let hidden = tree.bounds(message_box_in(&tree, content)).height;
+            toggle_details(&mut tree, proposal);
+            let shown = tree.bounds(message_box_in(&tree, content)).height;
+            shown - hidden
+        };
+
+        // Two lines of text, about 34 px; the fixed pane grew the box by 218.
+        let short = shown_growth(SAVE_FAILED_DETAILS);
+        assert!(
+            short > 20.0 && short < 60.0,
+            "two lines of details grow the box by {short} px"
+        );
+
+        // Twelve lines, about 203 px, and not the 1700 of a hundred.
+        let long: String = (1..=100)
+            .map(|i| format!("line {i} of a very long detail dump\n"))
+            .collect();
+        let long = shown_growth(&long);
+        assert!(
+            long > 150.0 && long < 260.0,
+            "a hundred lines are capped and scroll: the box grew by {long} px"
         );
     }
 
