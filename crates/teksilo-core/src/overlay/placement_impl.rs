@@ -2275,4 +2275,106 @@ mod tests {
             "wholly inside the usable area: {bounds:?}"
         );
     }
+
+    /// Every placement, once. The `match` names each variant with no
+    /// wildcard, so a new placement does not compile until it is added here
+    /// and so to the check below.
+    fn every_placement(anchor: Rect) -> Vec<OverlayPlacement> {
+        let all = vec![
+            OverlayPlacement::Below,
+            OverlayPlacement::Above,
+            OverlayPlacement::TrailingEdge,
+            OverlayPlacement::AtPointer(Point::new(anchor.x, anchor.bottom())),
+            OverlayPlacement::AtPointerAvoiding {
+                point: anchor.center(),
+                avoid: anchor,
+            },
+            OverlayPlacement::AboveSelection { selection: anchor },
+            OverlayPlacement::BelowSelection { selection: anchor },
+            OverlayPlacement::NearAnchor {
+                offset: Vec2::new(6.0, 2.0),
+            },
+            OverlayPlacement::Centered,
+            OverlayPlacement::BottomCenter,
+            OverlayPlacement::TopCenter { offset: 80.0 },
+            OverlayPlacement::BelowPreferred,
+            OverlayPlacement::ViewportCorner {
+                corner: Corner::BottomTrailing,
+                margin: Vec2::new(16.0, 16.0),
+            },
+            OverlayPlacement::FullViewport,
+        ];
+        for placement in &all {
+            match placement {
+                OverlayPlacement::Below
+                | OverlayPlacement::Above
+                | OverlayPlacement::TrailingEdge
+                | OverlayPlacement::AtPointer(_)
+                | OverlayPlacement::AtPointerAvoiding { .. }
+                | OverlayPlacement::AboveSelection { .. }
+                | OverlayPlacement::BelowSelection { .. }
+                | OverlayPlacement::NearAnchor { .. }
+                | OverlayPlacement::Centered
+                | OverlayPlacement::BottomCenter
+                | OverlayPlacement::TopCenter { .. }
+                | OverlayPlacement::BelowPreferred
+                | OverlayPlacement::ViewportCorner { .. }
+                | OverlayPlacement::FullViewport => {}
+            }
+        }
+        all
+    }
+
+    /// The overlay pass measures an overlay's height at the width its first
+    /// placement gave it and places it once more with that height
+    /// (`WidgetTree::layout_with_ops`). That second placement must give it the
+    /// same width, or the content is laid out at a width its height was not
+    /// measured at and spills. It does because no placement reads the height
+    /// to decide the width: a taller panel that flips above its anchor, is
+    /// shrunk to the room there, or is pinned to the top of the window keeps
+    /// its width. A placement that broke this would need the overlay pass to
+    /// measure the height again.
+    #[test]
+    fn no_placement_decides_a_width_from_the_height() {
+        let viewports = [OverlayViewport::from((800.0, 600.0)), inset_viewport()];
+        // Near the bottom, so a tall panel no longer fits below; near the
+        // top, so it fits nowhere; and near the trailing edge.
+        let anchors = [
+            Rect::new(300.0, 520.0, 120.0, 28.0),
+            Rect::new(40.0, 20.0, 90.0, 24.0),
+            Rect::new(700.0, 300.0, 80.0, 28.0),
+        ];
+        let directions = [LayoutDirection::LeftToRight, LayoutDirection::RightToLeft];
+        for viewport in viewports {
+            for anchor in anchors {
+                for direction in directions {
+                    for placement in every_placement(anchor) {
+                        for width in [60.0, 300.0, 1000.0] {
+                            let short = placed(
+                                placement.clone(),
+                                Size::new(width, 30.0),
+                                anchor,
+                                viewport,
+                                direction,
+                            );
+                            for height in [200.0, 480.0, 900.0] {
+                                let tall = placed(
+                                    placement.clone(),
+                                    Size::new(width, height),
+                                    anchor,
+                                    viewport,
+                                    direction,
+                                );
+                                assert_eq!(
+                                    tall.width, short.width,
+                                    "{placement:?} at {width} x {height} off {anchor:?} \
+                                     ({direction:?}): {tall:?}, against {short:?} 30 tall"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

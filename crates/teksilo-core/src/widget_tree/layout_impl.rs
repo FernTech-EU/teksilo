@@ -836,6 +836,17 @@ impl WidgetTree {
                 // the way a native dialog window sizing itself to its
                 // content already does (`size_to_content_target` in
                 // teksilo-app), and place the overlay again when it differs.
+                //
+                // One placement more is enough, and needs no loop: a
+                // placement decides an overlay's width from its content's
+                // width, its anchor and the usable area, never from its
+                // height, and this second placement changes only the height.
+                // So a taller overlay that flips above its anchor, or is
+                // shrunk to the room it finds there, keeps the width its
+                // height was measured at. The placement tests pin that
+                // (`no_placement_decides_a_width_from_the_height`); a
+                // placement that broke it would need the height measured
+                // again at the width the taller box was given.
                 let placed_width = self
                     .overlay_content_bounds(overlay_id)
                     .map_or(0.0, |bounds| bounds.width);

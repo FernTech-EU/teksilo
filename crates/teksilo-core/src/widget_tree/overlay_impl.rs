@@ -2026,10 +2026,15 @@ impl WidgetTree {
     ///
     /// This is the rectangle the overlay pass placed the content at: its
     /// width measured with an *unbounded* proposal, independent of the host
-    /// tree's own proposal, then narrowed or widened by the placement, and
-    /// its height measured again at that width. So it is the right thing to
-    /// assert against for content that must cap or wrap itself (tooltips
-    /// against `TOOLTIP_MAX_WIDTH`, popovers against their max height).
+    /// tree's own proposal, then narrowed or widened by the placement. Its
+    /// height is then measured again at that width (a placed width of zero
+    /// is left alone), and when that height differs from the open-width one
+    /// by more than half a pixel the overlay is placed again with it;
+    /// otherwise the open-width height stands. A placement may still shrink
+    /// the height to the room it finds, as it does an `Above` panel against
+    /// the top of the window. So it is the right thing to assert against for
+    /// content that must cap or wrap itself (tooltips against
+    /// `TOOLTIP_MAX_WIDTH`, popovers against their max height).
     /// Reading `bounds(content_id)` instead would report whatever the
     /// surrounding layout handed the widget.
     pub fn overlay_content_bounds(
