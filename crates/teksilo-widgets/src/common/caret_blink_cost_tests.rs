@@ -326,3 +326,17 @@ fn a_still_caret_in_a_code_editor_stops_blinking() {
     let window = Window::focused(editor);
     assert_blink_stops_and_resumes("code", window, probe);
 }
+
+fn text_input() -> (TextInput, crate::primitives::TextFieldHandle) {
+    let input = TextInput::new(Signal::new("hello".to_string()));
+    let handle = input.handle();
+    (input, handle)
+}
+
+#[test]
+fn a_still_caret_in_a_text_input_stops_blinking() {
+    let (input, handle) = text_input();
+    let window = Window::focused(input);
+    let probe = handle.blink_probe().expect("the field is built");
+    assert_blink_stops_and_resumes("text input", window, probe);
+}

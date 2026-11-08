@@ -1794,6 +1794,18 @@ impl TextFieldHandle {
         }
     }
 
+    /// The built field's caret flag, and a way to move the start of its
+    /// caret's stillness into the past, for the blink tests in `common`.
+    /// `None` before the field is built.
+    #[cfg(test)]
+    pub(crate) fn blink_probe(&self) -> Option<(Signal<bool>, Box<dyn Fn(std::time::Duration)>)> {
+        let state = self.slot.borrow().clone()?;
+        let caret = state.borrow().caret_visible.clone();
+        let backdate: Box<dyn Fn(std::time::Duration)> =
+            Box::new(move |by| state.borrow_mut().blink.backdate_stillness(by));
+        Some((caret, backdate))
+    }
+
     /// `true` while this field holds the keyboard focus. Observable, so a
     /// router can follow the caret without polling.
     pub fn focused_signal(&self) -> Signal<bool> {

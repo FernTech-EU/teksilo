@@ -37,10 +37,25 @@ use teksilo_core::signal::Signal;
 /// (Qt's default `QApplication::cursorFlashTime` is 1000 ms *per cycle*).
 const CARET_BLINK_INTERVAL: f32 = 0.5;
 
-/// How long a caret keeps blinking once nothing moves it: after this much time
-/// with no caret move, no edit and no focus change, it stops, left on, and the
-/// event loop sleeps until the writer does something. GTK's
-/// `gtk-cursor-blink-timeout` has the same default and the same purpose.
+/// How long a caret keeps blinking once nothing restarts it: after this much
+/// time it stops, left on, and the event loop sleeps until the writer does
+/// something. GTK's `gtk-cursor-blink-timeout` has the same default and the
+/// same purpose.
+///
+/// What restarts it is [`CaretBlink::restart`] and [`CaretBlink::reset`],
+/// which every surface calls when its caret or selection is published
+/// (`sync_cursor_signals`), on focus gain and on window reactivation. So a key
+/// the surface handles (an arrow, a typed character, Delete, a formatting
+/// shortcut, undo), a click, a composition update and focus all start the
+/// blink again. A selection or an undo made through a surface's handle
+/// restarts it too, and it resumes at the next frame the surface runs.
+///
+/// Not everything that changes the text restarts it: a format applied through
+/// a handle leaves the caret where it was and does not, and in the rich text
+/// and code editors neither does text an input method commits outside a
+/// composition (an emoji, dictation), which those two batch like typing
+/// without publishing the caret. A blink they leave stopped has its caret on,
+/// which is what a writer at work should see anyway.
 ///
 /// Each toggle costs a whole frame: a layout pass that finds nothing to do, a
 /// render, and a present of the whole window. In a Windows virtual machine a
@@ -293,9 +308,9 @@ pub const READ_ONLY_PRESET: PolicyBundle = PolicyBundle {
 /// scheduler behaves: if ticks are skipped, delayed, or clamped, the next
 /// tick catches up instead of the blink slowing down with the frame rate.
 ///
-/// The blink stops [`CARET_BLINK_TIMEOUT`] after the caret was last moved,
-/// with the caret on; [`restart`](Self::restart) and [`reset`](Self::reset)
-/// start it again.
+/// The blink stops [`CARET_BLINK_TIMEOUT`] after it was last restarted, with
+/// the caret on; [`restart`](Self::restart) and [`reset`](Self::reset) start
+/// it again.
 #[derive(Debug, Default)]
 pub(crate) struct CaretBlink {
     last_toggle: Option<Instant>,
@@ -345,11 +360,30 @@ impl CaretBlink {
 
     /// Move the start of the caret's stillness `by` into the past, so a test
     /// reaches the timeout without waiting for it.
+    ///
+    /// An `Instant` cannot go back past the clock's own start, which on
+    /// Windows is the machine's boot: on a machine up for less than `by`, a
+    /// plain subtraction panics. The test only needs the caret to have been
+    /// still for the timeout, so then the stillness is set to start the
+    /// timeout (or `by`, if shorter) before now, once the clock is that old,
+    /// which costs a wait only on a machine booted that recently.
     #[cfg(test)]
     pub(crate) fn backdate_stillness(&mut self, by: Duration) {
-        if let Some(since) = self.still_since.as_mut() {
-            *since -= by;
-        }
+        let Some(since) = self.still_since.as_mut() else {
+            return;
+        };
+        *since = match since.checked_sub(by) {
+            Some(earlier) => earlier,
+            None => {
+                let enough = by.min(CARET_BLINK_TIMEOUT);
+                loop {
+                    if let Some(earlier) = Instant::now().checked_sub(enough) {
+                        break earlier;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        };
     }
 
     /// Drive one frame of blinking.
@@ -739,6 +773,21 @@ mod tests {
             wake.get().is_some(),
             "a caret that moved must blink again, so it schedules its toggle"
         );
+    }
+
+    /// A backdate further than the clock reaches still takes the caret past
+    /// the timeout instead of panicking, which is what it did on a Windows
+    /// machine booted less than the backdate ago.
+    #[test]
+    fn a_backdate_past_the_clocks_start_still_reaches_the_timeout() {
+        let mut blink = due_blink(Duration::ZERO);
+        // No `Instant` lies this far back on any platform.
+        blink.backdate_stillness(Duration::MAX);
+        let visible = Signal::new(true);
+        let wake = wake_slot();
+        blink.tick(CaretPolicy::Blinking, true, &visible, Some(&wake));
+        assert!(visible.get(), "the blink stops with the caret on");
+        assert_eq!(wake.get(), None, "a stopped blink wakes nothing");
     }
 
     #[test]
