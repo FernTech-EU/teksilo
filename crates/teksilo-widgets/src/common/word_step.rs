@@ -168,6 +168,38 @@ mod tests {
         assert_eq!(step(Mac, text, 11), 16, "the end of fois");
     }
 
+    /// The landings the editors' and the field's word tests expect, on both
+    /// conventions. Those tests press the word chord of the host they run on,
+    /// so on Linux and Windows they never reach the Mac arm: this does.
+    #[test]
+    fn the_widget_tests_landings_on_both_conventions() {
+        let text = "alpha beta gamma";
+        assert_eq!((step(PcStyle, text, 2), step(Mac, text, 2)), (6, 5));
+        assert_eq!((step(PcStyle, text, 0), step(Mac, text, 0)), (6, 5));
+        assert_eq!((step(PcStyle, text, 6), step(Mac, text, 5)), (11, 10));
+        let text = "my long pass";
+        assert_eq!((step(PcStyle, text, 5), step(Mac, text, 5)), (8, 7));
+        // Inside the word before a wrap: the next word starts the next line,
+        // and the word's end is before the space ending this one.
+        let text = "word word word";
+        assert_eq!((step(PcStyle, text, 7), step(Mac, text, 7)), (10, 9));
+
+        for (convention, left) in [(PcStyle, "albeta gamma"), (Mac, "al beta gamma")] {
+            let document = TextDocument::new();
+            document.set_plain_text("alpha beta gamma").unwrap();
+            let cursor = cursor_at(&document, 2);
+            move_cursor_for(
+                convention,
+                &document,
+                &cursor,
+                MoveOperation::WordRight,
+                MoveMode::KeepAnchor,
+            );
+            cursor.remove_selected_text().unwrap();
+            assert_eq!(document.to_plain_text().unwrap(), left, "{convention:?}");
+        }
+    }
+
     #[test]
     fn a_pc_word_step_stops_at_a_paragraphs_end_and_then_the_next_start() {
         let text = "un deux.\n  trois";

@@ -32,6 +32,7 @@ use super::{TextFieldHandle, TextInputField};
 use crate::EditSource;
 use crate::button::press_test_support::{finger, touch};
 use crate::common::ime_ops_test::ImeOps;
+use crate::common::text_nav::{WORD_MODIFIER, by_convention};
 
 fn viewport() -> SizeProposal {
     SizeProposal::exact(400.0, 200.0)
@@ -1163,27 +1164,31 @@ fn shift_with_a_selection_still_extends_it() {
 
 /// Ctrl+Right stops at the start of the next word, as Windows and Linux fields
 /// do; Ctrl+Shift+Right selects up to it, and Ctrl+Delete removes the rest of
-/// the word and the space after it. They used to stop at the word's end.
+/// the word and the space after it. They used to stop at the word's end, which
+/// is where `⌥→`, `⌥⇧→` and `⌥⌦` still stop on macOS.
 #[test]
 fn a_word_step_forward_reaches_the_next_words_start() {
     let mut f = Field::new("alpha beta gamma", 2);
-    f.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
-    assert_eq!(f.caret(), 6);
-    f.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
-    assert_eq!(f.caret(), 11);
+    f.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
+    assert_eq!(f.caret(), by_convention(6, 5));
+    f.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
+    assert_eq!(f.caret(), by_convention(11, 10));
 
     let mut f = Field::new("alpha beta gamma", 2);
     f.tree
-        .press_key(Key::ArrowRight, Modifiers::CTRL | Modifiers::SHIFT);
+        .press_key(Key::ArrowRight, WORD_MODIFIER | Modifiers::SHIFT);
     {
         let st = f.state.borrow();
-        assert_eq!((st.cursor.anchor(), st.cursor.position()), (2, 6));
+        assert_eq!(
+            (st.cursor.anchor(), st.cursor.position()),
+            (2, by_convention(6, 5))
+        );
     }
 
     let mut f = Field::new("alpha beta gamma", 2);
-    f.tree.press_key(Key::Delete, Modifiers::CTRL);
+    f.tree.press_key(Key::Delete, WORD_MODIFIER);
     f.settle();
-    assert_eq!(f.doc_text(), "albeta gamma");
+    assert_eq!(f.doc_text(), by_convention("albeta gamma", "al beta gamma"));
     assert_eq!(f.caret(), 2);
 }
 
@@ -1199,23 +1204,27 @@ fn a_masked_field_is_one_word() {
         f
     };
     let mut f = masked(5);
-    f.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
+    f.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
     assert_eq!(f.caret(), 12);
-    f.tree.press_key(Key::ArrowLeft, Modifiers::CTRL);
+    f.tree.press_key(Key::ArrowLeft, WORD_MODIFIER);
     assert_eq!(f.caret(), 0);
 
     let mut f = masked(5);
-    f.tree.press_key(Key::Backspace, Modifiers::CTRL);
+    f.tree.press_key(Key::Backspace, WORD_MODIFIER);
     f.settle();
     assert_eq!(f.doc_text(), "ng pass");
 
     let mut f = masked(5);
-    f.tree.press_key(Key::Delete, Modifiers::CTRL);
+    f.tree.press_key(Key::Delete, WORD_MODIFIER);
     f.settle();
     assert_eq!(f.doc_text(), "my lo");
 
     let mut f = masked(5);
     f.state.borrow_mut().revealed = Some(Signal::new(true));
-    f.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
-    assert_eq!(f.caret(), 8, "revealed, the next word's start");
+    f.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
+    assert_eq!(
+        f.caret(),
+        by_convention(8, 7),
+        "revealed, the next word's start, or this word's end"
+    );
 }

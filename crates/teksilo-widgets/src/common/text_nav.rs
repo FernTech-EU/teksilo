@@ -191,10 +191,50 @@ pub(crate) fn deletes_word_for(convention: TextNavConvention, modifiers: Modifie
     }
 }
 
+/// The modifier a word step and a word delete are pressed with under
+/// `convention`: `⌥` on macOS, `Ctrl` elsewhere. A widget test presses
+/// [`WORD_MODIFIER`], so it runs the word step on every host, and checks the
+/// landing against [`by_convention`].
+#[cfg(test)]
+pub(crate) const fn word_modifier_for(convention: TextNavConvention) -> Modifiers {
+    match convention {
+        TextNavConvention::Mac => Modifiers::ALT,
+        TextNavConvention::PcStyle => Modifiers::CTRL,
+    }
+}
+
+/// [`word_modifier_for`] the convention this build targets.
+#[cfg(test)]
+pub(crate) const WORD_MODIFIER: Modifiers = word_modifier_for(TextNavConvention::CURRENT);
+
+/// `pc_style` on Windows and Linux, `mac` on macOS: what a widget test expects
+/// where the two conventions part, such as a forward word step's landing
+/// ([`forward_word_stop_for`]).
+#[cfg(test)]
+pub(crate) fn by_convention<T>(pc_style: T, mac: T) -> T {
+    match TextNavConvention::CURRENT {
+        TextNavConvention::PcStyle => pc_style,
+        TextNavConvention::Mac => mac,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::TextNavConvention::{Mac, PcStyle};
     use super::*;
+
+    /// What the widget tests press for a word step is one on both
+    /// conventions, so the same test steps by word on a Mac and elsewhere.
+    #[test]
+    fn the_word_modifier_is_a_word_step_and_a_word_delete_on_both_conventions() {
+        for convention in [Mac, PcStyle] {
+            let word = word_modifier_for(convention);
+            assert_eq!(caret_step_for(convention, word), CaretStep::Word);
+            assert_eq!(caret_step_for(convention, word | SHIFT), CaretStep::Word);
+            assert!(deletes_word_for(convention, word), "{convention:?}");
+        }
+        assert_eq!(WORD_MODIFIER, word_modifier_for(TextNavConvention::CURRENT));
+    }
 
     const ALT: Modifiers = Modifiers::ALT;
     const SUPER: Modifiers = Modifiers::SUPER;

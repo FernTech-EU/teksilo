@@ -10,6 +10,7 @@
 //! reader's offset is the document's position: the end of one paragraph and
 //! the start of the next are two offsets, not one (reader finding text-03).
 
+use crate::common::text_nav::{WORD_MODIFIER, by_convention};
 use accesskit_consumer::{NodeRef, Tree};
 use teksilo_canvas::SizeProposal;
 use teksilo_core::accessibility::widget_id_to_node_id;
@@ -627,7 +628,7 @@ fn right_from_the_end_of_a_wrapped_line_reaches_the_start_of_the_next() {
 fn a_word_step_onto_a_wrap_is_on_the_line_of_that_word() {
     let (mut r, wrap) = at_the_second_line();
     r.handle.select_range(wrap + 2, wrap + 2);
-    r.tree.press_key(Key::ArrowLeft, Modifiers::CTRL);
+    r.tree.press_key(Key::ArrowLeft, WORD_MODIFIER);
     r.update();
     assert_eq!(r.handle.cursor_position(), wrap);
     assert_eq!(r.line_start_at_caret(), wrap);
@@ -636,41 +637,50 @@ fn a_word_step_onto_a_wrap_is_on_the_line_of_that_word() {
 /// Ctrl+Right stops at the start of the next word, as Windows and Linux editors
 /// do, and the next word may start a wrapped line: the caret is then at the
 /// start of that line, where a reader reads it. It used to stop at the end of
-/// the word, before the space, and never reached a wrap.
+/// the word, before the space, and never reached a wrap. On macOS `⌥→` stops
+/// at the word's end, before the space that ends the first line.
 #[test]
 fn a_word_step_forward_lands_on_the_next_words_start_on_its_line() {
     let (mut r, wrap) = at_the_second_line();
     r.handle.select_range(wrap - 3, wrap - 3);
-    r.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
+    r.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
     r.update();
-    assert_eq!(r.handle.cursor_position(), wrap);
-    assert_eq!(r.line_start_at_caret(), wrap, "the line of that word");
+    assert_eq!(r.handle.cursor_position(), by_convention(wrap, wrap - 1));
+    assert_eq!(
+        r.line_start_at_caret(),
+        by_convention(wrap, 0),
+        "the line of the caret"
+    );
 
     r.handle.select_range(0, 0);
-    r.tree.press_key(Key::ArrowRight, Modifiers::CTRL);
+    r.tree.press_key(Key::ArrowRight, WORD_MODIFIER);
     r.update();
     assert_eq!(
         r.handle.cursor_position(),
-        6,
-        "alpha beta: the start of beta"
+        by_convention(6, 5),
+        "alpha beta: the start of beta, or the end of alpha"
     );
 }
 
 /// Ctrl+Shift+Right selects up to the next word's start, and Ctrl+Delete
-/// removes the rest of the word and the space after it.
+/// removes the rest of the word and the space after it. On macOS `⌥⇧→` and
+/// `⌥⌦` stop at the word's end.
 #[test]
 fn a_word_selection_and_a_word_delete_reach_the_next_words_start() {
     let mut r = Reader::plain("alpha beta gamma");
     r.handle.select_range(2, 2);
     r.tree
-        .press_key(Key::ArrowRight, Modifiers::CTRL | Modifiers::SHIFT);
+        .press_key(Key::ArrowRight, WORD_MODIFIER | Modifiers::SHIFT);
     r.update();
-    assert_eq!(r.handle.selection(), (2, 6));
+    assert_eq!(r.handle.selection(), (2, by_convention(6, 5)));
 
     r.handle.select_range(2, 2);
-    r.tree.press_key(Key::Delete, Modifiers::CTRL);
+    r.tree.press_key(Key::Delete, WORD_MODIFIER);
     r.update();
-    assert_eq!(r.doc.to_plain_text().unwrap(), "albeta gamma");
+    assert_eq!(
+        r.doc.to_plain_text().unwrap(),
+        by_convention("albeta gamma", "al beta gamma")
+    );
     assert_eq!(r.handle.cursor_position(), 2);
 }
 
@@ -828,7 +838,7 @@ fn shift_and_word_steps_with_a_selection_are_not_collapsed_to_its_ends() {
     r.update();
     assert_eq!(r.handle.selection(), (6, 15));
     r.handle.select_range(6, 16);
-    r.tree.press_key(Key::ArrowLeft, Modifiers::CTRL);
+    r.tree.press_key(Key::ArrowLeft, WORD_MODIFIER);
     r.update();
     assert_eq!(r.handle.selection(), (11, 11));
 }

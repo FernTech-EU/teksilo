@@ -18,6 +18,7 @@ use teksilo_text::text_document::{MoveMode, TextDocument};
 
 use super::CodeEditor;
 use super::state::SharedState;
+use crate::common::text_nav::{WORD_MODIFIER, by_convention};
 
 struct Driven {
     tree: WidgetTree,
@@ -579,28 +580,36 @@ fn an_undo_with_nothing_to_undo_keeps_the_extra_carets() {
 }
 
 /// Ctrl+Right stops at the next word's start, which may start a wrapped line:
-/// the caret is then reported on that line.
+/// the caret is then reported on that line. On macOS `⌥→` stops at the word's
+/// end, before the space that ends the first line.
 #[test]
 fn a_word_step_forward_lands_on_the_next_words_start_on_its_line() {
     let (mut d, wrap, _) = wrapped();
     d.put(wrap - 3);
-    d.key_with(Key::ArrowRight, Modifiers::CTRL);
-    assert_eq!(d.caret(), wrap);
-    assert_eq!(reported_run_start(&mut d), (wrap, 0));
+    d.key_with(Key::ArrowRight, WORD_MODIFIER);
+    assert_eq!(d.caret(), by_convention(wrap, wrap - 1));
+    assert_eq!(
+        reported_run_start(&mut d),
+        by_convention((wrap, 0), (0, wrap - 1))
+    );
 }
 
 /// Ctrl+Shift+Right selects up to the next word's start, and Ctrl+Delete
-/// removes the rest of the word and the space after it.
+/// removes the rest of the word and the space after it. On macOS `⌥⇧→` and
+/// `⌥⌦` stop at the word's end.
 #[test]
 fn a_word_selection_and_a_word_delete_reach_the_next_words_start() {
     let mut d = Driven::new("alpha beta gamma");
     d.put(2);
-    d.key_with(Key::ArrowRight, Modifiers::CTRL | Modifiers::SHIFT);
-    assert_eq!((d.anchor(), d.caret()), (2, 6));
+    d.key_with(Key::ArrowRight, WORD_MODIFIER | Modifiers::SHIFT);
+    assert_eq!((d.anchor(), d.caret()), (2, by_convention(6, 5)));
 
     d.put(2);
-    d.key_with(Key::Delete, Modifiers::CTRL);
-    assert_eq!(d.doc.to_plain_text().unwrap(), "albeta gamma");
+    d.key_with(Key::Delete, WORD_MODIFIER);
+    assert_eq!(
+        d.doc.to_plain_text().unwrap(),
+        by_convention("albeta gamma", "al beta gamma")
+    );
     assert_eq!(d.caret(), 2);
 }
 
