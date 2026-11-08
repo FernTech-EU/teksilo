@@ -76,8 +76,10 @@ pub(crate) enum LineStep {
     ParagraphEdge,
     /// A paragraph start: going up, the start of the caret's paragraph, or of
     /// the one before it when the caret is already there; going down, the
-    /// start of the next paragraph. `Ctrl+↑/↓` in Word, WordPad, and the GTK
-    /// and Qt text views, and what NVDA reads a paragraph after.
+    /// start of the next paragraph, or the end of the caret's paragraph when
+    /// it is the last (of the document, or of the table cell the step stays
+    /// in). `Ctrl+↑/↓` in Word, WordPad, and the GTK and Qt text views, and
+    /// what NVDA reads a paragraph after.
     ///
     /// Never produced under [`TextNavConvention::Mac`].
     ParagraphStart,

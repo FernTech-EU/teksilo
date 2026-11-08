@@ -13,8 +13,9 @@
 use teksilo_canvas::{Point, SizeProposal};
 use teksilo_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
 use teksilo_core::widget_tree::WidgetTree;
-use teksilo_text::text_document::TextDocument;
+use teksilo_text::text_document::{MoveMode, SelectionKind, TextDocument};
 
+use super::state::SharedState;
 use super::{EditorHandle, RichTextEditor};
 
 const WIDTH: f32 = 400.0;
@@ -22,6 +23,7 @@ const WIDTH: f32 = 400.0;
 struct Editor {
     doc: TextDocument,
     handle: EditorHandle,
+    state: SharedState,
     tree: WidgetTree,
 }
 
@@ -41,6 +43,7 @@ impl Editor {
     fn over(doc: TextDocument) -> Self {
         let editor = RichTextEditor::editor(doc.clone());
         let handle = editor.handle();
+        let state = editor.state_handle();
         let mut tree = WidgetTree::new();
         let id = tree.add(editor);
         tree.layout(SizeProposal::exact(WIDTH, 300.0));
@@ -52,7 +55,12 @@ impl Editor {
         ));
         let focused = tree.focused();
         assert!(focused.is_some_and(|f| f == id || tree.is_descendant_of(f, id)));
-        let mut editor = Self { doc, handle, tree };
+        let mut editor = Self {
+            doc,
+            handle,
+            state,
+            tree,
+        };
         editor.settle();
         editor
     }
@@ -117,6 +125,10 @@ impl Editor {
 
     fn anchor(&self) -> usize {
         self.handle.cursor_anchor_signal().get()
+    }
+
+    fn kind(&self) -> SelectionKind {
+        self.state.borrow().cursor.selection_kind()
     }
 }
 
@@ -331,4 +343,228 @@ fn a_selection_holding_a_table_whole_steps_on_past_it() {
         e.caret(),
         e.position_of("After"),
     );
+}
+
+/// The caret positions of a table's own, ahead of its first cell, that a
+/// caret can stand on (an assistive technology or a program can put it
+/// there): each reads as in the first cell's first paragraph, whose start
+/// lies after it.
+fn anchor_positions(e: &Editor, first_cell: &str) -> Vec<usize> {
+    let cell = e.position_of(first_cell);
+    let anchors: Vec<usize> = (0..cell)
+        .filter(|&at| {
+            e.doc
+                .block_at_caret(at)
+                .is_ok_and(|block| block.start == cell)
+        })
+        .collect();
+    assert!(
+        !anchors.is_empty(),
+        "precondition: the table has a position of its own before {first_cell:?}"
+    );
+    anchors
+}
+
+#[test]
+fn ctrl_down_from_a_tables_anchor_goes_to_its_first_cells_start() {
+    let mut e = table_editor();
+    for at in anchor_positions(&e, "alpha") {
+        e.handle.select_range(at, at);
+        e.settle();
+        e.ctrl_down();
+        assert_eq!(e.caret(), e.position_of("alpha"), "from {at}");
+    }
+}
+
+#[test]
+fn ctrl_up_from_a_tables_anchor_goes_to_the_paragraph_before() {
+    let mut e = table_editor();
+    for at in anchor_positions(&e, "alpha") {
+        e.handle.select_range(at, at);
+        e.settle();
+        e.ctrl_up();
+        assert_eq!(e.caret(), e.position_of("Before"), "from {at}");
+    }
+}
+
+#[test]
+fn shift_ctrl_from_a_tables_anchor_selects_as_the_step_goes() {
+    let mut e = cell_paragraphs_editor();
+    for at in anchor_positions(&e, "alpha") {
+        e.handle.select_range(at, at);
+        e.settle();
+        e.press(Key::ArrowDown, Modifiers::CTRL | Modifiers::SHIFT);
+        assert_eq!(e.caret(), e.position_of("alpha"), "down from {at}");
+        assert_eq!(e.anchor(), at, "the selection keeps its start");
+
+        e.handle.select_range(at, at);
+        e.settle();
+        e.press(Key::ArrowUp, Modifiers::CTRL | Modifiers::SHIFT);
+        assert_eq!(e.caret(), e.position_of("Before"), "up from {at}");
+        assert_eq!(e.anchor(), at, "the selection keeps its start");
+    }
+}
+
+/// [`TABLE`] with a second paragraph in three cells: `aleph` after `alpha`
+/// (row 0, column 0), `beth` after `beta` (row 0, column 1) and `gimel` after
+/// `gamma` (row 1, column 0). Markdown has no way to write a cell of two
+/// paragraphs, so they are added to the document.
+fn cell_paragraphs_editor() -> Editor {
+    const PAIRS: [(&str, &str); 3] = [("alpha", "aleph"), ("beta", "beth"), ("gamma", "gimel")];
+    let doc = TextDocument::new();
+    doc.set_markdown(TABLE).unwrap().wait().unwrap();
+    for (first, second) in PAIRS {
+        add_paragraph_after(&doc, first, second);
+    }
+    let e = Editor::over(doc);
+    for (first, second) in PAIRS {
+        let cell_of = |needle: &str| {
+            let block = e.doc.block_at_caret(e.position_of(needle)).unwrap();
+            let cell = e.doc.block_by_id(block.block_id)?.table_cell()?;
+            Some((block.block_id, cell.row, cell.column))
+        };
+        let (a, b) = (cell_of(first).unwrap(), cell_of(second).unwrap());
+        assert_ne!(a.0, b.0, "precondition: two paragraphs");
+        assert_eq!(
+            (a.1, a.2),
+            (b.1, b.2),
+            "precondition: {second:?} is in {first:?}'s cell"
+        );
+    }
+    e
+}
+
+/// Add a paragraph holding `text` after the cell paragraph that reads
+/// `cell_text`, in the same cell.
+fn add_paragraph_after(doc: &TextDocument, cell_text: &str, text: &str) {
+    let end = doc
+        .snapshot_flow()
+        .elements
+        .iter()
+        .find_map(|element| match element {
+            teksilo_text::text_document::FlowElementSnapshot::Table(t) => {
+                t.cells.iter().find_map(|cell| {
+                    let block = cell.blocks.iter().find(|b| b.text == cell_text)?;
+                    Some(block.position + block.text.chars().count())
+                })
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("a cell holds {cell_text:?}"));
+    let cursor = doc.cursor_at(0);
+    cursor.set_position(end, MoveMode::MoveAnchor);
+    cursor.insert_block().unwrap();
+    cursor.insert_text(text).unwrap();
+}
+
+#[test]
+fn ctrl_down_walks_the_paragraphs_of_a_cell_and_stops_at_its_end() {
+    let mut e = cell_paragraphs_editor();
+    e.caret_at("alpha", 2);
+    e.ctrl_down();
+    assert_eq!(
+        e.caret(),
+        e.position_of("aleph"),
+        "the cell's next paragraph"
+    );
+    let end_of_cell = e.position_of("aleph") + "aleph".len();
+    e.ctrl_down();
+    assert_eq!(e.caret(), end_of_cell, "the cell's end, not the next cell");
+    e.ctrl_down();
+    assert_eq!(e.caret(), end_of_cell, "the cell keeps the step");
+}
+
+#[test]
+fn ctrl_up_walks_back_through_a_cell_and_stops_at_its_start() {
+    let mut e = cell_paragraphs_editor();
+    e.caret_at("gimel", 3);
+    e.ctrl_up();
+    assert_eq!(e.caret(), e.position_of("gimel"));
+    e.ctrl_up();
+    assert_eq!(
+        e.caret(),
+        e.position_of("gamma"),
+        "the cell's first paragraph"
+    );
+    e.ctrl_up();
+    assert_eq!(e.caret(), e.position_of("gamma"), "the cell keeps the step");
+}
+
+#[test]
+fn ctrl_down_from_a_tables_anchor_stops_at_a_two_paragraph_cells_start() {
+    let mut e = cell_paragraphs_editor();
+    for at in anchor_positions(&e, "alpha") {
+        e.handle.select_range(at, at);
+        e.settle();
+        e.ctrl_down();
+        assert_eq!(e.caret(), e.position_of("alpha"), "from {at}");
+        e.ctrl_down();
+        assert_eq!(e.caret(), e.position_of("aleph"), "then the next one");
+    }
+}
+
+#[test]
+fn shift_ctrl_up_inside_a_cell_grows_the_text_selection() {
+    // At the start of a cell's second paragraph, with a row above: the step
+    // goes to the first paragraph's start, and the selection with it. Taken
+    // for the cell's edge, it selected this cell and the one above instead.
+    let mut e = cell_paragraphs_editor();
+    e.caret_at("gimel", 0);
+    let anchor = e.caret();
+    e.press(Key::ArrowUp, Modifiers::CTRL | Modifiers::SHIFT);
+    assert!(
+        !matches!(e.kind(), SelectionKind::Cells(_)),
+        "a text selection, not a cell range"
+    );
+    assert_eq!(e.anchor(), anchor);
+    assert_eq!(e.caret(), e.position_of("gamma"));
+}
+
+#[test]
+fn shift_ctrl_down_inside_a_cell_grows_the_text_selection() {
+    // At the end of a cell's first paragraph, with a row below.
+    let mut e = cell_paragraphs_editor();
+    let end_of_alpha = e.position_of("alpha") + "alpha".len();
+    e.handle.select_range(end_of_alpha, end_of_alpha);
+    e.settle();
+    e.press(Key::ArrowDown, Modifiers::CTRL | Modifiers::SHIFT);
+    assert!(
+        !matches!(e.kind(), SelectionKind::Cells(_)),
+        "a text selection, not a cell range"
+    );
+    assert_eq!(e.anchor(), end_of_alpha);
+    assert_eq!(e.caret(), e.position_of("aleph"));
+    e.press(Key::ArrowDown, Modifiers::CTRL | Modifiers::SHIFT);
+    assert_eq!(e.caret(), e.position_of("aleph") + "aleph".len());
+    assert!(!matches!(e.kind(), SelectionKind::Cells(_)));
+}
+
+#[test]
+fn shift_ctrl_at_a_cells_edge_still_takes_the_next_cell() {
+    // From the end of the cell's last paragraph the step has nowhere to go
+    // in the cell, and Shift with an arrow there selects cells, as it did.
+    let mut e = cell_paragraphs_editor();
+    let end_of_cell = e.position_of("aleph") + "aleph".len();
+    e.handle.select_range(end_of_cell, end_of_cell);
+    e.settle();
+    e.press(Key::ArrowDown, Modifiers::CTRL | Modifiers::SHIFT);
+    assert!(matches!(e.kind(), SelectionKind::Cells(_)));
+}
+
+#[test]
+fn ctrl_up_in_a_document_that_starts_with_a_table_stays_in_its_first_cell() {
+    let mut e = Editor::markdown("| alpha | beta |\n|---|---|\n| gamma | delta |\n\nAfter.");
+    let first = e.position_of("alpha");
+    e.caret_at("alpha", 3);
+    e.ctrl_up();
+    assert_eq!(e.caret(), first);
+    e.ctrl_up();
+    assert_eq!(e.caret(), first, "nothing comes before the table");
+    for at in 0..first {
+        e.handle.select_range(at, at);
+        e.settle();
+        let from = e.caret();
+        e.ctrl_up();
+        assert_eq!(e.caret(), from, "nothing comes before the table's anchor");
+    }
 }

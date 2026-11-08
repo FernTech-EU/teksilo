@@ -13,7 +13,7 @@
 use teksilo_canvas::{Point, Rect, SizeProposal};
 use teksilo_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
 use teksilo_core::widget_tree::WidgetTree;
-use teksilo_text::text_document::{SelectionKind, TextDocument};
+use teksilo_text::text_document::{MoveMode, SelectionKind, TextDocument};
 
 use super::state::{DragState, SharedState};
 use super::{EditorHandle, RichTextEditor};
@@ -1079,5 +1079,111 @@ fn a_word_step_forward_goes_through_a_table_cell_by_cell() {
         m.caret(from);
         m.press(Key::ArrowRight, Modifiers::CTRL);
         assert_eq!(m.selection(), (to, to), "{what}");
+    }
+}
+
+// ── Shift and an arrow in a cell of two paragraphs ───────────────────────
+
+/// [`TABLE_BETWEEN`] with a second paragraph in three cells: `a2` after `a1`,
+/// `b2` after `b1` and `c2` after `c1`. Markdown has no way to write a cell of
+/// two paragraphs, so they are added to the mounted document.
+fn mount_two_paragraph_cells() -> Mounted {
+    let mut m = mount(TABLE_BETWEEN);
+    for (first, second) in [("a1", "a2"), ("b1", "b2"), ("c1", "c2")] {
+        let cursor = m.doc.cursor_at(0);
+        cursor.set_position(m.at(first, first.len()), MoveMode::MoveAnchor);
+        cursor.insert_block().unwrap();
+        cursor.insert_text(second).unwrap();
+        m.settle();
+        m.caret(m.at(second, 0));
+        assert_eq!(
+            m.caret_cell(),
+            {
+                m.caret(m.at(first, 0));
+                m.caret_cell()
+            },
+            "setup: {second:?} must be in {first:?}'s cell"
+        );
+    }
+    m
+}
+
+/// At the start or end of a paragraph in the middle of a cell, an arrow moves
+/// inside the cell, so Shift with it grows the text selection. Only the start
+/// of the cell's first paragraph and the end of its last are the cell's edge,
+/// where Shift and an arrow start a range of cells.
+fn shift_arrow_inside_a_cell_selects_text(key: Key, paragraph: &str, offset: usize) {
+    let name = format!("Shift+{key:?} from {paragraph:?} at {offset}");
+    let mut m = mount_two_paragraph_cells();
+    let at = m.at(paragraph, offset);
+    m.caret(at);
+    let cell = m.caret_cell();
+    m.press(key, Modifiers::SHIFT);
+    assert!(
+        matches!(m.kind(), SelectionKind::Text),
+        "{name} must select text, not {:?}",
+        m.kind()
+    );
+    let (anchor, caret) = m.selection();
+    assert_eq!(anchor, at, "{name} must keep the selection's start");
+    assert_ne!(caret, at, "{name} must move the caret");
+    assert_eq!(m.caret_cell(), cell, "{name} must stay in the cell");
+}
+
+#[test]
+fn shift_up_from_a_cells_second_paragraph_selects_text() {
+    shift_arrow_inside_a_cell_selects_text(Key::ArrowUp, "c2", 0);
+}
+
+#[test]
+fn shift_down_from_the_end_of_a_cells_first_paragraph_selects_text() {
+    shift_arrow_inside_a_cell_selects_text(Key::ArrowDown, "a1", 2);
+}
+
+#[test]
+fn shift_left_from_a_cells_second_paragraph_selects_text() {
+    shift_arrow_inside_a_cell_selects_text(Key::ArrowLeft, "b2", 0);
+}
+
+#[test]
+fn shift_right_from_the_end_of_a_cells_first_paragraph_selects_text() {
+    shift_arrow_inside_a_cell_selects_text(Key::ArrowRight, "a1", 2);
+}
+
+#[test]
+fn shift_arrows_at_the_edge_of_a_cell_of_two_paragraphs_select_cells() {
+    for (key, from, name) in [
+        (Key::ArrowUp, ("c1", 0), "Shift+Up from the start of c1"),
+        (Key::ArrowDown, ("a2", 2), "Shift+Down from the end of a2"),
+        (Key::ArrowLeft, ("b1", 0), "Shift+Left from the start of b1"),
+        (Key::ArrowRight, ("a2", 2), "Shift+Right from the end of a2"),
+    ] {
+        let mut m = mount_two_paragraph_cells();
+        m.caret(m.at(from.0, from.1));
+        m.press(key, Modifiers::SHIFT);
+        assert!(
+            matches!(m.kind(), SelectionKind::Cells(_)),
+            "{name} must select cells, not {:?}",
+            m.kind()
+        );
+    }
+}
+
+#[test]
+fn shift_arrows_at_the_edge_of_a_one_paragraph_cell_select_cells() {
+    for (key, from, name) in [
+        (Key::ArrowUp, ("c1", 0), "Shift+Up from the start of c1"),
+        (Key::ArrowDown, ("a1", 2), "Shift+Down from the end of a1"),
+        (Key::ArrowLeft, ("b1", 0), "Shift+Left from the start of b1"),
+        (Key::ArrowRight, ("a1", 2), "Shift+Right from the end of a1"),
+    ] {
+        let mut m = mount(TABLE_BETWEEN);
+        m.caret(m.at(from.0, from.1));
+        m.press(key, Modifiers::SHIFT);
+        assert!(
+            matches!(m.kind(), SelectionKind::Cells(_)),
+            "{name} must select cells, not {:?}",
+            m.kind()
+        );
     }
 }

@@ -21,8 +21,8 @@ use super::typing_format::FormatToggle;
 use crate::editor_shortcuts::FormatShortcut;
 use teksilo_core::widget::EventContext;
 use teksilo_text::text_document::{
-    BlockFormat, InsertionOrigin, ListFormat, MoveMode, MoveOperation, SelectionType, TableCellRef,
-    TextCursor, TextDocument, TextFormat,
+    BlockFormat, BlockInfo, InsertionOrigin, ListFormat, MoveMode, MoveOperation, SelectionType,
+    TableCellRef, TextCursor, TextDocument, TextFormat,
 };
 use teksilo_text::{CursorAffinity, TextDirection};
 
@@ -2181,6 +2181,12 @@ fn vertical_op(step: LineStep, downward: bool) -> Option<MoveOperation> {
 /// text-document's `StartOfBlock` / `PreviousBlock` from the caret: at the end
 /// of a paragraph those read the separator after it, which belongs to the
 /// next paragraph, so `StartOfBlock` there went to the next paragraph's start.
+///
+/// A caret on a table's own positions before its first cell reads as in that
+/// cell's first paragraph, whose start lies after it. It is not in the cell's
+/// text yet, so the cell does not keep the step: down goes to the cell's
+/// start, the nearest paragraph start below the caret, and up to the start of
+/// the paragraph before the table, the nearest one above it.
 fn step_to_paragraph_start(st: &mut EditorState, downward: bool, mode: MoveMode) {
     let caret = st.cursor.position();
     let Ok(here) = st.document.block_at_caret(caret) else {
@@ -2190,30 +2196,12 @@ fn step_to_paragraph_start(st: &mut EditorState, downward: bool, mode: MoveMode)
         start: here.start,
         end: here.start + here.length,
     };
-    let neighbour = if downward {
-        // An independent cursor, so asking where a block step lands leaves the
-        // editor's caret and selection alone (see `TextCursor::clone`). It
-        // steps from the block's start, where a character index and a caret
-        // offset agree, so `NextBlock` steps from this paragraph and not the
-        // next one. `NextBlock` also steps over a table's anchor into the
-        // first cell, and stops at the end of the main text rather than going
-        // on into the footnote bodies after it.
-        let probe = st.cursor.clone();
-        probe.set_position(span.start, MoveMode::MoveAnchor);
-        probe.move_position(MoveOperation::NextBlock, MoveMode::MoveAnchor, 1);
-        st.document.block_at_caret(probe.position()).ok()
+    let neighbour = adjacent_paragraph(st, &here, caret, downward);
+    let confining = if caret < span.start {
+        None
     } else {
-        // The position before the paragraph (or before the caret, when it
-        // stands on a table's anchor ahead of the paragraph it reads as) is
-        // in the paragraph before: at its end, or at the start of an empty
-        // one.
-        caret
-            .min(span.start)
-            .checked_sub(1)
-            .and_then(|before| st.document.block_at_caret(before).ok())
-    }
-    .filter(|block| block.block_id != here.block_id);
-    let confining = confining_cell(st, here.block_id);
+        confining_cell(st, here.block_id)
+    };
     let neighbour = neighbour
         .filter(|block| confining.is_none() || cell_of_block(st, block.block_id) == confining)
         .map(|block| block.start);
@@ -2226,6 +2214,47 @@ fn step_to_paragraph_start(st: &mut EditorState, downward: bool, mode: MoveMode)
     st.cursor_affinity = affinity_after_step(&st.engine, st.shown_caret());
 }
 
+/// The paragraph after (`downward`) or before the caret's paragraph `here`,
+/// read as a caret reads it, or `None` when there is none.
+fn adjacent_paragraph(
+    st: &EditorState,
+    here: &BlockInfo,
+    caret: usize,
+    downward: bool,
+) -> Option<BlockInfo> {
+    if downward {
+        // An independent cursor, so asking where a block step lands leaves the
+        // editor's caret and selection alone (see `TextCursor::clone`). It
+        // steps from the block's start, where a character index and a caret
+        // offset agree, so `NextBlock` steps from this paragraph and not the
+        // next one. `NextBlock` also steps over a table's anchor into the
+        // first cell, and stops at the end of the main text rather than going
+        // on into the footnote bodies after it. From the last paragraph it
+        // stays where it is, which reads as this paragraph again: there is
+        // none after it.
+        let probe = st.cursor.clone();
+        probe.set_position(here.start, MoveMode::MoveAnchor);
+        probe.move_position(MoveOperation::NextBlock, MoveMode::MoveAnchor, 1);
+        let next = st.document.block_at_caret(probe.position()).ok()?;
+        (next.block_id != here.block_id).then_some(next)
+    } else {
+        // The position before the paragraph is in the paragraph before: at
+        // its end, or at the start of an empty one. A caret on a table's own
+        // positions ahead of its first cell reads as in that cell, and so do
+        // the table's other positions before it, so the walk goes back over
+        // them to the paragraph before the table. Before the first paragraph
+        // (or a table that opens the document) there is none.
+        let mut before = caret.min(here.start);
+        loop {
+            before = before.checked_sub(1)?;
+            let previous = st.document.block_at_caret(before).ok()?;
+            if previous.block_id != here.block_id {
+                break Some(previous);
+            }
+        }
+    }
+}
+
 /// A paragraph's extent, in caret positions.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 struct BlockSpan {
@@ -2236,7 +2265,9 @@ struct BlockSpan {
 /// The decision of [`step_to_paragraph_start`], apart from the document:
 /// `caret` in the paragraph `here`, `neighbour` the start of the paragraph the
 /// step may go to (the next one going down, the one before going up), `None`
-/// when there is none it may go to.
+/// when there is none it may go to. A caret ahead of `here` (on a table's
+/// anchor, reading as the first cell) has `here`'s start as the next start
+/// below it.
 fn paragraph_start_target(
     downward: bool,
     caret: usize,
@@ -2244,7 +2275,11 @@ fn paragraph_start_target(
     neighbour: Option<usize>,
 ) -> usize {
     if downward {
-        neighbour.unwrap_or(here.end)
+        if caret < here.start {
+            here.start
+        } else {
+            neighbour.unwrap_or(here.end)
+        }
     } else if caret > here.start {
         here.start
     } else {
@@ -2922,6 +2957,12 @@ pub(super) fn try_extend_cell_selection(st: &mut EditorState, dcol: i32, drow: i
 /// Start a cell selection when the caret stands at a cell boundary that the
 /// arrow press `(dcol, drow)` would cross, taking in the cell beyond it.
 /// Returns `false`, touching nothing, anywhere else.
+///
+/// The cell's boundary is the start of its first paragraph and the end of its
+/// last. The start and end of a paragraph in between are not: there the arrow
+/// moves inside the cell, and Shift with it grows the text selection, so
+/// Shift+Up (or Shift+Ctrl+Up, to the paragraph before) at the start of a
+/// cell's second paragraph selects back into its first.
 fn start_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
     let Some(cell_ref) = st.cursor.current_table_cell() else {
         return false;
@@ -2937,7 +2978,8 @@ fn start_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
         (0, 1) => at_end && row + 1 < table.rows(),
         _ => false,
     };
-    if !should_activate {
+    let forward = dcol > 0 || drow > 0;
+    if !should_activate || !in_cell_edge_paragraph(st, forward) {
         return false;
     }
 
@@ -2952,6 +2994,20 @@ fn start_cell_selection(st: &mut EditorState, dcol: i32, drow: i32) -> bool {
         column.max(target_col),
     );
     true
+}
+
+/// Whether the caret's paragraph is the last of its table cell (`forward`)
+/// or the first (otherwise): no paragraph of the same cell follows it, or
+/// precedes it. Read with the paragraph step's own neighbour, so Shift with an
+/// arrow and the paragraph step agree on where a cell ends.
+fn in_cell_edge_paragraph(st: &EditorState, forward: bool) -> bool {
+    let caret = st.cursor.position();
+    let Ok(here) = st.document.block_at_caret(caret) else {
+        return true;
+    };
+    let cell = cell_of_block(st, here.block_id);
+    adjacent_paragraph(st, &here, caret, forward)
+        .is_none_or(|block| cell_of_block(st, block.block_id) != cell)
 }
 
 /// The link Tab (or, with `back`, Shift+Tab) selects next, as document
@@ -3115,6 +3171,15 @@ mod motion_tests {
         // start lies after it: going up must not move it forward.
         assert_eq!(paragraph_start_target(false, 8, MIDDLE, Some(3)), 3);
         assert_eq!(paragraph_start_target(false, 8, MIDDLE, None), 8);
+    }
+
+    #[test]
+    fn a_caret_ahead_of_its_paragraph_steps_down_to_its_start() {
+        // Going down from a table's anchor, the first cell's start is the
+        // nearest paragraph start below the caret; the next paragraph, or the
+        // cell's end, would skip it.
+        assert_eq!(paragraph_start_target(true, 8, MIDDLE, Some(21)), 10);
+        assert_eq!(paragraph_start_target(true, 8, MIDDLE, None), 10);
     }
 
     #[test]
