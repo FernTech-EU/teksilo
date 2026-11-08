@@ -2462,6 +2462,55 @@ mod tests {
     /// and three times on Shift+Tab, because the details sat inside the toggle
     /// button (a button may hold no focusable content) and the document carried
     /// the toggle's label as well.
+    /// Reading the shown details does not hide them. The details document
+    /// handles neither a screen reader's default action nor Space, and both
+    /// bubbled up to the accordion around it, which collapsed: NVDA's activate
+    /// key on the text, or Space while reading it, took the details away.
+    #[test]
+    fn the_details_stay_shown_while_they_are_read() {
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let content = present_and_lay_out(&mut tree, save_failed_with_details(SAVE_FAILED_DETAILS));
+        let proposal = SizeProposal::exact(800.0, 600.0);
+        toggle_details(&mut tree, proposal);
+        let stops = tree.tab_stops_within(content);
+        assert_eq!(stops.len(), 4, "the details are shown: {stops:?}");
+        tree.focus(stops[1]);
+        let document = {
+            let consumer = accesskit_consumer::Tree::new(tree.sync_accessibility(), true);
+            consumer
+                .state()
+                .focus()
+                .expect("the details hold the focus")
+                .locate()
+                .0
+        };
+
+        tree.dispatch_access_action(
+            document,
+            teksilo_core::accesskit::Action::Click,
+            None,
+            &mut teksilo_core::window::NoopWindowOps,
+        );
+        settle(&mut tree, proposal);
+        assert_eq!(
+            tree.tab_stops_within(content),
+            stops,
+            "the default action on the details leaves them shown"
+        );
+
+        tree.focus(stops[1]);
+        tree.press_key(
+            teksilo_core::event::Key::Space,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        settle(&mut tree, proposal);
+        assert_eq!(
+            tree.tab_stops_within(content),
+            stops,
+            "Space in the details leaves them shown"
+        );
+    }
+
     #[test]
     fn the_focused_details_hear_the_toggles_label_once() {
         use teksilo_core::accesskit::Role;

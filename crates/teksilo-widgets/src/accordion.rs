@@ -661,6 +661,22 @@ impl Widget for Accordion {
         let expanded_key = self.expanded.clone();
         let expanded_access = self.expanded.clone();
         let header_focused_focus = header_focused.clone();
+        // The key and assistive handlers sit on the accordion's node, which is
+        // also the ancestor of everything in its content, so a key or an
+        // assistive action the content leaves unhandled bubbles up to them.
+        // Only one aimed at the accordion itself (or, for an assistive action,
+        // at its header button) operates the disclosure: Space in a read-only
+        // text inside it, or a screen reader's default action on that text,
+        // used to collapse the very content the user was reading. A context
+        // made outside a dispatch carries no target and is taken as aimed here.
+        let own_id = ctx.self_id();
+        let header_button_id = header_with_ring;
+        let aimed_at_accordion =
+            move |ctx: &EventContext| ctx.dispatch_target().is_none_or(|target| target == own_id);
+        let aimed_at_header = move |ctx: &EventContext| {
+            ctx.dispatch_target()
+                .is_none_or(|target| target == own_id || target == header_button_id)
+        };
 
         let mut handler_set = HandlerSet::new()
             .on_tap({
@@ -674,9 +690,9 @@ impl Widget for Accordion {
                 // assistive technology can navigate to the header (it
                 // advertises `Action::Click`) but cannot operate it.
                 move |action: teksilo_core::accesskit::Action,
-                      _ctx: &mut EventContext|
+                      ctx: &mut EventContext|
                       -> EventResponse {
-                    if action == teksilo_core::accesskit::Action::Click {
+                    if action == teksilo_core::accesskit::Action::Click && aimed_at_header(ctx) {
                         expanded_access.set(!expanded_access.get());
                         EventResponse::Handled
                     } else {
@@ -685,7 +701,10 @@ impl Widget for Accordion {
                 }
             })
             .on_key({
-                move |event: &WidgetEvent, _ctx: &mut EventContext| -> EventResponse {
+                move |event: &WidgetEvent, ctx: &mut EventContext| -> EventResponse {
+                    if !aimed_at_accordion(ctx) {
+                        return EventResponse::Ignored;
+                    }
                     match event {
                         WidgetEvent::KeyDown {
                             key: Key::Space | Key::Enter,
@@ -1055,6 +1074,59 @@ mod tests {
             stack.extend(tree.children(id));
         }
         panic!("the accordion has a header button");
+    }
+
+    /// A key or an assistive action the content leaves unhandled bubbles up to
+    /// the accordion, which is the content's ancestor. Only one aimed at the
+    /// accordion or its header button operates the disclosure: Space in a
+    /// focused control inside it, or a screen reader's default action on its
+    /// text, used to collapse the content the user was in.
+    #[test]
+    fn only_its_own_keys_and_actions_toggle_the_accordion() {
+        use crate::primitives::TextWidget;
+        use teksilo_core::accessibility::widget_id_to_node_id;
+        use teksilo_core::accesskit::Action;
+        use teksilo_core::event::Modifiers;
+        use teksilo_core::window::NoopWindowOps;
+
+        let expanded = Signal::new(true);
+        let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+        let body = tree.add(TextWidget::new(lit!("Body text")).focusable(true));
+        let acc = tree.add(Accordion::new(lit!("Section"), expanded.clone()).content(body));
+        let proposal = SizeProposal::exact(300.0, 200.0);
+        tree.layout(proposal);
+        tree.tick_animations(std::time::Duration::from_millis(400));
+        tree.layout(proposal);
+        let _ = tree.sync_accessibility();
+
+        let handled = tree.dispatch_access_action(
+            widget_id_to_node_id(body),
+            Action::Click,
+            None,
+            &mut NoopWindowOps,
+        );
+        assert!(!handled, "nothing in the content takes the click");
+        assert!(expanded.get(), "a click on the content leaves it open");
+
+        tree.focus(body);
+        tree.press_key(Key::Space, Modifiers::NONE);
+        assert!(expanded.get(), "Space in the content leaves it open");
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        assert!(expanded.get(), "Enter in the content leaves it open");
+
+        // Its own still work: the header button's default action, and Space
+        // with the focus on the accordion.
+        let header = header_button(&tree, acc);
+        assert!(tree.dispatch_access_action(
+            widget_id_to_node_id(header),
+            Action::Click,
+            None,
+            &mut NoopWindowOps,
+        ));
+        assert!(!expanded.get(), "the header button's click collapses it");
+        tree.focus(acc);
+        tree.press_key(Key::Space, Modifiers::NONE);
+        assert!(expanded.get(), "Space on the accordion expands it");
     }
 
     #[test]
