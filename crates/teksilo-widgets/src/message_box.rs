@@ -2160,6 +2160,90 @@ mod tests {
         );
     }
 
+    /// A box with long text and a row of buttons wider than the floor its
+    /// native window opens at.
+    fn wide_button_row() -> MessageBox {
+        MessageBox::warning(lit!("Starforgers has unsaved changes"))
+            .text(lit!(
+                "Starforgers could not be saved. The disk may be full or write-protected, \
+                 or a network drive or USB key may have been disconnected. Without saving, \
+                 the changes made since the last successful save are lost."
+            ))
+            .buttons(MessageBoxButtons::Custom(vec![
+                MessageBoxButton::standard(StandardButton::Discard)
+                    .label(lit!("Close without saving")),
+                MessageBoxButton::standard(StandardButton::Cancel)
+                    .label(lit!("Keep the document open")),
+                MessageBoxButton::standard(StandardButton::Save).label(lit!("Save somewhere else")),
+            ]))
+    }
+
+    /// A box whose row of buttons is wider than the floor is as wide as
+    /// that row, and the height it reports is the height its text takes at
+    /// that width, not at the floor, where the text wraps into more lines.
+    /// Shown over the page, it holds its buttons.
+    #[test]
+    fn a_box_wider_than_its_floor_reports_its_height_at_its_own_width() {
+        let mut tree = mock_text_tree();
+        tree.add(wide_button_row());
+        tree.layout(SizeProposal::exact(1200.0, 800.0));
+        let measure = |width: Option<f32>| {
+            tree.measure_root_intrinsic(SizeProposal {
+                width,
+                height: None,
+            })
+            .expect("the box is the root")
+        };
+        let open = measure(None);
+        assert!(
+            open.width > MIN_WIDTH + 1.0,
+            "the buttons are wider than the floor: {open:?}"
+        );
+        let at_own_width = measure(Some(open.width));
+        let at_floor = measure(Some(MIN_WIDTH));
+        assert!(
+            at_floor.height > at_own_width.height + 0.5,
+            "the text takes more lines at the floor ({at_floor:?}) than at the \
+             box's own width ({at_own_width:?})"
+        );
+        assert!(
+            (open.height - at_own_width.height).abs() <= 0.5,
+            "the box reports the height at its own width: {open:?}, against \
+             {at_own_width:?} at that width"
+        );
+
+        let mut tree = mock_text_tree();
+        let (content, window) = present_as_overlay(&mut tree, wide_button_row(), 1200.0, 800.0);
+        let panel = tree.bounds(content);
+        let message_box = tree.bounds(message_box_in(&tree, content));
+        assert!(
+            (message_box.width - open.width).abs() <= 0.5,
+            "over the page the box is as wide as its buttons: {message_box:?}"
+        );
+        let (texts, buttons) = texts_and_buttons(&tree, content);
+        assert_eq!(buttons.len(), 3, "{buttons:?}");
+        let text_bottom = texts
+            .iter()
+            .map(|t| t.y + t.height)
+            .fold(f32::MIN, f32::max);
+        for b in &buttons {
+            assert!(
+                b.y >= text_bottom
+                    && b.x >= panel.x
+                    && b.y >= panel.y
+                    && b.x + b.width <= panel.x + panel.width + 0.5
+                    && b.y + b.height <= panel.y + panel.height + 0.5,
+                "button {b:?} lies inside the box {panel:?}, below the text \
+                 ({text_bottom})"
+            );
+        }
+        assert!(
+            panel.x + panel.width <= window.x + window.width + 0.5
+                && panel.y + panel.height <= window.y + window.height + 0.5,
+            "the box {panel:?} fits the window {window:?}"
+        );
+    }
+
     #[test]
     fn escape_resolution_prefers_explicit_escape_button() {
         let state = State::new(Signal::new(false));
