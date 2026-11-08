@@ -19,9 +19,11 @@ by crate for clarity, not because crates version independently.
 
 - **`EventContext::set_window_string_id` gives an open window a new string id**,
   for a document window whose file moved (Save As, a restored backup, a project
-  switched in place). `find_window` then finds it under the new id only, and
-  its saved size and position move to the new id, so it comes back at its size
-  after a restart. It refuses an id another open window holds
+  switched in place). `find_window` then finds it under the new id, and its
+  saved size and position move to the new id, so it comes back at its size
+  after a restart. When another open window was opened with the same old id,
+  the old id stays with that window, along with its saved size and position.
+  It refuses an id another open window holds
   (`WindowStringIdError`). `WindowOps` has a matching method, which answers
   `Unsupported` unless an implementor provides it.
 
@@ -60,6 +62,10 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **Shift with an arrow key inside a table cell of several paragraphs selects
+  text in the cell** in `RichTextEditor`. At the start or end of a paragraph
+  in the middle of the cell it selected a range of cells instead. Only the
+  cell's own edges start a cell selection.
 - **After Undo or Redo at a soft wrap, the caret is shown and read on the line
   its text is on**, not at the end of the line above, in `RichTextEditor`,
   `PlainTextEditor` and `CodeEditor`.
