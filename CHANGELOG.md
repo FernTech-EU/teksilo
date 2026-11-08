@@ -13,9 +13,42 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
-### Fixed
+### Changed
 
 #### Widgets
+
+- **A text caret stops blinking, and stays shown, after ten seconds with nothing
+  moving it**, as GTK's does by default. An idle window with a focused text field
+  no longer redraws twice a second. Typing, a caret move, a click or coming back
+  to the window starts the blink again.
+
+### Fixed
+
+#### Core
+
+- **Pressing a braille routing key on the cell the braille cursor is already on
+  no longer moves the caret.** NVDA then clicks at the top-left of the
+  character, rounded down to whole pixels, which was the last pixel row of the
+  line above. The caret moved one line up, or from the end of a wrapped line to
+  the start of that line. A text's character boxes now start on a whole device
+  pixel inside their line.
+- **A screen reader hears a line break made with Shift+Enter as a line break.**
+  The position just before it is announced, and an empty line between two of
+  them reads as blank instead of saying nothing. Paragraph navigation in a
+  screen reader now also stops at such a break.
+
+#### Widgets
+
+- **After Undo or Redo at a soft wrap, the caret is shown and read on the line
+  its text is on**, not at the end of the line above, in `RichTextEditor`,
+  `PlainTextEditor` and `CodeEditor`.
+- **On Windows and Linux, Ctrl+Right moves to the start of the next word**, and
+  Ctrl+Shift+Right and Ctrl+Delete reach it, as in other Windows and Linux
+  editors. It stopped at the end of the current word. Option+Right on macOS
+  still stops at the end of the word.
+- **In a masked password field, Ctrl+Left, Ctrl+Right, Ctrl+Backspace and
+  Ctrl+Delete treat the hidden text as one word**, so they no longer give away
+  where it has spaces.
 
 - **A screen reader on Windows reads the line the caret is on when it is at the
   start of a wrapped line, in `RichTextEditor` and `PlainTextEditor`.** After
