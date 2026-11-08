@@ -62,15 +62,26 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A screen reader no longer finds an `Accordion`'s content or its header
+  actions inside its header button.** The content and the trailing controls
+  were children of the button, which made a screen reader repeat the header's
+  name on entering them, and a button may not contain other controls. They are
+  now its siblings, and the button covers the header row only.
+- **Space or Enter in a shown `Accordion` section, or a screen reader's
+  activate command on its text (such as a message box's details), no longer
+  collapses the section.** The accordion took every Space, Enter and assistive
+  click its content left unhandled.
 - **A message box's "Show details" text can be reached with Tab once shown**,
   read and reviewed by a screen reader, selected and copied. It was a plain
   label that only a screen reader's object navigation reached. The details
   pane is now as tall as its text, up to a dozen lines past which it scrolls,
   instead of a fixed height that left most of it blank under a short error.
-- **Down from the line above a table goes into its first row, and Down from
-  its last row goes to the text after it**, in `RichTextEditor`, also when the
+- **Down from the line above a table goes into its first row, Down from its
+  last row goes to the text after it, and Up into a cell that wraps onto
+  several lines lands on its last line**, in `RichTextEditor`, also when the
   text has line or paragraph spacing. The caret stayed where it was, so a
-  screen reader repeated the line as if the text ended there.
+  screen reader repeated the line as if the text ended there, and going up
+  skipped the lower lines of a wrapped cell.
 - **Shift with an arrow key inside a table cell of several paragraphs selects
   text in the cell** in `RichTextEditor`. At the start or end of a paragraph
   in the middle of the cell it selected a range of cells instead. Only the

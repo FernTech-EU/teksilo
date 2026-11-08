@@ -56,9 +56,12 @@ pane rather than by an internal height tween.
 
 The header is announced as `Role::Button` with `aria-expanded` reflecting the
 current state, and `aria-controls` pointing at the content region
-(`Role::Region`). Space/Enter toggle the disclosure; AT "click" actions are
-also handled. The focus ring appears only on keyboard focus (not on pointer
-clicks), matching the IntUI convention.
+(`Role::Region`). The button, the trailing slot's controls and the region are
+siblings in the accessibility tree, as in the WAI-ARIA disclosure pattern: a
+button holds nothing a screen reader can focus, so focus in the content is
+announced with the region's name only. Space/Enter toggle the disclosure; AT
+"click" actions are also handled. The focus ring appears only on keyboard
+focus (not on pointer clicks), matching the IntUI convention.
 
 ```rust
 # use teksilo_widgets::accordion::Accordion;
