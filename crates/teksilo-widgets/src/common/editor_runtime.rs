@@ -37,6 +37,17 @@ use teksilo_core::signal::Signal;
 /// (Qt's default `QApplication::cursorFlashTime` is 1000 ms *per cycle*).
 const CARET_BLINK_INTERVAL: f32 = 0.5;
 
+/// How long a caret keeps blinking once nothing moves it: after this much time
+/// with no caret move, no edit and no focus change, it stops, left on, and the
+/// event loop sleeps until the writer does something. GTK's
+/// `gtk-cursor-blink-timeout` has the same default and the same purpose.
+///
+/// Each toggle costs a whole frame: a layout pass that finds nothing to do, a
+/// render, and a present of the whole window. In a Windows virtual machine a
+/// caret blinking in an otherwise idle window was measured at 12 to 15 % of a
+/// core, and a writer leaves the caret still for minutes while thinking.
+const CARET_BLINK_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Debounce window for coalesced signal emission (`text_changed`,
 /// `format_changed`, `undo_redo_changed`). Rapid typing must not hammer
 /// every toolbar observer once per keystroke.
@@ -281,14 +292,24 @@ pub const READ_ONLY_PRESET: PolicyBundle = PolicyBundle {
 /// visible cadence stays locked to real seconds no matter how the frame
 /// scheduler behaves: if ticks are skipped, delayed, or clamped, the next
 /// tick catches up instead of the blink slowing down with the frame rate.
+///
+/// The blink stops [`CARET_BLINK_TIMEOUT`] after the caret was last moved,
+/// with the caret on; [`restart`](Self::restart) and [`reset`](Self::reset)
+/// start it again.
 #[derive(Debug, Default)]
 pub(crate) struct CaretBlink {
     last_toggle: Option<Instant>,
+    /// When the caret last moved or the surface last became active, which is
+    /// what the timeout counts from. `None` until the next tick seeds it.
+    still_since: Option<Instant>,
 }
 
 impl CaretBlink {
     pub(crate) fn new() -> Self {
-        Self { last_toggle: None }
+        Self {
+            last_toggle: None,
+            still_since: None,
+        }
     }
 
     /// Restart the blink phase, so the next toggle is a full interval away.
@@ -307,13 +328,28 @@ impl CaretBlink {
     /// write. Restarting without also setting `caret_visible` leaves the caret
     /// dark for up to one full interval after a cursor move — the exact
     /// symptom this method exists to prevent.
+    ///
+    /// A blink that had stopped after [`CARET_BLINK_TIMEOUT`] starts again.
     pub(crate) fn restart(&mut self) {
-        self.last_toggle = Some(Instant::now());
+        let now = Instant::now();
+        self.last_toggle = Some(now);
+        self.still_since = Some(now);
     }
 
-    /// Forget the phase entirely (next `tick` starts a fresh interval).
+    /// Forget the phase entirely (next `tick` starts a fresh interval, and a
+    /// fresh timeout).
     pub(crate) fn reset(&mut self) {
         self.last_toggle = None;
+        self.still_since = None;
+    }
+
+    /// Move the start of the caret's stillness `by` into the past, so a test
+    /// reaches the timeout without waiting for it.
+    #[cfg(test)]
+    pub(crate) fn backdate_stillness(&mut self, by: Duration) {
+        if let Some(since) = self.still_since.as_mut() {
+            *since -= by;
+        }
     }
 
     /// Drive one frame of blinking.
@@ -338,14 +374,26 @@ impl CaretBlink {
         if blinking {
             let now = Instant::now();
             let interval = Duration::from_secs_f32(CARET_BLINK_INTERVAL);
+            let still_since = *self.still_since.get_or_insert(now);
+            let timed_out = now.saturating_duration_since(still_since) >= CARET_BLINK_TIMEOUT;
             match self.last_toggle {
                 None => self.last_toggle = Some(now),
                 Some(last) if now.saturating_duration_since(last) >= interval => {
                     self.last_toggle = Some(now);
-                    let was = caret_visible.get();
-                    caret_visible.set(!was);
+                    // Past the timeout, the toggle that turns the caret on is
+                    // the last one, and one that would turn it off is skipped.
+                    let show = timed_out || !caret_visible.get();
+                    if caret_visible.get() != show {
+                        caret_visible.set(show);
+                    }
                 }
                 _ => {}
+            }
+            // Stopped: the caret stays on and nothing wakes the loop for it.
+            // A caret caught off by the timeout waits for its next toggle,
+            // scheduled below, so the off phase is never longer than usual.
+            if timed_out && caret_visible.get() {
+                return;
             }
             if let (Some(last), Some(wake)) = (self.last_toggle, wake_at) {
                 let next = last + interval;
@@ -361,6 +409,7 @@ impl CaretBlink {
         }
 
         self.last_toggle = None;
+        self.still_since = None;
         match policy {
             CaretPolicy::Blinking => {
                 // Not active: caret off.
@@ -608,6 +657,102 @@ mod tests {
         assert!(
             !visible.get(),
             "restart seeds the phase only — showing the caret is the caller's"
+        );
+    }
+
+    /// A blink phase one interval old, still since `still_for`: the next tick
+    /// is a toggle.
+    fn due_blink(still_for: Duration) -> CaretBlink {
+        let now = Instant::now();
+        CaretBlink {
+            last_toggle: Some(now - Duration::from_secs_f32(CARET_BLINK_INTERVAL + 0.01)),
+            still_since: Some(now - still_for),
+        }
+    }
+
+    #[test]
+    fn blink_stops_with_the_caret_on_after_the_timeout() {
+        let mut blink = due_blink(CARET_BLINK_TIMEOUT + Duration::from_secs(1));
+        let visible = Signal::new(true);
+        let wake = wake_slot();
+        blink.tick(CaretPolicy::Blinking, true, &visible, Some(&wake));
+        assert!(
+            visible.get(),
+            "a toggle past the timeout must leave the caret on, not turn it off"
+        );
+        assert_eq!(
+            wake.get(),
+            None,
+            "a stopped blink must not wake the event loop again"
+        );
+    }
+
+    #[test]
+    fn a_caret_off_at_the_timeout_comes_back_on_at_its_next_toggle() {
+        let mut blink = due_blink(CARET_BLINK_TIMEOUT + Duration::from_secs(1));
+        let visible = Signal::new(false);
+        let wake = wake_slot();
+        blink.tick(CaretPolicy::Blinking, true, &visible, Some(&wake));
+        assert!(visible.get(), "the blink must stop with the caret on");
+        assert_eq!(wake.get(), None);
+    }
+
+    #[test]
+    fn a_caret_off_at_the_timeout_keeps_its_wake_until_that_toggle() {
+        let now = Instant::now();
+        // Just toggled off, and still for longer than the timeout.
+        let mut blink = CaretBlink {
+            last_toggle: Some(now),
+            still_since: Some(now - CARET_BLINK_TIMEOUT - Duration::from_secs(1)),
+        };
+        let visible = Signal::new(false);
+        let wake = wake_slot();
+        blink.tick(CaretPolicy::Blinking, true, &visible, Some(&wake));
+        assert!(!visible.get(), "the off phase runs its usual length");
+        assert!(
+            wake.get().is_some(),
+            "an off caret needs the wake that turns it back on"
+        );
+    }
+
+    #[test]
+    fn blink_goes_on_before_the_timeout() {
+        let mut blink = due_blink(CARET_BLINK_TIMEOUT - Duration::from_secs(1));
+        let visible = Signal::new(true);
+        let wake = wake_slot();
+        blink.tick(CaretPolicy::Blinking, true, &visible, Some(&wake));
+        assert!(!visible.get(), "the caret still blinks before the timeout");
+        assert!(wake.get().is_some());
+    }
+
+    #[test]
+    fn restart_resumes_a_stopped_blink() {
+        let mut blink = due_blink(CARET_BLINK_TIMEOUT + Duration::from_secs(1));
+        let visible = Signal::new(true);
+        blink.tick(CaretPolicy::Blinking, true, &visible, None);
+        assert!(visible.get());
+        // The caret moves: the blink starts again, a full interval later.
+        blink.restart();
+        let wake = wake_slot();
+        blink.tick(CaretPolicy::Blinking, true, &visible, Some(&wake));
+        assert!(
+            wake.get().is_some(),
+            "a caret that moved must blink again, so it schedules its toggle"
+        );
+    }
+
+    #[test]
+    fn losing_activity_forgets_the_stillness() {
+        let mut blink = due_blink(CARET_BLINK_TIMEOUT + Duration::from_secs(1));
+        let visible = Signal::new(true);
+        // Focus or the window goes away, then comes back.
+        blink.tick(CaretPolicy::Blinking, false, &visible, None);
+        visible.set(true);
+        let wake = wake_slot();
+        blink.tick(CaretPolicy::Blinking, true, &visible, Some(&wake));
+        assert!(
+            wake.get().is_some(),
+            "a caret that comes back blinks again for a full timeout"
         );
     }
 

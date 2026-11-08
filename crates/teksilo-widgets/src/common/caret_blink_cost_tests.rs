@@ -14,7 +14,8 @@
 //! What each test holds the blink to: every frame of an idle window is one
 //! caret toggle woken by its own deadline, repainting and nothing else (no
 //! layout pass with work in it, no accessibility walk, nothing owed to a
-//! reader).
+//! reader); and once the caret has been still for the blink timeout, no frame
+//! at all.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -22,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use teksilo_canvas::{Point, Rect, SizeProposal};
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+use teksilo_core::event::{Key, Modifiers, PointerButton, WidgetEvent};
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
@@ -232,31 +233,33 @@ fn assert_blink_floor(name: &str, idle: &Idle) {
     );
 }
 
-fn rich_text() -> (RichTextEditor, Signal<bool>) {
+/// A surface's caret, and a way to move its stillness into the past.
+type Probe = (Signal<bool>, Box<dyn Fn(Duration)>);
+
+fn rich_text() -> (RichTextEditor, Probe) {
     let doc = TextDocument::new();
     doc.set_plain_text("A first paragraph.\nA second one.")
         .unwrap();
     let editor = RichTextEditor::editor(doc);
-    let caret = editor.state_handle().borrow().caret_visible.clone();
-    (editor, caret)
+    let state = editor.state_handle();
+    let caret = state.borrow().caret_visible.clone();
+    let backdate = Box::new(move |by| state.borrow_mut().blink.backdate_stillness(by));
+    (editor, (caret, backdate))
 }
 
-fn code() -> (CodeEditor, Signal<bool>) {
+fn code() -> (CodeEditor, Probe) {
     let doc = TextDocument::new();
     doc.set_plain_text("fn main() {}\n").unwrap();
     let editor = CodeEditor::new(doc);
-    let caret = editor
-        .handle()
-        .state_handle()
-        .borrow()
-        .caret_visible
-        .clone();
-    (editor, caret)
+    let state = editor.handle().state_handle();
+    let caret = state.borrow().caret_visible.clone();
+    let backdate = Box::new(move |by| state.borrow_mut().blink.backdate_stillness(by));
+    (editor, (caret, backdate))
 }
 
 #[test]
 fn a_blinking_caret_in_a_rich_text_editor_only_repaints() {
-    let (editor, caret) = rich_text();
+    let (editor, (caret, _)) = rich_text();
     let mut window = Window::focused(editor);
     let idle = window.idle(SPAN, Some(&caret));
     assert_blink_floor("rich text", &idle);
@@ -265,7 +268,7 @@ fn a_blinking_caret_in_a_rich_text_editor_only_repaints() {
 
 #[test]
 fn a_blinking_caret_in_a_code_editor_only_repaints() {
-    let (editor, caret) = code();
+    let (editor, (caret, _)) = code();
     let mut window = Window::focused(editor);
     let idle = window.idle(SPAN, Some(&caret));
     assert_blink_floor("code", &idle);
@@ -277,4 +280,49 @@ fn a_blinking_caret_in_a_text_input_only_repaints() {
     let mut window = Window::focused(TextInput::new(Signal::new("hello".to_string())));
     let idle = window.idle(SPAN, None);
     assert_blink_floor("text input", &idle);
+}
+
+/// Past the timeout the caret is left on and the window sleeps, until the
+/// caret moves.
+fn assert_blink_stops_and_resumes(name: &str, mut window: Window, (caret, backdate): Probe) {
+    backdate(Duration::from_secs(60));
+    let idle = window.idle(SPAN, Some(&caret));
+    eprintln!("{name} past the timeout: {idle:?}");
+    assert!(
+        idle.frames <= 1,
+        "{name}: a caret still past the timeout stops blinking: at most the \
+         frame that leaves it on; {idle:?}"
+    );
+    assert!(caret.get(), "{name}: the blink stops with the caret on");
+    assert_eq!(
+        window.tree.next_timer_deadline(),
+        None,
+        "{name}: nothing is left to wake the loop"
+    );
+    assert!(!window.tree.needs_redraw(), "{name}");
+
+    // The caret moves: it shows at once and blinks again.
+    window.tree.dispatch_event(WidgetEvent::KeyDown {
+        key: Key::ArrowRight,
+        modifiers: Modifiers::NONE,
+        text: None,
+    });
+    window.frame();
+    assert!(caret.get(), "{name}: a moved caret shows at once");
+    let idle = window.idle(SPAN, Some(&caret));
+    assert_blink_floor(name, &idle);
+}
+
+#[test]
+fn a_still_caret_in_a_rich_text_editor_stops_blinking() {
+    let (editor, probe) = rich_text();
+    let window = Window::focused(editor);
+    assert_blink_stops_and_resumes("rich text", window, probe);
+}
+
+#[test]
+fn a_still_caret_in_a_code_editor_stops_blinking() {
+    let (editor, probe) = code();
+    let window = Window::focused(editor);
+    assert_blink_stops_and_resumes("code", window, probe);
 }

@@ -172,7 +172,13 @@ and overlay timers, and the loop's own (`redraw_gate`, `occlusion_probe`,
 winit delivered, by kind, and `user_events` every event posted to the loop,
 the framework's own wakes included. A focused text field blinks its caret
 twice a second, so `woken_by={wake_at:2}` and `rendered_frames=2` is that
-field's floor; with no caret on screen the floor is no line at all.
+field's floor; with no caret on screen the floor is no line at all. The
+blink stops, the caret left on, once nothing has moved the caret for ten
+seconds (GTK's `gtk-cursor-blink-timeout` default), so a field left idle
+longer than that prints no line either; a key, a click or a focus change
+starts it again. `common/caret_blink_cost_tests.rs` in teksilo-widgets
+holds the rich text editor, the code editor and the text input to this:
+one repaint per toggle, no layout, no accessibility walk.
 
 CPU and GPU deltas can be read from the kernel:
 
