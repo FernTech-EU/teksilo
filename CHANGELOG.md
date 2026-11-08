@@ -36,6 +36,9 @@ by crate for clarity, not because crates version independently.
   The position just before it is announced, and an empty line between two of
   them reads as blank instead of saying nothing. Paragraph navigation in a
   screen reader now also stops at such a break.
+- **An overlay narrowed to fit the window, or widened to its anchor, is as tall
+  as its content at that width.** Its height was measured as if nothing
+  wrapped, so a modal clamped to a small window cut off its wrapped text.
 
 #### Widgets
 
@@ -46,6 +49,10 @@ by crate for clarity, not because crates version independently.
   Ctrl+Shift+Right and Ctrl+Delete reach it, as in other Windows and Linux
   editors. It stopped at the end of the current word. Option+Right on macOS
   still stops at the end of the word.
+- **A `MessageBox` whose text wraps is as tall as its text, so its buttons sit
+  inside it.** They could hang below the box, where a mouse click closed it as
+  Cancel instead of choosing the button. Its text now wraps at the same width
+  over the window as in a window of its own.
 - **In a masked password field, Ctrl+Left, Ctrl+Right, Ctrl+Backspace and
   Ctrl+Delete treat the hidden text as one word**, so they no longer give away
   where it has spaces.
