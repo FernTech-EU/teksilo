@@ -2666,6 +2666,14 @@ pub(crate) fn neighbour_line_center_y(
 /// after a table going down out of its last row. Its middle is returned rather
 /// than the probe's y, which can be in a cell's padding, where the hit test
 /// answers with the cell's start whatever the x.
+///
+/// Either way the line found may not be the nearest one. Going up from a
+/// table row, the guess is the end of the previous cell in document order, the
+/// last cell of the row above, and its y is that row's first line: under a
+/// cell of the row above that wraps on several lines, the hit lands on the
+/// cell's first line and the lines below it were skipped. So from the line
+/// found, [`nearer_line_under_x`] walks back toward the caret, line by line in
+/// document order, and keeps each line a hit at `x` still lands on.
 fn line_under_x(
     engine: &teksilo_text::RichTextEngine,
     x: f32,
@@ -2673,26 +2681,14 @@ fn line_under_x(
     direction: i32,
     caret: [f32; 4],
 ) -> Option<f32> {
-    // The middle of the line a hit at `y` lands on, if that line is past the
-    // caret's. Compared by the middle, so a line beside the caret's in the
-    // next cell of the row, drawn a little higher or lower in another size,
-    // does not count as the next one.
-    let landed_past = |y: f32| {
-        let hit = engine.hit_test(x, y)?;
-        let line = engine.caret_rect(hit.position, hit.affinity);
-        if line[3] <= 0.0 {
-            return None;
-        }
-        let middle = line[1] + line[3] * 0.5;
-        let past = if direction > 0 {
-            middle > caret[1] + caret[3]
-        } else {
-            middle < caret[1]
-        };
-        past.then_some(middle)
-    };
-    if landed_past(guess).is_some() {
-        return Some(guess);
+    if let Some(landed) = landed_past(engine, x, guess, direction, caret) {
+        // An ordinary line keeps its guess as it was: the walk finds nothing
+        // between it and the caret, and the hit test at the guess is the one
+        // the step always made.
+        return Some(
+            nearer_line_under_x(engine, x, landed, direction, caret)
+                .map_or(guess, |nearer| nearer.middle),
+        );
     }
     let (top, bottom) = engine.content_band_screen();
     // A step under half the smallest line a caret is drawn on cannot pass over
@@ -2708,8 +2704,119 @@ fn line_under_x(
         if y < top || y > bottom {
             return None;
         }
-        if let Some(middle) = landed_past(y) {
-            return Some(middle);
+        if let Some(landed) = landed_past(engine, x, y, direction, caret) {
+            let line = nearer_line_under_x(engine, x, landed, direction, caret).unwrap_or(landed);
+            return Some(line.middle);
+        }
+    }
+}
+
+/// A line a hit test at the caret's x landed on: a position on it, with the
+/// affinity that binds a wrap boundary to it, and the line's middle.
+#[derive(Clone, Copy)]
+struct LandedLine {
+    position: usize,
+    affinity: CursorAffinity,
+    middle: f32,
+}
+
+/// The line a hit at `(x, y)` lands on, if that line is past the caret drawn
+/// at `caret` going `direction`. Compared by the middle, so a line beside the
+/// caret's in the next cell of the row, drawn a little higher or lower in
+/// another size, does not count as the next one.
+fn landed_past(
+    engine: &teksilo_text::RichTextEngine,
+    x: f32,
+    y: f32,
+    direction: i32,
+    caret: [f32; 4],
+) -> Option<LandedLine> {
+    let hit = engine.hit_test(x, y)?;
+    let line = engine.caret_rect(hit.position, hit.affinity);
+    if line[3] <= 0.0 {
+        return None;
+    }
+    let middle = line[1] + line[3] * 0.5;
+    let past = if direction > 0 {
+        middle > caret[1] + caret[3]
+    } else {
+        middle < caret[1]
+    };
+    past.then_some(LandedLine {
+        position: hit.position,
+        affinity: hit.affinity,
+        middle,
+    })
+}
+
+/// The nearest line to the caret, at `x`, between it and `landed`, a line a
+/// step `direction` from the caret found past it; `None` when there is none
+/// and `landed` is the next line.
+///
+/// The lines between are found in document order from `landed` toward the
+/// caret: going up, the lines after `landed`, which in a table cell are the
+/// cell's lower lines; going down, the lines before it. Each is kept only when
+/// a hit at `x` at its middle lands on a line nearer than the last one kept
+/// and still past the caret, so a line of another cell of the row, at a height
+/// where nothing under `x` is drawn, ends the walk. Every line kept is
+/// strictly nearer, so the walk ends, and it only crosses lines drawn between
+/// the caret and `landed`: the rest of a table cell at most, never the
+/// document. For an ordinary line the first step is back on the caret's own
+/// line, which is not past it, and nothing is kept.
+fn nearer_line_under_x(
+    engine: &teksilo_text::RichTextEngine,
+    x: f32,
+    landed: LandedLine,
+    direction: i32,
+    caret: [f32; 4],
+) -> Option<LandedLine> {
+    // Toward the caret is the opposite way to the step. The neighbouring line
+    // in document order is found as `neighbour_line_center_y` finds it: from
+    // the line's range, both positions past its edge, with the affinity that
+    // binds a wrap boundary to the line moved to.
+    let toward = -direction;
+    let affinity = if toward > 0 {
+        CursorAffinity::Upstream
+    } else {
+        CursorAffinity::Downstream
+    };
+    let nearer = |middle: f32, than: f32| {
+        if toward > 0 {
+            middle > than
+        } else {
+            middle < than
+        }
+    };
+    let mut best = landed;
+    let mut found = None;
+    loop {
+        let Some((start, end)) = engine.visual_line_range_at(best.position, best.affinity) else {
+            return found;
+        };
+        let candidates: [Option<usize>; 2] = if toward > 0 {
+            [Some(end), end.checked_add(1)]
+        } else {
+            [start.checked_sub(1), start.checked_sub(2)]
+        };
+        let next = candidates.into_iter().flatten().find_map(|probe| {
+            let rect = engine.caret_rect(probe, affinity);
+            if rect[3] <= 0.0 {
+                return None;
+            }
+            let middle = rect[1] + rect[3] * 0.5;
+            nearer(middle, best.middle).then_some(middle)
+        });
+        let Some(middle) = next else {
+            return found;
+        };
+        // Still past the caret, and under `x`: a hit there lands on a line
+        // nearer than the one kept so far.
+        match landed_past(engine, x, middle, direction, caret) {
+            Some(line) if nearer(line.middle, best.middle) => {
+                best = line;
+                found = Some(line);
+            }
+            _ => return found,
         }
     }
 }

@@ -11,6 +11,9 @@
 //! cell of its last row, then probed one caret height on, which with prose's
 //! line and paragraph spacing is still the caret's own line: the caret stayed,
 //! and a screen reader read the same line again as if the text ended there.
+//! Going up, the position before a row is the end of the row above's last
+//! cell, drawn on that row's first line, so Up from a row skipped the lower
+//! lines of a wrapped cell above it.
 //!
 //! Every case runs with no spacing and with prose spacing, and each starts a
 //! fresh editor, so no column held from an earlier step decides where the
@@ -175,6 +178,29 @@ impl Editor {
         (from..from + 200)
             .find(|&at| self.x_of(at) > x)
             .unwrap_or_else(|| panic!("a position after {from} is drawn right of {x}"))
+    }
+
+    /// The y of the visual line `at` is on, asked away from any wrap
+    /// boundary's ambiguity: `at` is a position inside a word.
+    fn y_of(&self, at: usize) -> f32 {
+        self.state
+            .borrow()
+            .engine
+            .caret_rect(at, teksilo_text::CursorAffinity::Downstream)[1]
+    }
+
+    /// The y of each visual line `text` is drawn on, from the first position
+    /// of `text` to its last character, top first.
+    fn line_ys(&self, text: &str) -> Vec<f32> {
+        let start = self.position_of(text);
+        let mut ys: Vec<f32> = Vec::new();
+        for at in start..start + text.chars().count() {
+            let y = self.y_of(at);
+            if ys.last().is_none_or(|last| (y - last).abs() > 1.0) {
+                ys.push(y);
+            }
+        }
+        ys
     }
 }
 
@@ -381,5 +407,263 @@ fn down_and_up_walk_an_empty_table_inserted_after_the_last_paragraph() {
             "{spacing}: back on the paragraph above (caret {})",
             e.caret()
         );
+    }
+}
+
+/// The table of the NVDA run: "premier paragraphe" wraps in its cell on two
+/// lines, every other cell holds one.
+const WRAPPED_CELL: &str = "jouer, monsieur Stuart.\n\n\
+                            | premier paragraphe | deux | trois |\n\
+                            |---|---|---|\n\
+                            | quatre | cinq | six |\n\
+                            | sept | huit | neuf |";
+
+/// Up from a row lands on the last line of a two-line cell above it, not on
+/// its first: the step's first guess is the end of the previous cell in
+/// document order, the last cell of the row above, drawn on that row's first
+/// line.
+#[test]
+fn up_from_a_row_lands_on_the_last_line_of_a_wrapped_cell_above() {
+    for (spacing, typography) in spacings() {
+        for column in [0, 6] {
+            let mut e = Editor::new(WRAPPED_CELL, typography.clone());
+            let lines = e.line_ys("premier paragraphe");
+            assert_eq!(lines.len(), 2, "precondition: the cell wraps on two lines");
+            let from = e.position_of("quatre") + column;
+            let x = e.x_of(from);
+            e.caret_at(from);
+            e.press(Key::ArrowUp);
+            assert_eq!(e.caret_cell(), Some((0, 0)), "{spacing}, column {column}");
+            assert!(
+                (e.caret_rect()[1] - lines[1]).abs() < 1.0,
+                "{spacing}: Up from \"quatre\" column {column} lands on \"paragraphe\" \
+                 (caret {} at y {}, lines at {lines:?})",
+                e.caret(),
+                e.caret_rect()[1]
+            );
+            assert!(
+                (e.caret_rect()[0] - x).abs() < 10.0,
+                "{spacing}: column {column} keeps its x (from x {x}, at x {})",
+                e.caret_rect()[0]
+            );
+
+            // And on up, the cell's first line.
+            e.press(Key::ArrowUp);
+            assert_eq!(e.caret_cell(), Some((0, 0)), "{spacing}, column {column}");
+            assert!(
+                (e.caret_rect()[1] - lines[0]).abs() < 1.0,
+                "{spacing}: then \"premier\" (caret {})",
+                e.caret()
+            );
+        }
+    }
+}
+
+/// A paragraph wrapped on two lines before a table: Up from the first row
+/// lands on its last line, Down from its first line stays in it.
+#[test]
+fn up_from_the_first_row_lands_on_the_last_line_of_a_wrapped_paragraph() {
+    const WRAPPED: &str = "A paragraph long enough to wrap onto a second line in this \
+                           editor, which is four hundred wide, and then some.\n\n\
+                           | alpha | beta |\n\
+                           |-------|------|\n\
+                           | gamma | delta |";
+    for (spacing, typography) in spacings() {
+        let mut e = Editor::new(WRAPPED, typography.clone());
+        let lines = e.line_ys("A paragraph long enough");
+        let paragraph = e.line_ys(
+            "A paragraph long enough to wrap onto a second line in this editor, which is four \
+             hundred wide, and then some.",
+        );
+        assert_eq!(
+            paragraph.len(),
+            2,
+            "precondition: the paragraph wraps on two lines"
+        );
+        assert_eq!(lines[0], paragraph[0]);
+        for needle in ["alpha", "beta"] {
+            let mut e = Editor::new(WRAPPED, typography.clone());
+            e.caret_at(e.position_of(needle) + 2);
+            e.press(Key::ArrowUp);
+            assert_eq!(e.caret_cell(), None, "{spacing}: out of the table");
+            assert!(
+                (e.caret_rect()[1] - paragraph[1]).abs() < 1.0,
+                "{spacing}: Up from {needle:?} lands on the paragraph's last line \
+                 (caret {} at y {}, lines at {paragraph:?})",
+                e.caret(),
+                e.caret_rect()[1]
+            );
+        }
+        e.caret_at(e.position_of("A paragraph") + 3);
+        e.press(Key::ArrowDown);
+        assert_eq!(e.caret_cell(), None, "{spacing}: still above the table");
+        assert!(
+            (e.caret_rect()[1] - paragraph[1]).abs() < 1.0,
+            "{spacing}: Down from the first line lands on the second (caret {})",
+            e.caret()
+        );
+    }
+}
+
+/// Cells of one, two and three lines side by side.
+const UNEVEN: &str = "Above the table, a line reaching its third column.\n\n\
+                      | alpha bravo charlie delta echo foxtrot golf | hotel india juliet zulu | kilo |\n\
+                      |---|---|---|\n\
+                      | lima | mike | november |\n\
+                      | oscar papa quebec romeo sierra tango | victor | whiskey |\n\n\
+                      After the table, a line reaching its third column too.";
+
+const ROW_ONE_FIRST: &str = "alpha bravo charlie delta echo foxtrot golf";
+const ROW_ONE_SECOND: &str = "hotel india juliet zulu";
+const ROW_THREE_FIRST: &str = "oscar papa quebec romeo sierra tango";
+
+fn uneven_preconditions(e: &Editor) {
+    assert_eq!(
+        e.line_ys(ROW_ONE_FIRST).len(),
+        3,
+        "precondition: the first cell holds three lines"
+    );
+    assert_eq!(
+        e.line_ys(ROW_ONE_SECOND).len(),
+        2,
+        "precondition: the second cell holds two lines"
+    );
+    assert_eq!(
+        e.line_ys(ROW_THREE_FIRST).len(),
+        3,
+        "precondition: the last row's first cell holds three lines"
+    );
+}
+
+/// Up from a one-line cell lands on the last line of the taller cell above
+/// it, whatever the line count of the row's last cell, the one the step
+/// guesses from.
+#[test]
+fn up_from_a_one_line_cell_lands_on_the_last_line_of_the_cell_above() {
+    for (spacing, typography) in spacings() {
+        for (from, above, column) in [("lima", ROW_ONE_FIRST, 0), ("mike", ROW_ONE_SECOND, 1)] {
+            let mut e = Editor::new(UNEVEN, typography.clone());
+            uneven_preconditions(&e);
+            let last = *e.line_ys(above).last().unwrap();
+            e.caret_at(e.position_of(from) + 2);
+            e.press(Key::ArrowUp);
+            assert_eq!(
+                e.caret_cell(),
+                Some((0, column)),
+                "{spacing}: from {from:?}"
+            );
+            assert!(
+                (e.caret_rect()[1] - last).abs() < 1.0,
+                "{spacing}: Up from {from:?} lands on the last line of {above:?} \
+                 (caret {} at y {}, last line at {last})",
+                e.caret(),
+                e.caret_rect()[1]
+            );
+        }
+    }
+}
+
+/// Up from the paragraph after a table lands on the last line of the tall
+/// cell of its last row, not on the row's first line, where the row's last
+/// cell, the one the step guesses from, is drawn.
+#[test]
+fn up_from_after_a_table_lands_on_the_last_line_of_a_tall_cell_of_its_last_row() {
+    for (spacing, typography) in spacings() {
+        let mut e = Editor::new(UNEVEN, typography.clone());
+        uneven_preconditions(&e);
+        let last = *e.line_ys(ROW_THREE_FIRST).last().unwrap();
+        e.caret_at(e.position_of("After") + 2);
+        e.press(Key::ArrowUp);
+        assert_eq!(
+            e.caret_cell(),
+            Some((2, 0)),
+            "{spacing}: from after the table"
+        );
+        assert!(
+            (e.caret_rect()[1] - last).abs() < 1.0,
+            "{spacing}: Up from after the table lands on the last line of the cell above \
+             (caret {} at y {}, last line at {last})",
+            e.caret(),
+            e.caret_rect()[1]
+        );
+    }
+}
+
+/// Down into a row lands on the first line of the cell under the caret, both
+/// beside a taller cell and from one.
+#[test]
+fn down_into_a_row_lands_on_the_first_line_of_the_cell_below() {
+    for (spacing, typography) in spacings() {
+        // From the line above the table, over each column.
+        for (cell, column) in [(ROW_ONE_FIRST, 0), (ROW_ONE_SECOND, 1), ("kilo", 2)] {
+            let mut e = Editor::new(UNEVEN, typography.clone());
+            uneven_preconditions(&e);
+            let first = e.line_ys(cell)[0];
+            let from = e.first_right_of(e.position_of("Above"), e.x_of(e.position_of(cell)) + 4.0);
+            e.caret_at(from);
+            e.press(Key::ArrowDown);
+            assert_eq!(
+                e.caret_cell(),
+                Some((0, column)),
+                "{spacing}: into {cell:?}"
+            );
+            assert!(
+                (e.caret_rect()[1] - first).abs() < 1.0,
+                "{spacing}: Down lands on the first line of {cell:?} (caret {} at y {}, \
+                 first line at {first})",
+                e.caret(),
+                e.caret_rect()[1]
+            );
+        }
+
+        // From a one-line cell of the second row into the third, whose first
+        // cell is the tall one.
+        for (from, below, column) in [("lima", ROW_THREE_FIRST, 0), ("mike", "victor", 1)] {
+            let mut e = Editor::new(UNEVEN, typography.clone());
+            let first = e.line_ys(below)[0];
+            e.caret_at(e.position_of(from) + 2);
+            e.press(Key::ArrowDown);
+            assert_eq!(
+                e.caret_cell(),
+                Some((2, column)),
+                "{spacing}: from {from:?}"
+            );
+            assert!(
+                (e.caret_rect()[1] - first).abs() < 1.0,
+                "{spacing}: Down from {from:?} lands on the first line of {below:?} \
+                 (caret {} at y {}, first line at {first})",
+                e.caret(),
+                e.caret_rect()[1]
+            );
+        }
+    }
+}
+
+/// Down then Up through the first column visit every line of every cell, the
+/// same lines both ways.
+#[test]
+fn down_and_up_through_a_column_visit_every_line_of_its_cells() {
+    for (spacing, typography) in spacings() {
+        let mut e = Editor::new(UNEVEN, typography.clone());
+        uneven_preconditions(&e);
+        let mut expected: Vec<f32> = e.line_ys(ROW_ONE_FIRST);
+        expected.extend(e.line_ys("lima"));
+        expected.extend(e.line_ys(ROW_THREE_FIRST));
+        e.caret_at(e.position_of("Above") + 2);
+        let mut down = Vec::new();
+        for _ in 0..expected.len() {
+            e.press(Key::ArrowDown);
+            assert_eq!(e.caret_cell().map(|(_, c)| c), Some(0), "{spacing}");
+            down.push(e.caret_rect()[1]);
+        }
+        let mut up = vec![e.caret_rect()[1]];
+        for _ in 1..expected.len() {
+            e.press(Key::ArrowUp);
+            assert_eq!(e.caret_cell().map(|(_, c)| c), Some(0), "{spacing}");
+            up.push(e.caret_rect()[1]);
+        }
+        up.reverse();
+        assert_eq!(down, expected, "{spacing}: Down visits every line");
+        assert_eq!(up, expected, "{spacing}: Up visits every line");
     }
 }
