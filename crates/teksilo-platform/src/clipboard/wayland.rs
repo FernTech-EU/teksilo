@@ -33,9 +33,12 @@
 //! [`set_html`]: super::ClipboardBackend::set_html
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use wayland_client::backend::ObjectId;
 
 use super::ClipboardBackend;
-use crate::wayland_data::io::{Limits, read_bounded};
+use crate::wayland_data::io::{Limits, TransferError, read_bounded};
 use crate::wayland_data::{Payload, SelectionView, WaylandDataHub};
 
 /// What this process put on the clipboard, kept to answer its own paste.
@@ -45,9 +48,16 @@ struct OwnContent {
     html: Option<String>,
 }
 
+/// How long a selection whose owner timed out is not asked again. A rich
+/// paste asks for HTML, then for text: without this, an owner that does not
+/// answer would freeze the window once per attempt.
+const STALLED_FOR: Duration = Duration::from_secs(10);
+
 /// The system clipboard on a Wayland display. See the module docs.
 pub(crate) struct WaylandClipboard {
     hub: Arc<WaylandDataHub>,
+    /// The selection whose owner last timed out on a paste, and when.
+    stalled: Option<(ObjectId, Instant)>,
 }
 
 impl WaylandClipboard {
@@ -55,13 +65,14 @@ impl WaylandClipboard {
     pub(crate) fn new(display: &winit::event_loop::OwnedDisplayHandle) -> Result<Self, String> {
         Ok(Self {
             hub: WaylandDataHub::for_display(display)?,
+            stalled: None,
         })
     }
 
     /// The clipboard on a hub the caller made (the compositor tests).
     #[cfg(test)]
     pub(crate) fn on_hub(hub: Arc<WaylandDataHub>) -> Self {
-        Self { hub }
+        Self { hub, stalled: None }
     }
 
     fn view(&self) -> Result<SelectionView, String> {
@@ -69,14 +80,25 @@ impl WaylandClipboard {
     }
 
     /// Read `mime` from another application's selection.
-    fn read(&self, mime: &str) -> Result<Vec<u8>, String> {
+    fn read(&mut self, mime: &str) -> Result<Vec<u8>, String> {
+        let offer = self.hub.with_state(|state| state.selection_offer_id())?;
+        if let (Some(offer), Some((stalled, when))) = (&offer, &self.stalled)
+            && offer == stalled
+            && when.elapsed() < STALLED_FOR
+        {
+            return Err("the application holding the clipboard did not answer a moment ago".into());
+        }
         // The hub is released before the read: its thread keeps serving the
         // compositor meanwhile.
         let fd = self
             .hub
             .with_state(|state| state.receive_selection(mime))??;
-        read_bounded(fd, Limits::PASTE)
-            .map_err(|err| format!("reading the clipboard as {mime} failed: {err}"))
+        read_bounded(fd, Limits::PASTE).map_err(|err| {
+            if matches!(err, TransferError::Idle(_) | TransferError::Total(_)) {
+                self.stalled = offer.map(|offer| (offer, Instant::now()));
+            }
+            format!("reading the clipboard as {mime} failed: {err}")
+        })
     }
 
     fn set(&self, text: &str, html: Option<&str>) -> Result<(), String> {

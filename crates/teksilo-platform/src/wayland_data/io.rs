@@ -31,14 +31,16 @@ pub(crate) struct Limits {
 
 impl Limits {
     /// A paste, read on the UI thread: short, because the user is waiting
-    /// and the window cannot draw meanwhile.
+    /// and the window cannot draw meanwhile, but long enough for an owner
+    /// that builds the format on request (LibreOffice's HTML of a long
+    /// selection) to send its first byte.
     #[cfg_attr(
         not(feature = "clipboard"),
         allow(dead_code, reason = "a paste is the clipboard's")
     )]
     pub(crate) const PASTE: Limits = Limits {
-        idle: Duration::from_millis(1000),
-        total: Duration::from_millis(3000),
+        idle: Duration::from_secs(3),
+        total: Duration::from_secs(5),
         max_bytes: 256 * 1024 * 1024,
     };
 

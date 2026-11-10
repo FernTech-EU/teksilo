@@ -847,6 +847,14 @@ fn a_peer_that_never_writes_cannot_freeze_a_paste() {
         err.contains("sent nothing") || err.contains("took longer"),
         "{err}"
     );
-    assert!(took < Duration::from_secs(4), "the paste took {took:?}");
+    assert!(took < Duration::from_secs(6), "the paste took {took:?}");
+
+    // A rich paste asks again at once (HTML, then text): the same silent owner
+    // is not waited for a second time.
+    let started = Instant::now();
+    let err = teksilo.clipboard.get_text().unwrap_err();
+    let took = started.elapsed();
+    assert!(err.contains("did not answer"), "{err}");
+    assert!(took < Duration::from_millis(500), "the retry took {took:?}");
     drop(peer_conn);
 }

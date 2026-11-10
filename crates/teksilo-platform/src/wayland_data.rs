@@ -237,6 +237,19 @@ impl HubState {
         }
     }
 
+    /// The identity of the offer another client's selection reached us with,
+    /// if there is one: a new copy elsewhere is a new offer.
+    #[cfg_attr(
+        not(feature = "clipboard"),
+        allow(
+            dead_code,
+            reason = "the clipboard half of the hub, used when the `clipboard` feature is on"
+        )
+    )]
+    pub(crate) fn selection_offer_id(&self) -> Option<wayland_client::backend::ObjectId> {
+        self.selection_offer.as_ref().map(Proxy::id)
+    }
+
     /// Whether one of our surfaces has keyboard focus.
     #[cfg(all(test, feature = "clipboard"))]
     pub(crate) fn has_keyboard_focus(&self) -> bool {
