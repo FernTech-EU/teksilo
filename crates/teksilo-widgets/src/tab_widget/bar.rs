@@ -1926,7 +1926,7 @@ impl<T: 'static> Widget for TabBar<T> {
                                 let is_intra = data.source_bar_id == bar_id_for_drop;
                                 let is_foreign_ok = accept_external && data.item.is_some();
                                 if !is_intra && !is_foreign_ok {
-                                    drop_indicator.set(None);
+                                    drop_indicator.set_if_changed(None);
                                     return DropFeedback::NoFeedback;
                                 }
                             }
@@ -1937,7 +1937,7 @@ impl<T: 'static> Widget for TabBar<T> {
                                 // The indicator is optimistic — the
                                 // handler decides for real at drop.
                                 if !has_external_drop {
-                                    drop_indicator.set(None);
+                                    drop_indicator.set_if_changed(None);
                                     return DropFeedback::NoFeedback;
                                 }
                             }
@@ -1952,7 +1952,7 @@ impl<T: 'static> Widget for TabBar<T> {
                                 TabBarOrientation::Horizontal => bar.height,
                                 TabBarOrientation::Vertical => bar.width,
                             };
-                            drop_indicator.set(Some(0.0));
+                            drop_indicator.set_if_changed(Some(0.0));
                             return DropFeedback::InsertionLine {
                                 y: 0.0,
                                 width: cross,
@@ -1967,7 +1967,7 @@ impl<T: 'static> Widget for TabBar<T> {
                         let insertion_world_main =
                             insertion_world_main_for(&bounds, pointer_world_main, axis);
                         let insertion_local_main = insertion_world_main - bar_origin_main;
-                        drop_indicator.set(Some(insertion_local_main));
+                        drop_indicator.set_if_changed(Some(insertion_local_main));
                         DropFeedback::InsertionLine {
                             y: 0.0,
                             width: bounds[0].height,
@@ -1977,7 +1977,7 @@ impl<T: 'static> Widget for TabBar<T> {
                 .on_drag_leave({
                     let drop_indicator = self.paint_state.drop_indicator_x.clone();
                     move |_ctx: &mut EventContext| {
-                        drop_indicator.set(None);
+                        drop_indicator.set_if_changed(None);
                     }
                 })
                 .on_drop({
@@ -1994,7 +1994,7 @@ impl<T: 'static> Widget for TabBar<T> {
                           position: Point,
                           ctx: &mut EventContext|
                           -> bool {
-                        drop_indicator.set(None);
+                        drop_indicator.set_if_changed(None);
                         // Extract the tab payload if this is one; a
                         // failed downcast leaves `payload` intact for
                         // the non-tab branch below.

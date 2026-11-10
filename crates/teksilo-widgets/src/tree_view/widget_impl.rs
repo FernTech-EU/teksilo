@@ -991,7 +991,7 @@ impl<T: 'static> Widget for TreeView<T> {
                 let line_width = width_for_hover.get();
                 let vc = source_for_hover.visible_count();
                 if vc == 0 {
-                    feedback_for_hover.set(None);
+                    feedback_for_hover.set_if_changed(None);
                     hr_for_hover.set(None);
                     return DropFeedback::NoFeedback;
                 }
@@ -1046,7 +1046,7 @@ impl<T: 'static> Widget for TreeView<T> {
                         let foreign_ok =
                             export_for_hover.accepts_foreign_export(payload, my_view_id);
                         if !foreign_ok {
-                            feedback_for_hover.set(None);
+                            feedback_for_hover.set_if_changed(None);
                             return DropFeedback::NoFeedback;
                         }
                         (DropPosition::Before, 0)
@@ -1057,7 +1057,7 @@ impl<T: 'static> Widget for TreeView<T> {
                 if effective == DropPosition::Into {
                     // Drop *into* the hovered container → highlight its whole row.
                     let top = row_top - scroll;
-                    feedback_for_hover.set(Some(DropViz::Rect {
+                    feedback_for_hover.set_if_changed(Some(DropViz::Rect {
                         top,
                         height: row_h,
                         width: line_width,
@@ -1069,7 +1069,7 @@ impl<T: 'static> Widget for TreeView<T> {
                     }
                 } else {
                     let insertion_y = insertion_top - scroll;
-                    feedback_for_hover.set(Some(DropViz::Line {
+                    feedback_for_hover.set_if_changed(Some(DropViz::Line {
                         y: insertion_y,
                         width: line_width,
                         depth,
@@ -1089,7 +1089,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let export_for_drop = self.export.clone();
             let reorderable_for_drop = self.reorderable;
             handlers = handlers.on_drop(move |mut payload, position, ctx| {
-                feedback_for_drop.set(None);
+                feedback_for_drop.set_if_changed(None);
                 let vc = source_for_drop.visible_count();
                 if vc == 0 {
                     return false;
@@ -1140,7 +1140,7 @@ impl<T: 'static> Widget for TreeView<T> {
             let feedback_for_leave = self.drop_feedback.clone();
             let hr_for_leave = hovered_row.clone();
             handlers = handlers.on_drag_leave(move |_ctx| {
-                feedback_for_leave.set(None);
+                feedback_for_leave.set_if_changed(None);
                 hr_for_leave.set(None);
             });
 

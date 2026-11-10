@@ -625,7 +625,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 // accepts any payload type) and paint a row-drop visual for
                 // a drag the header strip is already handling.
                 if payload.has_typed::<ColumnReorderDragData>() {
-                    feedback_for_hover.set(None);
+                    feedback_for_hover.set_if_changed(None);
                     return teksilo_core::DropFeedback::NoFeedback;
                 }
                 // Real body width, so the affordance spans the actual row area
@@ -633,7 +633,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                 let viz_width = bounds_for_hover.get().width.max(1.0);
                 let count = source_for_hover.visible_count();
                 if count == 0 {
-                    feedback_for_hover.set(None);
+                    feedback_for_hover.set_if_changed(None);
                     return teksilo_core::DropFeedback::NoFeedback;
                 }
                 let rd = payload.get_typed::<RowDragData<T>>();
@@ -646,7 +646,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     && (has_foreign_hook_hover
                         || export_for_hover.accepts_foreign_export(payload, my_model_id));
                 if !reorder_ok && !foreign_ok {
-                    feedback_for_hover.set(None);
+                    feedback_for_hover.set_if_changed(None);
                     return teksilo_core::DropFeedback::NoFeedback;
                 }
                 let y = position.y - header_h_for_hover;
@@ -684,7 +684,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     ) {
                         DropResponse::Reject => {
                             if !foreign_ok {
-                                feedback_for_hover.set(None);
+                                feedback_for_hover.set_if_changed(None);
                                 return teksilo_core::DropFeedback::NoFeedback;
                             }
                             (DropPosition::Before, 0)
@@ -697,7 +697,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     (DropPosition::Before, 0)
                 };
                 if effective == DropPosition::Into {
-                    feedback_for_hover.set(Some(DropViz::Rect {
+                    feedback_for_hover.set_if_changed(Some(DropViz::Rect {
                         top: spot.top,
                         height: spot.height,
                         width: viz_width,
@@ -709,7 +709,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
                     }
                 } else {
                     let insertion_y = spot.insertion_y;
-                    feedback_for_hover.set(Some(DropViz::Line {
+                    feedback_for_hover.set_if_changed(Some(DropViz::Line {
                         y: insertion_y,
                         width: viz_width,
                         depth,
@@ -734,7 +734,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
             let export_for_drop = self.export.clone();
             let pinned_for_drop = (self.pinned_layout.clone(), self.pinned_built.clone());
             handlers = handlers.on_drop(move |mut payload, position, ctx| {
-                feedback_for_drop.set(None);
+                feedback_for_drop.set_if_changed(None);
                 // See the matching bail in `on_drag_hover` above — a column
                 // reorder drop is the header strip's, never the body's
                 // (`on_foreign_drop` would otherwise swallow it).
@@ -806,7 +806,7 @@ impl<T: 'static> Widget for TreeTableView<T> {
 
             let feedback_for_leave = self.drop_feedback.clone();
             handlers = handlers.on_drag_leave(move |_ctx| {
-                feedback_for_leave.set(None);
+                feedback_for_leave.set_if_changed(None);
             });
 
             let scroll_for_tick = self.scroll_y.clone();

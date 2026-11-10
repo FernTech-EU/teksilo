@@ -766,13 +766,13 @@ impl<T: 'static> Widget for ListView<T> {
                     ) || export_for_hover.accepts_foreign_export(payload, my_view_id)
                 });
                 if allowed {
-                    feedback_for_hover.set(Some((insertion_y, line_width)));
+                    feedback_for_hover.set_if_changed(Some((insertion_y, line_width)));
                     DropFeedback::InsertionLine {
                         y: insertion_y,
                         width: line_width,
                     }
                 } else {
-                    feedback_for_hover.set(None);
+                    feedback_for_hover.set_if_changed(None);
                     DropFeedback::NoFeedback
                 }
             });
@@ -816,7 +816,7 @@ impl<T: 'static> Widget for ListView<T> {
             // Escape cancels, or the source is destroyed.
             let feedback_for_leave = self.drop_feedback.clone();
             handlers = handlers.on_drag_leave(move |_ctx| {
-                feedback_for_leave.set(None);
+                feedback_for_leave.set_if_changed(None);
             });
 
             // Per-frame auto-scroll when the pointer lingers near the

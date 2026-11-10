@@ -3597,3 +3597,63 @@ fn a_click_on_a_scroll_arrow_leaves_focus_where_it_was() {
     tree.layout(SizeProposal::exact(300.0, 200.0));
     assert_eq!(tree.focused(), Some(field));
 }
+
+#[test]
+fn a_drag_move_that_leaves_the_drop_indicator_where_it_was_notifies_nothing() {
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let model = ListModel::from_vec(vec![doc_handle("T0", std::rc::Rc::new(0))]);
+    let bar = TabBar::horizontal(
+        model.clone(),
+        doc_delegate(),
+        Signal::new(None),
+        |_, h: &TabHandle| h.id,
+    )
+    .show_scroll_arrows(false)
+    .show_overflow_dropdown(false)
+    .on_external_drop(|_, _, _| true);
+    let bar_id = tree.add(bar);
+    let source_id = tree.add(FileDragSource {
+        name: "notes.txt".to_string(),
+    });
+    let expand_bar = tree.add(crate::Expand::new().flex(1.0).child(bar_id));
+    let expand_src = tree.add(crate::Expand::new().flex(1.0).child(source_id));
+    tree.add(crate::HStack::new().child(expand_src).child(expand_bar));
+    tree.layout(SizeProposal::exact(900.0, 80.0));
+
+    let from = tree.bounds(source_id).center();
+    let header = {
+        let row = data_source_header_row(&tree, bar_id);
+        tree.bounds(tree.child_widget(row, 0))
+    };
+    let leading = Point::new(header.x + header.width * 0.25, header.center().y);
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(leading));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+        leading.x + 1.0,
+        leading.y,
+    )));
+    tree.reconcile();
+    assert!(!tree.needs_reconcile(), "the tree is settled");
+
+    // Still the leading half of the header: the indicator does not move.
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+        leading.x + 2.0,
+        leading.y,
+    )));
+    assert!(
+        !tree.needs_reconcile(),
+        "an unchanged indicator must not dirty the bar"
+    );
+
+    // The trailing half puts it after the header.
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(
+        header.x + header.width * 0.75,
+        leading.y,
+    )));
+    assert!(tree.needs_reconcile(), "a moved indicator is repainted");
+}

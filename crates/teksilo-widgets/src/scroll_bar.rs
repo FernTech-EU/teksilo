@@ -443,7 +443,8 @@ impl Widget for ScrollBar {
             let max_scroll = max_scroll.clone();
             move |value: f32| {
                 let max = max_scroll.get();
-                scroll_position.set(value.clamp(0.0, max));
+                // A drag held past the end of the track writes the end on every move.
+                scroll_position.set_if_changed(value.clamp(0.0, max));
             }
         };
 
@@ -1214,6 +1215,35 @@ mod tests {
         let pos = position.get();
         assert!(pos > 200.0, "Expected scroll > 200, got {}", pos);
         assert!(pos < 300.0, "Expected scroll < 300, got {}", pos);
+    }
+
+    #[test]
+    fn a_thumb_dragged_past_the_end_notifies_the_position_once() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let (bar, position, _max, _ratio) = make_scrollbar();
+        let mut tree = WidgetTree::new();
+        let _id = tree.add(bar);
+        tree.layout(SizeProposal::exact(12.0, 400.0));
+        tree.render();
+        tree.pointer_move(Point::new(6.0, 10.0));
+        tree.dispatch_event(WidgetEvent::pointer_down(
+            Point::new(6.0, 10.0),
+            PointerButton::Primary,
+            teksilo_core::event::Modifiers::NONE,
+        ));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(6.0, 20.0)));
+        // Far past the end of the track: the position clamps to its maximum.
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(6.0, 900.0)));
+        let notified = Rc::new(Cell::new(0_u32));
+        let n = notified.clone();
+        let _handle = position.observe(move |_| n.set(n.get() + 1));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(6.0, 950.0)));
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(6.0, 990.0)));
+        assert_eq!(notified.get(), 0, "the clamped position did not change");
+        tree.dispatch_event(WidgetEvent::pointer_move(Point::new(6.0, 100.0)));
+        assert_eq!(notified.get(), 1, "a real change notifies");
     }
 
     #[test]

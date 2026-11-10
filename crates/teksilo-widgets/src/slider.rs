@@ -783,7 +783,10 @@ impl Widget for Slider {
                 if snap_step > 0.0 {
                     val = ((val - min) / snap_step).round() * snap_step + min;
                 }
-                value.set(val.clamp(min, max));
+                // A drag lands here on every pointer move, many of them on the
+                // grid position the thumb already holds; the bound signal would
+                // notify its observers for each.
+                value.set_if_changed(val.clamp(min, max));
             }
         };
 
@@ -1522,6 +1525,33 @@ mod tests {
         tree.press_key(Key::ArrowRight, Modifiers::NONE);
 
         assert_eq!(*seen.borrow(), vec![60.0, 50.0, 100.0]);
+    }
+
+    #[test]
+    fn a_drag_move_that_stays_on_the_same_grid_position_notifies_nothing() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        let value = Signal::new(0.0_f32);
+        let mut tree = WidgetTree::new();
+        let s = tree.add(Slider::new(value.clone(), 0.0, 100.0).step(10.0));
+        tree.layout(SizeProposal::exact(200.0, 60.0));
+        let b = tree.bounds(s);
+        let y = b.y + b.height / 2.0;
+        // The usable track is the width less the thumb, so 10 steps are
+        // several pixels each: neighbouring pixels share a grid position.
+        tree.pointer_down_button(Point::new(b.x + 100.0, y), PointerButton::Primary);
+        // Past the drag slop, so the moves after it are drag samples.
+        tree.pointer_move(Point::new(b.x + 110.0, y));
+        tree.pointer_move(Point::new(b.x + 111.0, y));
+        let notified = Rc::new(Cell::new(0_u32));
+        let n = notified.clone();
+        let _handle = value.observe(move |_| n.set(n.get() + 1));
+        tree.pointer_move(Point::new(b.x + 112.0, y));
+        assert_eq!(notified.get(), 0, "same grid position, same value");
+        tree.pointer_move(Point::new(b.x + 160.0, y));
+        assert_eq!(notified.get(), 1, "a new grid position notifies once");
+        tree.pointer_up_button(Point::new(b.x + 160.0, y), PointerButton::Primary);
     }
 
     #[test]

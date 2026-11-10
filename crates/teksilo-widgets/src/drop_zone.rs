@@ -474,11 +474,12 @@ impl Widget for DropZone {
                     has_urls_cb,
                 );
                 if ok {
-                    hover_state.set(DropZoneVisualState::HoverAccept);
-                    hover_announce.set(hover_announcement(payload));
+                    hover_state.set_if_changed(DropZoneVisualState::HoverAccept);
+                    hover_announce.set_if_changed(hover_announcement(payload));
                 } else {
-                    hover_state.set(DropZoneVisualState::HoverReject);
-                    hover_announce.set(tr_widget!(drop_zone_hover_reject()).resolve_now());
+                    hover_state.set_if_changed(DropZoneVisualState::HoverReject);
+                    hover_announce
+                        .set_if_changed(tr_widget!(drop_zone_hover_reject()).resolve_now());
                 }
                 // Visuals are state-driven; engage with `Accept` (no framework
                 // feedback) when accepting so the drop lands here, else
@@ -635,6 +636,28 @@ mod tests {
         tree.end_external_drag(p, data, &mut noop);
 
         assert_eq!(*got.borrow(), vec![PathBuf::from("/tmp/photo.png")]);
+    }
+
+    #[test]
+    fn a_hover_that_changes_nothing_notifies_nothing() {
+        let mut tree = tree();
+        tree.add(DropZone::new(lit!("Images")).accept_extensions(["png"]));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        let mut noop = teksilo_core::NoopWindowOps;
+        let data = ExternalDropData {
+            files: vec![PathBuf::from("/tmp/photo.png")],
+            ..Default::default()
+        };
+        let p = Point::new(200.0, 150.0);
+        tree.begin_external_drag(p, data.clone(), &mut noop);
+        tree.reconcile();
+        assert!(!tree.needs_reconcile(), "the tree is settled");
+        tree.update_external_drag(Point::new(201.0, 150.0), &mut noop);
+        assert!(
+            !tree.needs_reconcile(),
+            "the same hover state and announcement must not dirty the zone"
+        );
+        tree.end_external_drag(p, data, &mut noop);
     }
 
     #[test]

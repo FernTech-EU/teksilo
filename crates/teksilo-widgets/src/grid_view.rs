@@ -2545,19 +2545,19 @@ impl<T: 'static> Widget for GridView<T> {
                     &export_for_hover,
                 );
                 if allowed {
-                    insertion_h.set(Some(idx));
+                    insertion_h.set_if_changed(Some(idx));
                     // Engage (stops drop-target bubbling); the overlay paints
                     // the insertion bar, so no framework-drawn feedback.
                     teksilo_core::DropFeedback::Accept
                 } else {
-                    insertion_h.set(None);
+                    insertion_h.set_if_changed(None);
                     teksilo_core::DropFeedback::NoFeedback
                 }
             });
 
             let insertion_leave = self.insertion.clone();
             handlers = handlers.on_drag_leave(move |_ctx| {
-                insertion_leave.set(None);
+                insertion_leave.set_if_changed(None);
             });
 
             let strategy_d = strategy.clone();
@@ -2570,7 +2570,7 @@ impl<T: 'static> Widget for GridView<T> {
             let export_for_drop = self.export.clone();
             let reorderable_for_drop = self.reorderable;
             handlers = handlers.on_drop(move |mut payload, position, ctx| {
-                insertion_d.set(None);
+                insertion_d.set_if_changed(None);
                 let len = (len_d)();
                 let to = drag::insertion_index(
                     strategy_d.as_ref(),

@@ -643,7 +643,7 @@ impl<T: 'static> Widget for TableView<T> {
                     // row-level drops (same-view `RowDragData` or a foreign
                     // payload the source accepts) get an insertion line here.
                     if payload.has_typed::<ColumnReorderDragData>() {
-                        feedback_for_hover.set(None);
+                        feedback_for_hover.set_if_changed(None);
                         return teksilo_core::DropFeedback::NoFeedback;
                     }
                     let body_y = position.y - header_h_for_hover;
@@ -669,15 +669,15 @@ impl<T: 'static> Widget for TableView<T> {
                         ) || export_for_hover.accepts_foreign_export(payload, view_id)
                     });
                     if allowed {
-                        feedback_for_hover.set(Some((line_y, width)));
+                        feedback_for_hover.set_if_changed(Some((line_y, width)));
                         teksilo_core::DropFeedback::InsertionLine { y: line_y, width }
                     } else {
-                        feedback_for_hover.set(None);
+                        feedback_for_hover.set_if_changed(None);
                         teksilo_core::DropFeedback::NoFeedback
                     }
                 })
                 .on_drop(move |mut payload, position, ctx| {
-                    feedback_for_drop.set(None);
+                    feedback_for_drop.set_if_changed(None);
                     if payload.has_typed::<ColumnReorderDragData>() {
                         return false;
                     }
@@ -713,7 +713,7 @@ impl<T: 'static> Widget for TableView<T> {
                     export_for_drop.foreign_receive(&mut payload, view_id, ins, ctx)
                 })
                 .on_drag_leave(move |_ctx| {
-                    feedback_for_leave.set(None);
+                    feedback_for_leave.set_if_changed(None);
                 })
                 .on_drag_tick(move |pos, ctx| {
                     // Auto-scroll when the pointer lingers near the

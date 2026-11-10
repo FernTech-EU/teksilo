@@ -836,7 +836,7 @@ impl Widget for DockActivityBar {
                 .on_drag_hover(move |payload, pos, _ctx| {
                     if dropped_dock_tab(payload).is_none() && dropped_dock_widget(payload).is_none()
                     {
-                        indicator_hover.set(None);
+                        indicator_hover.set_if_changed(None);
                         return DropFeedback::NoFeedback;
                     }
                     let bar = self_bounds_hover.get();
@@ -846,15 +846,17 @@ impl Widget for DockActivityBar {
                         &visible_count_hover,
                     );
                     let (_, line_y) = rail_insertion(pos.y, &shown, bar.y, bar.height);
-                    indicator_hover.set(Some(line_y));
+                    indicator_hover.set_if_changed(Some(line_y));
                     DropFeedback::InsertionLine {
                         y: line_y,
                         width: bar.width,
                     }
                 })
-                .on_drag_leave(move |_ctx| indicator_leave.set(None))
+                .on_drag_leave(move |_ctx| {
+                    indicator_leave.set_if_changed(None);
+                })
                 .on_drop(move |payload, pos, ctx| {
-                    indicator_drop.set(None);
+                    indicator_drop.set_if_changed(None);
                     // A disabled side never mutates from a UI drop (Path 1 of the
                     // mid-drag-disable race: without this the model silently
                     // rejects but the side would still be revealed + the drop

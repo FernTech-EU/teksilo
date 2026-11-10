@@ -4818,3 +4818,44 @@ mod double_click_activation {
         tree.roots()[0]
     }
 }
+
+#[test]
+fn a_drag_move_that_leaves_the_insertion_line_where_it_was_notifies_nothing() {
+    use teksilo_core::event::{Modifiers, PointerButton, WidgetEvent};
+    let (mut tree, lv, _model) = sectioned_list(
+        vec![10, 20, 30, 40, 50, 60],
+        FixedSections(vec![2, 3, 1]),
+        |v| v.reorderable(true),
+    );
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let from = Point::new(20.0, 135.0);
+    tree.dispatch_event(WidgetEvent::pointer_down(
+        from,
+        PointerButton::Primary,
+        Modifiers::NONE,
+    ));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(30.0, 135.0)));
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(30.0, 85.0)));
+    let line = with_list_view::<usize, _>(&tree, lv, |v| v.drop_feedback_signal().get());
+    assert!(line.is_some(), "the drag shows an insertion line");
+
+    // Reconcile what the moves so far changed, then move a pixel: the line
+    // stays where it is, so nothing is left for the next frame to redo.
+    tree.reconcile();
+    assert!(!tree.needs_reconcile(), "the tree is settled");
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(31.0, 85.0)));
+    assert_eq!(
+        with_list_view::<usize, _>(&tree, lv, |v| v.drop_feedback_signal().get()),
+        line
+    );
+    assert!(
+        !tree.needs_reconcile(),
+        "an unchanged line must not dirty the view"
+    );
+
+    // A move that changes the line does.
+    tree.dispatch_event(WidgetEvent::pointer_move(Point::new(31.0, 145.0)));
+    let moved = with_list_view::<usize, _>(&tree, lv, |v| v.drop_feedback_signal().get());
+    assert_ne!(moved, line);
+    assert!(tree.needs_reconcile(), "a moved line is repainted");
+}
