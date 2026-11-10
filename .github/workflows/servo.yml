@@ -81,6 +81,19 @@ jobs:
             libfontconfig1-dev libfreetype-dev \
             libgl1-mesa-dev libegl1-mesa-dev libegl-mesa0 libgl1-mesa-dri
 
+      # The runner image carries several LLVM versions (20, 21 and 22 on
+      # Ubuntu 26.04). clang-sys loads the newest libclang it finds, while
+      # bindgen takes its include paths from /usr/bin/clang, an older one. The
+      # newer libclang then fails on the older clang's intrinsic headers
+      # (mozangle's build stops on '__builtin_ia32_sqrtss'). Point both at the
+      # LLVM that /usr/bin/clang belongs to.
+      - name: Pin libclang to the default clang's LLVM
+        run: |
+          llvm_dir=$(dirname "$(dirname "$(readlink -f "$(command -v clang)")")")
+          echo "Using $llvm_dir"
+          echo "LIBCLANG_PATH=$llvm_dir/lib" >> "$GITHUB_ENV"
+          echo "CLANG_PATH=$llvm_dir/bin/clang" >> "$GITHUB_ENV"
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
