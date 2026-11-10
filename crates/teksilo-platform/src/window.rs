@@ -228,6 +228,13 @@ pub fn install_display_handle(handle: winit::event_loop::OwnedDisplayHandle) {
     let _ = DISPLAY_HANDLE.set(handle);
 }
 
+/// The display handle [`install_display_handle`] installed, if any. The
+/// Wayland data hub keeps it to hold the connection open.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) fn installed_display_handle() -> Option<&'static winit::event_loop::OwnedDisplayHandle> {
+    DISPLAY_HANDLE.get()
+}
+
 /// The one wgpu instance for this process.
 ///
 /// A surface has to come from the same instance that later enumerates adapters

@@ -30,6 +30,8 @@ pub mod taskbar;
 pub mod text_input_hook;
 pub mod title_bar_host;
 mod wake;
+#[cfg(all(unix, not(target_os = "macos")))]
+pub(crate) mod wayland_data;
 pub mod window;
 pub mod window_activation;
 pub mod window_system;
@@ -40,7 +42,7 @@ pub use accessibility_prefs::AccessibilityPreferences;
 #[cfg(feature = "automation")]
 pub use automation_transport::{BoundTransport, TransportListener, TransportStream};
 #[cfg(feature = "clipboard")]
-pub use clipboard::ArboardClipboard;
+pub use clipboard::{ArboardClipboard, system_clipboard};
 pub use clipboard::{ClipboardBackend, ClipboardHandle, MemoryClipboard};
 pub use event_translation::TranslationState;
 #[cfg(feature = "rfd-backend")]

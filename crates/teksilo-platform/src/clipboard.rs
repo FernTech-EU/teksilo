@@ -32,6 +32,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+#[cfg(all(feature = "clipboard", unix, not(target_os = "macos")))]
+mod wayland;
+
 /// Backend-agnostic clipboard interface. Implementors read and write system
 /// clipboard payloads. Errors are returned as strings so backends do not need a
 /// shared error type.
@@ -86,6 +89,13 @@ impl ClipboardHandle {
         }
     }
 
+    #[cfg(feature = "clipboard")]
+    fn from_box(backend: Box<dyn ClipboardBackend>) -> Self {
+        Self {
+            inner: Rc::new(RefCell::new(BoxedBackend(backend))),
+        }
+    }
+
     pub fn get_text(&self) -> Result<String, String> {
         self.inner.borrow_mut().get_text()
     }
@@ -116,6 +126,32 @@ impl ClipboardHandle {
     /// selection owner on X11.
     pub fn has_html(&self) -> bool {
         self.inner.borrow_mut().has_html()
+    }
+}
+
+/// A boxed backend, so a backend chosen at run time fits [`ClipboardHandle`].
+#[cfg(feature = "clipboard")]
+struct BoxedBackend(Box<dyn ClipboardBackend>);
+
+#[cfg(feature = "clipboard")]
+impl ClipboardBackend for BoxedBackend {
+    fn get_text(&mut self) -> Result<String, String> {
+        self.0.get_text()
+    }
+    fn set_text(&mut self, text: &str) -> Result<(), String> {
+        self.0.set_text(text)
+    }
+    fn has_text(&mut self) -> bool {
+        self.0.has_text()
+    }
+    fn get_html(&mut self) -> Result<String, String> {
+        self.0.get_html()
+    }
+    fn set_html(&mut self, html: &str, plain_fallback: &str) -> Result<(), String> {
+        self.0.set_html(html, plain_fallback)
+    }
+    fn has_html(&mut self) -> bool {
+        self.0.has_html()
     }
 }
 
@@ -178,15 +214,114 @@ impl ClipboardBackend for MemoryClipboard {
 #[cfg(feature = "clipboard")]
 pub use arboard_backend::ArboardClipboard;
 
+/// The system clipboard for the display winit connected to, or an in-process
+/// [`MemoryClipboard`] when none can be reached.
+///
+/// * **Wayland**: the core clipboard protocol (`wl_data_device`) on winit's own
+///   connection, which every compositor implements, GNOME's included, and
+///   which a sandbox with no X server can reach. The `ext`/`wlr` data-control
+///   protocols `arboard` uses are not preferred even where they exist: they
+///   are meant for clipboard managers, Mutter offers neither, and one code path
+///   on every compositor is one path tested. `arboard` is tried only if the
+///   core protocol cannot be set up.
+/// * **X11, macOS, Windows**: [`ArboardClipboard`].
+///
+/// When no system clipboard can be reached the reason is written to stderr
+/// and copy and paste keep working inside this process only, so the next
+/// "my clipboard is its own" report can be told apart in a log.
+#[cfg(feature = "clipboard")]
+pub fn system_clipboard(display: &winit::event_loop::OwnedDisplayHandle) -> ClipboardHandle {
+    let wayland = {
+        use raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
+        display
+            .display_handle()
+            .is_ok_and(|handle| matches!(handle.as_raw(), RawDisplayHandle::Wayland(_)))
+    };
+    let opened = choose_backend(
+        wayland,
+        || open_wayland(display),
+        || ArboardClipboard::new().map(|b| Box::new(b) as Box<dyn ClipboardBackend>),
+    );
+    for warning in &opened.warnings {
+        eprintln!("teksilo-platform: {warning}");
+    }
+    match opened.backend {
+        Some(backend) => ClipboardHandle::from_box(backend),
+        None => ClipboardHandle::new(MemoryClipboard::new()),
+    }
+}
+
+#[cfg(all(feature = "clipboard", unix, not(target_os = "macos")))]
+fn open_wayland(
+    display: &winit::event_loop::OwnedDisplayHandle,
+) -> Result<Box<dyn ClipboardBackend>, String> {
+    wayland::WaylandClipboard::new(display).map(|b| Box::new(b) as Box<dyn ClipboardBackend>)
+}
+
+#[cfg(all(feature = "clipboard", not(all(unix, not(target_os = "macos")))))]
+fn open_wayland(
+    _display: &winit::event_loop::OwnedDisplayHandle,
+) -> Result<Box<dyn ClipboardBackend>, String> {
+    Err("Wayland is not supported on this platform".into())
+}
+
+/// The backend [`choose_backend`] settled on, and what to say about the way
+/// there.
+#[cfg(feature = "clipboard")]
+struct Chosen<B> {
+    /// `None`: no system clipboard; the caller falls back to memory.
+    backend: Option<B>,
+    warnings: Vec<String>,
+}
+
+/// The fallback decision, apart from the backends themselves so it is tested
+/// without a display: the core Wayland protocol on a Wayland display, then
+/// `arboard`; `arboard` alone elsewhere; and every failure said out loud.
+#[cfg(feature = "clipboard")]
+fn choose_backend<B>(
+    wayland: bool,
+    open_wayland: impl FnOnce() -> Result<B, String>,
+    open_arboard: impl FnOnce() -> Result<B, String>,
+) -> Chosen<B> {
+    let mut warnings = Vec::new();
+    if wayland {
+        match open_wayland() {
+            Ok(backend) => {
+                return Chosen {
+                    backend: Some(backend),
+                    warnings,
+                };
+            }
+            Err(err) => warnings.push(format!(
+                "the Wayland clipboard (wl_data_device) is unavailable: {err}; trying arboard"
+            )),
+        }
+    }
+    match open_arboard() {
+        Ok(backend) => Chosen {
+            backend: Some(backend),
+            warnings,
+        },
+        Err(err) => {
+            warnings.push(format!(
+                "the system clipboard is unavailable ({err}); copy and paste work only inside this application"
+            ));
+            Chosen {
+                backend: None,
+                warnings,
+            }
+        }
+    }
+}
+
 #[cfg(feature = "clipboard")]
 mod arboard_backend {
     use super::ClipboardBackend;
     use arboard::{Clipboard, Error};
 
-    /// Real system clipboard backed by `arboard`. One live instance per
-    /// window is the expected usage; the host application constructs it
-    /// during startup and hands a `ClipboardHandle::new(ArboardClipboard::new()?)`
-    /// to widgets.
+    /// Real system clipboard backed by `arboard`: the X11, macOS and Windows
+    /// clipboard. [`system_clipboard`](super::system_clipboard) picks it for
+    /// those, and the core Wayland protocol on a Wayland display.
     pub struct ArboardClipboard {
         inner: Clipboard,
     }
@@ -304,6 +439,55 @@ mod tests {
         a.set_html("<p>shared</p>", "shared").unwrap();
         assert_eq!(b.get_html().unwrap(), "<p>shared</p>");
         assert_eq!(b.get_text().unwrap(), "shared");
+    }
+
+    #[cfg(feature = "clipboard")]
+    #[test]
+    fn wayland_uses_the_core_protocol_and_says_nothing() {
+        let chosen = choose_backend(true, || Ok("wayland"), || Ok("arboard"));
+        assert_eq!(chosen.backend, Some("wayland"));
+        assert!(chosen.warnings.is_empty());
+    }
+
+    #[cfg(feature = "clipboard")]
+    #[test]
+    fn x11_never_tries_the_wayland_protocol() {
+        let chosen = choose_backend(
+            false,
+            || -> Result<&str, String> { panic!("Wayland opened on an X11 display") },
+            || Ok("arboard"),
+        );
+        assert_eq!(chosen.backend, Some("arboard"));
+        assert!(chosen.warnings.is_empty());
+    }
+
+    #[cfg(feature = "clipboard")]
+    #[test]
+    fn a_failed_wayland_clipboard_falls_back_to_arboard_and_says_so() {
+        let chosen = choose_backend(true, || Err("no seat".into()), || Ok("arboard"));
+        assert_eq!(chosen.backend, Some("arboard"));
+        assert_eq!(chosen.warnings.len(), 1);
+        assert!(
+            chosen.warnings[0].contains("no seat"),
+            "{:?}",
+            chosen.warnings
+        );
+    }
+
+    #[cfg(feature = "clipboard")]
+    #[test]
+    fn no_system_clipboard_at_all_is_reported_never_silent() {
+        // The Flatpak case behind this backend: Wayland with no core-protocol
+        // clipboard and no X server for arboard.
+        let chosen: Chosen<&str> = choose_backend(
+            true,
+            || Err("no data device manager".into()),
+            || Err("X11 server connection timed out".into()),
+        );
+        assert!(chosen.backend.is_none());
+        assert_eq!(chosen.warnings.len(), 2);
+        assert!(chosen.warnings[1].contains("only inside this application"));
+        assert!(chosen.warnings[1].contains("X11 server connection timed out"));
     }
 
     #[test]

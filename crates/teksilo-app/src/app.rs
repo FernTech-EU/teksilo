@@ -7170,17 +7170,18 @@ impl TeksiloAppBuilder {
         // (and any future clipboard-aware widget) can reach it via
         // `EventContext::app_state::<ClipboardHandle>()`. Behind the
         // `clipboard` feature because it pulls `arboard` into the build.
-        // Falls back to `MemoryClipboard` if the OS backend fails to
-        // initialize (headless CI, missing display, …) so the editor
-        // still works in-process.
+        // Built from the event loop's display connection, now that it exists:
+        // on Wayland the clipboard is the core protocol on winit's own
+        // connection (the compositor gives the selection to the focused
+        // client, and that is winit's), elsewhere `arboard`.
+        // `system_clipboard` falls back to `MemoryClipboard`, and says so on
+        // stderr, when no system clipboard can be reached, so the editor still
+        // works in-process.
         #[cfg(feature = "clipboard")]
         {
             use std::any::TypeId;
-            use teksilo_platform::clipboard::{ArboardClipboard, ClipboardHandle, MemoryClipboard};
-            let handle = match ArboardClipboard::new() {
-                Ok(backend) => ClipboardHandle::new(backend),
-                Err(_) => ClipboardHandle::new(MemoryClipboard::new()),
-            };
+            use teksilo_platform::clipboard::{ClipboardHandle, system_clipboard};
+            let handle = system_clipboard(&event_loop.owned_display_handle());
             self.app_state_registry
                 .insert(TypeId::of::<ClipboardHandle>(), Box::new(handle));
         }
