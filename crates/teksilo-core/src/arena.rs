@@ -2462,10 +2462,11 @@ impl WidgetArena {
         base: &'a crate::styles::Theme,
     ) -> std::borrow::Cow<'a, crate::styles::Theme> {
         // Fast path: if no widget has a theme override, borrow the base
-        // theme — no clone. This is the per-widget hot path during layout
-        // and paint, so avoiding `Theme::clone()` (which clones the
-        // typography token strings and bumps ~42 style-slot `Rc`s) here
-        // saves that work on every node, every pass, in the common case.
+        // theme rather than clone it (`Theme::clone()` clones the typography
+        // token strings and bumps ~42 style-slot `Rc`s). The layout and paint
+        // walks no longer come through here per widget (they use
+        // `theme_below`), but a walk's starting node and
+        // `WidgetTree::resolved_theme` still do.
         if self.theme_override_count == 0 {
             return std::borrow::Cow::Borrowed(base);
         }
@@ -2488,6 +2489,82 @@ impl WidgetArena {
             }
         }
         std::borrow::Cow::Owned(theme)
+    }
+
+    /// The theme `id` resolves to, given the theme its parent resolved to:
+    /// `inherited` with `id`'s own override applied, if it has one.
+    ///
+    /// This is how the layout walk resolves a theme. It visits a parent before
+    /// its children, so each child starts from the parent's answer instead of
+    /// walking its ancestors again the way
+    /// [`resolve_theme`](Self::resolve_theme) does. A node without an override
+    /// borrows `inherited`, so a whole tree under one override shares the one
+    /// clone made at that override's node, rather than cloning the theme once
+    /// per widget per pass. (The paint walk does the same lazily, through
+    /// `LazyTheme`, because most of a frame replays cached paint and needs no
+    /// theme at all.)
+    ///
+    /// The result is the same as `resolve_theme(id, base)` whenever
+    /// `inherited` is what the parent resolves to; the walk starts from
+    /// [`inherited_theme`](Self::inherited_theme) for that reason.
+    pub(crate) fn theme_below<'a>(
+        &self,
+        id: WidgetId,
+        inherited: &'a crate::styles::Theme,
+    ) -> std::borrow::Cow<'a, crate::styles::Theme> {
+        if self.has_theme_override(id) {
+            let mut theme = inherited.clone();
+            self.apply_theme_override(id, &mut theme);
+            std::borrow::Cow::Owned(theme)
+        } else {
+            std::borrow::Cow::Borrowed(inherited)
+        }
+    }
+
+    /// Whether `id` itself carries a theme override.
+    pub(crate) fn has_theme_override(&self, id: WidgetId) -> bool {
+        self.nodes
+            .get(id)
+            .is_some_and(|n| n.theme_override.is_some())
+    }
+
+    /// Whether any strict ancestor of `id` carries a theme override. Walks
+    /// parent links only and clones nothing.
+    pub(crate) fn has_theme_override_above(&self, id: WidgetId) -> bool {
+        if self.theme_override_count == 0 {
+            return false;
+        }
+        let mut current = self.parent(id);
+        while let Some(pid) = current {
+            if self.has_theme_override(pid) {
+                return true;
+            }
+            current = self.parent(pid);
+        }
+        false
+    }
+
+    /// Run `id`'s own theme override, if it has one, on `theme`.
+    pub(crate) fn apply_theme_override(&self, id: WidgetId, theme: &mut crate::styles::Theme) {
+        if let Some(ovr) = self.nodes.get(id).and_then(|n| n.theme_override.as_ref()) {
+            (ovr.func)(theme);
+        }
+    }
+
+    /// The theme `id` inherits from its ancestors, without its own override:
+    /// what a walk starting at `id` hands to [`theme_below`](Self::theme_below).
+    ///
+    /// A walk may start below the top of the tree (overlay content attached
+    /// to its anchor), and such a node still sees every override above it.
+    pub(crate) fn inherited_theme<'a>(
+        &self,
+        id: WidgetId,
+        base: &'a crate::styles::Theme,
+    ) -> std::borrow::Cow<'a, crate::styles::Theme> {
+        match self.parent(id) {
+            Some(parent) => self.resolve_theme(parent, base),
+            None => std::borrow::Cow::Borrowed(base),
+        }
     }
 }
 

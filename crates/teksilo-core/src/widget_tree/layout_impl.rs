@@ -667,13 +667,13 @@ impl WidgetTree {
     /// intended for single-primary-root windows).
     pub fn measure_root_intrinsic(&self, proposal: SizeProposal) -> Option<teksilo_canvas::Size> {
         let overlay_content_ids = self.overlay_manager.active_content_ids();
-        let base_theme = self.effective_theme.clone();
+        let base_theme = &self.effective_theme;
         let mut result: Option<teksilo_canvas::Size> = None;
         for root_id in self.arena.roots() {
             if overlay_content_ids.contains(&root_id) || !self.arena.is_active(root_id) {
                 continue;
             }
-            let resolved_theme = self.arena.resolve_theme(root_id, &base_theme);
+            let resolved_theme = self.arena.resolve_theme(root_id, base_theme);
             let extras = crate::widget::LayoutExtras {
                 focused: self.focused,
                 // A measurement, not a pass: nothing is parked off the back of
@@ -850,7 +850,8 @@ impl WidgetTree {
 
         // `effective_theme` carries the user/OS text-scale multiplier baked into
         // its typography, so every text widget measures at the scaled size.
-        let base_theme = self.effective_theme.clone();
+        // Borrowed, not cloned: nothing below writes it.
+        let base_theme = &self.effective_theme;
 
         let overlay_content_ids = self.overlay_manager.active_content_ids();
         let roots: Vec<WidgetId> = self.arena.roots();
@@ -878,12 +879,13 @@ impl WidgetTree {
                 shortcut_registry: Some(&self.shortcut_registry),
                 overlay_manager: Some(&self.overlay_manager),
             };
+            let inherited = self.arena.inherited_theme(root_id, base_theme);
             layout_widget_recursive(
                 &mut self.arena,
                 root_id,
                 Rect::from_origin_size(Point::ZERO, proposal.resolve(0.0, 0.0)),
                 proposal,
-                &base_theme,
+                &inherited,
                 self.layout_direction,
                 self.device_scale_factor,
                 self.effective_text_scale,
@@ -917,7 +919,7 @@ impl WidgetTree {
                     width: None,
                     height: None,
                 },
-                &base_theme,
+                base_theme,
                 &interaction_anchors,
             );
             if let Some(overlay_id) = overlay_id {
@@ -966,7 +968,7 @@ impl WidgetTree {
                             width: Some(placed_width),
                             height: None,
                         },
-                        &base_theme,
+                        base_theme,
                         &interaction_anchors,
                     );
                     if (fitted.height - intrinsic.height).abs() > 0.5 {
@@ -1007,12 +1009,15 @@ impl WidgetTree {
                 shortcut_registry: Some(&self.shortcut_registry),
                 overlay_manager: Some(&self.overlay_manager),
             };
+            // Overlay content may hang below its anchor rather than sit at a
+            // root, and then it inherits the overrides above it.
+            let inherited = self.arena.inherited_theme(*content_id, base_theme);
             layout_widget_recursive(
                 &mut self.arena,
                 *content_id,
                 overlay_bounds,
                 content_proposal,
-                &base_theme,
+                &inherited,
                 self.layout_direction,
                 self.device_scale_factor,
                 self.effective_text_scale,
@@ -1260,7 +1265,8 @@ fn layout_widget_recursive(
     id: WidgetId,
     parent_bounds: Rect,
     proposal: SizeProposal,
-    base_theme: &crate::styles::Theme,
+    // What `id`'s parent resolved to; `id` adds its own override, if any.
+    inherited_theme: &crate::styles::Theme,
     layout_direction: crate::environment::LayoutDirection,
     scale_factor: f32,
     text_scale: f32,
@@ -1274,7 +1280,9 @@ fn layout_widget_recursive(
         return;
     }
 
-    let resolved_theme = arena.resolve_theme(id, base_theme);
+    // Borrowed from the parent unless `id` carries an override, so a subtree
+    // under one override shares that override's single clone of the theme.
+    let resolved_theme = arena.theme_below(id, inherited_theme);
 
     let desired_size = {
         let ctx = LayoutContext {
@@ -1414,7 +1422,7 @@ fn layout_widget_recursive(
                 placement.id,
                 child_bounds,
                 child_proposal,
-                base_theme,
+                &resolved_theme,
                 layout_direction,
                 scale_factor,
                 text_scale,

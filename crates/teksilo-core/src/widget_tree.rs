@@ -56,6 +56,7 @@ mod intent_routing_tests;
 #[cfg(test)]
 mod key_release_tests;
 mod layout_impl;
+mod lazy_theme;
 #[cfg(test)]
 mod live_image_tests;
 #[cfg(test)]

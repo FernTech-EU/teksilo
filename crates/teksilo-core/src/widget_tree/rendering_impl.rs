@@ -3,6 +3,7 @@
 
 use super::*;
 
+use super::lazy_theme::LazyTheme;
 use teksilo_canvas::quantize_raster_scale;
 
 /// Accessibility preferences passed through the paint recursion.
@@ -159,11 +160,12 @@ impl WidgetTree {
             if overlay_skip.contains(&root_id) {
                 continue;
             }
+            let inherited = LazyTheme::entry(&self.arena, root_id, &base_theme);
             paint_widget_cached(
                 &mut self.arena,
                 root_id,
                 &mut frame,
-                &base_theme,
+                &inherited,
                 &text_backend,
                 None,
                 &a11y_prefs,
@@ -181,11 +183,14 @@ impl WidgetTree {
         }
 
         for content_id in self.overlay_manager.active_content_ids() {
+            // Overlay content may hang below its anchor rather than sit at a
+            // root, and then it inherits the overrides above it.
+            let inherited = LazyTheme::entry(&self.arena, content_id, &base_theme);
             paint_widget_cached(
                 &mut self.arena,
                 content_id,
                 &mut frame,
-                &base_theme,
+                &inherited,
                 &text_backend,
                 None,
                 &a11y_prefs,
@@ -342,7 +347,8 @@ fn paint_widget_cached(
     arena: &mut WidgetArena,
     id: WidgetId,
     frame: &mut RenderFrame,
-    base_theme: &crate::styles::Theme,
+    // The parent's theme scope; `id` adds its own override, if any.
+    inherited_theme: &LazyTheme<'_>,
     text_backend: &Option<Rc<RefCell<dyn teksilo_canvas::TextBackend>>>,
     clip_bounds: Option<Rect>,
     a11y_prefs: &A11yPaintPrefs,
@@ -496,10 +502,23 @@ fn paint_widget_cached(
     // sample wrong-density bitmaps — treat the node as needing paint.
     let needs_paint = node.dirty.needs_paint || node.paint_raster_scale != this_raster_scale;
 
+    // This node's theme scope, for its own paint hooks and its children. A
+    // node without an override hands on its parent's scope; one with an
+    // override gets its own, which resolves (cloning the theme and running
+    // the override) only if something here or below asks, and then once for
+    // the whole subtree. Something asks when it repaints, and on every frame
+    // when it wants `after_paint` (the hook below runs on cache hits too).
+    let own_scope;
+    let theme_scope = if arena.has_theme_override(id) {
+        own_scope = LazyTheme::below(inherited_theme, id);
+        &own_scope
+    } else {
+        inherited_theme
+    };
+
     if needs_paint || node.cached_paint.is_none() {
-        let resolved_theme = arena.resolve_theme(id, base_theme);
         let ctx = PaintContext {
-            theme: &resolved_theme,
+            theme: theme_scope.get(arena),
             scale_factor: this_raster_scale,
             text_scale: a11y_prefs.text_scale,
             layout_direction,
@@ -617,7 +636,7 @@ fn paint_widget_cached(
             arena,
             child_id,
             frame,
-            base_theme,
+            theme_scope,
             text_backend,
             next_clip,
             a11y_prefs,
@@ -643,9 +662,8 @@ fn paint_widget_cached(
             && node.widget.wants_after_paint()
         {
             let view = crate::widget::WidgetTreeView::new(arena_ref, overlay_rects);
-            let resolved_theme = arena_ref.resolve_theme(id, base_theme);
             let ctx = PaintContext {
-                theme: &resolved_theme,
+                theme: theme_scope.get(arena_ref),
                 scale_factor: this_raster_scale,
                 text_scale: a11y_prefs.text_scale,
                 layout_direction,
@@ -685,9 +703,8 @@ fn paint_widget_cached(
             if raster_scale_changed && let Some(tb) = text_backend {
                 tb.borrow_mut().set_raster_scale(this_raster_scale);
             }
-            let resolved_theme = arena.resolve_theme(id, base_theme);
             let ctx = PaintContext {
-                theme: &resolved_theme,
+                theme: theme_scope.get(arena),
                 scale_factor: this_raster_scale,
                 text_scale: a11y_prefs.text_scale,
                 layout_direction,
@@ -1723,6 +1740,368 @@ mod tests {
         let child_theme = tree.resolved_theme(child);
         assert_eq!(child_theme.colors.accent, Color::RED);
         assert_eq!(child_theme.colors.text_secondary, Color::GREEN);
+    }
+
+    fn painted_accents(frame: &RenderFrame) -> Vec<[f32; 4]> {
+        frame.shapes.iter().map(|s| s.color).collect()
+    }
+
+    /// The paint walk resolves the theme top-down, each node starting from its
+    /// parent's answer, so an inner override has to see what the outer one
+    /// wrote, and the inner one's sibling must see the outer one only.
+    #[test]
+    fn nested_overrides_compose_in_the_paint_walk() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let outer = tree.add(ThemeAwareWidget);
+        let inner = tree.add_child(outer, ThemeAwareWidget);
+        let inner_leaf = tree.add_child(inner, ThemeAwareWidget);
+        let _outer_leaf = tree.add_child(outer, ThemeAwareWidget);
+        let _outside = tree.add(ThemeAwareWidget);
+
+        tree.set_theme_override(outer, |theme| {
+            theme.colors.accent = Color::RED;
+        });
+        // Green only if it ran on top of the outer override.
+        tree.set_theme_override(inner, |theme| {
+            if theme.colors.accent == Color::RED {
+                theme.colors.accent = Color::GREEN;
+            }
+        });
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let frame = tree.render();
+
+        let light = teksilo_tokens::ColorTokens::light_default()
+            .accent
+            .to_array();
+        let red = Color::RED.to_array();
+        let green = Color::GREEN.to_array();
+        assert_eq!(
+            painted_accents(&frame),
+            vec![red, green, green, red, light],
+            "outer, inner, inner's leaf, outer's other leaf, then the root outside"
+        );
+        assert_eq!(tree.resolved_theme(inner_leaf).colors.accent, Color::GREEN);
+    }
+
+    /// A theme set at the root after an override was installed reaches a
+    /// subtree that has no override, and passes under the override too: the
+    /// override edits the new theme rather than freezing the old one.
+    #[test]
+    fn a_root_theme_change_reaches_every_subtree() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let plain = tree.add(ThemeAwareWidget);
+        let _plain_leaf = tree.add_child(plain, ThemeAwareWidget);
+        let overridden = tree.add(ThemeAwareWidget);
+        let _overridden_leaf = tree.add_child(overridden, ThemeAwareWidget);
+
+        // Touches a token the probes do not paint, so the accent they paint
+        // is whatever the root theme says.
+        tree.set_theme_override(overridden, |theme| {
+            theme.colors.text_secondary = Color::GREEN;
+        });
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let light = teksilo_tokens::ColorTokens::light_default()
+            .accent
+            .to_array();
+        assert_eq!(painted_accents(&tree.render()), vec![light; 4]);
+
+        tree.set_theme(crate::presets::intui::dark());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let dark = teksilo_tokens::ColorTokens::dark_default()
+            .accent
+            .to_array();
+        assert_eq!(painted_accents(&tree.render()), vec![dark; 4]);
+        assert_eq!(
+            tree.resolved_theme(overridden).colors.text_secondary,
+            Color::GREEN,
+            "the override still applies on top of the new root theme"
+        );
+    }
+
+    /// An override that stops applying (the closure reads live state, the
+    /// way an app switches a themed surface off) takes effect at the next
+    /// pass that repaints the subtree: nothing keeps the theme it produced
+    /// earlier.
+    #[test]
+    fn an_override_that_stops_applying_is_not_remembered() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let surface = tree.add(ThemeAwareWidget);
+        let _leaf = tree.add_child(surface, ThemeAwareWidget);
+
+        let enabled = Rc::new(std::cell::Cell::new(true));
+        let live = enabled.clone();
+        tree.set_theme_override(surface, move |theme| {
+            if live.get() {
+                theme.colors.accent = Color::RED;
+            }
+        });
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let red = Color::RED.to_array();
+        assert_eq!(painted_accents(&tree.render()), vec![red; 2]);
+
+        enabled.set(false);
+        tree.arena.mark_subtree_needs_paint(surface);
+        tree.arena.mark_needs_layout(surface);
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let light = teksilo_tokens::ColorTokens::light_default()
+            .accent
+            .to_array();
+        assert_eq!(painted_accents(&tree.render()), vec![light; 2]);
+        assert_eq!(
+            tree.resolved_theme(surface).colors.accent,
+            teksilo_tokens::ColorTokens::light_default().accent
+        );
+    }
+
+    /// Records the accent of the theme the layout walk hands it.
+    #[derive(Debug)]
+    struct AccentRecorder {
+        seen: Rc<std::cell::Cell<Option<Color>>>,
+    }
+
+    impl Widget for AccentRecorder {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            self.seen.set(Some(ctx.theme.colors.accent));
+            proposal.resolve(0.0, 0.0).into()
+        }
+    }
+
+    /// The layout walk hands each node the theme its ancestors' overrides
+    /// produce, however deep it sits, and leaves a sibling subtree alone.
+    #[test]
+    fn the_layout_walk_honours_an_override_at_depth() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let deep_seen = Rc::new(std::cell::Cell::new(None));
+        let plain_seen = Rc::new(std::cell::Cell::new(None));
+
+        let themed = tree.add(crate::test_widgets::StackWidget::new());
+        let middle = tree.add_child(themed, crate::test_widgets::StackWidget::new());
+        let deep = tree.add_child(
+            middle,
+            AccentRecorder {
+                seen: deep_seen.clone(),
+            },
+        );
+        // A child, so the walk visits `deep` itself rather than only placing
+        // it from its parent.
+        tree.add_child(deep, FillWidget::new());
+        let plain = tree.add(crate::test_widgets::StackWidget::new());
+        let plain_deep = tree.add_child(
+            plain,
+            AccentRecorder {
+                seen: plain_seen.clone(),
+            },
+        );
+        tree.add_child(plain_deep, FillWidget::new());
+
+        tree.set_theme_override(themed, |theme| {
+            theme.colors.accent = Color::RED;
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        assert_eq!(deep_seen.get(), Some(Color::RED), "under the override");
+        assert_eq!(
+            plain_seen.get(),
+            Some(teksilo_tokens::ColorTokens::light_default().accent),
+            "beside it"
+        );
+    }
+
+    /// Overlay content that hangs below an overridden widget is laid out and
+    /// painted by its own walk, started at the content rather than at a root,
+    /// and still sees the override above it.
+    #[test]
+    fn overlay_content_below_an_override_inherits_it() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let anchor = tree.add(ThemeAwareWidget);
+        let content = tree.add_child(anchor, ThemeAwareWidget);
+        tree.set_theme_override(anchor, |theme| {
+            theme.colors.accent = Color::RED;
+        });
+        tree.show_overlay(crate::overlay::OverlayRequest::new(
+            content,
+            anchor,
+            crate::overlay::OverlayPlacement::Centered,
+            crate::overlay::DismissBehavior::Manual,
+        ));
+
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let red = Color::RED.to_array();
+        assert_eq!(
+            painted_accents(&tree.render()),
+            vec![red; 2],
+            "the anchor, then its overlay content in the overlay loop"
+        );
+    }
+
+    /// The cost this guards: a theme override used to be re-run, on a fresh
+    /// clone of the whole `Theme`, for every widget below it and on every
+    /// pass. One override at a window's root therefore cloned the theme once
+    /// per widget per layout. Each walk now runs it once, at the node that
+    /// carries it, and lends the result to the subtree.
+    #[test]
+    fn an_override_runs_once_per_walk_however_large_its_subtree() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let root = tree.add(ThemeAwareWidget);
+        let mut leaves = Vec::new();
+        for _ in 0..8 {
+            let branch = tree.add_child(root, ThemeAwareWidget);
+            for _ in 0..8 {
+                leaves.push(tree.add_child(branch, ThemeAwareWidget));
+            }
+        }
+        let runs = Rc::new(std::cell::Cell::new(0_usize));
+        let counter = runs.clone();
+        tree.set_theme_override(root, move |theme| {
+            counter.set(counter.get() + 1);
+            theme.colors.accent = Color::RED;
+        });
+
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(runs.get(), 1, "one layout walk over 73 widgets");
+
+        let frame = tree.render();
+        assert_eq!(runs.get(), 2, "one paint walk over 73 widgets");
+        assert_eq!(frame.shapes.len(), 73);
+        assert!(
+            painted_accents(&frame)
+                .iter()
+                .all(|c| *c == Color::RED.to_array())
+        );
+
+        // A new proposal lays every widget out again, and a repaint of the
+        // whole subtree paints every widget again; still one run each.
+        tree.layout(SizeProposal::exact(401.0, 300.0));
+        assert_eq!(runs.get(), 3, "one more layout walk");
+        tree.arena.mark_subtree_needs_paint(root);
+        tree.render();
+        assert_eq!(runs.get(), 4, "one more paint walk");
+    }
+
+    /// A frame repaints what is dirty and replays the cache for the rest. An
+    /// override over a subtree that is all cache hits has nothing to theme,
+    /// so it must not run (and clone the theme) just because the walk passed
+    /// through it; once something below it repaints, it runs, once.
+    #[test]
+    fn an_override_over_a_clean_subtree_does_not_run_in_paint() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let themed = tree.add(ThemeAwareWidget);
+        let branch = tree.add_child(themed, ThemeAwareWidget);
+        let deep = tree.add_child(branch, ThemeAwareWidget);
+        let _deep_leaf = tree.add_child(deep, ThemeAwareWidget);
+        let elsewhere = ColorProbe::new(Color::BLUE);
+        let elsewhere_paints = elsewhere.paints.clone();
+        let elsewhere = tree.add(elsewhere);
+
+        let runs = Rc::new(std::cell::Cell::new(0_usize));
+        let counter = runs.clone();
+        tree.set_theme_override(themed, move |theme| {
+            counter.set(counter.get() + 1);
+            theme.colors.accent = Color::RED;
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.render();
+        let after_first_frame = runs.get();
+
+        // Only the widget outside the override repaints: the walk still
+        // passes through the overridden subtree to replay its cache.
+        tree.mark_needs_paint(elsewhere);
+        let painted_before = elsewhere_paints.get();
+        tree.render();
+        assert_eq!(
+            elsewhere_paints.get(),
+            painted_before + 1,
+            "the frame did walk and paint"
+        );
+        assert_eq!(
+            runs.get(),
+            after_first_frame,
+            "nothing under the override repainted, so it did not run"
+        );
+
+        // One widget deep under the override repaints: the override runs once
+        // for it, and the widget still paints in the overridden colour.
+        tree.mark_needs_paint(deep);
+        let frame = tree.render();
+        assert_eq!(runs.get(), after_first_frame + 1);
+        assert_eq!(
+            painted_accents(&frame),
+            vec![Color::RED.to_array(); 4],
+            "the replayed cache and the repainted widget alike"
+        );
+    }
+
+    /// Records the accent its `after_paint` and `post_paint` are handed.
+    #[derive(Debug)]
+    struct HookThemeRecorder {
+        after: Rc<std::cell::Cell<Option<Color>>>,
+        post: Rc<std::cell::Cell<Option<Color>>>,
+    }
+
+    impl Widget for HookThemeRecorder {
+        fn layout_response(
+            &self,
+            proposal: SizeProposal,
+            _ctx: &LayoutContext,
+        ) -> crate::widget::LayoutResponse {
+            proposal.resolve(0.0, 0.0).into()
+        }
+
+        fn wants_after_paint(&self) -> bool {
+            true
+        }
+
+        fn after_paint(&self, _view: &crate::widget::WidgetTreeView<'_>, ctx: &PaintContext) {
+            self.after.set(Some(ctx.theme.colors.accent));
+        }
+
+        fn wants_post_paint(&self) -> bool {
+            true
+        }
+
+        fn post_paint(&self, _bounds: Rect, _canvas: &mut Canvas, ctx: &PaintContext) {
+            self.post.set(Some(ctx.theme.colors.accent));
+        }
+    }
+
+    /// `after_paint` runs on every frame, cached or not, and `post_paint` on a
+    /// repaint; both read the theme through the same deferred scope as
+    /// `paint`, and both get the override's.
+    #[test]
+    fn the_other_paint_hooks_see_the_override() {
+        let mut tree = WidgetTree::new().with_theme(crate::presets::intui::light());
+        let themed = tree.add(ThemeAwareWidget);
+        let after = Rc::new(std::cell::Cell::new(None));
+        let post = Rc::new(std::cell::Cell::new(None));
+        tree.add_child(
+            themed,
+            HookThemeRecorder {
+                after: after.clone(),
+                post: post.clone(),
+            },
+        );
+        let elsewhere = tree.add(ThemeAwareWidget);
+        tree.set_theme_override(themed, |theme| {
+            theme.colors.accent = Color::RED;
+        });
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.render();
+        assert_eq!(after.get(), Some(Color::RED));
+        assert_eq!(post.get(), Some(Color::RED));
+
+        // A frame that repaints only outside the override: the recorder is a
+        // cache hit, but its `after_paint` still runs, with the override.
+        after.set(None);
+        tree.mark_needs_paint(elsewhere);
+        tree.render();
+        assert_eq!(after.get(), Some(Color::RED));
     }
 
     /// Leaf that paints one rect in a colour read at paint time, in its own
