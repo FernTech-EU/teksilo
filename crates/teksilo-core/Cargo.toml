@@ -56,6 +56,12 @@ harness = false
 [[bench]]
 name = "budget_gate"
 
+# What a theme override costs the layout and paint walks; an instrument with no
+# gate (the pass count is pinned by a unit test).
+[[bench]]
+name = "theme_resolution"
+harness = false
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(teksilo_loom)'] }
 
