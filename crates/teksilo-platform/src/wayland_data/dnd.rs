@@ -14,8 +14,8 @@
 //!
 //! [`TouchSerialSource`]: crate::external_dnd::TouchSerialSource
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, VecDeque};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use teksilo_canvas::Point;
 use teksilo_core::window::TeksiloWindowId;
@@ -50,14 +50,104 @@ pub(crate) struct Route {
     pub(crate) poster: Arc<dyn AppEventPoster>,
     /// The window's surface, the origin of a drag it starts.
     pub(crate) surface: WlSurface,
+    /// Shared by every clone of the route.
+    outbox: Arc<Mutex<Outbox>>,
+}
+
+/// A window's drag events, kept in the order they happened. A drop's data is
+/// read on a thread of its own, so its `Dropped` is ready only later; what the
+/// window is sent meanwhile (the next drag's `Entered`, say) waits behind it,
+/// or the framework would apply the old drop to the new drag.
+#[derive(Default)]
+struct Outbox {
+    queue: VecDeque<Slot>,
+    next_read: u64,
+}
+
+enum Slot {
+    Ready(ExternalDragEvent),
+    /// A drop whose data is still being read.
+    Reading(u64),
 }
 
 impl Route {
+    pub(crate) fn new(
+        window_id: TeksiloWindowId,
+        poster: Arc<dyn AppEventPoster>,
+        surface: WlSurface,
+    ) -> Self {
+        Self {
+            window_id,
+            poster,
+            surface,
+            outbox: Arc::default(),
+        }
+    }
+
+    fn outbox(&self) -> MutexGuard<'_, Outbox> {
+        self.outbox.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn post(&self, event: ExternalDragEvent) {
+        self.outbox().post(event, |event| self.post_now(event));
+    }
+
+    fn post_now(&self, event: ExternalDragEvent) {
         self.poster.post_external(Box::new(ExternalDndEventPayload {
             window_id_owner: self.window_id,
             event,
         }));
+    }
+
+    /// Hold the window's later events until the drop about to be read is
+    /// posted with [`Self::finish_read`].
+    fn begin_read(&self) -> u64 {
+        self.outbox().begin_read()
+    }
+
+    fn finish_read(&self, read: u64, event: ExternalDragEvent) {
+        self.outbox()
+            .finish_read(read, event, |event| self.post_now(event));
+    }
+}
+
+impl Outbox {
+    /// Post `event` now, or queue it behind a drop still being read.
+    fn post(&mut self, event: ExternalDragEvent, mut post_now: impl FnMut(ExternalDragEvent)) {
+        if self.queue.is_empty() {
+            post_now(event);
+        } else {
+            self.queue.push_back(Slot::Ready(event));
+        }
+    }
+
+    fn begin_read(&mut self) -> u64 {
+        let read = self.next_read;
+        self.next_read += 1;
+        self.queue.push_back(Slot::Reading(read));
+        read
+    }
+
+    /// The drop `read` is ready as `event`: post it, then whatever waited
+    /// behind it, up to the next drop still being read.
+    fn finish_read(
+        &mut self,
+        read: u64,
+        event: ExternalDragEvent,
+        mut post_now: impl FnMut(ExternalDragEvent),
+    ) {
+        if let Some(slot) = self
+            .queue
+            .iter_mut()
+            .find(|slot| matches!(slot, Slot::Reading(r) if *r == read))
+        {
+            *slot = Slot::Ready(event);
+        }
+        while matches!(self.queue.front(), Some(Slot::Ready(_))) {
+            if let Some(Slot::Ready(event)) = self.queue.pop_front() {
+                post_now(event);
+            }
+        }
     }
 }
 
@@ -497,6 +587,8 @@ fn receive_drop(
     offer.receive(mime.clone(), std::os::fd::AsFd::as_fd(&write));
     let _ = conn.flush();
     drop(write);
+    let pending = route.begin_read();
+    let reader = route.clone();
     let spawned = std::thread::Builder::new()
         .name("teksilo-wayland-drop".into())
         .spawn(move || {
@@ -507,12 +599,21 @@ fn receive_drop(
                     ExternalDropData::default()
                 }
             };
-            route.post(ExternalDragEvent::Dropped { data, position });
+            reader.finish_read(pending, ExternalDragEvent::Dropped { data, position });
             finish_offer(&offer);
             let _ = conn.flush();
         });
     if let Err(err) = spawned {
         eprintln!("teksilo-platform: cannot start a thread to read a drop: {err}");
+        // The offer went with the closure. The drop still has to end, and the
+        // window's later events must not wait behind it for ever.
+        route.finish_read(
+            pending,
+            ExternalDragEvent::Dropped {
+                data: ExternalDropData::default(),
+                position,
+            },
+        );
     }
 }
 
@@ -552,6 +653,62 @@ mod tests {
     #[test]
     fn an_offer_of_nothing_readable_picks_nothing() {
         assert_eq!(pick_mime(&["image/png".to_string()]), None);
+    }
+
+    fn name(event: &ExternalDragEvent) -> &'static str {
+        match event {
+            ExternalDragEvent::Entered { .. } => "entered",
+            ExternalDragEvent::Moved { .. } => "moved",
+            ExternalDragEvent::Left => "left",
+            ExternalDragEvent::Dropped { .. } => "dropped",
+            _ => "other",
+        }
+    }
+
+    fn dropped() -> ExternalDragEvent {
+        ExternalDragEvent::Dropped {
+            data: ExternalDropData::default(),
+            position: Point::new(0.0, 0.0),
+        }
+    }
+
+    fn entered() -> ExternalDragEvent {
+        ExternalDragEvent::Entered {
+            data: ExternalDropData::default(),
+            position: Point::new(0.0, 0.0),
+        }
+    }
+
+    #[test]
+    fn events_wait_behind_a_drop_being_read() {
+        let mut posted = Vec::new();
+        let mut outbox = Outbox::default();
+        outbox.post(entered(), |e| posted.push(name(&e)));
+        let read = outbox.begin_read();
+        // The next drag arrives while the first drop's data is still read.
+        outbox.post(entered(), |e| posted.push(name(&e)));
+        outbox.post(ExternalDragEvent::Left, |e| posted.push(name(&e)));
+        assert_eq!(posted, ["entered"]);
+        outbox.finish_read(read, dropped(), |e| posted.push(name(&e)));
+        assert_eq!(posted, ["entered", "dropped", "entered", "left"]);
+        // Nothing waits any more: the next event goes straight out.
+        outbox.post(entered(), |e| posted.push(name(&e)));
+        assert_eq!(posted.len(), 5);
+    }
+
+    #[test]
+    fn drops_finishing_out_of_order_are_posted_in_order() {
+        let mut posted = Vec::new();
+        let mut outbox = Outbox::default();
+        let first = outbox.begin_read();
+        outbox.post(entered(), |e| posted.push(name(&e)));
+        let second = outbox.begin_read();
+        outbox.post(ExternalDragEvent::Left, |e| posted.push(name(&e)));
+        // The second drop's data arrives first: it waits for the first.
+        outbox.finish_read(second, dropped(), |e| posted.push(name(&e)));
+        assert!(posted.is_empty());
+        outbox.finish_read(first, dropped(), |e| posted.push(name(&e)));
+        assert_eq!(posted, ["dropped", "entered", "dropped", "left"]);
     }
 
     #[test]

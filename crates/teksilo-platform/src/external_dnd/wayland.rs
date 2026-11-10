@@ -160,14 +160,9 @@ impl ExternalDndBackend for WaylandExternalDndBackend {
             .ok()?;
             let surface = WlSurface::from_id(state.conn(), id).ok()?;
             let key = surface.id().protocol_id();
-            state.dnd.add_route(
-                key,
-                Route {
-                    window_id,
-                    poster: poster.clone(),
-                    surface,
-                },
-            );
+            state
+                .dnd
+                .add_route(key, Route::new(window_id, poster.clone(), surface));
             Some(key)
         });
         match registered {
