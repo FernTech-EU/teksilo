@@ -11,7 +11,7 @@ accessibility. Working example: `cargo run -p scene-ink`.
 
 | need | where |
 | --- | --- |
-| every sample the platform delivered | [`EventContext::coalesced`](../crates/teksilo-core/src/widget/event_context.rs), populated by [`PenBatching::Coalesce`](../crates/teksilo-platform/src/pen.rs) |
+| every sample the platform delivered | [`EventContext::coalesced`](../crates/teksilo-core/src/widget/event_context.rs), populated by [`PenBatching::Coalesce`](../crates/teksilo-platform/src/pen.rs) for a pen, and for a mouse on X11 and Wayland by the event loop, which folds a turn's moves into one dispatch |
 | a stroke between two notes | [`SceneLayer::Interleaved`](../crates/teksilo-scene/src/scene.rs) |
 | a surface that repaints on its own | [`WetLayer`](../crates/teksilo-scene/src/view/paint_node.rs) |
 | a growing path that is not quadratic | [`Path::stamp`](../crates/teksilo-canvas/src/path.rs) → an O(1) mask-cache key |

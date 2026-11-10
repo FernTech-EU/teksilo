@@ -342,10 +342,26 @@ pub(crate) fn route_input_event(
         tree.pointer_left_window(ops);
         return true;
     }
-    let now = tree.input_now();
-    let samples = backend.translate(&BackendEvent::Winit(event), now);
+    let samples = translate(backend, tree, event);
     route_samples(tree, ops, samples);
     true
+}
+
+/// Translate one winit event into samples without routing them, on the
+/// tree's clock.
+///
+/// [`route_input_event`] routes what this answers at once; the loop calls it
+/// alone for a `CursorMoved` it holds back
+/// ([`crate::input_loop::MoveBuffer`]), so the translator's suppressors run
+/// on the move as it arrives, against the contacts and the time of that
+/// moment, and only the dispatch waits.
+pub(crate) fn translate(
+    backend: &mut dyn PointerBackend,
+    tree: &WidgetTree,
+    event: &WindowEvent,
+) -> Vec<InputSample> {
+    let now = tree.input_now();
+    backend.translate(&BackendEvent::Winit(event), now)
 }
 
 /// Drain the pen shim: what it buffered, translated; empty without a pen
@@ -495,7 +511,11 @@ pub(crate) fn apply_menubar_action(
 }
 
 /// Send each sample to the door its shape names.
-fn route_samples(tree: &mut WidgetTree, ops: &mut dyn WindowOps, samples: Vec<InputSample>) {
+pub(crate) fn route_samples(
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    samples: Vec<InputSample>,
+) {
     for sample in samples {
         match sample {
             InputSample::Pointer(p) => tree.dispatch_pointer_with_ops(p, ops),

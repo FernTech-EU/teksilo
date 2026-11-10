@@ -459,11 +459,38 @@ and hovered onto another inside one drain would never enter the first at all —
 a hover affordance that silently stops firing under a batching mode.
 `coalescing_keeps_the_proximity_enters_own_sample` is the gate.
 
-Mouse and touch are not folded at all. winit dispatches those per event during
-`window_event`, so folding would mean buffering across calls and releasing at
-`about_to_wait` — up to a turn of added latency on the most latency-sensitive
-path in the framework. The pen path has no such cost because it is *already*
-drained at `about_to_wait`.
+**The mouse is folded by the event loop, on X11 and Wayland.** Neither
+compresses motion (Mutter hands a 1000 Hz mouse to the application as 1000
+`CursorMoved` a second), and winit delivers a turn's backlog back to back, so a
+tree dispatch per move cost more than the frame and a drag or a selection fell
+behind the pointer. `teksilo-app` translates each `CursorMoved` as it arrives
+(the X11 phantom-motion suppressor judges it then) and holds the sample in a
+`MoveBuffer`; the next move from the same window and device folds into it the
+way `coalesce_pen_moves` folds a drain, so one `PointerMove` reaches the tree
+with the older positions in `coalesced`. The held move is dispatched before
+every other callback: any other window event (a button, a wheel notch, a key,
+IME, a contact, enter or leave, modifiers, focus, `RedrawRequested`), a user
+event, the accessibility actions a window event drains, and first thing in
+`about_to_wait`, ahead of the pen pump, the ticks and the frames. So no event
+changes place, a press lands where the last move left the pointer, and no move
+waits out a sleep. The one window event that releases nothing is `AxisMotion`,
+which the loop drops on arrival (`input_loop::dropped_on_arrival`): winit's X11
+backend sends one per valuator after every move, nothing reads them, and
+releasing on them kept X11 from folding at all. It adds no frame of latency either: a frame is drawn only
+after every move delivered before it has been dispatched, as before. A move never folds
+across another window, another device, a button change or a modifier change.
+
+Windows and macOS are left alone. Windows keeps no queue of mouse moves
+(`WM_MOUSEMOVE` is made from the latest position when the queue is read), and
+AppKit coalesces mouse events itself; on macOS a native drag must also start
+while AppKit is still dispatching the drag event (`beginDraggingSession` takes
+`NSApp.currentEvent`), which a move released from a later callback would not be.
+`input_loop::holds_mouse_moves` is the switch. A handler that counted moves
+sees fewer of them; one that reads positions, or `coalesced()` then
+`pointer_position()`, sees the same path.
+
+Touch is not folded: a contact's moves still reach the tree one per winit
+event.
 
 ### 3.3 Cancellation
 

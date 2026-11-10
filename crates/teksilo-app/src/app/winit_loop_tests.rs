@@ -31,12 +31,15 @@
 //!
 //! # What it decides, and what it cannot
 //!
-//! Forty-two claims, and they do not all carry the same weight. Verified by
+//! Forty-three claims, and they do not all carry the same weight. Verified by
 //! mutation — each of these reverts a production line and reddens this test:
 //!
 //! - **(a)** the pointer arm in `handle_window_event_inner` is reached at all;
 //! - **(a2)** the window system reached the translator, so X11's phantom
 //!   cursor motion during a contact is suppressed;
+//! - **(a3)** a burst of `CursorMoved` reaches the widget as one move, held
+//!   until `about_to_wait`, also with the `AxisMotion` X11 sends after each
+//!   move, and a press releases the held move ahead of it;
 //! - **(e)/(f)** the theme's `touch_enabled` reaches both an open window's
 //!   translator (`WindowManager::set_theme`) and a window created afterwards
 //!   (`input_loop::wire_translator`);
@@ -1087,6 +1090,81 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
     let prelude = owners_followed_through_the_window_manager;
     drive(builder, prelude, move |app, event_loop| {
         let window = only_window(app);
+
+        // -- (a3) a burst of moves is one dispatch
+        //
+        // An X11 window holds its moves: the burst reaches nothing until the
+        // turn's `about_to_wait`, and then reaches the widget once. Leaving
+        // the release out of `about_to_wait` leaves the log empty; dispatching
+        // each move as it comes gives three. A press then releases the moves
+        // held before it, ahead of it, which leaving the release out of
+        // `window_event` turns into a press with no move before it. First of
+        // the pointer claims: a press within half a second of a contact's
+        // lift is X11's promoted click, which (a) and (a2) would leave behind.
+        recorder.borrow_mut().phases.clear();
+        let mouse_phases = |recorder: &Shared| -> Vec<teksilo_core::pointer::PointerPhase> {
+            recorder
+                .borrow()
+                .phases
+                .iter()
+                .filter(|(_, kind)| *kind == teksilo_tokens::PointerKind::Mouse)
+                .map(|(phase, _)| *phase)
+                .collect()
+        };
+        for x in [140.0, 150.0, 160.0] {
+            app.window_event(event_loop, window, cursor(x, 100.0));
+        }
+        assert!(
+            mouse_phases(&recorder).is_empty(),
+            "the burst is held while the turn delivers it: {:?}",
+            recorder.borrow().phases
+        );
+        ApplicationHandler::about_to_wait(app, event_loop);
+        assert_eq!(
+            mouse_phases(&recorder),
+            vec![teksilo_core::pointer::PointerPhase::Move],
+            "`about_to_wait` releases the burst as one move"
+        );
+        recorder.borrow_mut().phases.clear();
+        // The same burst as winit's X11 backend delivers it: each move
+        // followed by an `AxisMotion` for x and for y. Leaving the drop out
+        // of `window_event` releases every move on its first axis: three
+        // dispatches.
+        for x in [140.0, 150.0, 160.0] {
+            app.window_event(event_loop, window, cursor(x, 100.0));
+            for (axis, value) in [(0, x), (1, 100.0)] {
+                app.window_event(
+                    event_loop,
+                    window,
+                    WindowEvent::AxisMotion {
+                        device_id: winit::event::DeviceId::dummy(),
+                        axis,
+                        value,
+                    },
+                );
+            }
+        }
+        ApplicationHandler::about_to_wait(app, event_loop);
+        assert_eq!(
+            mouse_phases(&recorder),
+            vec![teksilo_core::pointer::PointerPhase::Move],
+            "the axes winit sends after each X11 move do not break the burst"
+        );
+        recorder.borrow_mut().phases.clear();
+        app.window_event(event_loop, window, cursor(170.0, 100.0));
+        app.window_event(event_loop, window, cursor(180.0, 100.0));
+        app.window_event(event_loop, window, click(ElementState::Pressed));
+        app.window_event(event_loop, window, click(ElementState::Released));
+        assert_eq!(
+            mouse_phases(&recorder),
+            vec![
+                teksilo_core::pointer::PointerPhase::Move,
+                teksilo_core::pointer::PointerPhase::Down,
+                teksilo_core::pointer::PointerPhase::Up,
+            ],
+            "a press releases the held moves ahead of it"
+        );
+        recorder.borrow_mut().phases.clear();
 
         // -- (a) a contact handed to the real `window_event` reaches the tree
         //

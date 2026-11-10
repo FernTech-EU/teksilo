@@ -1347,6 +1347,11 @@ struct TeksiloAppHandler {
     /// One-shot catch-up deadline for the pen shim. See
     /// [`TeksiloAppHandler::pen_deadline`].
     pen_recheck_at: Option<Instant>,
+    /// The mouse move held back so the rest of the turn's moves fold into
+    /// it, keyed by the window and the device it came from. Released before
+    /// every callback that is not another move from the same window and
+    /// device: see [`TeksiloAppHandler::release_held_move`].
+    held_move: crate::input_loop::MoveBuffer<(WindowId, winit::event::DeviceId)>,
     /// When the on-screen keyboard's rectangle was last read. See
     /// [`TeksiloAppHandler::refresh_occluded_band`].
     osk_polled_at: Option<Instant>,
@@ -1428,6 +1433,7 @@ impl TeksiloAppHandler {
             loop_tick_poll: None,
             woken_externally: true,
             pen_recheck_at: None,
+            held_move: crate::input_loop::MoveBuffer::new(),
             osk_polled_at: None,
             key_report: teksilo_platform::key_report::KeyReportGate::for_platform(),
             settings: None,
@@ -2404,6 +2410,83 @@ impl TeksiloAppHandler {
         self.with_input_in_window(window_id, event_loop, |chrome, backend, tree, ops| {
             crate::input_loop::dispatch_input(chrome, backend, tree, ops, event);
         });
+    }
+
+    /// Hold a `CursorMoved` back in [`Self::held_move`], where the moves the
+    /// rest of the turn delivers fold into it. `false`, with nothing done,
+    /// when its window does not hold moves
+    /// ([`crate::input_loop::holds_mouse_moves`]) or is gone: the caller then
+    /// dispatches it at once.
+    ///
+    /// The move is translated now, so X11's phantom-motion suppressor judges
+    /// it against the contacts and the clock of the moment it arrived.
+    fn hold_cursor_move(
+        &mut self,
+        window_id: WindowId,
+        device_id: winit::event::DeviceId,
+        event: &WindowEvent,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let Some(managed) = self.wm.get_by_winit_mut(window_id) else {
+            return false;
+        };
+        if !crate::input_loop::holds_mouse_moves(managed.translation_state.window_system()) {
+            return false;
+        }
+        let samples =
+            crate::input_routing::translate(&mut managed.translation_state, &managed.tree, event);
+        let released = self.held_move.offer((window_id, device_id), samples);
+        self.dispatch_released_moves(released, event_loop);
+        true
+    }
+
+    /// Dispatch the move [`Self::held_move`] holds, if any, with the chores
+    /// and the `post_event` its `CursorMoved` would have had.
+    ///
+    /// Called first in every callback but a move that folds into the held
+    /// one (`window_event`, `user_event`, `about_to_wait`), and before the
+    /// accessibility actions a window event drains: whatever happens next
+    /// then finds the pointer where the last move left it, as it did when
+    /// every move was dispatched as it came. `about_to_wait` is the turn's
+    /// last chance, so no move stays held while the loop sleeps, and the
+    /// frames and ticks it runs see the latest position.
+    fn release_held_move(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some((key, sample)) = self.held_move.take() {
+            self.dispatch_released_moves(
+                vec![(
+                    key,
+                    teksilo_platform::pointer_backend::InputSample::Pointer(sample),
+                )],
+                event_loop,
+            );
+        }
+    }
+
+    /// Dispatch what a [`MoveBuffer`](crate::input_loop::MoveBuffer)
+    /// released, a window at a time and in order, each followed by the
+    /// `post_event` a pointer event has always been followed by, so what its
+    /// handlers asked for is carried out before the next window's samples.
+    fn dispatch_released_moves(
+        &mut self,
+        released: Vec<(
+            (WindowId, winit::event::DeviceId),
+            teksilo_platform::pointer_backend::InputSample,
+        )>,
+        event_loop: &ActiveEventLoop,
+    ) {
+        let mut released = released.into_iter().peekable();
+        while let Some(((window_id, _), first)) = released.next() {
+            let mut samples = vec![first];
+            while let Some((_, sample)) =
+                released.next_if(|((next_window, _), _)| *next_window == window_id)
+            {
+                samples.push(sample);
+            }
+            self.with_input_in_window(window_id, event_loop, |chrome, _backend, tree, ops| {
+                crate::input_loop::dispatch_released_moves(chrome, tree, ops, samples);
+            });
+            self.post_event(event_loop);
+        }
     }
 
     /// Drain every window's pen shim.
@@ -4150,8 +4233,10 @@ impl TeksiloAppHandler {
                 a11y_events.push(evt);
             }
         }
-        // A screen reader's action is the user's, as a click is.
+        // A screen reader's action is the user's, as a click is. It comes
+        // after the moves that came before it.
         if !a11y_events.is_empty() {
+            self.release_held_move(event_loop);
             self.wm.note_user_activation();
         }
         for evt in a11y_events {
@@ -4583,6 +4668,14 @@ impl TeksiloAppHandler {
         // themselves are `crate::input_routing`, which a test can drive with a
         // hand-written winit event and a bare tree.
         if crate::input_routing::is_pointer_input_event(&event) {
+            // A move is held where its window folds moves; the turn's
+            // `about_to_wait`, or the next event that is not a move, releases
+            // it, and runs the `post_event` it owes then.
+            if let WindowEvent::CursorMoved { device_id, .. } = &event
+                && self.hold_cursor_move(window_id, *device_id, &event, event_loop)
+            {
+                return;
+            }
             self.dispatch_input_in_window(window_id, &event, event_loop);
             self.post_event(event_loop);
             return;
@@ -5140,6 +5233,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         if let Some(trace) = &mut self.idle_trace {
             trace.note_user_event();
         }
+        // An OS drag entering or dropping, an automation request, a wake: all
+        // are later than the moves already delivered.
+        self.release_held_move(event_loop);
         // A payload that came with an activation token: every handler sees
         // what it wraps, and the token waits for the first raise or open.
         let (event, token) = unwrap_activation_token(event);
@@ -5546,6 +5642,21 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         if let Some(trace) = &mut self.idle_trace {
             trace.note_window_event(&event);
         }
+        // X11's `AxisMotion` after each move: counted above, and nothing else.
+        if crate::input_loop::dropped_on_arrival(&event) {
+            return;
+        }
+        // A held move is dispatched before anything else this window event
+        // does, unless the event is the next move of the same window and
+        // device, which the pointer arm offers to it.
+        let folds_into_held = matches!(
+            &event,
+            WindowEvent::CursorMoved { device_id, .. }
+                if self.held_move.holds_for((window_id, *device_id))
+        );
+        if !folds_into_held {
+            self.release_held_move(event_loop);
+        }
         self.handle_window_event_inner(event_loop, window_id, event);
     }
 
@@ -5578,6 +5689,10 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        // The turn's last move, before the ticks, the pen pump and the frames
+        // they ask for: none of them may see the pointer where it was before
+        // the turn's burst, and no move may wait out the sleep.
+        self.release_held_move(event_loop);
         // The dialogs of the windows that took the focus this turn, now the
         // window system has finished giving it.
         self.wm.refocus_after_turn();

@@ -49,10 +49,11 @@ use std::time::Instant;
 
 use teksilo_canvas::Rect;
 use teksilo_core::WidgetTree;
+use teksilo_core::pointer::PointerSample;
 use teksilo_core::window::{SoftKeyboardSupport, WindowOps};
 use teksilo_platform::TranslationState;
 use teksilo_platform::pen::PenSource;
-use teksilo_platform::pointer_backend::PointerBackend;
+use teksilo_platform::pointer_backend::{InputSample, PointerBackend};
 use teksilo_platform::safe_area::SafeAreaSides;
 use teksilo_platform::text_input_hook::{StoreFocus, TextStoreMode};
 use teksilo_platform::window_system::WindowSystem;
@@ -201,6 +202,188 @@ pub(crate) fn dispatch_input(
         chrome.request_redraw(trace_label);
     }
     true
+}
+
+/// Whether a window on `window_system` holds its mouse moves back, so that
+/// the moves one event-loop turn delivers reach its tree as one dispatch
+/// ([`MoveBuffer`]).
+///
+/// X11 and Wayland hand the application every motion event the device
+/// produced: Mutter does not compress motion, so a 1000 Hz mouse is 1000
+/// `CursorMoved` a second, and winit delivers a turn's backlog back to back
+/// before the turn's `RedrawRequested`. A tree dispatch per move then costs
+/// more than the frame, and a handler that changes state on every move
+/// (a drop indicator, a text selection) falls behind the pointer for good.
+///
+/// The other two platforms already fold motion before winit sees it, and are
+/// left alone:
+///
+/// - Windows keeps no queue of mouse moves: `WM_MOUSEMOVE` is made from the
+///   pointer's latest position when the queue is read, so there is one per
+///   read and nothing left to fold.
+/// - AppKit coalesces mouse-moved and mouse-dragged events itself (`NSEvent`
+///   mouse coalescing is on by default). And a native drag must start while
+///   AppKit is still dispatching the drag event: `beginDraggingSession` takes
+///   `NSApp.currentEvent`, which `OsHandoff::Eager` reads on every move.
+///   Releasing a held move later, from another callback, would ask for the
+///   drag with whatever event AppKit took last.
+///
+/// [`WindowSystem::Unknown`] is the set {Windows, macOS, headless}, so it
+/// answers `false`.
+pub(crate) fn holds_mouse_moves(window_system: WindowSystem) -> bool {
+    matches!(window_system, WindowSystem::X11 | WindowSystem::Wayland)
+}
+
+/// Whether the loop drops `event` on arrival: an event Teksilo reads nothing
+/// from, which therefore neither releases a held move ([`MoveBuffer`]) nor
+/// runs the `post_event` an event owes.
+///
+/// That is `AxisMotion`, which nothing in Teksilo reads. winit's X11 backend
+/// (0.30, `xinput2_mouse_motion`) follows every `CursorMoved` with one
+/// `AxisMotion` per valuator the motion carried: a mouse's x and y, so a move
+/// arrives as `CursorMoved`, `AxisMotion`, `AxisMotion`. Handled like any
+/// other event, the first `AxisMotion` released the move just held, so X11
+/// never folded a move, and each one ran `post_event` and its cross-window
+/// sweep: three passes for every move.
+pub(crate) fn dropped_on_arrival(event: &WindowEvent) -> bool {
+    matches!(event, WindowEvent::AxisMotion { .. })
+}
+
+/// A mouse move held back until the event loop has something else to do,
+/// so that every move one turn delivers reaches the tree as a single
+/// `PointerMove`.
+///
+/// The pen path folds a drain the same way (`coalesce_pen_moves` in
+/// `teksilo-platform`): the newest position is dispatched, and the older ones
+/// travel in [`PointerSample::coalesced`], oldest first, each with its own
+/// time, so `EventContext::coalesced` and a velocity tracker still see every
+/// position the device reported.
+///
+/// `K` names where a move came from: the loop uses the winit window and
+/// device, a test any comparable value. Two moves fold only when their keys
+/// are equal and the samples agree on the pointer, its buttons and the
+/// modifiers ([`joins`]); anything else releases the held move first. The
+/// loop releases it ([`take`](Self::take)) before every callback that is not
+/// another move from the same key, so no event changes place: moves fold,
+/// and every other event still finds the pointer where the last move left
+/// it.
+#[derive(Debug)]
+pub(crate) struct MoveBuffer<K> {
+    held: Option<(K, PointerSample)>,
+}
+
+impl<K: Copy + PartialEq> MoveBuffer<K> {
+    /// An empty buffer.
+    pub(crate) const fn new() -> Self {
+        Self { held: None }
+    }
+
+    /// Whether a move from `key` would be offered to the held one rather
+    /// than release it: the test the loop makes before an event reaches
+    /// anything else.
+    pub(crate) fn holds_for(&self, key: K) -> bool {
+        self.held.as_ref().is_some_and(|(held, _)| *held == key)
+    }
+
+    /// Offer what one `CursorMoved` from `key` translated to.
+    ///
+    /// Returns what must be dispatched now, in order, with the key it came
+    /// from. A lone pure move is held: folded into the held move when the two
+    /// [`join`](joins), and otherwise held in its place, the held one coming
+    /// back to be dispatched first. Nothing at all (the translator dropped
+    /// X11's emulated pointer) leaves the buffer as it is: there is no sample
+    /// to order against. Anything else releases the held move and comes back
+    /// behind it, so no sample is lost and none overtakes another.
+    pub(crate) fn offer(&mut self, key: K, samples: Vec<InputSample>) -> Vec<(K, InputSample)> {
+        let mut ready = Vec::new();
+        let mut samples = samples.into_iter();
+        let (first, rest) = (samples.next(), samples.next());
+        let mut current = match (first, rest) {
+            (None, _) => return ready,
+            (Some(InputSample::Pointer(sample)), None) if is_pure_move(&sample) => sample,
+            (first, rest) => {
+                if let Some((held_key, held)) = self.held.take() {
+                    ready.push((held_key, InputSample::Pointer(held)));
+                }
+                ready.extend(
+                    first
+                        .into_iter()
+                        .chain(rest)
+                        .chain(samples)
+                        .map(|sample| (key, sample)),
+                );
+                return ready;
+            }
+        };
+        match self.held.take() {
+            Some((held_key, held)) if held_key == key && joins(&held, &current) => {
+                fold(held, &mut current);
+            }
+            Some((held_key, held)) => ready.push((held_key, InputSample::Pointer(held))),
+            None => {}
+        }
+        self.held = Some((key, current));
+        ready
+    }
+
+    /// The held move, for the loop to dispatch.
+    pub(crate) fn take(&mut self) -> Option<(K, PointerSample)> {
+        self.held.take()
+    }
+}
+
+/// A move that changes nothing but the position: what a burst is made of.
+fn is_pure_move(sample: &PointerSample) -> bool {
+    sample.phase == teksilo_core::pointer::PointerPhase::Move && sample.button.is_none()
+}
+
+/// Whether `next` may fold into `held`: the same pointer, holding the same
+/// buttons, under the same modifiers.
+///
+/// A button or modifier change arrives as an event of its own, which
+/// releases the held move before it, so these hold for any two moves the loop
+/// offers in a row. They are checked anyway, because a fold across one would
+/// put a move that happened with the button up into the same dispatch as a
+/// move made with it down.
+fn joins(held: &PointerSample, next: &PointerSample) -> bool {
+    is_pure_move(held)
+        && is_pure_move(next)
+        && held.pointer.id == next.pointer.id
+        && held.pointer.kind == next.pointer.kind
+        && held.pointer.buttons == next.pointer.buttons
+        && held.modifiers == next.modifiers
+}
+
+/// Make `held` a batched position of `next`, behind the positions `held`
+/// already carried and ahead of any `next` carries, so the list stays oldest
+/// first. The same step `coalesce_pen_moves` takes in `teksilo-platform`.
+fn fold(held: PointerSample, next: &mut PointerSample) {
+    let mut merged = held.coalesced;
+    merged.push(
+        teksilo_core::CoalescedSample::new(held.pointer.time, held.position)
+            .with_axes(held.pointer.axes),
+    );
+    merged.append(&mut next.coalesced);
+    next.coalesced = merged;
+}
+
+/// Dispatch samples a [`MoveBuffer`] released, then do the chores a
+/// `CursorMoved` owes: push the tree's cursor, and ask for a frame only when
+/// the tree needs one, as [`dispatch_input`] does for a move.
+pub(crate) fn dispatch_released_moves(
+    chrome: &mut dyn InputChrome,
+    tree: &mut WidgetTree,
+    ops: &mut dyn WindowOps,
+    samples: Vec<InputSample>,
+) {
+    if samples.is_empty() {
+        return;
+    }
+    crate::input_routing::route_samples(tree, ops, samples);
+    chrome.set_cursor(tree.current_cursor());
+    if tree.needs_redraw() {
+        chrome.request_redraw("cursor");
+    }
 }
 
 /// Before a press is dispatched, end the composition a text service holds in
@@ -661,6 +844,9 @@ pub(crate) fn wire_translator(
         state.set_pen_source(pen);
     }
 }
+
+#[cfg(test)]
+mod move_buffer_tests;
 
 #[cfg(test)]
 mod tests {
