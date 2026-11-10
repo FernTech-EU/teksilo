@@ -101,6 +101,8 @@ mod a11y_walk_cost;
 #[cfg(test)]
 mod composition_tests;
 #[cfg(test)]
+mod cursor_signal_tests;
+#[cfg(test)]
 mod find_highlight_tests;
 #[cfg(test)]
 mod input_document_tests;
@@ -4898,6 +4900,11 @@ pub(super) fn sync_cursor_signals(state: &SharedState) {
     let anc_sig = st.cursor_anchor.clone();
     let sel_sig = st.has_selection.clone();
     let caret_vis_sig = st.caret_visible.clone();
+    let kind = st.cursor.selection_kind();
+    let shape_changed =
+        st.synced_cursor_affinity != st.cursor_affinity || st.synced_selection_kind != kind;
+    st.synced_cursor_affinity = st.cursor_affinity;
+    st.synced_selection_kind = kind;
     // Restart the blink phase on every cursor mutation: a steady-visible
     // caret while typing or holding an arrow key, blinking only
     // resumes after the user stops moving. Mirrors focus-gain behavior
@@ -4912,9 +4919,19 @@ pub(super) fn sync_cursor_signals(state: &SharedState) {
     // text typed next; a toolbar showing that format reads it again.
     let format_sig = typing_format::prune(&mut st).then(|| st.format_version.clone());
     drop(st);
-    pos_sig.set(pos);
-    anc_sig.set(anc);
-    sel_sig.set(has_sel);
+    // A drag or a selection calls this on every pointer move, and the body
+    // binds all three signals, so a write that changes nothing would still
+    // dirty the widget and make the window lay out for it. Two things change
+    // what is painted under an unchanged offset and anchor: a flipped
+    // affinity moves the caret to the other side of a wrap, and a selection
+    // that became a whole-cell one paints the cell. Both still notify.
+    if shape_changed {
+        pos_sig.set(pos);
+    } else {
+        pos_sig.set_if_changed(pos);
+    }
+    anc_sig.set_if_changed(anc);
+    sel_sig.set_if_changed(has_sel);
     if blink_reset && !caret_vis_sig.get() {
         caret_vis_sig.set(true);
     }

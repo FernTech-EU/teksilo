@@ -530,6 +530,19 @@ pub(crate) struct EditorState {
     /// in the commit message that introduced this field.
     pub cursor_affinity: CursorAffinity,
 
+    /// The affinity the cursor signals were last published with. A caret
+    /// at a soft-wrap boundary keeps its offset when only its affinity
+    /// flips, yet it is drawn on the other line, so `sync_cursor_signals`
+    /// needs it to know that an unchanged offset is still a change a
+    /// repaint must see.
+    pub synced_cursor_affinity: CursorAffinity,
+
+    /// The selection shape the cursor signals were last published with. A
+    /// whole-cell selection (Ctrl+A in a cell, twice) keeps the offset and
+    /// the anchor of the text selection it grows from, yet it paints the
+    /// cell, so an unchanged offset says nothing about the paint.
+    pub synced_selection_kind: teksilo_text::text_document::SelectionKind,
+
     /// Caret blink phase. Wall-clock driven, so the visible rhythm stays
     /// locked to real seconds no matter how the frame scheduler behaves.
     /// Shared with the other text surfaces — see
@@ -1065,6 +1078,8 @@ impl EditorState {
             image_cache: ImageCache::new(),
             preferred_x: None,
             cursor_affinity: CursorAffinity::default(),
+            synced_cursor_affinity: CursorAffinity::default(),
+            synced_selection_kind: teksilo_text::text_document::SelectionKind::None,
             blink: CaretBlink::new(),
             frame_request: None,
             frame_wake_at: None,
