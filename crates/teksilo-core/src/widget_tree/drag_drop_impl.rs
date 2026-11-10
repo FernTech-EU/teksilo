@@ -660,11 +660,11 @@ impl WidgetTree {
         }
 
         // Only a plain internal drag with an exportable payload escalates.
-        let (data, handoff, dragging) = match self.active_drag.as_ref() {
+        let (handoff, dragging) = match self.active_drag.as_ref() {
             Some(d)
                 if !d.is_external && d.source_widget.is_some() && d.payload.is_os_exportable() =>
             {
-                (d.payload.to_outbound(), d.payload.os_handoff(), d.pointer)
+                (d.payload.os_handoff(), d.pointer)
             }
             _ => return false,
         };
@@ -675,6 +675,11 @@ impl WidgetTree {
         if !eager && !self.is_outside_window(position) {
             return false;
         }
+        // Built only now: it clones the MIME map, and a drag that stays inside
+        // the window gets here on every pointer move without asking.
+        let Some(data) = self.active_drag.as_ref().map(|d| d.payload.to_outbound()) else {
+            return false;
+        };
 
         // Ask the platform to start a native OS drag. A refusal (no backend /
         // test sink, a stale event on macOS) keeps the in-app session intact,
