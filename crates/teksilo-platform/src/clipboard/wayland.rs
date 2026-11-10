@@ -191,16 +191,33 @@ fn payload(text: &str, html: Option<&str>) -> Payload {
 /// `html`, with a UTF-8 declaration in front unless it declares a charset of
 /// its own near its head.
 fn with_charset_declaration(html: &str) -> String {
+    if declares_charset(html) {
+        html.to_string()
+    } else {
+        format!("<meta http-equiv=\"content-type\" content=\"text/html; charset=utf-8\">{html}")
+    }
+}
+
+/// Whether a `<meta>` tag in the first 1024 characters of `html` names a
+/// charset (`<meta charset=...>`, or `http-equiv` with a `content` type that
+/// carries one). The word in the text itself does not count: a copy of a
+/// sentence about charsets still needs the declaration.
+fn declares_charset(html: &str) -> bool {
     let head: String = html
         .chars()
         .take(1024)
         .collect::<String>()
         .to_ascii_lowercase();
-    if head.contains("charset") {
-        html.to_string()
-    } else {
-        format!("<meta http-equiv=\"content-type\" content=\"text/html; charset=utf-8\">{html}")
+    let mut rest = head.as_str();
+    while let Some(start) = rest.find("<meta") {
+        let tag = &rest[start..];
+        let end = tag.find('>').unwrap_or(tag.len());
+        if tag[..end].contains("charset") {
+            return true;
+        }
+        rest = &tag[end..];
     }
+    false
 }
 
 /// ISO 8859-1, each character past U+00FF written as `?`.
@@ -520,6 +537,30 @@ mod tests {
     fn html_that_declares_its_charset_is_offered_unchanged() {
         let html = "<html><head><meta charset=\"utf-8\"></head><body>x</body></html>";
         assert_eq!(with_charset_declaration(html), html);
+    }
+
+    #[test]
+    fn an_http_equiv_declaration_counts_too() {
+        let html = "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=windows-1252\"><p>x</p>";
+        assert_eq!(with_charset_declaration(html), html);
+    }
+
+    #[test]
+    fn the_word_charset_in_the_text_is_not_a_declaration() {
+        let html = "<p>Set the charset to UTF-8, café</p>";
+        let served = with_charset_declaration(html);
+        assert!(
+            served.starts_with("<meta http-equiv=\"content-type\""),
+            "{served}"
+        );
+        assert!(served.ends_with(html));
+    }
+
+    #[test]
+    fn a_meta_without_a_charset_is_not_a_declaration() {
+        assert!(!declares_charset(
+            "<meta name=\"generator\" content=\"x\"><p>the charset</p>"
+        ));
     }
 
     #[test]
