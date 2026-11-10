@@ -59,8 +59,10 @@ use std::any::Any;
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use wayland_backend::client::WaylandError;
 use wayland_backend::sys::client::Backend;
 use wayland_client::globals::{GlobalListContents, registry_queue_init};
+use wayland_client::protocol::wl_callback::{Event as CallbackEvent, WlCallback};
 use wayland_client::protocol::wl_data_device::{Event as DataDeviceEvent, WlDataDevice};
 use wayland_client::protocol::wl_data_device_manager::WlDataDeviceManager;
 use wayland_client::protocol::wl_data_offer::{Event as DataOfferEvent, WlDataOffer};
@@ -130,6 +132,38 @@ struct OwnSelection {
     owner_data: Arc<dyn Any + Send + Sync>,
 }
 
+/// A `set_selection` the compositor has not answered yet. A `wl_display.sync`
+/// sent right after the request comes back once the compositor has handled
+/// it; by then an accepted source has been announced back to us (`selection`)
+/// and the source it replaced has been cancelled.
+#[cfg_attr(
+    not(feature = "clipboard"),
+    allow(
+        dead_code,
+        reason = "the clipboard half of the hub, used when the `clipboard` feature is on"
+    )
+)]
+struct SelectionCheck {
+    source: WlDataSource,
+    /// The source of ours that was the selection when the request went out.
+    previous: Option<WlDataSource>,
+    /// Whether a `selection` event arrived between the sync of the request
+    /// before this one and this one's.
+    announced: bool,
+}
+
+/// Sources of ours kept while the compositor has not cancelled them. A
+/// compositor cancels a replaced source as it takes the new one, so only a
+/// non-conforming one lets this many build up; the oldest then goes.
+#[cfg_attr(
+    not(feature = "clipboard"),
+    allow(
+        dead_code,
+        reason = "the clipboard half of the hub, used when the `clipboard` feature is on"
+    )
+)]
+const MAX_OWNED_SOURCES: usize = 8;
+
 /// The selection as this process sees it.
 #[cfg_attr(
     not(feature = "clipboard"),
@@ -169,8 +203,13 @@ pub(crate) struct HubState {
     pub(crate) press_serials: TouchSerialSource,
     /// The compositor's current selection, as last announced to us.
     selection_offer: Option<WlDataOffer>,
-    /// The selection we set, while the compositor still holds it.
-    own: Option<OwnSelection>,
+    /// The selections we set that the compositor has not cancelled, oldest
+    /// first. The last is the one we believe current. An older one stays until
+    /// its `cancelled`: when the compositor refuses a newer copy, the older one
+    /// is still the selection and still has to be served.
+    owned: Vec<OwnSelection>,
+    /// `set_selection` requests waiting for their `wl_display.sync`.
+    checks: Vec<SelectionCheck>,
     /// External drag-and-drop.
     pub(crate) dnd: dnd::DndState,
 }
@@ -189,7 +228,7 @@ impl HubState {
         )
     )]
     pub(crate) fn selection(&self) -> SelectionView {
-        if let Some(own) = &self.own {
+        if let Some(own) = self.owned.last() {
             return SelectionView::Own(own.owner_data.clone());
         }
         match &self.selection_offer {
@@ -205,6 +244,14 @@ impl HubState {
     }
 
     /// Take the clipboard: offer `payload` as the new selection.
+    ///
+    /// The compositor answers later, and may refuse without a word: Mutter
+    /// ignores a serial no newer than the one the current selection was set
+    /// with, two copies with no input between them included. So the source
+    /// this replaces is not destroyed here. It goes when the compositor
+    /// cancels it, which it does as it takes the new one; if the new one is
+    /// refused instead, the older one is still the clipboard, and still ours
+    /// to serve (see [`Self::selection_checked`]).
     #[cfg_attr(
         not(feature = "clipboard"),
         allow(
@@ -228,16 +275,51 @@ impl HubState {
             source.offer(mime.clone());
         }
         self.device.set_selection(Some(&source), serial);
-        if let Some(previous) = self.own.replace(OwnSelection {
+        self.conn.display().sync(&self.qh, source.clone());
+        self.checks.push(SelectionCheck {
+            source: source.clone(),
+            previous: self.owned.last().map(|own| own.source.clone()),
+            announced: false,
+        });
+        if self.owned.len() == MAX_OWNED_SOURCES {
+            self.owned.remove(0).source.destroy();
+        }
+        self.owned.push(OwnSelection {
             source,
             payload,
             owner_data,
-        }) {
-            // The compositor has moved on to the new source; nothing will ask
-            // the old one for data again.
-            previous.source.destroy();
-        }
+        });
         Ok(())
+    }
+
+    /// The compositor has handled the `set_selection` of `source`. It refused
+    /// it when it neither announced a new selection to us nor cancelled the
+    /// source of ours it would have replaced: that one is still the clipboard.
+    /// The refused source is dropped, so what this process reads back is what
+    /// every other application reads.
+    ///
+    /// With no earlier source of ours there is nothing to tell a silent refusal
+    /// by, and the new source is kept; a refusal with a cancel (Mutter's for a
+    /// client without keyboard focus) is handled by the `cancelled` itself.
+    fn selection_checked(&mut self, source: &WlDataSource) {
+        let Some(at) = self.checks.iter().position(|c| &c.source == source) else {
+            return;
+        };
+        let check = self.checks.remove(at);
+        let previous_kept = check
+            .previous
+            .as_ref()
+            .is_some_and(|previous| self.owned.iter().any(|own| &own.source == previous));
+        if check.announced || !previous_kept {
+            return;
+        }
+        if let Some(at) = self.owned.iter().position(|own| own.source == check.source) {
+            self.owned.remove(at);
+            check.source.destroy();
+            eprintln!(
+                "teksilo-platform: the compositor ignored a copy (no input since the previous one?); the clipboard keeps what was copied before"
+            );
+        }
     }
 
     /// Ask the selection's owner to write `mime` into a pipe, and return the
@@ -257,9 +339,14 @@ impl HubState {
             .ok_or_else(|| "the clipboard is empty".to_string())?;
         let (read, write) = io::pipe().map_err(|err| format!("cannot create a pipe: {err}"))?;
         offer.receive(mime.to_string(), write.as_fd());
-        self.conn
-            .flush()
-            .map_err(|err| format!("cannot reach the compositor: {err}"))?;
+        match self.conn.flush() {
+            Ok(()) => {}
+            // A full socket buffer: libwayland keeps the request, with its own
+            // copy of the descriptor, and the next flush sends it. The bounded
+            // read covers the wait.
+            Err(WaylandError::Io(io)) if io.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(err) => return Err(format!("cannot reach the compositor: {err}")),
+        }
         // Our copy of the write end is closed here, so the reader sees the end
         // once the owner closes theirs.
         drop(write);
@@ -268,9 +355,9 @@ impl HubState {
 
     /// Serve `mime` of the selection we own over `fd`.
     fn serve_selection(&self, source: &WlDataSource, mime: &str, fd: OwnedFd) {
-        let Some(own) = self.own.as_ref().filter(|own| &own.source == source) else {
-            // A source we replaced: it has nothing to say any more. Closing the
-            // pipe gives the reader an empty answer at once.
+        let Some(own) = self.owned.iter().find(|own| &own.source == source) else {
+            // A source we no longer keep: it has nothing to say any more.
+            // Closing the pipe gives the reader an empty answer at once.
             return;
         };
         let Some((_, bytes)) = own.payload.iter().find(|(m, _)| m == mime) else {
@@ -387,7 +474,8 @@ impl WaylandDataHub {
             serials: InputSerials::default(),
             press_serials: TouchSerialSource::default(),
             selection_offer: None,
-            own: None,
+            owned: Vec::new(),
+            checks: Vec::new(),
             dnd: dnd::DndState::default(),
         };
         // The seat's capabilities, and with them the keyboard whose focus the
@@ -711,16 +799,32 @@ impl Dispatch<WlDataSource, SourceKind> for HubState {
                     state.serve_selection(source, &mime_type, fd);
                 }
                 DataSourceEvent::Cancelled => {
-                    // Another client took the clipboard (or the compositor
-                    // refused ours). Ours no longer is.
-                    if state.own.as_ref().is_some_and(|own| &own.source == source) {
-                        state.own = None;
-                    }
+                    // Replaced (by another client's copy or a newer one of
+                    // ours), or refused. Either way it is no longer the
+                    // clipboard; an older source of ours, if one is left, still
+                    // may be.
+                    state.owned.retain(|own| &own.source != source);
                     source.destroy();
                 }
                 _ => {}
             },
             SourceKind::Drag => dnd::source_event(state, source, event),
+        }
+    }
+}
+
+/// The `wl_display.sync` sent after a `set_selection`, carrying its source.
+impl Dispatch<WlCallback, WlDataSource> for HubState {
+    fn event(
+        state: &mut Self,
+        _: &WlCallback,
+        event: CallbackEvent,
+        source: &WlDataSource,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let CallbackEvent::Done { .. } = event {
+            state.selection_checked(source);
         }
     }
 }
@@ -739,6 +843,12 @@ impl Dispatch<WlDataDevice, ()> for HubState {
             // and a `selection` or an `enter` then says what it is for.
             DataDeviceEvent::DataOffer { .. } => {}
             DataDeviceEvent::Selection { id } => {
+                // The compositor handles requests in order, so this answers the
+                // oldest `set_selection` still waiting: the others' syncs come
+                // back after its own.
+                if let Some(oldest) = state.checks.first_mut() {
+                    oldest.announced = true;
+                }
                 if let Some(previous) = state.selection_offer.take()
                     && id.as_ref() != Some(&previous)
                 {

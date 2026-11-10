@@ -697,6 +697,93 @@ fn a_copy_survives_the_window_that_made_it() {
 
 #[test]
 #[ignore = "needs mutter, dbus-daemon and wl-clipboard; run with --ignored"]
+fn another_clients_copy_replaces_ours() {
+    let Some(compositor) = Compositor::start() else {
+        return;
+    };
+    let mut teksilo = Teksilo::open(&compositor);
+    teksilo
+        .clipboard
+        .set_text("ours")
+        .expect("a focused window can copy");
+    teksilo.window.pump();
+    // Our source is cancelled as wl-copy's takes its place; a paste in teksilo
+    // must then read the other client's text, not ours from memory.
+    compositor.copy(&[], "theirs");
+    wait_for(
+        "the other client's copy to replace ours",
+        Duration::from_secs(10),
+        || teksilo.window.pump(),
+        || teksilo.clipboard.get_text().ok().as_deref() == Some("theirs"),
+    );
+}
+
+#[test]
+#[ignore = "needs mutter, dbus-daemon and wl-clipboard; run with --ignored"]
+fn a_copy_the_compositor_ignores_leaves_the_previous_one() {
+    let Some(compositor) = Compositor::start() else {
+        return;
+    };
+    let mut teksilo = Teksilo::open(&compositor);
+    // Two copies with no input between them carry the same serial, and Mutter
+    // ignores a `set_selection` whose serial is no newer than the selection's
+    // (`selection_serial - serial < UINT32_MAX / 2`), without a word. The
+    // first copy must survive the second's refusal, for teksilo and for
+    // everyone else alike.
+    teksilo
+        .clipboard
+        .set_text("first")
+        .expect("a focused window can copy");
+    teksilo
+        .clipboard
+        .set_text("second")
+        .expect("the request goes out; the compositor answers later");
+    wait_for(
+        "the ignored copy to be dropped",
+        Duration::from_secs(10),
+        || teksilo.window.pump(),
+        || teksilo.clipboard.get_text().ok().as_deref() == Some("first"),
+    );
+    assert_eq!(compositor.paste(&["--no-newline"]), "first");
+}
+
+#[test]
+#[ignore = "needs mutter, dbus-daemon and wl-clipboard; run with --ignored"]
+fn a_copy_refused_for_want_of_focus_leaves_the_previous_one() {
+    let Some(compositor) = Compositor::start() else {
+        return;
+    };
+    let conn = compositor.connect();
+    let hub = WaylandDataHub::for_connection(conn.clone()).expect("the hub starts");
+    let mut clipboard = WaylandClipboard::on_hub(hub.clone());
+    let mut window = Window::open(&conn, "only");
+    wait_for(
+        "focus",
+        Duration::from_secs(10),
+        || window.pump(),
+        || hub.with_state(|s| s.has_keyboard_focus()).unwrap_or(false),
+    );
+    clipboard
+        .set_text("kept")
+        .expect("a focused window can copy");
+    window.pump();
+    // With its only window gone the process has no focus, so the next copy is
+    // refused; the one before it must stay the clipboard.
+    window.close();
+    wait_for(
+        "the focus to leave",
+        Duration::from_secs(10),
+        || {},
+        || !hub.with_state(|s| s.has_keyboard_focus()).unwrap_or(true),
+    );
+    let err = clipboard.set_text("refused").unwrap_err();
+    assert!(err.contains("keyboard focus"), "{err}");
+    assert_eq!(compositor.paste(&["--no-newline"]), "kept");
+    hub.shutdown();
+}
+
+#[test]
+#[ignore = "needs mutter, dbus-daemon and wl-clipboard; run with --ignored"]
 fn copying_without_focus_is_refused_not_lost() {
     let Some(compositor) = Compositor::start() else {
         return;

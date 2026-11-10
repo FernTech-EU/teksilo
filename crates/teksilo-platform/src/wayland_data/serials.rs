@@ -7,9 +7,12 @@
 //! The core clipboard protocol ties a selection to user input twice:
 //!
 //! * the request carries the **serial of an input event**, and a compositor
-//!   may refuse a serial older than the selection it already holds (Weston and
-//!   Mutter both compare `selection_serial - serial < UINT32_MAX / 2` and
-//!   ignore the request when it is older);
+//!   may ignore, without a word, a serial that is not newer than the one the
+//!   selection it already holds was set with. Mutter 50 ignores an equal one
+//!   too (`selection_serial - serial < UINT32_MAX / 2`), so two copies with no
+//!   input between them leave the first in place; Weston ignores only an older
+//!   one (`serial - selection_serial > UINT32_MAX / 2`). The hub keeps the
+//!   earlier source until the compositor answers (`HubState::set_selection`);
 //! * Mutter refuses (and cancels the source of) a `set_selection` from any
 //!   client but the one with **keyboard focus**, and every compositor sends a
 //!   client the current selection only while it has that focus.
