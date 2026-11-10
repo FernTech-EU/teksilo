@@ -3,7 +3,7 @@
 
 //! The system clipboard over the core Wayland protocol (`wl_data_device`).
 //!
-//! The protocol work — the device, the serial, serving and receiving — is the
+//! The protocol work (the device, the serial, serving and receiving) is the
 //! shared [`WaylandDataHub`]'s; this module is the clipboard's policy on top of
 //! it: which MIME types we offer, which of another application's we take, and
 //! how their bytes become text.
@@ -302,12 +302,12 @@ fn essence_and_charset(mime: &str) -> (String, Option<&str>) {
 impl<'a> TextMime<'a> {
     /// How good `mime` is as text, or `None` when it is not text we read.
     ///
-    /// 0. `text/plain;charset=utf-8` — the standard, exact name;
-    /// 1. `UTF8_STRING` — the X11 name for the same, all XWayland clients;
+    /// 0. `text/plain;charset=utf-8`: the standard, exact name;
+    /// 1. `UTF8_STRING`: the X11 name for the same, all XWayland clients;
     /// 2. `text/plain` with another charset we can decode;
-    /// 3. `text/plain` with none — UTF-8 in practice on Linux;
-    /// 4. `TEXT` — X11's "any encoding", UTF-8 when it is valid UTF-8;
-    /// 5. `STRING` — X11's ISO 8859-1, which loses everything past U+00FF.
+    /// 3. `text/plain` with none: UTF-8 in practice on Linux;
+    /// 4. `TEXT`: X11's "any encoding", UTF-8 when it is valid UTF-8;
+    /// 5. `STRING`: X11's ISO 8859-1, which loses everything past U+00FF.
     fn rank(mime: &'a str) -> Option<Self> {
         let (rank, charset) = match mime {
             "UTF8_STRING" => (1, Charset::Utf8),
@@ -533,14 +533,14 @@ mod tests {
 
     #[test]
     fn our_copy_round_trips_through_our_own_decoder() {
-        for (mime, bytes) in payload("ligne 1\nligne 2 — ✓", None) {
+        for (mime, bytes) in payload("ligne 1\nligne 2 ☃ ✓", None) {
             let decoded = best_text_mime(std::slice::from_ref(&mime))
                 .unwrap()
                 .decode(&bytes);
             let expected = if mime == "STRING" {
                 "ligne 1\nligne 2 ? ?"
             } else {
-                "ligne 1\nligne 2 — ✓"
+                "ligne 1\nligne 2 ☃ ✓"
             };
             assert_eq!(decoded, expected, "{mime}");
         }

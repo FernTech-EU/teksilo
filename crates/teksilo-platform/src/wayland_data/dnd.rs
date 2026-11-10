@@ -177,7 +177,7 @@ pub(crate) fn begin_outbound(
         return;
     };
     // `start_drag` needs the serial of the press that opened the current
-    // implicit grab — a `wl_pointer::button` for a mouse or pen, a
+    // implicit grab: a `wl_pointer::button` for a mouse or pen, a
     // `wl_touch::down` for a finger. Without one held, the compositor would
     // refuse silently and never send a terminal event; report the
     // cancellation instead. Taking the serial also stops counting its press as
@@ -205,7 +205,7 @@ pub(crate) fn begin_outbound(
         source.offer(mime);
     }
     if source.version() >= 3 {
-        // Copy only — never advertise Move, which would let the destination
+        // Copy only: never advertise Move, which would let the destination
         // physically relocate a dragged file. Move-out is an explicit opt-in.
         source.set_actions(DndAction::Copy);
     }
@@ -239,7 +239,7 @@ fn finish_outbound(state: &mut HubState, outcome: DropOutcome) {
     // Our own drag ending while it is over one of our windows is the one abort
     // a destination can be told about: the window holding the re-entered
     // session gets no `leave` for a drag the compositor has simply stopped. A
-    // live route here can only belong to this drag — a seat carries one drag
+    // live route here can only belong to this drag: a seat carries one drag
     // at a time.
     if state.dnd.active_route.is_some() {
         state.dnd.post_routed(ExternalDragEvent::Cancelled);
@@ -347,7 +347,7 @@ pub(super) fn device_event(state: &mut HubState, event: DataDeviceEvent) {
             let mimes = id.as_ref().map(offer_mimes).unwrap_or_default();
             state.dnd.active_route = Some(route);
             state.dnd.position = Point::new(x as f32, y as f32);
-            // Accept a type we can read AND negotiate an action — both, or the
+            // Accept a type we can read AND negotiate an action, both, or the
             // compositor shows the "forbidden" cursor and blocks the drop.
             state.dnd.offer_serial = serial;
             state.dnd.offer_accepted_mime = pick_mime(&mimes);

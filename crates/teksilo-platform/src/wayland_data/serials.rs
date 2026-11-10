@@ -10,7 +10,7 @@
 //!   may refuse a serial older than the selection it already holds (Weston and
 //!   Mutter both compare `selection_serial - serial < UINT32_MAX / 2` and
 //!   ignore the request when it is older);
-//! * Mutter refuses — and cancels the source of — a `set_selection` from any
+//! * Mutter refuses (and cancels the source of) a `set_selection` from any
 //!   client but the one with **keyboard focus**, and every compositor sends a
 //!   client the current selection only while it has that focus.
 //!

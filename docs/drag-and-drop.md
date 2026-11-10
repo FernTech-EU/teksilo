@@ -446,7 +446,7 @@ Teksilo advertises in either direction (§11.5).
 |---|---|---|---|
 | **macOS** | `NSDraggingDestination` on a transparent overlay `NSView` | `NSDraggingSource` on the same overlay | Full position + files + text + URLs. Both directions verified. |
 | **Windows** | OLE `IDropTarget` (`RevokeDragDrop` winit's, then `RegisterDragDrop` ours) | OLE `IDropSource` + `DoDragDrop` (deferred off the dispatch that armed it) | Inbound: full position + formats. |
-| **Wayland** | `wl_data_device` from the seat | `wl_data_source` + `start_drag` | No winit conflict (winit leaves Wayland DnD unimplemented). Both directions verified. |
+| **Wayland** | `wl_data_device` from the seat | `wl_data_source` + `start_drag` | No winit conflict (winit leaves Wayland DnD unimplemented). The process binds **one** device, shared with the clipboard: Mutter keeps one device per client and silences an older one, and sends a drag to one device only. Both directions verified. |
 | **X11** | XDND v5 via an `XdndProxy` helper window | XDND source: owns `XdndSelection`, polls the pointer, serves the selection (incl. `INCR`) | Full position + arbitrary MIME types. See §11.3.1. |
 
 winit's own `DroppedFile` / `HoveredFile` events are *not* used: they carry no
@@ -649,16 +649,14 @@ of the same app**. A drop back on the **source window** reports
 `InApp { accepted }` to the source, whatever the platform says (it reports a
 copy): the window holds the in-app outcome until the platform's `DragEnded` and
 delivers it then, once. Limitation: a drop accepted in **another window** of the
-app reports `OsCopy` (the OS's view). On Wayland with several windows, the drop
-on the source window may be posted by another window's thread, unordered with
-the source thread's `DragEnded`; when the end arrives first, the source hears
-`OsCopy` for an in-app drop, as before this rule.
+app reports `OsCopy` (the OS's view). On Wayland one thread posts both the drop
+on the source window and the source's `DragEnded`, the drop first.
 
 **Per-platform:** macOS uses `NSDraggingSource` + `beginDraggingSessionWithItems:event:source:`
 (triggering event from `NSApp.currentEvent`); Windows runs OLE `DoDragDrop` on the
 next event-loop turn (it spins its own modal loop, so it cannot run inside the
 dispatch that armed the escalation); Wayland uses `wl_data_source` +
-`wl_data_device.start_drag` with a press serial captured on the DnD thread (see
+`wl_data_device.start_drag` with a press serial captured on the Wayland data thread (see
 below; the `Drop` handler skips the pipe-read for a self-drag to avoid a
 single-thread deadlock); X11 owns `XdndSelection` from its proxy window
 and polls the pointer rather than grabbing it (§11.3.1). A backend that cannot
@@ -684,14 +682,14 @@ backend, and on Wayland that is load-bearing rather than informational:
 given, a mouse opens one with `wl_pointer::button` and a finger with
 `wl_touch::down`, and handing over the wrong one makes the compositor refuse the
 request **silently**, no drag starts and no terminal event ever arrives, so the
-framework is left waiting for a drag that never existed. The DnD thread therefore
+framework is left waiting for a drag that never existed. The Wayland data thread therefore
 binds `wl_touch` beside `wl_pointer` and keeps the latest press serial per device
 class (`TouchSerialSource`); a device with no press of its own yields *no* serial
 rather than the other device's, so the backend reports the start as cancelled
 and the framework tears its bookkeeping down. Before this a finger could not
-export a drag at all. A press already released when the DnD thread gets to the
-start yields no serial either: an `Eager` drag asks on its first move, and a
-quick release can beat the thread by a few milliseconds.
+export a drag at all. A press already released when the drag starts yields no
+serial either: an `Eager` drag asks on its first move, and a quick release can
+come first.
 
 ### 11.6 The `DropTarget` widget
 

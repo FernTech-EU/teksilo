@@ -13,6 +13,36 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Platform
+
+- **The system clipboard works on every Wayland compositor, GNOME's
+  included, and in a Flatpak with no X server.** On Wayland the clipboard is
+  now the core protocol (`wl_data_device`) on the application's own
+  connection, which every compositor implements. Before, it needed a
+  data-control protocol, which GNOME does not offer, then an X server: with
+  neither (GNOME under Flatpak's `--socket=wayland`), copy and paste worked
+  only inside the application, without a word. Text and HTML are exchanged as
+  before, under all the usual type names, and a copy stays available after
+  the window that made it closes. X11, macOS and Windows keep `arboard`.
+- **An application with no reachable system clipboard says so on stderr**
+  (`teksilo-platform: the system clipboard is unavailable (…)`) instead of
+  falling back to an in-process clipboard silently.
+- **External drag-and-drop on GNOME no longer depends on window order.** The
+  backend bound a `wl_data_device` per window, and Mutter keeps only one per
+  application: a drag could reach a window's device that no longer heard
+  anything. The application now binds one device, shared with the clipboard.
+- **A paste or a drop from an application that never sends its data gives up
+  after a few seconds** instead of freezing the window.
+
+### Added
+
+#### Platform
+
+- `teksilo_platform::clipboard::system_clipboard`, the system clipboard for
+  the display winit connected to (what `TeksiloAppBuilder` installs).
+
 ## [0.25.0] - 2026-11-10
 
 ### Added

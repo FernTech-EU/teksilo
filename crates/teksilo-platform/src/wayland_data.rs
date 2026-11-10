@@ -32,8 +32,8 @@
 //! A thread of ours services that queue. winit cannot: it only calls back for
 //! events on its own queue, and skips its `about_to_wait` on a wake-up that
 //! dispatched nothing of its own (`winit` 0.30, Wayland `pump_events`, "Reduce
-//! spurious wake-ups"). Yet a `wl_data_source::send` — another application
-//! pasting what we copied — arrives exactly when we are idle and unfocused. The
+//! spurious wake-ups"). Yet a `wl_data_source::send` (another application
+//! pasting what we copied) arrives exactly when we are idle and unfocused. The
 //! thread takes part in reading the socket through libwayland's
 //! `prepare_read` / `read_events` protocol, the one Mesa's EGL uses on an
 //! application's display from its own threads: a prepared reader is woken by
@@ -45,7 +45,7 @@
 //! itself first** ([`WaylandDataHub::with_state`]): when winit runs a Copy
 //! command for a key press, our copy of that key event is already queued (the
 //! same read delivered both), so dispatching it before choosing a serial is
-//! what makes the serial current — see [`serials`].
+//! what makes the serial current (see [`serials`]).
 //!
 //! The hub keeps the display connection alive (`keepalive`) for as long as it
 //! exists, so its proxies never outlive the display they were created on, and
@@ -156,7 +156,7 @@ pub(crate) struct HubState {
     manager: WlDataDeviceManager,
     device: WlDataDevice,
     _seat: WlSeat,
-    /// Bound on the seat's announcement only — never ahead of it. Mutter
+    /// Bound on the seat's announcement only, never ahead of it. Mutter
     /// served a `get_touch` on a seat without touch out of an uninitialised
     /// list and gnome-shell crashed, taking the whole session with it; the same
     /// rule is followed for every device here.
