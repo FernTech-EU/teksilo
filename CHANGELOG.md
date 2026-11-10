@@ -40,12 +40,54 @@ by crate for clarity, not because crates version independently.
 - **A paste or a drop from an application that never sends its data gives up
   after a few seconds** instead of freezing the window.
 
+#### Input
+
+- **Dragging and selecting with a fast mouse no longer lag.** With a 1000 Hz
+  mouse on GNOME, dragging a tree row or a tab and selecting text fell to one
+  or two frames a second, and hundreds of moves were still being handled
+  after the button was released. A pointer move no longer lays out every
+  window, and on X11 and Wayland the mouse moves of one event-loop turn are
+  handled together.
+- **Spring-loaded folders open and drop targets scroll at their edge with
+  the pointer held still.** A drop target's `on_drag_tick` now runs on every
+  frame of a drag, also while the pointer rests or moves inside one row, and
+  during a drag from another application. It used to run only when
+  something else redrew the window.
+
+### Changed
+
+#### Input
+
+- **Behaviour change:** on X11 and Wayland, the mouse moves of one
+  event-loop turn reach widgets as one `PointerMove` at the latest position,
+  with the earlier positions in `PointerSample::coalesced`, as pen moves
+  already do. A widget the pointer crosses entirely within one turn gets no
+  hover enter or leave, as on macOS and Windows, which are unchanged.
+- **Behaviour change:** a `Slider`'s or `ScrollBar`'s value signal, a drop
+  indicator, and the rich-text editor's cursor and selection signals notify
+  only when their value changes.
+- teksilo no longer asks winit for device events, where each raw motion woke
+  the event loop: on Windows at once, and on X11 from the first time one of
+  the application's windows gains or loses focus.
+
+#### Core
+
+- A theme override (`WidgetTree::set_theme_override`) no longer copies the
+  theme for every widget under it on each layout and paint: once per layout,
+  and in a paint only when something under it repaints or uses
+  `after_paint`.
+
 ### Added
 
 #### Platform
 
 - `teksilo_platform::clipboard::system_clipboard`, the system clipboard for
   the display winit connected to (what `TeksiloAppBuilder` installs).
+
+#### Diagnostics
+
+- `TEKSILO_IDLE_TRACE` reports the mouse moves received, dropped, folded and
+  dispatched (`move_buffer={offered,dropped,folded,dispatched}`).
 
 ## [0.25.0] - 2026-11-10
 
