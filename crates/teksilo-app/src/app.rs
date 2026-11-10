@@ -7040,6 +7040,32 @@ impl TeksiloAppBuilder {
 
         let event_loop = build_loop();
         event_loop.set_control_flow(ControlFlow::Wait);
+        // Nothing in Teksilo reads a winit `DeviceEvent`: the handler has no
+        // `device_event`, and the pointer and keyboard arrive as window
+        // events. winit asks for them by default (`WhenFocused`), so a fast
+        // mouse sends its motion twice.
+        //
+        // When this takes effect differs per backend:
+        // - Windows: at once. winit registered raw input for every mouse and
+        //   keyboard as it built the loop, and this call registers again,
+        //   removing it.
+        // - X11: at the first focus change of a window of this application,
+        //   not before. winit selects raw motion, buttons and keys on the
+        //   root window as it builds the loop, whatever the focus, and this
+        //   call only stores the setting; winit applies it when a window
+        //   takes or loses the focus, and no public call applies it sooner.
+        //   Until then every raw event on the screen, the pointer outside the
+        //   window included, reaches and wakes the loop, which is what an
+        //   application whose first window is mapped without the focus
+        //   (focus-stealing prevention, a window opened behind another) keeps
+        //   doing until the user focuses it once.
+        // - Wayland and macOS: never. winit's `listen_device_events` is an
+        //   empty function on both; on Wayland the relative pointer is bound
+        //   for every seat with a pointer whenever the compositor offers the
+        //   protocol. The device events still arrive there, beside the
+        //   window events that carry the same motion, and the default
+        //   `device_event` drops them.
+        event_loop.listen_device_events(winit::event_loop::DeviceEvents::Never);
         // Before the first window: AppKit reads it as windows are ordered in.
         teksilo_platform::set_automatic_window_tabbing(self.window_tabbing);
         // Before the first window too: each window's text input attaches as
