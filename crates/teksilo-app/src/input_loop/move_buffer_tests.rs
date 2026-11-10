@@ -702,6 +702,52 @@ fn a_selection_extended_by_a_burst_ends_at_the_last_position() {
     assert_eq!(handle.selection(), (2, 9));
 }
 
+// -- what the idle trace counts --------------------------------------------------
+
+/// The trace's move counts add up, in `CursorMoved` events: every move
+/// offered is either dropped by the translator, folded into another, or
+/// dispatched, and a sample that is not a move is in none of them.
+#[test]
+fn the_counted_moves_add_up_to_the_moves_offered() {
+    let mut buffer = MoveBuffer::new();
+    let mut offered = 0_u64;
+    let mut dropped = 0_u64;
+    let (mut dispatched, mut folded) = (0_u64, 0_u64);
+    let mut count = |released: &[(u8, InputSample)]| {
+        let samples: Vec<InputSample> = released.iter().map(|(_, s)| s.clone()).collect();
+        let (moves, batch) = count_moves(&samples);
+        dispatched += moves;
+        folded += batch;
+    };
+
+    // Four moves, one of them X11's emulated pointer (no sample), then a
+    // press, which releases the three that made it.
+    for (ms, samples) in [
+        (1, vec![InputSample::Pointer(mouse_move(10.0, 1))]),
+        (2, Vec::new()),
+        (3, vec![InputSample::Pointer(mouse_move(30.0, 3))]),
+        (4, vec![InputSample::Pointer(mouse_move(40.0, 4))]),
+    ] {
+        offered += 1;
+        if samples.is_empty() {
+            dropped += 1;
+        }
+        let released = buffer.offer(1_u8, samples);
+        assert!(released.is_empty(), "nothing released at {ms} ms");
+    }
+    let down = PointerSample::mouse(PointerPhase::Down, p(40.0, 0.0), EventTime::from_millis(5))
+        .with_button(teksilo_core::event::PointerButton::Primary);
+    let released = buffer.offer(1_u8, vec![InputSample::Pointer(down)]);
+    assert_eq!(released.len(), 2, "the held move, then the press");
+    count(&released);
+    assert_eq!(
+        (offered, dropped, folded, dispatched),
+        (4, 1, 2, 1),
+        "one dispatch carrying two folded moves, one move dropped"
+    );
+    assert_eq!(offered, dropped + folded + dispatched);
+}
+
 // -- which windows hold --------------------------------------------------------
 
 /// Only the two window systems that deliver every motion event hold moves.

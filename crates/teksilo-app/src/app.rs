@@ -805,6 +805,23 @@ pub(crate) struct IdleTrace {
     /// distinct from `request_redraw_all` — surfaces how often the
     /// targeted cross-window path actually fires versus the blanket one.
     cross_window_redraws: u64,
+    /// The mouse moves of windows that hold them (`input_loop::MoveBuffer`),
+    /// each counted in `CursorMoved` events, so a trace reads moves
+    /// received and moves dispatched per second directly:
+    /// - `moves_offered`: every `CursorMoved` such a window received;
+    /// - `moves_dropped`: of those, the ones the translator turned into no
+    ///   sample (X11's emulated pointer during a contact);
+    /// - `moves_folded`: the ones that reached the tree inside another
+    ///   move's `coalesced` list rather than as a dispatch of their own;
+    /// - `moves_dispatched`: the `PointerMove` dispatches made.
+    ///
+    /// Over a run, offered = dropped + folded + dispatched, give or take the
+    /// one move held across a report and the moves of a window that closed
+    /// while one was held, which are in none of the last three.
+    moves_offered: u64,
+    moves_dropped: u64,
+    moves_folded: u64,
+    moves_dispatched: u64,
     idle_callbacks_run: u64,
     /// App events that reached the public dispatch (`on_app_event` and the
     /// framework's arms); a framework-private wake is not one.
@@ -946,6 +963,10 @@ impl IdleTrace {
             resize_redraw_requests: 0,
             frame_request_redraws: 0,
             cross_window_redraws: 0,
+            moves_offered: 0,
+            moves_dropped: 0,
+            moves_folded: 0,
+            moves_dispatched: 0,
             idle_callbacks_run: 0,
             app_events: 0,
             posted_draw_wakes: 0,
@@ -1005,6 +1026,24 @@ impl IdleTrace {
             "resize" => self.resize_redraw_requests += 1,
             _ => {}
         }
+        self.maybe_report();
+    }
+
+    /// A `CursorMoved` offered to the move buffer; `dropped` when the
+    /// translator made no sample of it.
+    fn note_move_offered(&mut self, dropped: bool) {
+        self.moves_offered += 1;
+        if dropped {
+            self.moves_dropped += 1;
+        }
+        self.maybe_report();
+    }
+
+    /// `dispatched` `PointerMove`s reached a tree, carrying `folded` moves
+    /// between them in their `coalesced` lists.
+    fn note_moves_dispatched(&mut self, dispatched: u64, folded: u64) {
+        self.moves_dispatched += dispatched;
+        self.moves_folded += folded;
         self.maybe_report();
     }
 
@@ -1097,7 +1136,7 @@ impl IdleTrace {
         }
 
         eprintln!(
-            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} ticks={} resume_time_reached={} woken_by={{{}}} window_events={{{}}} user_events={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{},gpu_reclaim:{}}} timers={{windows:{},animations:{},tooltips:{}}}",
+            "teksilo_idle_trace t={:.3} redraw_requested={} rendered_frames={} hidden_redraws={} ticks={} resume_time_reached={} woken_by={{{}}} window_events={{{}}} user_events={} request_redraw_all={} cross_window_redraws={} input_redraws={{cursor:{},mouse_input:{},mouse_wheel:{},keyboard:{},resize:{},frame_request:{}}} idle_callbacks={} app_events={} posted_wakes={{draw:{},layout:{}}} waker_wakes={} waker_wakes_dropped={} control_flow={{wait:{},wait_until:{},gpu_reclaim:{}}} timers={{windows:{},animations:{},tooltips:{}}} move_buffer={{offered:{},dropped:{},folded:{},dispatched:{}}}",
             self.started.elapsed().as_secs_f64(),
             self.redraw_requested,
             self.rendered_frames,
@@ -1127,6 +1166,10 @@ impl IdleTrace {
             self.timer_windows,
             self.animation_timers,
             self.tooltip_timers,
+            self.moves_offered,
+            self.moves_dropped,
+            self.moves_folded,
+            self.moves_dispatched,
         );
 
         self.last_report = Instant::now();
@@ -1140,6 +1183,10 @@ impl IdleTrace {
         self.ticks = 0;
         self.request_redraw_all = 0;
         self.cross_window_redraws = 0;
+        self.moves_offered = 0;
+        self.moves_dropped = 0;
+        self.moves_folded = 0;
+        self.moves_dispatched = 0;
         self.cursor_redraw_requests = 0;
         self.mouse_input_redraw_requests = 0;
         self.mouse_wheel_redraw_requests = 0;
@@ -2435,6 +2482,9 @@ impl TeksiloAppHandler {
         }
         let samples =
             crate::input_routing::translate(&mut managed.translation_state, &managed.tree, event);
+        if let Some(trace) = &mut self.idle_trace {
+            trace.note_move_offered(samples.is_empty());
+        }
         let released = self.held_move.offer((window_id, device_id), samples);
         self.dispatch_released_moves(released, event_loop);
         true
@@ -2482,9 +2532,15 @@ impl TeksiloAppHandler {
             {
                 samples.push(sample);
             }
-            self.with_input_in_window(window_id, event_loop, |chrome, _backend, tree, ops| {
-                crate::input_loop::dispatch_released_moves(chrome, tree, ops, samples);
-            });
+            let (moves, folded) = crate::input_loop::count_moves(&samples);
+            let delivered = self
+                .with_input_in_window(window_id, event_loop, |chrome, _backend, tree, ops| {
+                    crate::input_loop::dispatch_released_moves(chrome, tree, ops, samples);
+                })
+                .is_some();
+            if delivered && let Some(trace) = &mut self.idle_trace {
+                trace.note_moves_dispatched(moves, folded);
+            }
             self.post_event(event_loop);
         }
     }

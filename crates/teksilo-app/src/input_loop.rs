@@ -367,6 +367,23 @@ fn fold(held: PointerSample, next: &mut PointerSample) {
     next.coalesced = merged;
 }
 
+/// How many of `samples` are moves, and how many moves those carry folded
+/// into their `coalesced` lists: what the idle trace counts of a released
+/// batch, in `CursorMoved` events.
+///
+/// A move the loop translated from one `CursorMoved` carries no batch of its
+/// own (winit reports no intermediate positions), so each `coalesced` entry
+/// on a released move is one `CursorMoved` that [`MoveBuffer::offer`] folded.
+pub(crate) fn count_moves(samples: &[InputSample]) -> (u64, u64) {
+    samples
+        .iter()
+        .filter_map(|sample| match sample {
+            InputSample::Pointer(p) if is_pure_move(p) => Some(p.coalesced.len() as u64),
+            _ => None,
+        })
+        .fold((0, 0), |(moves, folded), batch| (moves + 1, folded + batch))
+}
+
 /// Dispatch samples a [`MoveBuffer`] released, then do the chores a
 /// `CursorMoved` owes: push the tree's cursor, and ask for a frame only when
 /// the tree needs one, as [`dispatch_input`] does for a move.
