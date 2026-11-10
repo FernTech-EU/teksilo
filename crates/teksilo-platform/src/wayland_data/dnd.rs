@@ -73,6 +73,11 @@ struct Outbound {
     /// Set once the drop is performed, so a trailing `cancelled` does not
     /// override the success outcome.
     dropped: bool,
+    /// Started by a finger (`wl_touch`) rather than a pointer.
+    coarse: bool,
+    /// Whether the compositor has shown it took the `start_drag`: an event on
+    /// the source, or an `enter`.
+    answered: bool,
 }
 
 /// Drag-and-drop state, part of [`HubState`].
@@ -219,7 +224,28 @@ pub(crate) fn begin_outbound(
         data,
         action: DndAction::empty(),
         dropped: false,
+        coarse: pointer.is_coarse(),
+        answered: false,
     });
+}
+
+/// A button release (or, for `coarse`, a touch up) reached our own
+/// `wl_pointer` / `wl_touch`. Once the compositor turns the press's implicit
+/// grab into a drag, the release goes to the drag and never reaches us; one
+/// that does, while the drag of that device class is still unanswered, means
+/// the compositor ignored `start_drag` (the release was already on its way, or
+/// the grab check failed). Mutter does so without a word and without
+/// cancelling the source, so nothing else would ever end the drag, and every
+/// later drop on our windows would be taken for a drop of our own.
+pub(crate) fn release_reached_us(state: &mut HubState, coarse: bool) {
+    if state
+        .dnd
+        .outbound
+        .as_ref()
+        .is_some_and(|o| o.coarse == coarse && !o.answered && !o.dropped)
+    {
+        finish_outbound(state, DropOutcome::Cancelled);
+    }
 }
 
 /// End the outbound drag at the framework's request (a release before the
@@ -272,6 +298,9 @@ pub(super) fn source_event(state: &mut HubState, source: &WlDataSource, event: D
             source.destroy();
         }
         return;
+    }
+    if let Some(outbound) = &mut state.dnd.outbound {
+        outbound.answered = true;
     }
     match event {
         DataSourceEvent::Send { mime_type, fd } => {
@@ -339,6 +368,11 @@ pub(super) fn device_event(state: &mut HubState, event: DataDeviceEvent) {
                 previous.destroy();
             }
             state.dnd.offer = id.clone();
+            // A seat carries one drag: if ours is in flight, this is it, and
+            // the compositor took its start.
+            if let Some(outbound) = &mut state.dnd.outbound {
+                outbound.answered = true;
+            }
             let Some(route) = state.dnd.routes.get(&surface.id().protocol_id()).cloned() else {
                 // Not one of our surfaces (one already detached).
                 state.dnd.active_route = None;

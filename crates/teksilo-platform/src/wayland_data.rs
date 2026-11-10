@@ -733,6 +733,7 @@ impl Dispatch<WlPointer, ()> for HubState {
                     state.press_serials.record_pointer(serial);
                 } else {
                     state.press_serials.record_pointer_release();
+                    dnd::release_reached_us(state, false);
                 }
             }
             // A button held across a leave (a drag grab took it) is released
@@ -759,7 +760,10 @@ impl Dispatch<WlTouch, ()> for HubState {
                 state.serials.record(serial);
                 state.press_serials.record_touch(serial);
             }
-            TouchEvent::Up { .. } => state.press_serials.record_touch_up(),
+            TouchEvent::Up { .. } => {
+                state.press_serials.record_touch_up();
+                dnd::release_reached_us(state, true);
+            }
             // The compositor took every touch point away: none is held.
             TouchEvent::Cancel => state.press_serials.record_touch_cancel(),
             _ => {}
