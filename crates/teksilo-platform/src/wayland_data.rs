@@ -402,17 +402,26 @@ pub(crate) struct WaylandDataHub {
     _keepalive: Box<dyn Any + Send + Sync>,
 }
 
-/// Every hub of the process, one per display (an application has one).
-fn registry() -> &'static Mutex<Vec<Arc<WaylandDataHub>>> {
-    static HUBS: OnceLock<Mutex<Vec<Arc<WaylandDataHub>>>> = OnceLock::new();
-    HUBS.get_or_init(|| Mutex::new(Vec::new()))
+/// Every hub of the process, one per display (an application has one), and
+/// the displays a hub could not be made for, with why.
+#[derive(Default)]
+struct Registry {
+    hubs: Vec<Arc<WaylandDataHub>>,
+    failed: Vec<(usize, String)>,
+}
+
+fn registry() -> &'static Mutex<Registry> {
+    static HUBS: OnceLock<Mutex<Registry>> = OnceLock::new();
+    HUBS.get_or_init(Mutex::default)
 }
 
 impl WaylandDataHub {
     /// The hub for winit's Wayland display, created on first use.
     ///
     /// `Err` when `display` is not a Wayland display, or when the compositor
-    /// offers no seat or no data device manager.
+    /// offers no seat or no data device manager. A display the hub could not
+    /// be made for is not tried again: every window attaches its drag-and-drop
+    /// through here, and each attempt is a blocking roundtrip.
     pub(crate) fn for_display(
         display: &winit::event_loop::OwnedDisplayHandle,
     ) -> Result<Arc<Self>, String> {
@@ -425,20 +434,30 @@ impl WaylandDataHub {
             return Err("the display is not a Wayland display".into());
         };
         let ptr = wayland.display.as_ptr();
-        let mut hubs = registry()
+        let mut registry = registry()
             .lock()
             .map_err(|_| "the Wayland data registry is poisoned".to_string())?;
-        if let Some(hub) = hubs.iter().find(|hub| hub.display == ptr as usize) {
+        if let Some(hub) = registry.hubs.iter().find(|hub| hub.display == ptr as usize) {
             return Ok(hub.clone());
+        }
+        if let Some((_, why)) = registry.failed.iter().find(|(d, _)| *d == ptr as usize) {
+            return Err(why.clone());
         }
         // SAFETY: `ptr` is the live `wl_display` of winit's connection, which
         // `keepalive` (a clone of winit's owned display handle) keeps open for
         // as long as the hub, and so every proxy made on it, exists.
         let backend = unsafe { Backend::from_foreign_display(ptr.cast()) };
         let conn = Connection::from_backend(backend);
-        let hub = Self::start(conn, ptr as usize, Box::new(display.clone()))?;
-        hubs.push(hub.clone());
-        Ok(hub)
+        match Self::start(conn, ptr as usize, Box::new(display.clone())) {
+            Ok(hub) => {
+                registry.hubs.push(hub.clone());
+                Ok(hub)
+            }
+            Err(why) => {
+                registry.failed.push((ptr as usize, why.clone()));
+                Err(why)
+            }
+        }
     }
 
     /// The hub already serving the display at `ptr`, if one was created by
@@ -447,6 +466,7 @@ impl WaylandDataHub {
         registry()
             .lock()
             .ok()?
+            .hubs
             .iter()
             .find(|hub| hub.display == ptr)
             .cloned()
@@ -471,9 +491,20 @@ impl WaylandDataHub {
         let seat = globals
             .bind::<WlSeat, _, _>(&qh, 1..=5, ())
             .map_err(|err| format!("the compositor offers no seat: {err}"))?;
-        let manager = globals
-            .bind::<WlDataDeviceManager, _, _>(&qh, 1..=3, ())
-            .map_err(|err| format!("the compositor offers no data device manager: {err}"))?;
+        let manager = match globals.bind::<WlDataDeviceManager, _, _>(&qh, 1..=3, ()) {
+            Ok(manager) => manager,
+            Err(err) => {
+                // The seat is the application's connection's: give it back
+                // rather than leave the compositor holding it.
+                if seat.version() >= 5 {
+                    seat.release();
+                    let _ = conn.flush();
+                }
+                return Err(format!(
+                    "the compositor offers no data device manager: {err}"
+                ));
+            }
+        };
         let device = manager.get_data_device(&seat, &qh, ());
         let mut state = HubState {
             conn: conn.clone(),
@@ -581,13 +612,20 @@ impl WaylandDataHub {
             // SAFETY: `fds` holds two valid pollfds for the call's duration.
             let ready = unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
             if ready < 0 {
-                if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
                     // Dropping the guard cancels the read; prepare again.
                     continue;
                 }
+                if matches!(err.raw_os_error(), Some(libc::ENOMEM | libc::EAGAIN)) {
+                    // Short of memory for the poll's own bookkeeping: passing.
+                    // Stopping would leave the selection unserved for good.
+                    drop(guard);
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    continue;
+                }
                 eprintln!(
-                    "teksilo-platform: waiting on the Wayland connection failed ({}); clipboard and drag-and-drop stop",
-                    std::io::Error::last_os_error()
+                    "teksilo-platform: waiting on the Wayland connection failed ({err}); clipboard and drag-and-drop stop"
                 );
                 return;
             }
