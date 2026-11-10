@@ -2346,7 +2346,8 @@ impl WidgetTree {
     ///   driven, and every one of them contributes to
     ///   [`next_timer_deadline`](Self::next_timer_deadline) — which
     ///   `request_redraw_due` polls to wake precisely the due windows;
-    /// - drag ticks follow that window's own pointer stream;
+    /// - drag ticks ask for the frame tick while the drop target has a tick
+    ///   handler, so they too run on a deadline;
     /// - a handler that called `request_rebuild` marked the arena
     ///   directly, so `needs_render()` is already true without any
     ///   reconcile.

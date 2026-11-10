@@ -445,7 +445,9 @@ impl WidgetTree {
     }
 
     /// Fire `on_drag_tick` on the current drop target (if any). Runs once
-    /// per layout pass while a drag session is active. The handler
+    /// per layout pass while a drag session is active, and the drag asks for
+    /// a pass every frame while its target has the handler
+    /// ([`arm_drag_tick`](Self::arm_drag_tick)), moving or not. The handler
     /// receives the pointer position in the target's local coordinates.
     /// Fires from both external and own handler buckets.
     pub(super) fn process_drag_tick(&mut self, ops: &mut dyn crate::window::WindowOps) {
@@ -1040,6 +1042,35 @@ impl WidgetTree {
         if is_os_drag && self.os_drop_accepted != Some(engaged_now) {
             self.os_drop_accepted = Some(engaged_now);
             ops.set_drop_accepted(engaged_now);
+        }
+        self.arm_drag_tick();
+    }
+
+    /// Ask for the next frame when the drop target has an `on_drag_tick`
+    /// handler, so the tick runs on the frame clock and not only when
+    /// something else lays the window out.
+    ///
+    /// Nothing else is sure to: a move inside one row leaves the drop
+    /// feedback as it was, so it notifies nothing, and a drag with no preview
+    /// in the tree (an external drag, this application's drag coming back
+    /// into a window, a header reorder) marks nothing for layout. A pointer
+    /// held still sends nothing at all. Spring-loaded folders and edge
+    /// auto-scroll live in the tick. Called after every drag move, a tick's
+    /// own included, so the frames go on while the target keeps its handler
+    /// and stop after the drag ends; a window that draws nothing gets them as
+    /// ticks, the frame tick being part of
+    /// [`next_unpainted_deadline`](Self::next_unpainted_deadline).
+    fn arm_drag_tick(&self) {
+        let Some(target) = self.active_drag.as_ref().and_then(|d| d.current_target) else {
+            return;
+        };
+        let ticks = self.arena.is_active(target)
+            && self.arena.get(target).is_some_and(|node| {
+                node.handlers.on_drag_tick.is_some()
+                    || node.external_handlers.on_drag_tick.is_some()
+            });
+        if ticks {
+            self.request_frame();
         }
     }
 
@@ -2572,6 +2603,59 @@ mod tests {
     }
 
     // --- External (OS) drag-and-drop -----------------------------------
+
+    /// A drag over a target with an `on_drag_tick` handler asks for the frame
+    /// tick, so the tick runs on a deadline whether or not anything else lays
+    /// the window out: on entering, on a move, and after each tick. A target
+    /// without the handler asks for nothing, and the request lapses after the
+    /// drag.
+    #[test]
+    fn a_drag_over_a_ticking_target_asks_for_the_frame_tick() {
+        use crate::drag_payload::ExternalDropData;
+        use teksilo_canvas::Point;
+
+        let proposal = SizeProposal::exact(200.0, 100.0);
+        let at = Point::new(100.0, 50.0);
+        let mut noop = crate::window::NoopWindowOps;
+        let target = |ticks: bool| {
+            let mut tree = WidgetTree::new();
+            let accept = FillWidget::new()
+                .on_drag_hover(|_payload, _at, _ctx| crate::drag_state::DropFeedback::Accept);
+            if ticks {
+                tree.add(accept.on_drag_tick(|_at, _ctx| {}));
+            } else {
+                tree.add(accept);
+            }
+            tree.layout(proposal);
+            tree
+        };
+
+        let mut plain = target(false);
+        plain.begin_external_drag(at, ExternalDropData::default(), &mut noop);
+        assert!(
+            plain.frame_tick_deadline().is_none(),
+            "a target with no tick handler asks for no frame"
+        );
+
+        let mut ticking = target(true);
+        ticking.begin_external_drag(at, ExternalDropData::default(), &mut noop);
+        assert!(ticking.frame_tick_deadline().is_some(), "entering asks");
+        ticking.layout(proposal);
+        assert!(
+            ticking.frame_tick_deadline().is_some(),
+            "the tick asks again, with the pointer held still"
+        );
+        ticking.update_external_drag(Point::new(101.0, 50.0), &mut noop);
+        ticking.layout(proposal);
+        assert!(ticking.frame_tick_deadline().is_some(), "and after a move");
+
+        ticking.cancel_external_drag(&mut noop);
+        ticking.layout(proposal);
+        assert!(
+            ticking.frame_tick_deadline().is_none(),
+            "and lapses after the drag"
+        );
+    }
 
     #[test]
     fn external_drop_delivers_files_and_marks_external() {

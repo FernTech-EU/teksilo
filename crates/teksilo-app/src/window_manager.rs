@@ -4889,132 +4889,112 @@ impl WindowManager {
         }
     }
 
-    /// Reconcile every window's reactive (`Signal`-bound) state and
-    /// request redraw ONLY on the ones that come out of that with pending
-    /// layout or paint work (`WidgetTree::needs_render`). Returns how many
-    /// windows were poked, purely so a caller can log/trace it.
+    /// After a dispatch, bring every window's structure up to what the
+    /// handlers asked for, and ask each window whose reactive
+    /// (`Signal`-bound) state changed for what it needs to show that change.
+    /// Only a window whose structure or focus must change is laid out here.
+    /// Returns how many windows were asked for a redraw, purely so a caller
+    /// can log or trace it. The per-window step is
+    /// `cross_window::sweep_window`.
     ///
     /// # The problem
     ///
-    /// A `Signal` mutation made by a handler in one window's dispatch
-    /// (e.g. writing to an app-level `Signal` a *sibling* window's widget
-    /// also reads) is supposed to make that sibling dirty too — that's the
-    /// whole point of sharing a `Signal` across windows. But only the
-    /// dispatching window's own event-handling path calls
-    /// `request_redraw()` on itself (see the `WindowEvent::CursorMoved` /
-    /// `MouseInput` / `KeyboardInput` arms); nothing tells winit to
-    /// schedule a `RedrawRequested` for the sibling, so it shows a stale
-    /// frame until the user focuses it (which finally earns it a paint).
+    /// A handler in one window can write a `Signal` that a widget in another
+    /// window binds; sharing a `Signal` across windows is meant to update
+    /// both. But only the dispatching window's own input path asks for its
+    /// own redraw (see `input_loop::dispatch_input`), and nothing asks winit
+    /// to redraw the other one, which would show a stale frame until
+    /// something unrelated repainted it.
     ///
-    /// # Why this can't just check `needs_render()`
+    /// Asking `needs_render()` alone cannot find that window. A `Signal`
+    /// write only advances the signal's change generation (a signal holds no
+    /// reference into any tree's arena), and only the tree's own reconcile
+    /// compares that generation with what its binding registry last acted on
+    /// and turns the difference into the arena marks `needs_render()` reads.
+    /// So each window with [`needs_reconcile`](WidgetTree::needs_reconcile)
+    /// is [reconciled](WidgetTree::reconcile) first, the one awaiting a
+    /// redraw included. A pending `animate_to` is started on the scheduler,
+    /// so its deadline wakes the window.
     ///
-    /// A `Signal` write only advances a change generation on the signal
-    /// itself (a deliberately lazy design — a signal has no reference
-    /// back into any `WidgetTree`'s arena to mark node-level dirty bits
-    /// synchronously). That generation is only compared against what
-    /// each window's `BindingRegistry` last acted on, and walked into
-    /// `arena.needs_layout` / `needs_paint` — i.e. into what
-    /// `needs_render()` actually reads — by `WidgetTree`'s internal
-    /// `process_state_changes` step, which today runs *only* at the top
-    /// of that tree's own `layout()`. A window's own
-    /// `layout()` runs *only* as part of handling its own
-    /// `RedrawRequested` (see `handle_redraw_requested` in `app.rs`). So a
-    /// sibling window that never redraws never reconciles its bindings
-    /// either — its `needs_render()` reads `false` forever, not just
-    /// "until it happens to repaint", because nothing ever performed the
-    /// walk that would make it `true`. Checking `needs_render()` without
-    /// reconciling first would make this method a permanent no-op for
-    /// exactly the case it exists to fix.
+    /// # When it lays a window out
     ///
-    /// That's why a window's `tree.layout()` is called here first, at
-    /// its OWN current size (`proposal_changed` stays `false`), whenever
-    /// [`WidgetTree::needs_reconcile`] says reconciling could change the
-    /// answer. This is the only place in the framework doing this
-    /// specific reconciliation for a plain app-level `Signal` (the
-    /// theme/locale/text-scale/follow-system broadcasts sidestep the
-    /// whole problem by mutating each tree directly through
-    /// `&mut self.windows`, not through a shared `Signal`, so they
-    /// always know synchronously that every window needs a redraw).
+    /// It used to reconcile every such window by calling `layout()` at the
+    /// window's size: a whole-window layout, run in the event handler, before
+    /// the window's own frame laid out again. A drag or a text selection
+    /// writes a bound signal on every pointer move, so every move paid a full
+    /// layout of the window being dragged in: with a 1000 Hz mouse that was
+    /// most of the CPU, and the frames stopped. Those writes only repaint or
+    /// relayout, and `reconcile()` turns them into marks that the window's
+    /// frame lays out once.
     ///
-    /// # Why the reconcile is gated rather than unconditional
+    /// What does need the layout at once is a change of structure or focus
+    /// ([`needs_structural_layout`](WidgetTree::needs_structural_layout)): a
+    /// focus request waiting for a dormant target, a rebuild, a `visible_when`
+    /// gate to apply. winit delivers the events it has queued before the
+    /// window's frame (the whole X11 or Wayland batch; on Windows every queued
+    /// message, since `WM_PAINT` comes last), so a key typed right after a
+    /// shortcut that shows and focuses a search field, or a second Enter on a
+    /// button that hid itself, would otherwise reach the old focus and the
+    /// old widgets. Such a window is laid out here, as before, even when a
+    /// redraw is on its way. These changes follow discrete actions, not
+    /// pointer moves, so a drag does not pay for them; a binding written on
+    /// every move at `Rebuild` level, or a gate flipped on every move, would.
     ///
-    /// It was unconditional at first, on the grounds that `layout()`
-    /// short-circuits before the per-node geometry recursion when
-    /// nothing is dirty. That undersells the cost: `layout_with_ops`
-    /// runs a dozen per-frame passes *before* it gets near that
-    /// short-circuit — pending animations, the frame tick, the animation
-    /// scheduler tick, drag ticks, the whole of `process_state_changes`,
-    /// tooltips, delayed / pointer-leave / auto-dismiss overlays and
-    /// overlay fades — and it ran all of them for every open window on
-    /// every dispatched event, including a fast mouse-move stream.
+    /// A relayout mark is left to the frame. Between two events of one batch,
+    /// hit-testing then uses the geometry on screen, which is what the user
+    /// aimed at. A relayout binding written on every move (a caret pulse
+    /// bound at `Relayout`, say) is laid out once per frame, not per move.
     ///
-    /// `needs_reconcile()` is cheap enough to ask instead (`u64`
-    /// comparisons over unique bound sources, no arena walk) and answers
-    /// precisely the question this sweep is for. It is safe to skip the
-    /// rest because everything in that list has its own scheduling path
-    /// — the timing-driven passes all feed `WidgetTree::next_timer_deadline`,
-    /// which `request_redraw_due` polls — see `needs_reconcile`'s own doc
-    /// for the case-by-case argument.
+    /// The marks are not lost to the frame: the binding registry remembers,
+    /// per tree, which generation of each source it acted on, so visiting the
+    /// windows in any order (this iterates a `HashMap`) delivers a shared
+    /// write to all of them, and arena marks stay until a pass clears them.
     ///
-    /// The `needs_render()` check stays OUTSIDE the gate on purpose: a
-    /// window can need a repaint for reasons that never involved a
-    /// binding (a handler called `request_rebuild`, an event dirtied a
-    /// node directly), and skipping the reconcile must not also skip
-    /// poking it.
+    /// The layout runs with `NoopWindowOps`, as it always did here: a handler
+    /// it runs (a rebuild's `build`, a focus handler) cannot open a window or
+    /// end an input method's composition from it.
     ///
-    /// # Reconciling here does not rob the window of its own reconcile
+    /// # Windows that draw nothing
     ///
-    /// Load-bearing, and it was not always true. Dirty tracking used to
-    /// be a `bool` living on the `Signal`, which the first registry to
-    /// flush both read AND cleared — so this very sweep was the thing
-    /// that broke shared-`Signal` fan-out: whichever window it happened
-    /// to visit first consumed the change and every later window's
-    /// reconcile found nothing, permanently. `Signal` now exposes a
-    /// monotone generation and each `BindingRegistry` remembers what it
-    /// last acted on (see `teksilo_core::binding::BindingGroup`), so
-    /// visiting windows in any order — this method iterates a `HashMap`,
-    /// so the order is arbitrary and varies run to run — delivers the
-    /// change to all of them.
+    /// A hidden window, or one whose redraw is withheld, is never asked for a
+    /// redraw: its paint marks wait for the frame that shows it again, and a
+    /// request here after each of its ticks would re-arm the next one
+    /// forever. When its state changed here it is asked for a non-visual
+    /// tick, which lays it out and delivers its accessibility tree at the
+    /// rate the redraw gate allows, so its state stays current as the
+    /// `redraw_gate` module promises. The tick follows a write or a layout
+    /// made here, which a tick's own layout leaves nothing of, so the tick
+    /// this sweep runs after does not ask for another.
     ///
-    /// One known limitation: this uses `WidgetTree::layout` (a
-    /// `NoopWindowOps` sink), not `layout_with_ops`, so a handler that
-    /// this reconcile pass happens to run (a data-driven rebuild reacting
-    /// to the very state change being reconciled) cannot synchronously
-    /// open a window from here. That is acceptable for a background
-    /// reconciliation pass — the window still opens correctly the next
-    /// time this sibling performs its own real redraw with a real
-    /// `WindowOps` sink, exactly the way an app that never called this
-    /// method at all would have behaved.
+    /// The application tree is not swept: it is never drawn, and
+    /// `tick_app_tree` runs its logic frame whenever it has reactive work.
     ///
     /// # Why `needs_render()`, not `needs_redraw()`
     ///
-    /// Deliberately narrower than the broader `needs_redraw()`, which
-    /// also reports `true` while a per-frame shader animation is merely
-    /// *running*, with no dirty paint or layout at all. Treating "an
-    /// animation is running" as a reason to force an extra redraw here —
-    /// on top of whatever other window's event just got dispatched —
-    /// would effectively re-couple that animating window's frame rate to
-    /// the dispatch rate of every OTHER window's input (a fast mouse-move
-    /// stream can exceed 60 Hz), defeating the 60 Hz `WaitUntil` pacing
-    /// those animations already get from `next_timer_deadline` /
-    /// `request_redraw_due` and reintroducing the exact uncapped
-    /// free-running redraw behaviour that pacing was written to remove.
+    /// `needs_redraw()` also reports `true` while a per-frame shader animation
+    /// is merely running, with no dirty paint or layout at all. Treating that
+    /// as a reason for a redraw here would tie that window's frame rate to
+    /// the dispatch rate of every other window's input (a fast mouse-move
+    /// stream exceeds 60 Hz), defeating the 60 Hz `WaitUntil` pacing those
+    /// animations get from `next_timer_deadline` / `request_redraw_due`.
     pub fn request_redraw_needing_render(&mut self) -> usize {
         let now = std::time::Instant::now();
         let mut poked = 0;
         for managed in self.windows.values_mut() {
-            if managed.tree.needs_reconcile() {
-                let size = managed.platform_window.surface_size();
-                let sf = managed.platform_window.scale_factor() as f32;
-                let proposal =
-                    teksilo_canvas::SizeProposal::exact(size.0 as f32 / sf, size.1 as f32 / sf);
-                managed.tree.layout(proposal);
-            }
-            // A window that draws nothing is skipped: its paint marks wait
-            // for the redraw that shows it again, and a request here after
-            // each of its ticks would re-arm the next one forever.
-            if managed.tree.needs_render() && !managed.redraw.draws_nothing(now) {
-                managed.request_redraw();
+            let window = &managed.platform_window;
+            let size = || {
+                let (width, height) = window.surface_size();
+                let scale = window.scale_factor() as f32;
+                teksilo_canvas::SizeProposal::exact(width as f32 / scale, height as f32 / scale)
+            };
+            let swept = crate::cross_window::sweep_window(
+                &mut managed.tree,
+                &managed.redraw,
+                now,
+                size,
+                || window.request_redraw(),
+            );
+            if swept == crate::cross_window::Swept::Redraw {
                 poked += 1;
             }
         }

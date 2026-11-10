@@ -7,6 +7,7 @@ pub mod app_event_observers;
 pub(crate) mod application_menu;
 #[cfg(feature = "automation")]
 pub mod automation_bridge;
+pub(crate) mod cross_window;
 pub mod default_post_root;
 pub(crate) mod input_loop;
 pub(crate) mod input_routing;

@@ -186,7 +186,6 @@ impl RedrawGate {
     }
 
     /// A requested redraw has not arrived yet.
-    #[cfg(test)]
     pub(crate) fn awaits_redraw(&self) -> bool {
         self.outstanding_since.get().is_some()
     }
