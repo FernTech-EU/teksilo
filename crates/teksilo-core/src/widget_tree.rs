@@ -339,6 +339,30 @@ pub struct WidgetTree {
     /// `invalidate_culls_for_moved_interaction`.
     last_interaction_anchors: Vec<WidgetId>,
     last_proposal: SizeProposal,
+    /// How many times [`layout_with_ops`](Self::layout_with_ops) has run on
+    /// this tree; read through [`layout_passes`](Self::layout_passes).
+    layout_passes: u64,
+    /// The arena's rebuild-mark count when the last layout pass ended: a
+    /// count past it is a rebuild no pass has seen. See
+    /// [`needs_structural_layout`](Self::needs_structural_layout).
+    rebuild_marks_laid_out: u64,
+    /// The last pass left a rebuild undone because a pointer capture held
+    /// it back ([`captures_defer_rebuilds`](Self::captures_defer_rebuilds)).
+    /// Its mark is already counted in `rebuild_marks_laid_out`, so this is
+    /// what tells [`needs_structural_layout`](Self::needs_structural_layout)
+    /// that the release must be followed by a pass.
+    rebuild_deferred: bool,
+    /// The focused widget the last pass found disabled with no enabled Tab
+    /// stop to hand focus to, so focus stayed on it. While focus is still
+    /// there, [`needs_structural_layout`](Self::needs_structural_layout) does
+    /// not ask for the pass again on every event. An `enabled_when` binding
+    /// firing in the binding flush clears it, since a stop may have been
+    /// enabled, and every pass tries anew.
+    disabled_focus_stays: Option<WidgetId>,
+    /// A binding flush found a `visible_when` gate that no longer matches its
+    /// node's activation; the next `process_state_changes` settles it. See
+    /// [`needs_structural_layout`](Self::needs_structural_layout).
+    activation_pending: bool,
     pending_modal_requests: Vec<crate::modal::QueuedModalRequest>,
     pending_modal_dismissal: bool,
     shortcut_registry: crate::shortcut::ShortcutRegistry,
@@ -1151,6 +1175,11 @@ impl WidgetTree {
             pending_focus_request: None,
             last_interaction_anchors: Vec::new(),
             last_proposal: SizeProposal::exact(800.0, 600.0),
+            layout_passes: 0,
+            rebuild_marks_laid_out: 0,
+            rebuild_deferred: false,
+            disabled_focus_stays: None,
+            activation_pending: false,
             pending_modal_requests: Vec::new(),
             pending_modal_dismissal: false,
             shortcut_registry: {
@@ -2229,9 +2258,73 @@ impl WidgetTree {
         self.arena.any_needs_layout() || self.arena.any_needs_paint()
     }
 
-    /// Whether this tree has reactive work that only a `layout()` pass can
-    /// turn into arena dirt — i.e. whether reconciling it right now could
-    /// change what [`needs_render`](Self::needs_render) reports.
+    /// Whether the next layout pass changes which widgets exist, which are
+    /// active or which one has focus, so an event dispatched before it would
+    /// reach the wrong widget:
+    ///
+    /// - a focus request waits for a dormant target to wake (see
+    ///   [`focus`](Self::focus)): until a pass runs, keys go to the widget
+    ///   focused before it;
+    /// - an active widget was marked for a rebuild since the last pass: until
+    ///   then its old children take the events;
+    /// - a rebuild the last pass held back for a pointer capture
+    ///   ([`captures_defer_rebuilds`](Self::captures_defer_rebuilds)) can go
+    ///   ahead, the capture being over: the release must not leave the next
+    ///   click on the old children;
+    /// - a binding flush ([`reconcile`](Self::reconcile)) found a
+    ///   `visible_when` gate that disagrees with its node: a node to park,
+    ///   still active and focusable until then, or one to wake under an
+    ///   active parent;
+    /// - the focused control has become disabled, unless the last pass
+    ///   found nowhere to send focus and no enabled state has changed since:
+    ///   until a pass hands focus on, a key reaches the disabled control,
+    ///   which refuses it.
+    ///
+    /// Paint and relayout marks are not in it. Until the pass, the widgets
+    /// and the focus stay as they are, and hit-testing uses the geometry on
+    /// screen, which is what the user aimed at. Asking reads a few fields,
+    /// compares two counters, scans the live pointers for a capture and
+    /// asks whether the focused widget is enabled (a walk up its ancestors):
+    /// no arena walk. A layout pass settles every term, or, for a deferred
+    /// rebuild under a capture and a focus with nowhere to go, records why it
+    /// could not, so none of them asks for a layout per event.
+    #[doc(hidden)]
+    pub fn needs_structural_layout(&self) -> bool {
+        self.pending_focus_request.is_some()
+            || self.activation_pending
+            || self.arena.rebuild_marks() != self.rebuild_marks_laid_out
+            || (self.rebuild_deferred && !self.captures_defer_rebuilds())
+            || self.focus_waits_to_leave_a_disabled_control()
+    }
+
+    /// Whether a layout pass leaves a captured widget and its ancestors
+    /// unrebuilt: some pointer holds a capture and no drag session owns the
+    /// pointer. Rebuilding the captor would tear down the node the gesture's
+    /// next move and its release are delivered to; a drag session routes by
+    /// itself, so it does not need the guard.
+    pub(crate) fn captures_defer_rebuilds(&self) -> bool {
+        self.active_drag.is_none()
+            && self
+                .pointers
+                .iter()
+                .any(|entry| entry.captured_by.is_some())
+    }
+
+    /// Whether focus sits on an active control that has become disabled and
+    /// a pass could move it on: a pass that found nowhere to send it recorded
+    /// the widget in `disabled_focus_stays`.
+    fn focus_waits_to_leave_a_disabled_control(&self) -> bool {
+        self.focused.is_some_and(|focused| {
+            self.disabled_focus_stays != Some(focused)
+                && self.arena.is_active(focused)
+                && !self.arena.is_enabled(focused)
+        })
+    }
+
+    /// Whether this tree has reactive work that only [`reconcile`](Self::reconcile)
+    /// or a `layout()` pass can turn into arena dirt, that is, whether
+    /// reconciling it right now could change what
+    /// [`needs_render`](Self::needs_render) reports.
     ///
     /// Read-only and cheap: `O(unique bound sources)` `u64` comparisons
     /// plus one peek per registered animated signal. No arena walk, no
@@ -2262,7 +2355,7 @@ impl WidgetTree {
     /// binding-registry staleness (the whole point), and a *pending*
     /// `animate_to` — which the scheduler has not started yet, so it
     /// contributes no deadline, and which only `process_pending_animations`
-    /// (inside `layout`) can promote into one. The second term is
+    /// (inside `reconcile` and `layout`) can promote into one. The second term is
     /// belt-and-braces: arming an animation also advances the signal's
     /// generation, so a bound animated signal is already covered by the
     /// first — but an animated signal registered without being bound
@@ -6402,9 +6495,9 @@ mod text_scale_tests {
 /// Covers the `WidgetTree`-level facts
 /// `teksilo_app::WindowManager::request_redraw_needing_render` (the
 /// targeted cross-window redraw added for shared-`Signal` dispatch
-/// fan-out) relies on. Neither test touches windows at all — they exist
-/// to pin down `needs_render()`'s contract in isolation, since
-/// teksilo-app cannot stand up a real `PlatformWindow` in a unit test.
+/// fan-out) relies on: `needs_reconcile()`, `reconcile()` and
+/// `needs_render()`, in isolation. The sweep's per-window step is tested in
+/// `teksilo_app`'s `cross_window` module, over these same trees.
 #[cfg(test)]
 mod cross_window_redraw_signal_tests {
     use super::*;
@@ -6419,13 +6512,15 @@ mod cross_window_redraw_signal_tests {
     /// but `Signal::set` only flips a dirty flag on the signal itself and
     /// in the `BindingRegistry`; nothing walks that into a tree's
     /// `needs_layout` / `needs_paint` bits (what `needs_render()` reads)
-    /// except that tree's OWN `process_state_changes`, run at the top of
-    /// its OWN `layout()`. So immediately after the mutation, with
-    /// neither tree having re-run `layout()`, BOTH read clean — a naive
+    /// except that tree's OWN reconcile, run by its `reconcile()` or at
+    /// the top of its OWN `layout()`. So immediately after the mutation,
+    /// with neither tree having reconciled, BOTH read clean: a naive
     /// "just check `needs_render()`" cross-window redraw would see
-    /// nothing to do and stay a permanent no-op. Once tree B's `layout()`
-    /// runs (what `request_redraw_needing_render` does for every window
-    /// before checking it), the same mutation is finally visible there.
+    /// nothing to do and stay a permanent no-op. Once tree B reconciles,
+    /// the same mutation is finally visible there. This test reconciles
+    /// through `layout()`, the frame's path;
+    /// `reconcile_makes_a_shared_write_visible_without_laying_out` does it
+    /// through `reconcile()`, the sweep's.
     ///
     /// Each tree wraps its gated leaf in a `StackWidget` parent (rather
     /// than gating a bare root leaf) so the fact under test — an ACTIVE
@@ -6487,10 +6582,8 @@ mod cross_window_redraw_signal_tests {
             "both trees must report pending reactive work from the shared write"
         );
 
-        // This is what `request_redraw_needing_render` does for a window
-        // whose gate is open — reconcile at the window's OWN current
-        // size, which is what walks a pending Signal-driven change into
-        // the arena.
+        // Tree B's own frame: its layout reconciles first, which is what
+        // walks a pending Signal-driven change into the arena.
         tree_b.layout(proposal);
 
         assert!(
@@ -6510,14 +6603,10 @@ mod cross_window_redraw_signal_tests {
         );
     }
 
-    /// The gate `request_redraw_needing_render` gained must stay SHUT for
-    /// a window with nothing reactive pending, or it saves nothing: that
-    /// method runs after every dispatched event, and an open gate costs
-    /// a full `layout_with_ops` — a dozen per-frame passes (pending
-    /// animations, frame tick, scheduler tick, drag tick,
-    /// `process_state_changes`, tooltips, four overlay passes) before it
-    /// reaches the geometry short-circuit, for every open window, on
-    /// every event of a fast mouse-move stream.
+    /// The gate `request_redraw_needing_render` asks must stay SHUT for
+    /// a window with nothing reactive pending: that method runs after
+    /// every dispatched event, for every open window, and an open gate
+    /// costs a reconcile, or a tick for a window that draws nothing.
     #[test]
     fn needs_reconcile_is_false_for_an_idle_tree() {
         let shared = Signal::new(true);
@@ -6715,6 +6804,302 @@ mod cross_window_redraw_signal_tests {
             "but nothing is actually dirty for paint/layout — needs_render() must stay false, \
              which is the whole point of using it (not needs_redraw()) as the cross-window filter"
         );
+    }
+
+    /// `reconcile()` answers the sweep's question without a layout: the tree
+    /// that only observes a shared write comes out of it needing a render,
+    /// and no layout pass has run. The write flips a `visible_when` gate, so
+    /// it also reports a structural layout, and the layout that follows finds
+    /// the marks and parks the leaf.
+    #[test]
+    fn reconcile_makes_a_shared_write_visible_without_laying_out() {
+        let shared = Signal::new(true);
+
+        let mut tree_a = WidgetTree::new();
+        let stack_a = tree_a.add(StackWidget::new());
+        let id_a = tree_a.add_child(stack_a, FillWidget::new());
+        tree_a.visible_when(id_a, shared.clone());
+
+        let mut tree_b = WidgetTree::new();
+        let stack_b = tree_b.add(StackWidget::new());
+        let id_b = tree_b.add_child(stack_b, FillWidget::new());
+        tree_b.visible_when(id_b, shared.clone());
+
+        let proposal = SizeProposal::exact(100.0, 100.0);
+        for tree in [&mut tree_a, &mut tree_b] {
+            tree.layout(proposal);
+            tree.render();
+        }
+        let passes_a = tree_a.layout_passes();
+        let passes_b = tree_b.layout_passes();
+
+        shared.set(false);
+        tree_b.reconcile();
+
+        assert!(tree_b.needs_render(), "the observer must be redrawn");
+        assert!(!tree_b.needs_reconcile(), "and its reconcile is done");
+        assert_eq!(tree_b.layout_passes(), passes_b, "without a layout pass");
+        assert!(
+            tree_b.is_active(id_b),
+            "nothing parked by the reconcile itself"
+        );
+        assert!(
+            tree_b.needs_structural_layout(),
+            "but the gate to apply is reported, so the sweep lays B out"
+        );
+        assert!(
+            tree_a.needs_reconcile(),
+            "one tree's reconcile leaves the other tree's pending"
+        );
+        assert_eq!(tree_a.layout_passes(), passes_a);
+
+        // The frame: what the marks asked for is laid out and drawn.
+        tree_b.layout(proposal);
+        assert!(!tree_b.is_active(id_b), "the layout parks the hidden leaf");
+        assert!(!tree_b.needs_structural_layout());
+        tree_b.render();
+        assert!(!tree_b.needs_render());
+    }
+
+    /// A data-driven rebuild is marked by the reconcile, reported as
+    /// structural, and carried out by a layout. Rebuilding in the reconcile
+    /// would put fresh children with no bounds under the pointer until a
+    /// layout gave them some.
+    #[test]
+    fn reconcile_marks_a_rebuild_and_leaves_it_to_the_layout() {
+        #[derive(Debug)]
+        struct Rebuilt {
+            data: Signal<u32>,
+            builds: std::rc::Rc<std::cell::Cell<u32>>,
+        }
+        impl crate::widget::Widget for Rebuilt {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                self.data.bind_to(
+                    ctx.self_id(),
+                    ctx.binding_registry(),
+                    crate::binding::BindingLevel::Rebuild,
+                );
+                self.builds.set(self.builds.get() + 1);
+                vec![ctx.add(FillWidget::new())]
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &crate::widget::LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(10.0, 10.0).into()
+            }
+        }
+
+        let data = Signal::new(0_u32);
+        let builds = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut tree = WidgetTree::new();
+        let stack = tree.add(StackWidget::new());
+        let rebuilt = tree.add_child(
+            stack,
+            Rebuilt {
+                data: data.clone(),
+                builds: builds.clone(),
+            },
+        );
+        let proposal = SizeProposal::exact(100.0, 100.0);
+        tree.layout(proposal);
+        tree.render();
+        let children_before = tree.children(rebuilt);
+        let built = builds.get();
+        let passes = tree.layout_passes();
+
+        data.set(1);
+        tree.reconcile();
+
+        assert!(
+            tree.needs_render(),
+            "the rebuild shows, so the window is poked"
+        );
+        assert_eq!(builds.get(), built, "but nothing is rebuilt yet");
+        assert_eq!(tree.children(rebuilt), children_before);
+        assert_eq!(tree.layout_passes(), passes);
+        assert!(
+            tree.needs_structural_layout(),
+            "the rebuild is reported, so the sweep lays the window out"
+        );
+
+        tree.layout(proposal);
+        assert_eq!(builds.get(), built + 1, "the layout rebuilds it");
+        assert_ne!(tree.children(rebuilt), children_before);
+        assert!(!tree.needs_structural_layout());
+    }
+
+    /// What a drag or a selection writes on every move, a repaint or a
+    /// relayout of a widget that stays where it is, is not structural: the
+    /// sweep leaves it to the frame.
+    #[test]
+    fn paint_and_relayout_marks_need_no_structural_layout() {
+        let paint = Signal::new(0_u32);
+        let relayout = Signal::new(0_u32);
+        let mut tree = WidgetTree::new();
+        let stack = tree.add(StackWidget::new());
+        let painted = tree.add_child(stack, FillWidget::new());
+        let relaid = tree.add_child(stack, FillWidget::new());
+        paint.bind_to(
+            painted,
+            tree.binding_registry(),
+            crate::binding::BindingLevel::RepaintOnly,
+        );
+        relayout.bind_to(
+            relaid,
+            tree.binding_registry(),
+            crate::binding::BindingLevel::Relayout,
+        );
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        tree.render();
+
+        paint.set(1);
+        relayout.set(1);
+        tree.reconcile();
+
+        assert!(tree.needs_render());
+        assert!(!tree.needs_structural_layout());
+    }
+
+    /// A focus request for a dormant node waits for a layout to wake it, and
+    /// the next key must find it there: structural.
+    #[test]
+    fn a_focus_request_for_a_dormant_node_needs_a_structural_layout() {
+        let shown = Signal::new(false);
+        let mut tree = WidgetTree::new();
+        let stack = tree.add(StackWidget::new());
+        let field = tree.add_child(stack, FillWidget::new());
+        tree.visible_when(field, shown.clone());
+        let proposal = SizeProposal::exact(100.0, 100.0);
+        tree.layout(proposal);
+        assert!(!tree.needs_structural_layout(), "precondition: settled");
+
+        tree.focus(field);
+        assert!(tree.needs_structural_layout(), "the request waits");
+        shown.set(true);
+        tree.layout(proposal);
+        assert_eq!(tree.focused(), Some(field), "the layout lands it");
+        assert!(!tree.needs_structural_layout());
+    }
+
+    /// A rebuild marked on a dormant node waits for the pass that wakes it,
+    /// and no event reaches its structure meanwhile: not structural.
+    #[test]
+    fn a_rebuild_mark_on_a_dormant_node_needs_no_structural_layout() {
+        let mut tree = WidgetTree::new();
+        let stack = tree.add(StackWidget::new());
+        let parked = tree.add_child(stack, FillWidget::new());
+        tree.visible_when(parked, false);
+        tree.layout(SizeProposal::exact(100.0, 100.0));
+        assert!(!tree.is_active(parked), "precondition: parked");
+
+        tree.arena_mark_needs_rebuild_for_testing(parked);
+        assert!(!tree.needs_structural_layout());
+        tree.arena_mark_needs_rebuild_for_testing(stack);
+        assert!(tree.needs_structural_layout(), "an active one is");
+    }
+
+    /// A rebuild written while a press holds its capture is left undone by
+    /// the pass, which still counts its mark as laid out. Held, it asks for
+    /// no layout per event; once the release ends the capture, it is
+    /// structural again, so the sweep lays the window out before the next
+    /// event reaches the old children.
+    #[test]
+    fn a_rebuild_held_back_for_a_capture_is_structural_once_released() {
+        #[derive(Debug)]
+        struct Rebuilt {
+            data: Signal<u32>,
+            builds: std::rc::Rc<std::cell::Cell<u32>>,
+        }
+        impl crate::widget::Widget for Rebuilt {
+            fn build(&mut self, ctx: &mut crate::build_context::BuildContext) -> Vec<WidgetId> {
+                self.data.bind_to(
+                    ctx.self_id(),
+                    ctx.binding_registry(),
+                    crate::binding::BindingLevel::Rebuild,
+                );
+                self.builds.set(self.builds.get() + 1);
+                use crate::widget_builder::WidgetBuilder;
+                vec![ctx.add(FillWidget::new().on_tap(|_event, _ctx| {}))]
+            }
+            fn layout_response(
+                &self,
+                proposal: SizeProposal,
+                _ctx: &crate::widget::LayoutContext,
+            ) -> crate::widget::LayoutResponse {
+                proposal.resolve(100.0, 100.0).into()
+            }
+        }
+
+        let data = Signal::new(0_u32);
+        let builds = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut tree = WidgetTree::new();
+        tree.add(Rebuilt {
+            data: data.clone(),
+            builds: builds.clone(),
+        });
+        let proposal = SizeProposal::exact(100.0, 100.0);
+        tree.layout(proposal);
+        tree.render();
+        let built = builds.get();
+        let at = teksilo_canvas::Point::new(10.0, 10.0);
+        tree.enter_simulated_mode();
+
+        tree.pointer_down_button(at, crate::event::PointerButton::Primary);
+        assert!(
+            tree.captures_defer_rebuilds(),
+            "precondition: the press captures"
+        );
+        data.set(1);
+        tree.reconcile();
+        assert!(tree.needs_structural_layout(), "a new mark");
+        tree.layout(proposal);
+        assert_eq!(builds.get(), built, "held back for the capture");
+        assert!(
+            !tree.needs_structural_layout(),
+            "and no layout per event while it is held"
+        );
+
+        tree.pointer_up_button(at, crate::event::PointerButton::Primary);
+        assert!(!tree.captures_defer_rebuilds());
+        assert!(
+            tree.needs_structural_layout(),
+            "the release lets it go ahead"
+        );
+        tree.layout(proposal);
+        assert_eq!(builds.get(), built + 1, "the layout rebuilds it");
+        assert!(!tree.needs_structural_layout());
+    }
+
+    /// An `animate_to` armed from another window's handler is started by the
+    /// reconcile, so its deadline wakes this window, with no layout run.
+    #[test]
+    fn reconcile_starts_a_pending_animation() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(FillWidget::new());
+        tree.layout(SizeProposal::exact(50.0, 50.0));
+        tree.render();
+        let passes = tree.layout_passes();
+
+        let anim = Signal::new_animated(0.0_f32);
+        tree.register_animated_signal(&anim, id);
+        anim.animate_to(
+            1.0,
+            std::time::Duration::from_millis(200),
+            teksilo_tokens::Easing::Linear,
+        );
+        assert!(tree.next_timer_deadline().is_none(), "not started yet");
+
+        tree.reconcile();
+
+        assert!(!anim.has_pending_animation(), "promoted to the scheduler");
+        assert!(
+            tree.next_timer_deadline().is_some(),
+            "its deadline now wakes the window"
+        );
+        assert!(!tree.needs_reconcile());
+        assert_eq!(tree.layout_passes(), passes);
     }
 }
 

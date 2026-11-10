@@ -269,15 +269,26 @@ impl WidgetTree {
     /// back when the control is enabled again. The move is `Programmatic`:
     /// it is not the same widget restored, and a text field it lands on keeps
     /// its caret.
+    ///
+    /// A focus that stays is recorded in `disabled_focus_stays`, so that
+    /// `needs_structural_layout` does not ask for this pass on every event
+    /// while nothing can come of it. Something can once an enabled state
+    /// changes: the binding flush clears the record whenever an
+    /// `enabled_when` binding fires, and so does the start of this function,
+    /// at every pass.
     pub(super) fn move_focus_off_disabled(&mut self, ops: &mut dyn crate::window::WindowOps) {
+        self.disabled_focus_stays = None;
         let Some(focused) = self.focused else {
             return;
         };
         if !self.arena.is_active(focused) || self.arena.is_enabled(focused) {
             return;
         }
-        if let Some(next) = self.enabled_stop_around(focused) {
-            self.focus_with_origin_ops(next, crate::focus::FocusOrigin::Programmatic, ops);
+        match self.enabled_stop_around(focused) {
+            Some(next) => {
+                self.focus_with_origin_ops(next, crate::focus::FocusOrigin::Programmatic, ops);
+            }
+            None => self.disabled_focus_stays = Some(focused),
         }
     }
 }

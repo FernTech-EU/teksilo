@@ -5,67 +5,11 @@ use super::*;
 
 impl WidgetTree {
     /// Process dirty state bindings: mark bound widgets for repaint, relayout,
-    /// or rebuild. Called automatically at the start of layout().
+    /// or rebuild, then carry out the rebuilds and the `visible_when`
+    /// transitions those marks and gates ask for. Called automatically at the
+    /// start of layout().
     pub(super) fn process_state_changes(&mut self, ops: &mut dyn crate::window::WindowOps) {
-        // Whether a command would be handled, for the menu rows that grey out
-        // from it, first: a row's enabled state is bound to it, and both the
-        // effective-enabled refresh and the binding flush below must see the
-        // new value in this pass.
-        self.flush_command_availability();
-
-        // Refresh the node-resident `effective_enabled_signal`s FIRST, so a
-        // widget bound to one is dirty-marked in time for the binding flush
-        // immediately below to drain it in this same pass, rather than a frame
-        // late. This is also where a signal seeded during `build()` — when the
-        // widget's parent was not yet wired, so the seed could only see its own
-        // `enabled` prop — is corrected against the now-complete tree.
-        self.flush_effective_enabled_signals();
-
-        // One unified flush: both visual buckets and the a11y flag
-        // are drained from the same walk, so a signal bound at both
-        // a visual level and `AccessibilityOnly` (e.g. a Button's
-        // `label` re-registers the same Signal at RepaintOnly
-        // *and* AccessibilityOnly) flips both. Two separate flushes
-        // would each advance this registry's last-seen generation for
-        // that source, so the second would find nothing to report.
-        let (dirty_widgets, a11y_binding_dirty) = self.binding_registry.flush_all_dirty();
-        for (id, level) in &dirty_widgets {
-            match level {
-                crate::binding::BindingLevel::RepaintOnly => {
-                    self.arena.mark_needs_paint(*id);
-                }
-                crate::binding::BindingLevel::SubtreeRepaint => {
-                    // Used by `enabled_when` so the leaves in the
-                    // disabled subtree re-resolve their role colors
-                    // via the paint walker's `effective_enabled`.
-                    // No layout work — geometry is unchanged.
-                    self.arena.mark_subtree_needs_paint(*id);
-                }
-                crate::binding::BindingLevel::Relayout => {
-                    self.arena.mark_needs_layout(*id);
-                    self.arena.mark_ancestors_need_layout(*id);
-                }
-                crate::binding::BindingLevel::Rebuild => {
-                    self.arena.mark_needs_rebuild(*id);
-                    self.arena.mark_ancestors_need_layout(*id);
-                }
-                crate::binding::BindingLevel::AccessibilityOnly => {
-                    // Drained into the boolean below — never appears in
-                    // the visual map, but kept in the match so a future
-                    // variant addition is a compile-time reminder.
-                }
-            }
-        }
-
-        // Orthogonal to the visual dirty pass: if any signal bound at
-        // `BindingLevel::AccessibilityOnly` fired, flip the tree-wide
-        // `a11y_dirty` flag so the next `sync_accessibility` rebuilds
-        // the AccessKit tree. Decoupled from layout / paint so a text
-        // edit that changes no visual geometry still reaches screen
-        // readers within one frame.
-        if a11y_binding_dirty {
-            self.a11y_dirty = true;
-        }
+        self.flush_bindings_into_arena();
 
         // Rebuild data-driven widgets whose data model changed.
         self.process_pending_rebuilds(&mut *ops);
@@ -120,6 +64,8 @@ impl WidgetTree {
         for id in to_activate {
             self.arena.activate(id);
         }
+        // Every gate agrees with its node now, as far as a flush can tell.
+        self.activation_pending = false;
         // Fire activation_signal observers (e.g. a WebView's set_visible
         // bridge) after the whole visibility pass has committed — not from
         // inside the set_dormant/activate recursion above.
@@ -133,6 +79,109 @@ impl WidgetTree {
         // this pass has re-registered, so anything still empty belongs to
         // a widget that is genuinely gone.
         self.binding_registry.reclaim_empty_groups();
+    }
+
+    /// Turn what changed in the bound signals since the last pass into arena
+    /// marks: paint, subtree paint, layout and rebuild marks on the bound
+    /// widgets, and the accessibility flag. Changes no structure and runs no
+    /// geometry: a rebuild is only marked here, and carried out by
+    /// [`process_state_changes`](Self::process_state_changes).
+    ///
+    /// The first half of `process_state_changes`, and all of
+    /// [`reconcile`](Self::reconcile) besides the animations.
+    fn flush_bindings_into_arena(&mut self) {
+        // Whether a command would be handled, for the menu rows that grey out
+        // from it, first: a row's enabled state is bound to it, and both the
+        // effective-enabled refresh and the binding flush below must see the
+        // new value in this pass.
+        self.flush_command_availability();
+
+        // Refresh the node-resident `effective_enabled_signal`s FIRST, so a
+        // widget bound to one is dirty-marked in time for the binding flush
+        // immediately below to drain it in this same pass, rather than a frame
+        // late. This is also where a signal seeded during `build()` — when the
+        // widget's parent was not yet wired, so the seed could only see its own
+        // `enabled` prop — is corrected against the now-complete tree.
+        self.flush_effective_enabled_signals();
+
+        // One unified flush: both visual buckets and the a11y flag
+        // are drained from the same walk, so a signal bound at both
+        // a visual level and `AccessibilityOnly` (e.g. a Button's
+        // `label` re-registers the same Signal at RepaintOnly
+        // *and* AccessibilityOnly) flips both. Two separate flushes
+        // would each advance this registry's last-seen generation for
+        // that source, so the second would find nothing to report.
+        let (dirty_widgets, a11y_binding_dirty) = self.binding_registry.flush_all_dirty();
+        for (id, level) in &dirty_widgets {
+            // Looked at here, per widget whose bindings fired, so that
+            // `needs_structural_layout` costs no walk over every gate.
+            if self.visibility_gate_disagrees(*id) {
+                self.activation_pending = true;
+            }
+            match level {
+                crate::binding::BindingLevel::RepaintOnly => {
+                    self.arena.mark_needs_paint(*id);
+                }
+                crate::binding::BindingLevel::SubtreeRepaint => {
+                    // Used by `enabled_when` so the leaves in the
+                    // disabled subtree re-resolve their role colors
+                    // via the paint walker's `effective_enabled`.
+                    // No layout work — geometry is unchanged.
+                    self.arena.mark_subtree_needs_paint(*id);
+                    // A control that focus could not leave may now have a
+                    // stop to go to, enabled here, so the record that kept
+                    // `needs_structural_layout` quiet no longer holds.
+                    self.disabled_focus_stays = None;
+                }
+                crate::binding::BindingLevel::Relayout => {
+                    self.arena.mark_needs_layout(*id);
+                    self.arena.mark_ancestors_need_layout(*id);
+                }
+                crate::binding::BindingLevel::Rebuild => {
+                    self.arena.mark_needs_rebuild(*id);
+                    self.arena.mark_ancestors_need_layout(*id);
+                }
+                crate::binding::BindingLevel::AccessibilityOnly => {
+                    // Drained into the boolean below — never appears in
+                    // the visual map, but kept in the match so a future
+                    // variant addition is a compile-time reminder.
+                }
+            }
+        }
+
+        // Orthogonal to the visual dirty pass: if any signal bound at
+        // `BindingLevel::AccessibilityOnly` fired, flip the tree-wide
+        // `a11y_dirty` flag so the next `sync_accessibility` rebuilds
+        // the AccessKit tree. Decoupled from layout / paint so a text
+        // edit that changes no visual geometry still reaches screen
+        // readers within one frame.
+        if a11y_binding_dirty {
+            self.a11y_dirty = true;
+        }
+    }
+
+    /// Whether `id`'s `visible_when` gate disagrees with its activation in a
+    /// way the visibility pass of `process_state_changes` acts on: an active
+    /// node whose gate is `false`, or a dormant one whose gate is `true`
+    /// under an active parent.
+    fn visibility_gate_disagrees(&self, id: WidgetId) -> bool {
+        let Some(gate) = self
+            .arena
+            .get(id)
+            .and_then(|node| node.visible_state.as_ref())
+        else {
+            return false;
+        };
+        let active = self.arena.is_active(id);
+        let visible = gate.get();
+        if active {
+            return !visible;
+        }
+        visible
+            && self
+                .arena
+                .parent(id)
+                .is_none_or(|parent| self.arena.is_active(parent))
     }
 
     /// Destroy the content of dismissed overlays that asked for it
@@ -354,11 +403,14 @@ impl WidgetTree {
         // rebuild, `revalidate_interaction_state` clears a now-stale
         // `pointer_captured_by`; subsequent events hit-test normally.
         let to_rebuild_all = self.arena.collect_needs_rebuild();
+        // Whatever this call leaves undone for a capture: see the end of the
+        // filter below, and `needs_structural_layout`.
+        self.rebuild_deferred = false;
         if to_rebuild_all.is_empty() {
             self.revalidate_interaction_state(&mut *ops);
             return;
         }
-        let captured_ancestors: Option<Vec<WidgetId>> = if self.active_drag.is_none() {
+        let captured_ancestors: Option<Vec<WidgetId>> = if self.captures_defer_rebuilds() {
             // Every captured widget, not just the primary pointer's: two
             // contacts can hold two captures, and rebuilding either one's
             // ancestors mid-gesture is what this guard exists to prevent.
@@ -367,22 +419,21 @@ impl WidgetTree {
                 .iter()
                 .filter_map(|entry| entry.captured_by)
                 .collect();
-            (!captors.is_empty()).then(|| {
-                let mut ids = Vec::new();
-                for cap in captors {
-                    let mut cur = Some(cap);
-                    while let Some(id) = cur {
-                        if !ids.contains(&id) {
-                            ids.push(id);
-                        }
-                        cur = self.arena.parent(id);
+            let mut ids = Vec::new();
+            for cap in captors {
+                let mut cur = Some(cap);
+                while let Some(id) = cur {
+                    if !ids.contains(&id) {
+                        ids.push(id);
                     }
+                    cur = self.arena.parent(id);
                 }
-                ids
-            })
+            }
+            Some(ids)
         } else {
             None
         };
+        let marked = to_rebuild_all.len();
         let to_rebuild: Vec<WidgetId> = match &captured_ancestors {
             Some(chain) => to_rebuild_all
                 .into_iter()
@@ -390,6 +441,10 @@ impl WidgetTree {
                 .collect(),
             None => to_rebuild_all,
         };
+        // A rebuild held back for the capture keeps its mark, but the pass's
+        // end counts the mark as laid out. Without this, the release would
+        // leave the next event on the old children until a frame.
+        self.rebuild_deferred = to_rebuild.len() < marked;
         if to_rebuild.is_empty() {
             self.revalidate_interaction_state(&mut *ops);
             return;
@@ -502,6 +557,49 @@ impl WidgetTree {
         // (e.g. SceneView's drag-end rebuild re-arming PulsingDot
         // loopers via `register_bindings`).
         self.process_pending_animations();
+    }
+
+    /// Bring this tree's reactive state into its arena without laying it out:
+    /// afterwards [`needs_reconcile`](Self::needs_reconcile) is `false` and
+    /// [`needs_render`](Self::needs_render) says whether the change shows.
+    ///
+    /// It does two things. It starts every pending `animate_to` on the
+    /// animation scheduler, so the animation's deadline reaches
+    /// [`next_timer_deadline`](Self::next_timer_deadline) and wakes the
+    /// window. And it flushes the binding registry: command availability and
+    /// effective-enabled signals are refreshed, then every widget bound to a
+    /// signal written since the last flush gets the paint, layout or rebuild
+    /// mark its binding level asks for, and an accessibility binding sets the
+    /// tree's accessibility flag. Effects need nothing here: they are signal
+    /// observers, and ran when the signal was written.
+    ///
+    /// It measures nothing, places nothing, rebuilds nothing and parks or
+    /// wakes nothing. Those happen in the next [`layout`](Self::layout), which
+    /// finds the marks left here: the binding registry remembers per tree
+    /// what it has acted on, and arena marks stay until a pass clears them, so
+    /// nothing flushed here is lost to it. The flush also notes a
+    /// `visible_when` gate that now disagrees with its node, which
+    /// [`needs_structural_layout`](Self::needs_structural_layout) reports.
+    /// Rebuilding or parking here, without the layout, would leave fresh
+    /// widgets with no bounds under the pointer and focus nowhere until a
+    /// layout restored it.
+    ///
+    /// This is what `teksilo_app::WindowManager::request_redraw_needing_render`
+    /// runs after a dispatch. It then lays out at once a window that
+    /// [`needs_structural_layout`](Self::needs_structural_layout), and leaves
+    /// the rest to the window's frame.
+    #[doc(hidden)]
+    pub fn reconcile(&mut self) {
+        self.process_pending_animations();
+        self.flush_bindings_into_arena();
+    }
+
+    /// How many layout passes ([`layout`](Self::layout) and
+    /// [`layout_with_ops`](Self::layout_with_ops)) this tree has run. A test
+    /// reads it to assert that a path runs no layout.
+    #[doc(hidden)]
+    pub fn layout_passes(&self) -> u64 {
+        self.layout_passes
     }
 
     /// Run the layout pass with the given size proposal, using
@@ -620,6 +718,17 @@ impl WidgetTree {
         proposal: SizeProposal,
         ops: &mut dyn crate::window::WindowOps,
     ) {
+        self.layout_passes += 1;
+        self.run_layout_pass(proposal, ops);
+        // At the end: a rebuild marked during the pass itself is left to the
+        // frames that follow, as it always was, and must not make every later
+        // sweep lay the window out again.
+        self.rebuild_marks_laid_out = self.arena.rebuild_marks();
+    }
+
+    /// The body of [`layout_with_ops`](Self::layout_with_ops), which has two
+    /// ways out.
+    fn run_layout_pass(&mut self, proposal: SizeProposal, ops: &mut dyn crate::window::WindowOps) {
         self.process_pending_animations();
 
         let now = std::time::Instant::now();

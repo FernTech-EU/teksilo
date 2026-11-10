@@ -681,6 +681,11 @@ pub struct WidgetArena {
     nodes: SlotMap<WidgetId, WidgetNode>,
     /// Number of nodes with theme overrides. When zero, resolve_theme is O(1).
     pub(crate) theme_override_count: usize,
+    /// How many times an active node has been marked for a rebuild, ever.
+    /// The tree compares it with the count its last layout pass ended at to
+    /// tell, without walking the arena, whether a rebuild is waiting (see
+    /// `WidgetTree::needs_structural_layout`).
+    rebuild_marks: u64,
     /// Whether any node was ever marked a focus region. Never reset: while
     /// it is false, the region scans (run for command availability every
     /// pass) answer at once.
@@ -787,6 +792,7 @@ impl WidgetArena {
         Self {
             nodes: SlotMap::with_key(),
             theme_override_count: 0,
+            rebuild_marks: 0,
             focus_regions_seen: false,
             cached_roots: Vec::new(),
             roots_dirty: true,
@@ -2153,7 +2159,18 @@ impl WidgetArena {
             node.dirty.needs_rebuild = true;
             node.dirty.needs_layout = true;
             node.dirty.needs_paint = true;
+            // A dormant node is rebuilt when it wakes, by the pass that wakes
+            // it; until then no event can reach its structure.
+            if node.activation == ActivationState::Active {
+                self.rebuild_marks += 1;
+            }
         }
+    }
+
+    /// How many times an active node has been marked for a rebuild since the
+    /// arena was made. Only differences mean anything.
+    pub(crate) fn rebuild_marks(&self) -> u64 {
+        self.rebuild_marks
     }
 
     /// Collect widgets that need their `build()` re-run (data-driven rebuild).

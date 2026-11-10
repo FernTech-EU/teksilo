@@ -582,6 +582,71 @@ fn a_cycle_scope_keeps_the_handed_on_focus() {
     assert_eq!(tree.focused(), Some(first));
 }
 
+/// A focused control that becomes disabled asks for the pass that hands
+/// focus on, so a key sent before the frame reaches the next stop rather than
+/// the disabled control, which refuses it.
+#[test]
+fn a_disabled_focused_control_asks_for_a_structural_layout() {
+    let Row {
+        mut tree,
+        ids: [_a, b, c],
+        enabled,
+    } = row_of_three();
+    tree.focus(b);
+    assert!(!tree.needs_structural_layout(), "precondition: settled");
+    enabled[1].set(false);
+    assert!(tree.needs_structural_layout());
+    lay_out(&mut tree);
+    assert_eq!(tree.focused(), Some(c));
+    assert!(!tree.needs_structural_layout());
+}
+
+/// With nowhere to send focus, the pass leaves it on the disabled control,
+/// and the control does not ask for that pass again on every event.
+#[test]
+fn a_lone_disabled_control_asks_for_one_pass_only() {
+    let mut tree = WidgetTree::new();
+    let root = tree.add(StackWidget::new());
+    let only = field(&mut tree, root);
+    let enabled = Signal::new(true);
+    tree.enabled_when(only, enabled.clone());
+    lay_out(&mut tree);
+    tree.focus(only);
+    enabled.set(false);
+    assert!(tree.needs_structural_layout());
+    lay_out(&mut tree);
+    assert_eq!(tree.focused(), Some(only));
+    assert!(!tree.needs_structural_layout());
+}
+
+/// A control enabled while focus is stuck on a disabled one gives focus
+/// somewhere to go: the binding flush clears the record, so the tree asks
+/// for the pass again before the next key, and the pass hands focus on.
+#[test]
+fn enabling_another_control_asks_again_for_the_pass() {
+    let mut tree = WidgetTree::new();
+    let root = tree.add(StackWidget::new());
+    let only = field(&mut tree, root);
+    let later = field(&mut tree, root);
+    let only_enabled = Signal::new(true);
+    let later_enabled = Signal::new(false);
+    tree.enabled_when(only, only_enabled.clone());
+    tree.enabled_when(later, later_enabled.clone());
+    lay_out(&mut tree);
+    tree.focus(only);
+    only_enabled.set(false);
+    lay_out(&mut tree);
+    assert_eq!(tree.focused(), Some(only), "precondition: nowhere to go");
+    assert!(!tree.needs_structural_layout());
+
+    later_enabled.set(true);
+    tree.reconcile();
+    assert!(tree.needs_structural_layout(), "somewhere to go now");
+    lay_out(&mut tree);
+    assert_eq!(tree.focused(), Some(later));
+    assert!(!tree.needs_structural_layout());
+}
+
 #[test]
 fn a_lone_disabled_control_keeps_focus() {
     let mut tree = WidgetTree::new();
