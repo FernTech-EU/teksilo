@@ -26,6 +26,10 @@ by crate for clarity, not because crates version independently.
   only inside the application, without a word. Text and HTML are exchanged as
   before, under all the usual type names, and a copy stays available after
   the window that made it closes. X11, macOS and Windows keep `arboard`.
+  On Wayland, copying now needs one of the application's windows to have
+  keyboard focus, on every compositor: on KDE and wlroots compositors a copy
+  made with no window focused used to work and now returns an error, leaving
+  the clipboard as it was.
 - **An application with no reachable system clipboard says so on stderr**
   (`teksilo-platform: the system clipboard is unavailable (…)`) instead of
   falling back to an in-process clipboard silently.

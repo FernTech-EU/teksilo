@@ -226,6 +226,14 @@ pub use arboard_backend::ArboardClipboard;
 ///   core protocol cannot be set up.
 /// * **X11, macOS, Windows**: [`ArboardClipboard`].
 ///
+/// On Wayland a copy needs one of the application's windows to have keyboard
+/// focus, as the core protocol requires: with none focused (every window
+/// closed, or a copy made after the user switched to another application),
+/// `set_text` and `set_html` return an error and the clipboard keeps what it
+/// held. Pastes likewise see the current clipboard only while a window is
+/// focused. On KDE and wlroots compositors, where `arboard` used data-control,
+/// that is new.
+///
 /// When no system clipboard can be reached the reason is written to stderr
 /// and copy and paste keep working inside this process only, so the next
 /// "my clipboard is its own" report can be told apart in a log.

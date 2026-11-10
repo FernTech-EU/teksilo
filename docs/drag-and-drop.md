@@ -649,8 +649,11 @@ of the same app**. A drop back on the **source window** reports
 `InApp { accepted }` to the source, whatever the platform says (it reports a
 copy): the window holds the in-app outcome until the platform's `DragEnded` and
 delivers it then, once. Limitation: a drop accepted in **another window** of the
-app reports `OsCopy` (the OS's view). On Wayland one thread posts both the drop
-on the source window and the source's `DragEnded`, the drop first.
+app reports `OsCopy` (the OS's view). On Wayland the drop on the source window
+is posted before the source's `DragEnded`: both are posted while dispatching the
+one shared event queue, which the Wayland data thread or the UI thread does under
+one lock, in the compositor's order, and the event proxy delivers them in the
+order posted.
 
 **Per-platform:** macOS uses `NSDraggingSource` + `beginDraggingSessionWithItems:event:source:`
 (triggering event from `NSApp.currentEvent`); Windows runs OLE `DoDragDrop` on the
