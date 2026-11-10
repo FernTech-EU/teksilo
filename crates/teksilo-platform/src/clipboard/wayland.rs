@@ -298,10 +298,28 @@ struct TextMime<'a> {
     rank: u8,
 }
 
+/// The rank of `text/uri-list`, below every plain text type.
+const URI_LIST_RANK: u8 = 6;
+
 impl TextMime<'_> {
     fn decode(&self, bytes: &[u8]) -> String {
-        self.charset.decode(bytes)
+        let text = self.charset.decode(bytes);
+        if self.rank == URI_LIST_RANK {
+            uri_list_text(&text)
+        } else {
+            text
+        }
     }
+}
+
+/// The URIs of a `text/uri-list` (RFC 2483: CRLF-separated, `#` starts a
+/// comment line), one per line.
+fn uri_list_text(list: &str) -> String {
+    list.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Split `type/subtype;param=value;…` into the lowercase essence and the
@@ -324,7 +342,9 @@ impl<'a> TextMime<'a> {
     /// 2. `text/plain` with another charset we can decode;
     /// 3. `text/plain` with none: UTF-8 in practice on Linux;
     /// 4. `TEXT`: X11's "any encoding", UTF-8 when it is valid UTF-8;
-    /// 5. `STRING`: X11's ISO 8859-1, which loses everything past U+00FF.
+    /// 5. `STRING`: X11's ISO 8859-1, which loses everything past U+00FF;
+    /// 6. `text/uri-list`, read as its URIs: all a file manager offers for a
+    ///    copied file (Dolphin), which `arboard` pasted as text too.
     fn rank(mime: &'a str) -> Option<Self> {
         let (rank, charset) = match mime {
             "UTF8_STRING" => (1, Charset::Utf8),
@@ -332,6 +352,13 @@ impl<'a> TextMime<'a> {
             "STRING" => (5, Charset::Latin1),
             _ => {
                 let (essence, charset) = essence_and_charset(mime);
+                if essence == "text/uri-list" {
+                    return Some(Self {
+                        mime,
+                        charset: Charset::Utf8,
+                        rank: URI_LIST_RANK,
+                    });
+                }
                 if essence != "text/plain" {
                     return None;
                 }
@@ -423,6 +450,7 @@ mod tests {
             "text/plain",
             "TEXT",
             "STRING",
+            "text/uri-list",
         ];
         for i in 0..order.len() {
             let offered = strings(&order[i..]);
@@ -446,12 +474,19 @@ mod tests {
     #[test]
     fn an_unknown_charset_and_non_text_are_not_taken() {
         assert_eq!(
-            best_text_mime(&strings(&[
-                "text/plain;charset=koi8-r",
-                "image/png",
-                "text/uri-list"
-            ])),
+            best_text_mime(&strings(&["text/plain;charset=koi8-r", "image/png"])),
             None
+        );
+    }
+
+    #[test]
+    fn a_copied_file_pastes_as_its_uri() {
+        // Dolphin offers a copied file as `text/uri-list` and nothing else.
+        let offered = strings(&["text/uri-list"]);
+        let best = best_text_mime(&offered).unwrap();
+        assert_eq!(
+            best.decode(b"# from Dolphin\r\nfile:///home/a/x.txt\r\nfile:///home/a/y%20z.txt\r\n"),
+            "file:///home/a/x.txt\nfile:///home/a/y%20z.txt"
         );
     }
 
