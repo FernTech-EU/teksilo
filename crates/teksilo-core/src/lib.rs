@@ -29,6 +29,7 @@ pub mod idle;
 pub mod ime;
 pub mod intent;
 pub mod kinetic;
+pub mod language;
 pub mod menu_item_id;
 pub mod modal;
 pub mod motion_visibility;
@@ -104,6 +105,7 @@ pub use kinetic::{
     BouncingSimulation, ClampingSimulation, FlingDriver, KineticScroller, ScrollSimulation,
     ScrollStep, VelocityEstimate, VelocityTracker, rubber_band,
 };
+pub use language::{LanguageTag, LanguageTagError};
 pub use menu_item_id::MenuItemId;
 pub use modal::{
     ModalBuilder, ModalCloseBehavior, ModalContent, ModalPlacement, ModalPresentation,

@@ -77,6 +77,7 @@ pub fn is_widget_builder_method(name: &str) -> bool {
             | "focus_within"
             | "hover_within"
             | "visible_when"
+            | "content_language"
             // Drag / drop
             | "drag_activation"
             | "on_drag_hover"

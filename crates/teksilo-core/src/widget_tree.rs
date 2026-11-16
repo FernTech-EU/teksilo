@@ -18,6 +18,9 @@ mod accessibility_description_impl;
 mod accessibility_description_tests;
 mod accessibility_emit_impl;
 mod accessibility_impl;
+mod accessibility_language_impl;
+#[cfg(test)]
+mod accessibility_language_tests;
 mod accessibility_placeholder_impl;
 #[cfg(test)]
 mod accessibility_proxy_tests;
@@ -3834,6 +3837,7 @@ impl WidgetTree {
         // `visible_when` needs the binding registry (which the arena lacks), so
         // pull it out here and apply it via `self.visible_when` after.
         let visible_when = handler_set.visible_when.take();
+        let content_language = handler_set.content_language.take();
         // Same reason for the reactive access Props: the arena can't reach the
         // registry, so register them here before handing the set to the arena.
         if let Some(access) = handler_set.access.as_ref() {
@@ -3843,6 +3847,9 @@ impl WidgetTree {
             .apply_handler_set(id, handler_set, crate::arena::HandlerScope::Own);
         if let Some(prop) = visible_when {
             self.visible_when(id, prop);
+        }
+        if let Some(language) = content_language {
+            self.install_content_language(id, language);
         }
     }
 
@@ -3856,9 +3863,11 @@ impl WidgetTree {
         id: WidgetId,
         mut handler_set: crate::widget_builder::HandlerSet,
     ) {
-        // See `apply_self_handler_set`: route `visible_when` and the reactive
-        // access Props through the registry (the arena can't reach it).
+        // See `apply_self_handler_set`: route `visible_when`, the language and
+        // the reactive access Props through the registry (the arena can't
+        // reach it).
         let visible_when = handler_set.visible_when.take();
+        let content_language = handler_set.content_language.take();
         if let Some(access) = handler_set.access.as_ref() {
             Self::register_access_prop_bindings(access, id, &self.binding_registry);
         }
@@ -3866,6 +3875,9 @@ impl WidgetTree {
             .apply_handler_set(id, handler_set, crate::arena::HandlerScope::External);
         if let Some(prop) = visible_when {
             self.visible_when(id, prop);
+        }
+        if let Some(language) = content_language {
+            self.install_content_language(id, language);
         }
     }
 
@@ -5194,8 +5206,13 @@ impl WidgetTree {
 
         {
             if let Some(mut widget_box) = self.arena.take_widget(id) {
-                if let Some(handler_set) = widget_box.take_handler_set() {
+                if let Some(mut handler_set) = widget_box.take_handler_set() {
                     self.arena.restore_widget(id, widget_box);
+                    // Needs the binding registry, which the node block
+                    // below cannot reach while it borrows the arena.
+                    if let Some(language) = handler_set.content_language.take() {
+                        self.install_content_language(id, language);
+                    }
                     if handler_set.focus_region.is_some() {
                         self.arena.focus_regions_seen = true;
                     }
@@ -5408,8 +5425,13 @@ impl WidgetTree {
 
         {
             if let Some(mut widget_box) = self.arena.take_widget(id) {
-                if let Some(handler_set) = widget_box.take_handler_set() {
+                if let Some(mut handler_set) = widget_box.take_handler_set() {
                     self.arena.restore_widget(id, widget_box);
+                    // Needs the binding registry, which the node block
+                    // below cannot reach while it borrows the arena.
+                    if let Some(language) = handler_set.content_language.take() {
+                        self.install_content_language(id, language);
+                    }
                     if handler_set.focus_region.is_some() {
                         self.arena.focus_regions_seen = true;
                     }
@@ -6227,6 +6249,74 @@ impl WidgetTree {
     /// Get the resolved theme for a specific widget (applying ancestor overrides).
     pub fn resolved_theme(&self, id: WidgetId) -> crate::styles::Theme {
         self.arena.resolve_theme(id, &self.theme).into_owned()
+    }
+
+    // --- Content language ---
+
+    /// Declare the language of `id`'s content and its subtree's, as
+    /// [`WidgetBuilder::content_language`](crate::widget_builder::WidgetBuilder::content_language)
+    /// does at the widget's creation site. `None` withdraws a declaration.
+    pub fn set_content_language(
+        &mut self,
+        id: WidgetId,
+        language: Option<crate::signal::Prop<Option<crate::language::LanguageTag>>>,
+    ) {
+        match language {
+            Some(language) => self.install_content_language(id, language),
+            None => {
+                if self.arena.declares_content_language(id) {
+                    self.arena.set_content_language(id, None);
+                    self.content_language_changed(id);
+                }
+            }
+        }
+    }
+
+    /// The language of `id`'s content: its own declaration, else the nearest
+    /// ancestor's, else, for an overlay's content, that of the widget the
+    /// overlay is attached to. `None` when nothing declares one: the content
+    /// is in the application's locale.
+    pub fn content_language(&self, id: WidgetId) -> Option<crate::language::LanguageTag> {
+        self.arena
+            .content_language_of(id, Some(&self.overlay_manager))
+    }
+
+    /// Store a declaration on `id` and keep it live: a bound prop is
+    /// registered so that a change re-lays out and repaints the subtree and
+    /// re-walks the accessibility tree (see
+    /// [`content_language_changed`](Self::content_language_changed)).
+    pub(crate) fn install_content_language(
+        &mut self,
+        id: WidgetId,
+        language: crate::signal::Prop<Option<crate::language::LanguageTag>>,
+    ) {
+        // `Relayout` is the visual half: the binding flush widens it to the
+        // declaring node's subtree (see `flush_bindings_into_arena`), because
+        // every text widget below it shapes with the language. The
+        // accessibility half re-walks the tree.
+        language.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::Relayout,
+        );
+        language.register_if_bound(
+            id,
+            &self.binding_registry,
+            crate::binding::BindingLevel::AccessibilityOnly,
+        );
+        if self.arena.set_content_language(id, Some(language)) {
+            self.content_language_changed(id);
+        }
+    }
+
+    /// What follows a change to the language declared on `id`: everything in
+    /// its subtree is laid out and painted again, since a text widget may
+    /// shape differently, and the accessibility tree is walked again.
+    pub(crate) fn content_language_changed(&mut self, id: WidgetId) {
+        self.arena.mark_needs_layout(id);
+        self.arena.mark_ancestors_need_layout(id);
+        self.arena.mark_subtree_needs_paint(id);
+        self.a11y_dirty = true;
     }
 }
 

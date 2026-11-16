@@ -237,7 +237,7 @@ changes; after a structural change, re-`find_node` (by role/label, which
 carries the usual label fragility) rather than reuse a possibly-stale id.
 
 **Query**, `snapshot_tree {window_id?, max_depth?}`, `read_node {node}`,
-`find_node {role?, label?}`, `assert_node {node, kind, value?/flag?}`,
+`find_node {role?, label?, language?}`, `assert_node {node, kind, value?/flag?}`,
 `list_windows {}`, `query_pointers {}`
 
 `max_depth` bounds the walk from the root, and on a real app it is usually the
@@ -245,8 +245,8 @@ difference between a reply you can read and one you cannot: take a shallow
 snapshot first, then descend from a node you picked out of it.
 
 `assert_node`'s `kind` is one of `role_equals`, `label_equals`,
-`label_contains`, `value_equals`, `document_text_equals` (each taking the
-expected string in `value`), `toggled`, `expanded`, `selected`, `disabled`
+`label_contains`, `value_equals`, `document_text_equals`, `language_equals`
+(each taking the expected string in `value`), `toggled`, `expanded`, `selected`, `disabled`
 (each taking the expected bool in `flag`), or `exists` / `focused` /
 `supports_text_ranges`, which take neither. An unrecognised `kind` is
 refused rather than defaulted, the same reason every op's parameters are
@@ -876,6 +876,20 @@ unreviewable. `assert_node` gained `supports_text_ranges` and
 `labelled_by`: a dialog named by pointing at its visible title reports that
 title here, where the raw property is empty. The unresolved property is kept
 as `raw_label`, and only when the two differ.
+
+**Language.** A node carries `language` (a BCP 47 tag) only where the
+application declared one with `content_language` and it took effect: where it
+differs from the language the node inherits. A snapshot of an application that
+declares nothing has no `language` on any node, and the window root's locale
+is not reported as one. The language a node's text is read in, inherited or
+not, is `text.language`; it is what the platform adapters send. `find_node`'s
+`language` and the `language_equals` assertion compare that inherited
+language, without regard to case:
+
+```json
+find_node { "role": "TextInput", "language": "ar" }
+assert_node { "node": 42, "kind": "language_equals", "value": "ja" }
+```
 
 ## Documented limitations
 

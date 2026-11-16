@@ -168,6 +168,11 @@ impl WidgetTree {
             .filter(|nid| emitted.contains(nid))
             .unwrap_or(focus);
 
+        // Each row named here from its content, with the node its name was
+        // taken from: the row is read in that content's language.
+        let mut named_from: std::collections::HashMap<accesskit::NodeId, accesskit::NodeId> =
+            std::collections::HashMap::new();
+
         // ── Name-from-content for row nodes ───────────────────────────
         // A virtualized row is two nodes: a thin structural wrapper
         // (`ListItemWrapper` / `TreeItemWrapper`) carrying the role, level
@@ -202,7 +207,7 @@ impl WidgetTree {
                 .map(|(i, (nid, _))| (*nid, i))
                 .collect();
 
-            let mut hoisted: Vec<(usize, String)> = Vec::new();
+            let mut hoisted: Vec<(usize, String, accesskit::NodeId)> = Vec::new();
             for (i, (_, node)) in nodes.iter().enumerate() {
                 if !names_from_content(node.role()) || node.label().is_some() {
                     continue;
@@ -218,14 +223,15 @@ impl WidgetTree {
                     }
                     match descendant.label() {
                         Some(label) if !label.trim().is_empty() => {
-                            hoisted.push((i, label.to_string()));
+                            hoisted.push((i, label.to_string(), nid));
                             break;
                         }
                         _ => stack.extend(descendant.children().iter().rev().copied()),
                     }
                 }
             }
-            for (i, label) in hoisted {
+            for (i, label, source) in hoisted {
+                named_from.insert(nodes[i].0, source);
                 nodes[i].1.set_label(label);
             }
         }
@@ -454,6 +460,12 @@ impl WidgetTree {
         // more. After the cells are named and before the description pass,
         // with every `labelled_by` target present.
         super::accessibility_placeholder_impl::drop_placeholders_repeating_the_name(&mut nodes);
+        // Each node's content language, where it differs from what it
+        // inherits. After the prune and the strips, so it is compared with
+        // the parent each node has in the tree as sent, and after the cells
+        // are named, since a node named from its content is read in that
+        // content's language.
+        self.emit_content_languages(&mut nodes, &named_from);
 
         // Last, on the nodes this update carries: a `described_by` relation
         // reaches no screen reader through AccessKit, so its targets' text is

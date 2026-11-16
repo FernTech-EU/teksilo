@@ -105,6 +105,9 @@ pub struct FindParams {
     pub window_id: Option<u64>,
     pub role: Option<String>,
     pub label: Option<String>,
+    /// The language the node is read in, inherited or not: a BCP 47 tag
+    /// such as `ja` or `fr-FR`, compared without regard to case.
+    pub language: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -114,7 +117,7 @@ pub struct AssertParams {
     pub node: u64,
     /// One of: exists, focused, role_equals, label_equals, label_contains,
     /// value_equals, toggled, expanded, selected, disabled,
-    /// supports_text_ranges, document_text_equals.
+    /// supports_text_ranges, document_text_equals, language_equals.
     pub kind: String,
     /// The expected string, for the *_equals / *_contains kinds.
     pub value: Option<String>,
@@ -559,7 +562,9 @@ impl AutomationServer {
         .await
     }
 
-    #[tool(description = "Find the first node matching a role and/or label.")]
+    #[tool(
+        description = "Find the first node matching a role, a label and/or the language it is read in."
+    )]
     pub(crate) async fn find_node(
         &self,
         Parameters(p): Parameters<FindParams>,
@@ -569,13 +574,16 @@ impl AutomationServer {
             AutomationOp::FindNode {
                 role: p.role,
                 label: p.label,
+                language: p.language,
             },
             SettleSpec::default(),
         )
         .await
     }
 
-    #[tool(description = "Assert a property of a node (role/label/value/toggled/expanded/...).")]
+    #[tool(
+        description = "Assert a property of a node (role/label/value/toggled/expanded/language/...)."
+    )]
     pub(crate) async fn assert_node(
         &self,
         Parameters(p): Parameters<AssertParams>,
@@ -1224,7 +1232,7 @@ an `id` (an AccessKit id, stable for the widget's lifetime — across relayout /
 theme / locale, but a structural rebuild that recreates the widget yields a \
 new id, so re-find after the tree's structure changes), plus role, label, \
 value, toggled/expanded/selected, bounds, and the `actions` it supports. \
-`find_node {role?, label?}` returns the first match's id directly.
+`find_node {role?, label?, language?}` returns the first match's id directly.
 2. Act on it. `invoke_action {node, action}` where action is one of click, \
 focus, expand, collapse, set_value, increment, decrement, show_context_menu; \
 or the shortcuts `set_value` / `type_text` / `focus_node` / `expand` / \
@@ -1389,6 +1397,7 @@ fn build_assertion(p: &AssertParams) -> Result<Assertion, McpError> {
         "disabled" => Assertion::Disabled { value: flag()? },
         "supports_text_ranges" => Assertion::SupportsTextRanges,
         "document_text_equals" => Assertion::DocumentTextEquals { value: value()? },
+        "language_equals" => Assertion::LanguageEquals { value: value()? },
         other => {
             return Err(McpError::invalid_params(
                 format!("unknown assertion kind '{other}'"),

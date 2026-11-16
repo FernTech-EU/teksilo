@@ -815,6 +815,7 @@ fn paint_follows_a_box_moved_without_a_layout() {
         prefers_large_text: false,
         window_active: true,
         clip_bounds: None,
+        content_language: None,
     };
     let mut canvas = Canvas::new();
     let moved = Rect::new(30.4, 20.0, 16.0, 12.0);

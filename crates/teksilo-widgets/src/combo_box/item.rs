@@ -78,6 +78,10 @@ pub(super) fn build_default_item(
 pub(super) struct DropdownItem<T: Clone + PartialEq + 'static> {
     pub(super) value: T,
     pub(super) label: String,
+    /// The language of this row's content, declared on the row's node so a
+    /// reader announces the option in it. See
+    /// [`ComboBox::item_language`](super::ComboBox::item_language).
+    pub(super) language: Option<teksilo_core::language::LanguageTag>,
     /// 1-based index for `position_in_set`.
     pub(super) position: usize,
     pub(super) total: usize,
@@ -227,6 +231,10 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownItem<T> {
                 }
             })
             .cursor(CursorIcon::Pointer);
+        let handler_set = match self.language.clone() {
+            Some(language) => handler_set.content_language(language),
+            None => handler_set,
+        };
 
         ctx.apply_self_handlers(handler_set);
 

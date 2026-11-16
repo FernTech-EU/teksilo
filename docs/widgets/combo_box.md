@@ -22,6 +22,7 @@ ComboBox — dropdown selection widget.
 | `Self` | [`item_label(f: impl Fn(&T) -> LocalizedString + 'static)`](#combobox-item_label) |
 | `Self` | [`render_item(f: impl Fn(&T, bool) -> Box<dyn Widget> + 'static)`](#combobox-render_item) |
 | `Self` | [`render_selected(f: impl Fn(&T) -> Box<dyn Widget> + 'static)`](#combobox-render_selected) |
+| `Self` | [`item_language(f: impl Fn(&T) -> Option<teksilo_core::language::LanguageTag> + 'static)`](#combobox-item_language) |
 | `Self` | [`on_select(f: impl Fn(&T, &mut EventContext) + 'static)`](#combobox-on_select) |
 | `Self` | [`max_visible_items(n: usize)`](#combobox-max_visible_items) |
 | `Self` | [`type_ahead_timeout(d: Duration)`](#combobox-type_ahead_timeout) |
@@ -250,6 +251,24 @@ accessibility tree — the ComboBox's own `accessibility(builder)`
 already announces the selected value via `set_value`, so the custom
 visual can never double-announce. When nothing is selected the
 trigger shows the `placeholder` text.
+
+<a id="combobox-item_language"></a>
+
+#### `pub fn item_language( mut self, f: impl Fn(&T) -> Option<teksilo_core::language::LanguageTag> + 'static, ) -> Self`
+
+The language each item's text is written in, for a list whose items
+are not all in the interface's language: a language picker showing
+each language's own name, a list of titles in their original
+languages.
+
+Each dropdown row declares `f(&item)` as its
+`content_language`,
+so a screen reader reads the option in that language, and so does the
+selected value shown when the combo is closed. `None` for an item
+leaves it in the language around the combo box.
+
+The combo box's own node keeps the interface's language: its name
+("Language") is the interface's, and one node has one language.
 
 <a id="combobox-on_select"></a>
 

@@ -11791,6 +11791,7 @@ dependencies = [
  "accesskit 0.25.2",
  "accesskit_consumer",
  "criterion",
+ "icu_locale_core",
  "proptest",
  "raw-window-handle",
  "serde",

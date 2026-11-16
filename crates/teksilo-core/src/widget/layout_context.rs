@@ -50,6 +50,16 @@ pub struct LayoutContext<'a> {
     /// like the inspector's Focus / Shortcuts / Overlays tabs. `None`
     /// in test contexts.
     pub(crate) extras: Option<LayoutExtras<'a>>,
+    /// The language of the content of the widget this context was resolved
+    /// for (see [`content_language`](Self::content_language)). `None` both
+    /// when nothing declares one and while no node in the tree declares a
+    /// language at all.
+    pub(crate) content_language: Option<crate::language::LanguageTag>,
+    /// The widget `content_language` was resolved for. A widget asking a
+    /// child for its size hands it its own context, so the arena re-resolves
+    /// the language for the child: in O(1) from this when the child's parent
+    /// is this widget, with a walk otherwise. `None` outside a tree.
+    pub(crate) language_for: Option<WidgetId>,
 }
 
 /// Read-only handles to tree-level state that some widgets (notably
@@ -79,6 +89,39 @@ impl<'a> LayoutContext<'a> {
             arena: None,
             extras: None,
             stack_main_axis: None,
+            content_language: None,
+            language_for: None,
+        }
+    }
+
+    /// The language of the content of the widget being laid out: its own
+    /// [`content_language`](crate::widget_builder::WidgetBuilder::content_language)
+    /// declaration, else its nearest ancestor's, else, inside an overlay, that
+    /// of the widget the overlay is attached to. `None` when nothing
+    /// declares one, which means the content is in the application's locale.
+    ///
+    /// A change to a declaration lays the tree out again.
+    pub fn content_language(&self) -> Option<&crate::language::LanguageTag> {
+        self.content_language.as_ref()
+    }
+
+    /// The same context, resolved for `id` with `language`.
+    pub(crate) fn with_content_language(
+        &self,
+        id: WidgetId,
+        language: Option<crate::language::LanguageTag>,
+    ) -> LayoutContext<'a> {
+        LayoutContext {
+            stack_main_axis: self.stack_main_axis,
+            theme: self.theme,
+            layout_direction: self.layout_direction,
+            scale_factor: self.scale_factor,
+            text_scale: self.text_scale,
+            text_backend: self.text_backend,
+            arena: self.arena,
+            extras: self.extras,
+            content_language: language,
+            language_for: Some(id),
         }
     }
 
@@ -95,7 +138,15 @@ impl<'a> LayoutContext<'a> {
     pub fn with_stack_main_axis(&self, axis: StackAxis) -> LayoutContext<'a> {
         LayoutContext {
             stack_main_axis: Some(axis),
-            ..*self
+            theme: self.theme,
+            layout_direction: self.layout_direction,
+            scale_factor: self.scale_factor,
+            text_scale: self.text_scale,
+            text_backend: self.text_backend,
+            arena: self.arena,
+            extras: self.extras,
+            content_language: self.content_language.clone(),
+            language_for: self.language_for,
         }
     }
 

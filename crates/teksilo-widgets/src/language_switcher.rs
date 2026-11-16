@@ -36,6 +36,7 @@
 use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
+use teksilo_core::language::LanguageTag;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{LayoutContext, LayoutResponse, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
@@ -210,6 +211,9 @@ impl Widget for LanguageSwitcher {
             self.selected.clone(),
             |c: &LocaleChoice| LocalizedString::literal(c.display.clone()),
         )
+        // Each row shows a language's own name, so each is read in that
+        // language rather than the interface's.
+        .item_language(|c: &LocaleChoice| LanguageTag::parse(&c.tag).ok())
         .variant(self.variant)
         .placeholder(tr_widget!(a11y_language_switcher_name()))
         // The reason this widget needs `ComboBox::on_select` (not a plain
@@ -332,6 +336,56 @@ mod tests {
         let id = tree.add(LanguageSwitcher::new());
         tree.layout(SizeProposal::exact(300.0, 50.0));
         assert!(tree.bounds(id).width >= 0.0);
+    }
+
+    #[test]
+    fn each_option_is_read_in_its_own_language() {
+        use teksilo_core::accesskit::Role;
+        use teksilo_core::event::{Key, Modifiers};
+
+        let mut tree = light_tree();
+        tree.set_locale("fr-FR".to_owned());
+        let id = tree.add(LanguageSwitcher::new().locales(langs(&["fr-FR", "ja", "ar-SA"])));
+        tree.layout(SizeProposal::exact(300.0, 400.0));
+        let combo = tree.children(id)[0];
+        tree.focus(combo);
+        tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        tree.layout(SizeProposal::exact(300.0, 400.0));
+
+        let update = tree.sync_accessibility();
+        let languages = teksilo_core::accessibility::audit::effective_languages(&update);
+        let names = teksilo_core::accessibility::audit::resolved_names(&update);
+        let mut options: Vec<(String, Option<String>)> = update
+            .nodes
+            .iter()
+            .filter(|(_, n)| n.role() == Role::ListBoxOption)
+            .map(|(nid, _)| {
+                (
+                    names.get(nid).cloned().unwrap_or_default(),
+                    languages.get(nid).cloned(),
+                )
+            })
+            .collect();
+        options.sort();
+        assert_eq!(
+            options,
+            vec![
+                ("français (fr-FR)".to_owned(), Some("fr-FR".to_owned())),
+                ("العربية (ar-SA)".to_owned(), Some("ar-SA".to_owned())),
+                ("日本語 (ja)".to_owned(), Some("ja".to_owned())),
+            ],
+        );
+        let combo_node = update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.role() == Role::ComboBox)
+            .map(|(nid, _)| *nid)
+            .unwrap();
+        assert_eq!(
+            languages.get(&combo_node).map(String::as_str),
+            Some("fr-FR"),
+            "the control itself stays in the interface's language"
+        );
     }
 
     #[test]

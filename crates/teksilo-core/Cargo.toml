@@ -32,6 +32,9 @@ slotmap = "1"
 serde = { workspace = true }
 thiserror = { workspace = true }
 raw-window-handle = "0.6"
+# `language::LanguageTag` parses and case-fixes a BCP 47 tag. No data tables:
+# the parser alone.
+icu_locale_core = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
 # Test-only: property-based testing (see the `proptest` entry in the

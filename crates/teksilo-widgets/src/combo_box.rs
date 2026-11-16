@@ -149,6 +149,9 @@ pub struct ComboBox<T: Clone + PartialEq + 'static> {
     /// own typeface. Rebuilt on every selection change (see
     /// [`render_selected`](Self::render_selected)).
     render_selected: Option<Rc<dyn Fn(&T) -> Box<dyn Widget>>>,
+    /// The language each item's text is written in. See
+    /// [`item_language`](Self::item_language).
+    item_language: self::panel::ItemLanguage<T>,
     /// Optional callback fired whenever the user commits a selection
     /// (a dropdown-row tap, or `Enter`), with a live
     /// `EventContext`. Distinct from observing the `selected` signal:
@@ -268,6 +271,7 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
             item_label,
             render_item: None,
             render_selected: None,
+            item_language: None,
             on_select: None,
             placeholder: LocalizedString::literal(String::new()),
             label: None,
@@ -392,6 +396,27 @@ impl<T: Clone + PartialEq + 'static> ComboBox<T> {
     /// trigger shows the `placeholder` text.
     pub fn render_selected(mut self, f: impl Fn(&T) -> Box<dyn Widget> + 'static) -> Self {
         self.render_selected = Some(Rc::new(f));
+        self
+    }
+
+    /// The language each item's text is written in, for a list whose items
+    /// are not all in the interface's language: a language picker showing
+    /// each language's own name, a list of titles in their original
+    /// languages.
+    ///
+    /// Each dropdown row declares `f(&item)` as its
+    /// [`content_language`](teksilo_core::widget_builder::WidgetBuilder::content_language),
+    /// so a screen reader reads the option in that language, and so does the
+    /// selected value shown when the combo is closed. `None` for an item
+    /// leaves it in the language around the combo box.
+    ///
+    /// The combo box's own node keeps the interface's language: its name
+    /// ("Language") is the interface's, and one node has one language.
+    pub fn item_language(
+        mut self,
+        f: impl Fn(&T) -> Option<teksilo_core::language::LanguageTag> + 'static,
+    ) -> Self {
+        self.item_language = Some(Rc::new(f));
         self
     }
 
@@ -774,6 +799,13 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
             };
             ctx.add(label)
         };
+        // The selected value is drawn in its own language, as its row is.
+        if let Some(language_of) = self.item_language.clone() {
+            let language = self
+                .selected
+                .map(move |selected| selected.as_ref().and_then(|item| language_of(item)));
+            ctx.apply_handlers(label_id, HandlerSet::new().content_language(language));
+        }
 
         // Resolve the active style: per-call override > theme slot >
         // built-in `RecipeComboBoxStyle` default. The style produces
@@ -860,6 +892,7 @@ impl<T: Clone + PartialEq + 'static> Widget for ComboBox<T> {
                 .unwrap_or_else(|| teksilo_i18n::tr_widget!(a11y_builtin_search())),
             item_label: self.item_label.clone(),
             render_item: self.render_item.clone(),
+            item_language: self.item_language.clone(),
             on_select: self.on_select.clone(),
             max_visible_items: self.max_visible_items,
             version: panel_version,

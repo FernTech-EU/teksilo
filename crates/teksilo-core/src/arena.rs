@@ -329,6 +329,11 @@ pub struct WidgetNode {
     /// When `Some`, this node is a focus region (an F6 stop) with this name.
     /// See [`HandlerSet::focus_region`](crate::widget_builder::HandlerSet::focus_region).
     pub focus_region: Option<crate::signal::Prop<String>>,
+    /// The language this node's content is written in, declared with
+    /// [`HandlerSet::content_language`](crate::widget_builder::HandlerSet::content_language).
+    /// A prop that reads `None` declares nothing. Read through
+    /// [`WidgetArena::content_language_of`], which inherits it.
+    pub(crate) content_language: Option<crate::signal::Prop<Option<crate::language::LanguageTag>>>,
     /// The last focus that was one of this region's own focusables, where F6
     /// lands next. Written by `WidgetTree::set_focused`.
     pub(crate) focus_region_last_focus: Option<WidgetId>,
@@ -588,6 +593,7 @@ impl WidgetNode {
             receives_every_key_release: false,
             judges_reveals_live: false,
             focus_region: None,
+            content_language: None,
             focus_region_last_focus: None,
             hit_transparent: false,
             hit_slop: None,
@@ -681,6 +687,10 @@ pub struct WidgetArena {
     nodes: SlotMap<WidgetId, WidgetNode>,
     /// Number of nodes with theme overrides. When zero, resolve_theme is O(1).
     pub(crate) theme_override_count: usize,
+    /// Number of nodes carrying a `content_language` declaration. While it is
+    /// zero, [`content_language_of`](Self::content_language_of) answers
+    /// without a walk, and the accessibility walker skips its language pass.
+    pub(crate) content_language_count: usize,
     /// How many times an active node has been marked for a rebuild, ever.
     /// The tree compares it with the count its last layout pass ended at to
     /// tell, without walking the arena, whether a rebuild is waiting (see
@@ -792,6 +802,7 @@ impl WidgetArena {
         Self {
             nodes: SlotMap::with_key(),
             theme_override_count: 0,
+            content_language_count: 0,
             rebuild_marks: 0,
             focus_regions_seen: false,
             cached_roots: Vec::new(),
@@ -865,12 +876,39 @@ impl WidgetArena {
     /// `LayoutContext` (resolved theme, layout direction, text backend), but
     /// those are a stable function of `id` within a single pass, so the pair
     /// uniquely determines the input.
+    /// `ctx` resolved for `id`'s content language, when it was resolved for
+    /// another widget and a language is declared anywhere. `None` means `ctx`
+    /// is already right for `id`.
+    ///
+    /// A widget measures its children with its own context, so this is how a
+    /// child reads its own language. When `ctx` belongs to the child's parent
+    /// (the common case) the answer is the child's own declaration or the
+    /// parent's language, with no walk.
+    pub(crate) fn language_context<'c>(
+        &self,
+        id: WidgetId,
+        ctx: &crate::widget::LayoutContext<'c>,
+    ) -> Option<crate::widget::LayoutContext<'c>> {
+        if self.content_language_count == 0 || ctx.language_for == Some(id) {
+            return None;
+        }
+        let language = match ctx.language_for {
+            Some(owner) if self.parent(id) == Some(owner) => self
+                .own_content_language(id)
+                .or_else(|| ctx.content_language.clone()),
+            _ => self.content_language_of(id, ctx.overlay_manager()),
+        };
+        Some(ctx.with_content_language(id, language))
+    }
+
     pub(crate) fn cached_layout_response(
         &self,
         id: WidgetId,
         proposal: teksilo_canvas::SizeProposal,
         ctx: &crate::widget::LayoutContext,
     ) -> Option<crate::widget::LayoutResponse> {
+        let resolved = self.language_context(id, ctx);
+        let ctx = resolved.as_ref().unwrap_or(ctx);
         let node = self.nodes.get(id)?;
         let measuring = self.measuring.get();
         if node.activation != ActivationState::Active && !measuring {
@@ -2058,7 +2096,95 @@ impl WidgetArena {
         {
             parent.children.retain(|&c| c != id);
         }
-        self.nodes.remove(id);
+        if let Some(node) = self.nodes.remove(id)
+            && node.content_language.is_some()
+        {
+            self.content_language_count -= 1;
+        }
+    }
+
+    /// Declare (or, with `None`, withdraw) the language of `id`'s content.
+    /// Keeps [`content_language_count`](Self::content_language_count) in
+    /// step. Returns whether the node exists.
+    pub(crate) fn set_content_language(
+        &mut self,
+        id: WidgetId,
+        language: Option<crate::signal::Prop<Option<crate::language::LanguageTag>>>,
+    ) -> bool {
+        let Some(node) = self.nodes.get_mut(id) else {
+            return false;
+        };
+        match (node.content_language.is_some(), language.is_some()) {
+            (false, true) => self.content_language_count += 1,
+            (true, false) => self.content_language_count -= 1,
+            _ => {}
+        }
+        node.content_language = language;
+        true
+    }
+
+    /// Whether `id` itself carries a `content_language` declaration, whatever
+    /// it currently reads.
+    pub(crate) fn declares_content_language(&self, id: WidgetId) -> bool {
+        self.content_language_count > 0
+            && self
+                .nodes
+                .get(id)
+                .is_some_and(|node| node.content_language.is_some())
+    }
+
+    /// The language `id`'s own declaration reads, when it has one that reads
+    /// `Some`.
+    pub(crate) fn own_content_language(
+        &self,
+        id: WidgetId,
+    ) -> Option<crate::language::LanguageTag> {
+        self.nodes
+            .get(id)?
+            .content_language
+            .as_ref()
+            .and_then(|prop| prop.get())
+    }
+
+    /// The language of `id`'s content: its own declaration, else the nearest
+    /// ancestor's. At the root of an overlay's content the walk goes on from
+    /// the widget the overlay is attached to, when `overlays` is given, so a
+    /// popover opened from a Japanese field is Japanese too.
+    ///
+    /// `None` when nothing on the way declares a language: the content is in
+    /// the window's language, the application's locale.
+    ///
+    /// O(1) while no node declares a language.
+    pub fn content_language_of(
+        &self,
+        id: WidgetId,
+        overlays: Option<&crate::overlay::OverlayManager>,
+    ) -> Option<crate::language::LanguageTag> {
+        if self.content_language_count == 0 {
+            return None;
+        }
+        // The roots already crossed, so an overlay attached to a widget of
+        // its own content cannot send the walk round for ever.
+        let mut crossed: Vec<WidgetId> = Vec::new();
+        let mut current = id;
+        loop {
+            let node = self.nodes.get(current)?;
+            if let Some(tag) = node.content_language.as_ref().and_then(|prop| prop.get()) {
+                return Some(tag);
+            }
+            current = match node.parent {
+                Some(parent) => parent,
+                None => {
+                    let overlays = overlays?;
+                    if crossed.contains(&current) {
+                        return None;
+                    }
+                    crossed.push(current);
+                    let overlay = overlays.find_by_content(current)?;
+                    overlays.anchor_for(overlay)?
+                }
+            };
+        }
     }
 
     /// Drain the buffered Active↔Dormant transitions recorded since the last

@@ -97,9 +97,18 @@ fn execute_op(
                 }
             }
         }
-        AutomationOp::FindNode { role, label } => {
+        AutomationOp::FindNode {
+            role,
+            label,
+            language,
+        } => {
             let update = tree.sync_accessibility();
-            let found = find_node_ref(&update, role.as_deref(), label.as_deref());
+            let found = find_node_ref(
+                &update,
+                role.as_deref(),
+                label.as_deref(),
+                language.as_deref(),
+            );
             AutomationReply::ok(serde_json::json!({ "node": found }))
         }
         AutomationOp::AssertNode { node, assertion } => {
@@ -1741,7 +1750,7 @@ fn condition_met(
 ) -> bool {
     match condition {
         WaitCondition::NodeExists { role, label } => {
-            find_node_ref(update, role.as_deref(), label.as_deref()).is_some()
+            find_node_ref(update, role.as_deref(), label.as_deref(), None).is_some()
         }
         WaitCondition::NodeValue { node, expected } => update
             .nodes
@@ -2251,8 +2260,15 @@ fn semantic_node(
             }
             .to_string()
         }),
+        language: info.language.clone(),
     });
+    // The root carries the application's locale; every other node states a
+    // language only where a declaration took effect.
+    let language = (id != teksilo_core::accessibility::root_node_id())
+        .then(|| node.language().map(str::to_owned))
+        .flatten();
     SemanticNode {
+        language,
         id: id.0,
         role: format!("{:?}", node.role()),
         label,
@@ -2349,23 +2365,35 @@ fn find_node(update: &accesskit::TreeUpdate, node: NodeRef) -> Option<SemanticNo
         .map(|(id, n)| semantic_node(*id, n, focus, &semantic_ctx))
 }
 
-/// First node (in AT/build order) whose role and/or label match. A `None`
-/// filter matches anything; role compares against the role's `Debug` name
-/// case-insensitively; label compares for exact equality.
+/// First node (in AT/build order) whose role, label and language match. A
+/// `None` filter matches anything; role compares against the role's `Debug`
+/// name case-insensitively; label compares for exact equality; language
+/// compares the language the node is read in, inherited or not, without
+/// regard to case.
 fn find_node_ref(
     update: &accesskit::TreeUpdate,
     role: Option<&str>,
     label: Option<&str>,
+    language: Option<&str>,
 ) -> Option<NodeRef> {
+    // Inheritance is the consumer's, so only build it when asked.
+    let languages =
+        language.map(|_| teksilo_core::accessibility::audit::effective_languages(update));
     update
         .nodes
         .iter()
-        .find(|(_, n)| {
+        .find(|(id, n)| {
             let role_ok = role
                 .map(|r| format!("{:?}", n.role()).eq_ignore_ascii_case(r))
                 .unwrap_or(true);
             let label_ok = label.map(|l| n.label() == Some(l)).unwrap_or(true);
-            role_ok && label_ok
+            let language_ok = match (language, &languages) {
+                (Some(wanted), Some(languages)) => languages
+                    .get(id)
+                    .is_some_and(|have| have.eq_ignore_ascii_case(wanted)),
+                _ => true,
+            };
+            role_ok && label_ok && language_ok
         })
         .map(|(id, _)| id.0)
 }
@@ -2560,6 +2588,20 @@ fn evaluate_assertion(
                 }
                 None => pass(false, Some("node carries no text ranges".to_string())),
             }
+        }
+        Assertion::LanguageEquals { value } => {
+            let languages = teksilo_core::accessibility::audit::effective_languages(update);
+            let have = languages.get(id);
+            let ok = have.is_some_and(|have| have.eq_ignore_ascii_case(value));
+            pass(
+                ok,
+                (!ok).then(|| match have {
+                    Some(have) => format!("the node is read in '{have}', expected '{value}'"),
+                    None => {
+                        format!("no language is stated on the node or above it, expected '{value}'")
+                    }
+                }),
+            )
         }
     };
     if result.passed {

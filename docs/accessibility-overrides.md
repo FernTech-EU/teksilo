@@ -69,6 +69,7 @@ Naming: `.access_*` prefix throughout. Three tiers by frequency of use.
 | `.access_current(c)` | `Node::aria_current` | Mark this as the current item in its container (`aria-current`). |
 | `.access_has_popup(kind)` | `Node::has_popup` | Disclosure flag, `Menu`, `Listbox`, `Dialog`, … |
 | `.access_orientation(o)` | `Node::orientation` | Sliders, scrollbars, separators. |
+| `.content_language(tag)` | `Node::language` | Not an `access_*` method: the language of the content, read by text widgets too. Inherited by the subtree; written only where it differs from what the node inherits. See [Content language](#content-language). |
 
 #### Naming a container from its visible title
 
@@ -379,6 +380,91 @@ button
 flows through unchanged. The user-visible string overrides (`access_label`, `access_description`, `access_hint`, `access_value`, `access_custom_action`) take `impl Into<Prop<String>>` and store a `Prop<String>`, so `tr!(...)` stays **locale-reactive**: the accessibility tree re-walks on a locale change and re-resolves the announced value, no composite rebuild required. (`AccessibilityOverrides` lives in `teksilo-core`, which can't name `LocalizedString`; the bridge is `From<LocalizedString> for Prop<String>`.)
 
 For explicitly-untranslated AT strings, wrap with `lit!(...)`: `access_label(lit!("Debug"))`. A bare `&str` still compiles, because [`impl From<&str> for Prop<String>`](../crates/teksilo-core/src/signal.rs) exists so that call sites written against the older `impl Into<String>` setters kept working when the setters widened. `lit!` is therefore a convention, not a compiler-enforced requirement. Use it anyway: it is what makes an untranslated AT string greppable in a one-pass audit, and it records the omission as a decision rather than an oversight. The `#[doc(hidden)]` `_literal` twins (`access_label_literal`, etc.) remain only as the literal path reachable from inside `teksilo-core` itself (where `lit!` isn't available); application code uses `lit!`.
+
+---
+
+## Content language
+
+The window's accessibility root carries the application's locale, and every
+node inherits it. Content in another language (a field holding a
+translation, a document's prose, a language's own name in a language list)
+says so with `content_language`, the equivalent of HTML's `lang`:
+
+```rust
+use teksilo::prelude::*; // LanguageTag
+
+// A fixed language.
+let japanese = LanguageTag::parse("ja").expect("a BCP 47 tag");
+TextWidget::new(lit!("日本語")).content_language(japanese);
+
+// A language that changes while the window is open.
+let target: Signal<Option<LanguageTag>> = Signal::new(None);
+TextInput::new(suggestion).content_language(target.clone());
+target.set(LanguageTag::parse("ar").ok());
+```
+
+It is not an `access_*` method because it is not only for assistive
+technology: any widget can read the language of its content from
+`ctx.content_language()` on the layout, paint and event contexts
+(`WidgetTree::content_language(id)` in a test).
+
+- **`LanguageTag`** is a BCP 47 language identifier, checked and written in
+  canonical case (`en-us` becomes `en-US`; `en_US` is accepted). Extensions
+  and private-use tags are refused. Canonical case matters on every platform:
+  Windows turns the tag into a locale identifier and drops it when that fails,
+  and Orca splits it at its first `-`.
+- **Inherited by the subtree.** `None` declares nothing, so the node inherits.
+  The content of an overlay (a popover, a dropdown, a context menu) inherits
+  from the widget it is attached to.
+- **Written only where it changes.** A node is given `Node::language` only
+  where its language differs from the one it inherits from its parent in the
+  tree as sent, which is not the widget tree: a layout container that
+  declares a language is still pruned (see
+  [Automatic presentational collapse](#automatic-presentational-collapse-no-opt-in)),
+  and the children promoted past it carry the language instead. A
+  declaration equal to the inherited language writes nothing, so declaring
+  nothing leaves the tree exactly as it was.
+- **A node named from its content is read in that content's language.** A
+  list or tree row the walker names from its delegate's text, and a table cell
+  named after its labels, take the language of that text, so a `ListView` row
+  whose delegate declares `ja` is read in Japanese although the row's own node
+  belongs to the view.
+- **Merge.** A merged node (`access_merge_subtree`) carries the merging
+  widget's language. A descendant in another language cannot be represented
+  in one merged label.
+- **One language per node.** A label holding two languages ("日本語
+  (japonais)") is read in the label's. A language for each run is not
+  implemented.
+- **Reactive.** A bound declaration re-walks the accessibility tree, and lays
+  out and repaints the declaring subtree, when it changes.
+
+`ComboBox::item_language` declares a language for each dropdown row (and the
+closed combo's value); `LanguageSwitcher` uses it, so each language's own
+name is read in that language while the control stays in the interface's.
+
+### What each platform does with it
+
+AccessKit inherits the property itself (`accesskit_consumer`'s
+`NodeRef::language()` walks the parents), and every adapter reads it through
+the consumer. What it exposes differs (read in accesskit_windows 0.35,
+accesskit_macos 0.27, accesskit_unix 0.24):
+
+| Platform | On an element | On text |
+|---|---|---|
+| Windows (UIA) | `Culture` property, as a locale identifier | `UIA_CultureAttributeId` on a text range |
+| macOS | nothing | `NSAccessibilityLanguageTextAttribute` in an attributed string |
+| Linux (AT-SPI) | nothing: `Accessible.Locale` is always empty | the `language` text attribute |
+
+So only Windows gives a language to a name (a button's, a list row's). On
+macOS and Linux the language reaches text a reader takes through the text
+interfaces; every Teksilo label carries text runs, so a label read as text is
+included. Whether a screen reader then switches voice is the reader's
+business and is not promised here.
+
+The automation bridge reports it: `SemanticNode::language` where a
+declaration took effect, `TextRangeInfo::language` for the language a text is
+read in, and `find_node { language }` / `assert_node { kind: "language_equals" }`
+(see [automation-mcp.md](automation-mcp.md)).
 
 ---
 

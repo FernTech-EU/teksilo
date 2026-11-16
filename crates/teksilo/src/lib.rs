@@ -149,10 +149,11 @@ pub mod prelude {
         AccessNodeBuilder, AccessSubtreeMode, AccessibilityOverrides, Action, AnimationSpec,
         BuildContext, ButtonMask, CursorIcon, EventContext, EventResponse, ImeContext, ImeOrigin,
         ImePurpose, Intent, IntentKind, IntentResponse, IntoTeksiChild, IntoTeksiCondition, Key,
-        KeyStroke, LayoutContext, LayoutResponse, ModalCloseBehavior, ModalPresentation, Modifiers,
-        OverscrollBehavior, PaintContext, PointerButton, Politeness, Prop, Shortcut,
-        ShortcutRegistry, ShortcutScope, Signal, StandardEdit, TapEvent, TeksiBranch, TeksiBranch3,
-        TeksiBranch4, TraversalScopePolicy, Widget, WidgetBuilder, WidgetEvent, WidgetId,
+        KeyStroke, LanguageTag, LayoutContext, LayoutResponse, ModalCloseBehavior,
+        ModalPresentation, Modifiers, OverscrollBehavior, PaintContext, PointerButton, Politeness,
+        Prop, Shortcut, ShortcutRegistry, ShortcutScope, Signal, StandardEdit, TapEvent,
+        TeksiBranch, TeksiBranch3, TeksiBranch4, TraversalScopePolicy, Widget, WidgetBuilder,
+        WidgetEvent, WidgetId,
     };
 
     // Window-active appearance: the opt-in per-widget dim wrapper. The

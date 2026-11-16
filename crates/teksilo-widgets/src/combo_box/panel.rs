@@ -19,6 +19,7 @@ use teksilo_canvas::{Rect, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
 use teksilo_core::event::{EventResponse, Key, WidgetEvent};
+use teksilo_core::language::LanguageTag;
 use teksilo_core::overlay::OverlayPlacement;
 use teksilo_core::signal::Signal;
 use teksilo_core::styles::{PopoverStyleConfig, PopoverVariant};
@@ -37,6 +38,8 @@ use teksilo_i18n::LocalizedString;
 /// Selection-commit callback threaded down from `ComboBox::on_select`,
 /// fired by each `DropdownItem`'s tap with a live `EventContext`.
 pub(super) type OnSelect<T> = Option<Rc<dyn Fn(&T, &mut EventContext)>>;
+/// The language of an item's content, from [`ComboBox::item_language`](super::ComboBox::item_language).
+pub(super) type ItemLanguage<T> = Option<Rc<dyn Fn(&T) -> Option<LanguageTag>>>;
 
 /// Commit the highlighted option: make it the value and tell the application.
 ///
@@ -84,6 +87,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
     highlight: &Highlight<T>,
     item_label: &Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    item_language: &ItemLanguage<T>,
     on_select: &OnSelect<T>,
     max_visible_items: usize,
 ) -> WidgetId {
@@ -96,9 +100,11 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
                 // so resolving the label at build time is acceptable even in
                 // reactive mode; the persistent trigger is the live-reactive one.
                 let label = (item_label)(&value).resolve_now();
+                let language = item_language.as_ref().and_then(|f| f(&value));
                 vstack = vstack.child(DropdownItem {
                     value,
                     label,
+                    language,
                     position: i + 1,
                     total,
                     selected_signal: selected.clone(),
@@ -120,6 +126,7 @@ pub(super) fn build_static_item_list<T: Clone + PartialEq + 'static>(
         highlight,
         item_label,
         render_item,
+        item_language,
         on_select,
         max_visible_items,
         None,
@@ -140,6 +147,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     highlight: &Highlight<T>,
     item_label: &Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: &Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    item_language: &ItemLanguage<T>,
     on_select: &OnSelect<T>,
     max_visible_items: usize,
     filtered_indices: Option<Vec<usize>>,
@@ -192,6 +200,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
     let highlight_for_delegate = highlight.clone();
     let item_label_for_delegate = item_label.clone();
     let render_item_for_delegate = render_item.clone();
+    let item_language_for_delegate = item_language.clone();
     let on_select_for_delegate = on_select.clone();
     let delegate = move |index: usize, value: &T, _selected: bool| -> Box<dyn Widget> {
         // Panel is ephemeral (rebuilt on open / panel_version change),
@@ -201,6 +210,7 @@ fn build_virtualized_list<T: Clone + PartialEq + 'static>(
         Box::new(DropdownItem {
             value: value.clone(),
             label,
+            language: item_language_for_delegate.as_ref().and_then(|f| f(value)),
             position: index + 1,
             total: visible_count,
             selected_signal: selected_for_delegate.clone(),
@@ -354,6 +364,7 @@ pub(super) struct DropdownPanel<T: Clone + PartialEq + 'static> {
     pub(super) search_label: LocalizedString,
     pub(super) item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     pub(super) render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    pub(super) item_language: ItemLanguage<T>,
     /// Fired (with a live `EventContext`) when the user commits a row by
     /// tapping it; threaded from `ComboBox::on_select`.
     pub(super) on_select: OnSelect<T>,
@@ -399,6 +410,7 @@ struct FilteredItemList<T: Clone + PartialEq + 'static> {
     list_box: Signal<Option<WidgetId>>,
     item_label: Rc<dyn Fn(&T) -> LocalizedString>,
     render_item: Option<Rc<dyn Fn(&T, bool) -> Box<dyn Widget>>>,
+    item_language: ItemLanguage<T>,
     on_select: OnSelect<T>,
     max_visible_items: usize,
     version: Signal<u64>,
@@ -471,6 +483,7 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
                 &self.highlight,
                 &self.item_label,
                 &self.render_item,
+                &self.item_language,
                 &self.on_select,
                 self.max_visible_items,
                 Some(visible_indices),
@@ -483,9 +496,11 @@ impl<T: Clone + PartialEq + 'static> Widget for FilteredItemList<T> {
                     // so resolving the label at build time is acceptable even in
                     // reactive mode; the persistent trigger is the live-reactive one.
                     let label = (self.item_label)(&value).resolve_now();
+                    let language = self.item_language.as_ref().and_then(|f| f(&value));
                     vstack = vstack.child(DropdownItem {
                         value,
                         label,
+                        language,
                         position: pos + 1,
                         total: visible_count,
                         selected_signal: self.selected.clone(),
@@ -582,6 +597,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 list_box: self.list_box.clone(),
                 item_label: self.item_label.clone(),
                 render_item: self.render_item.clone(),
+                item_language: self.item_language.clone(),
                 on_select: self.on_select.clone(),
                 max_visible_items: self.max_visible_items,
                 version: self.version.clone(),
@@ -600,6 +616,7 @@ impl<T: Clone + PartialEq + 'static> Widget for DropdownPanel<T> {
                 &self.highlight,
                 &self.item_label,
                 &self.render_item,
+                &self.item_language,
                 &self.on_select,
                 self.max_visible_items,
             )

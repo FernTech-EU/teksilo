@@ -13,6 +13,53 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Core
+
+- **`content_language`: the language a widget's content is written in, for
+  its whole subtree**, the equivalent of HTML's `lang`. It is a builder method
+  on every widget (`.content_language(tag)`, also on `HandlerSet` and in
+  `teksu!`), takes a `LanguageTag`, an `Option<LanguageTag>` or a signal of
+  either, and is inherited by the subtree; an overlay's content inherits it
+  from the widget the overlay is attached to. The accessibility tree carries
+  it as AccessKit's `language` wherever it differs from what a node inherits,
+  so a screen reader can read a field holding a translation, or a language's
+  own name, in that language; declaring nothing leaves the tree as it was.
+  A list row or a table cell named from its content is read in that
+  content's language.
+  Widgets read it with `content_language()` on `LayoutContext`, `PaintContext`
+  (a new public field) and `EventContext`, and tests with
+  `WidgetTree::content_language(id)`.
+- **`LanguageTag`**, a BCP 47 language tag checked and written in canonical
+  case (`en-us` becomes `en-US`, `en_US` is accepted), with
+  `likely_direction()`. In the prelude.
+
+#### Widgets
+
+- **`ComboBox::item_language`** declares the language of each item, on its
+  dropdown row and on the closed combo's value. `LanguageSwitcher` uses it:
+  each language's own name is read in that language, while the control keeps
+  the interface's.
+
+#### Automation
+
+- **The language a node is read in.** `SemanticNode::language` where a
+  declaration took effect, `TextRangeInfo::language` for the language a text
+  is read in, a `language` filter on `find_node`, and a `language_equals`
+  assertion on `assert_node`. `accessibility::audit` gained
+  `effective_languages`, and `NodeTextInfo` a `language` field.
+
+### Changed
+
+#### Internationalization
+
+- **Kurdish (`ku`) with no script subtag is laid out left to right.**
+  Kurmanji, what `ku` usually means, is written in Latin script; Sorani
+  (`ckb`) stays right to left. A script subtag now decides the direction both
+  ways, so `ar-Latn` and `sd-Deva` are left to right as well. The table is
+  `LanguageTag::likely_direction`'s, which `rtl_from_locale` now calls.
+
 ## [0.26.0] - 2026-11-11
 
 ### Fixed

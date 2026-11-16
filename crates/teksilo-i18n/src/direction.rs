@@ -4,33 +4,20 @@
 //! Layout direction derivation from a `LanguageIdentifier`.
 
 use teksilo_core::environment::LayoutDirection;
+use teksilo_core::language::LanguageTag;
 use unic_langid::LanguageIdentifier;
-
-const RTL_SCRIPTS: &[&str] = &[
-    "Arab", "Hebr", "Syrc", "Thaa", "Nkoo", "Samr", "Mand", "Mend", "Adlm",
-];
-
-const RTL_LANGUAGES: &[&str] = &[
-    "ar", "fa", "he", "ur", "yi", "ps", "sd", "ku", "dv", "ckb", "ug",
-];
 
 /// Derive layout direction from a locale.
 ///
-/// Checks the script subtag first (`ar-Arab-SA` → RTL via `Arab`); if no
-/// script subtag is present, falls back to a hardcoded list of languages
-/// that always render RTL (`ar-SA` → RTL via `ar`).
+/// The script subtag decides when there is one (`ar-Arab-SA` is right to
+/// left, `az-Latn` left to right); without one, the language does (`ar-SA`
+/// is right to left). The table is
+/// [`LanguageTag::likely_direction`]'s, the one a text input falls back on,
+/// so the interface and the fields agree.
 pub fn rtl_from_locale(locale: &LanguageIdentifier) -> LayoutDirection {
-    if let Some(script) = locale.script.as_ref() {
-        let s: &str = script.into();
-        if RTL_SCRIPTS.contains(&s) {
-            return LayoutDirection::RightToLeft;
-        }
-    }
-    let lang: &str = locale.language.as_str();
-    if RTL_LANGUAGES.contains(&lang) {
-        return LayoutDirection::RightToLeft;
-    }
-    LayoutDirection::LeftToRight
+    LanguageTag::parse(&locale.to_string())
+        .map(|tag| tag.likely_direction())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -82,6 +69,29 @@ mod tests {
         );
         assert_eq!(
             rtl_from_locale(&parse("ks-Arab-IN")),
+            LayoutDirection::RightToLeft
+        );
+    }
+
+    #[test]
+    fn the_script_decides_over_the_language() {
+        assert_eq!(
+            rtl_from_locale(&parse("az-Arab")),
+            LayoutDirection::RightToLeft
+        );
+        // Arabic written in Latin script reads left to right.
+        assert_eq!(
+            rtl_from_locale(&parse("ar-Latn")),
+            LayoutDirection::LeftToRight
+        );
+    }
+
+    #[test]
+    fn kurdish_without_a_script_is_left_to_right() {
+        // Kurmanji is written in Latin script; Sorani (`ckb`) in Arabic.
+        assert_eq!(rtl_from_locale(&parse("ku")), LayoutDirection::LeftToRight);
+        assert_eq!(
+            rtl_from_locale(&parse("ckb-IQ")),
             LayoutDirection::RightToLeft
         );
     }

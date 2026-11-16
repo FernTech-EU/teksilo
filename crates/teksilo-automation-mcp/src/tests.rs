@@ -153,6 +153,7 @@ async fn server_handler_snapshot_find_invoke_round_trip() {
             window_id: None,
             role: Some("Button".into()),
             label: Some("Save".into()),
+            language: None,
         }))
         .await
         .expect("find ok");
@@ -188,6 +189,7 @@ async fn assert_node_failure_is_tool_error() {
             window_id: None,
             role: Some("Button".into()),
             label: Some("Save".into()),
+            language: None,
         }))
         .await
         .unwrap();

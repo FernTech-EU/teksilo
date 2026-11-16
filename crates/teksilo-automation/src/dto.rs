@@ -108,6 +108,18 @@ pub struct SemanticNode {
     /// of its string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_label: Option<String>,
+    /// The language the node's own `language` property states, a BCP 47 tag.
+    ///
+    /// Present only where it differs from the language the node inherits:
+    /// where an application declared one with `content_language` and it took
+    /// effect. Absent on every other node, the window root included (which
+    /// carries the application's locale), so a snapshot of an application
+    /// that declares nothing is unchanged. The language a node is read in,
+    /// inherited or not, is what `find_node`'s `language` and the
+    /// `language_equals` assertion compare, and what
+    /// [`TextRangeInfo::language`] reports for text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 /// What a screen reader could review on a node that carries text ranges.
@@ -132,6 +144,12 @@ pub struct TextRangeInfo {
     /// `"left_to_right"` or `"right_to_left"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direction: Option<String>,
+    /// The language the text is read in, as the platform adapters receive
+    /// it: the node's own, else the nearest ancestor's, ending at the window
+    /// root's application locale. Absent when nothing up to the root states
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 /// A node's bounds in logical pixels.
@@ -595,6 +613,10 @@ pub enum Assertion {
     SupportsTextRanges,
     /// The text a reader would review equals the given string.
     DocumentTextEquals { value: String },
+    /// The language the node is read in equals the given BCP 47 tag,
+    /// compared without regard to case: the node's own `language`, else the
+    /// nearest ancestor's, as the platform adapters resolve it.
+    LanguageEquals { value: String },
 }
 
 /// Result of an [`Assertion`].
@@ -749,6 +771,10 @@ pub enum AutomationOp {
         role: Option<String>,
         #[serde(default)]
         label: Option<String>,
+        /// The language the node is read in, inherited or not: a BCP 47 tag,
+        /// compared without regard to case.
+        #[serde(default)]
+        language: Option<String>,
     },
     AssertNode {
         node: NodeRef,

@@ -300,6 +300,10 @@ pub struct NodeTextInfo {
     pub has_geometry: bool,
     /// The node's declared base reading direction, when it has one.
     pub direction: Option<accesskit::TextDirection>,
+    /// The language of the node's text as the platform adapters receive it:
+    /// the node's own, else the nearest ancestor's (`NodeRef::language`).
+    /// `None` when nothing up to the root states one.
+    pub language: Option<String>,
 }
 
 /// Text-range information for every node that carries any.
@@ -336,6 +340,7 @@ pub fn text_infos(update: &TreeUpdate) -> std::collections::HashMap<NodeId, Node
                 document_text: range.text(),
                 has_geometry: !range.bounding_boxes().is_empty(),
                 direction: node.data().text_direction(),
+                language: node.language().map(str::to_owned),
             },
         );
     }
@@ -407,6 +412,25 @@ fn from_affine(a: accesskit::Affine) -> teksilo_canvas::Transform2D {
             m[5] as f32,
         ],
     }
+}
+
+/// Each node's language as the platform adapters receive it: its own, else
+/// the nearest ancestor's, the inheritance `accesskit_consumer` applies
+/// (`NodeRef::language`). A node with no language up to the root is absent.
+pub fn effective_languages(update: &TreeUpdate) -> std::collections::HashMap<NodeId, String> {
+    let tree = Tree::new(update.clone(), false);
+    let state = tree.state();
+    let mut out = std::collections::HashMap::new();
+    let mut stack = vec![state.root()];
+    while let Some(node) = stack.pop() {
+        for child in node.children() {
+            stack.push(child);
+        }
+        if let Some(language) = node.language() {
+            out.insert(locate(&node), language.to_owned());
+        }
+    }
+    out
 }
 
 /// The name each node announces, resolved the way an adapter resolves it —

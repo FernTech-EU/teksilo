@@ -136,6 +136,14 @@ impl WidgetTree {
                 crate::binding::BindingLevel::Relayout => {
                     self.arena.mark_needs_layout(*id);
                     self.arena.mark_ancestors_need_layout(*id);
+                    // A language declaration reaches every text widget in the
+                    // subtree, and paint caches are kept per node: a label
+                    // whose glyphs change keeps its bounds and would paint
+                    // its old ones. (A layout pass lays the whole tree out,
+                    // so layout needs no widening.)
+                    if self.arena.declares_content_language(*id) {
+                        self.arena.mark_subtree_needs_paint(*id);
+                    }
                 }
                 crate::binding::BindingLevel::Rebuild => {
                     self.arena.mark_needs_rebuild(*id);
@@ -640,6 +648,8 @@ impl WidgetTree {
             arena: Some(&self.arena),
             extras: Some(extras),
             stack_main_axis: None,
+            content_language: self.content_language(content_id),
+            language_for: Some(content_id),
         };
         let node = self
             .arena
@@ -691,6 +701,8 @@ impl WidgetTree {
                 arena: Some(&self.arena),
                 extras: Some(extras),
                 stack_main_axis: None,
+                content_language: self.content_language(root_id),
+                language_for: Some(root_id),
             };
             let Some(node) = self.arena.get(root_id) else {
                 continue;
@@ -886,6 +898,7 @@ impl WidgetTree {
                 Rect::from_origin_size(Point::ZERO, proposal.resolve(0.0, 0.0)),
                 proposal,
                 &inherited,
+                None,
                 self.layout_direction,
                 self.device_scale_factor,
                 self.effective_text_scale,
@@ -1012,12 +1025,16 @@ impl WidgetTree {
             // Overlay content may hang below its anchor rather than sit at a
             // root, and then it inherits the overrides above it.
             let inherited = self.arena.inherited_theme(*content_id, base_theme);
+            // Likewise the language: the content's own declaration, else its
+            // arena parent's, else its anchor's.
+            let inherited_language = self.content_language(*content_id);
             layout_widget_recursive(
                 &mut self.arena,
                 *content_id,
                 overlay_bounds,
                 content_proposal,
                 &inherited,
+                inherited_language.as_ref(),
                 self.layout_direction,
                 self.device_scale_factor,
                 self.effective_text_scale,
@@ -1267,6 +1284,9 @@ fn layout_widget_recursive(
     proposal: SizeProposal,
     // What `id`'s parent resolved to; `id` adds its own override, if any.
     inherited_theme: &crate::styles::Theme,
+    // The language of `id`'s parent's content; `id`'s own declaration, if it
+    // reads one, wins.
+    inherited_language: Option<&crate::language::LanguageTag>,
     layout_direction: crate::environment::LayoutDirection,
     scale_factor: f32,
     text_scale: f32,
@@ -1283,6 +1303,13 @@ fn layout_widget_recursive(
     // Borrowed from the parent unless `id` carries an override, so a subtree
     // under one override shares that override's single clone of the theme.
     let resolved_theme = arena.theme_below(id, inherited_theme);
+    let language = if arena.content_language_count == 0 {
+        None
+    } else {
+        arena
+            .own_content_language(id)
+            .or_else(|| inherited_language.cloned())
+    };
 
     let desired_size = {
         let ctx = LayoutContext {
@@ -1294,6 +1321,8 @@ fn layout_widget_recursive(
             arena: Some(arena),
             extras,
             stack_main_axis: None,
+            content_language: language.clone(),
+            language_for: Some(id),
         };
         arena
             .cached_layout_response(id, proposal, &ctx)
@@ -1358,6 +1387,8 @@ fn layout_widget_recursive(
             arena: Some(arena),
             extras,
             stack_main_axis: None,
+            content_language: language.clone(),
+            language_for: Some(id),
         };
         let node = arena
             .get(id)
@@ -1423,6 +1454,7 @@ fn layout_widget_recursive(
                 child_bounds,
                 child_proposal,
                 &resolved_theme,
+                language.as_ref(),
                 layout_direction,
                 scale_factor,
                 text_scale,
@@ -1438,6 +1470,13 @@ fn layout_widget_recursive(
             // re-measure the leaf against a fresh `exact` proposal (a memo miss,
             // since the parent measured it under a different proposal), adding a
             // redundant `layout_response` per leaf on every pass.
+            let leaf_language = if arena.content_language_count == 0 {
+                None
+            } else {
+                arena
+                    .own_content_language(placement.id)
+                    .or_else(|| language.clone())
+            };
             let ctx = LayoutContext {
                 theme: &resolved_theme,
                 layout_direction,
@@ -1447,6 +1486,8 @@ fn layout_widget_recursive(
                 arena: Some(arena),
                 extras,
                 stack_main_axis: None,
+                content_language: leaf_language,
+                language_for: Some(placement.id),
             };
             let node = arena.get(placement.id).expect("child id is active");
             node.widget

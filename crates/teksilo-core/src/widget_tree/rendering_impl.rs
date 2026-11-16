@@ -166,6 +166,7 @@ impl WidgetTree {
                 root_id,
                 &mut frame,
                 &inherited,
+                None,
                 &text_backend,
                 None,
                 &a11y_prefs,
@@ -186,11 +187,14 @@ impl WidgetTree {
             // Overlay content may hang below its anchor rather than sit at a
             // root, and then it inherits the overrides above it.
             let inherited = LazyTheme::entry(&self.arena, content_id, &base_theme);
+            // The content's language comes from its anchor, as in layout.
+            let inherited_language = self.content_language(content_id);
             paint_widget_cached(
                 &mut self.arena,
                 content_id,
                 &mut frame,
                 &inherited,
+                inherited_language.as_ref(),
                 &text_backend,
                 None,
                 &a11y_prefs,
@@ -349,6 +353,8 @@ fn paint_widget_cached(
     frame: &mut RenderFrame,
     // The parent's theme scope; `id` adds its own override, if any.
     inherited_theme: &LazyTheme<'_>,
+    // The language of the parent's content; `id`'s own declaration wins.
+    inherited_language: Option<&crate::language::LanguageTag>,
     text_backend: &Option<Rc<RefCell<dyn teksilo_canvas::TextBackend>>>,
     clip_bounds: Option<Rect>,
     a11y_prefs: &A11yPaintPrefs,
@@ -372,6 +378,13 @@ fn paint_widget_cached(
             .get(id)
             .and_then(|n| n.enabled_state.as_ref())
             .is_none_or(|p| p.get());
+    let language = if arena.content_language_count == 0 {
+        None
+    } else {
+        arena
+            .own_content_language(id)
+            .or_else(|| inherited_language.cloned())
+    };
 
     let node = arena.get(id).expect("node id is active (guarded above)");
     let bounds = node.bounds;
@@ -528,6 +541,7 @@ fn paint_widget_cached(
             prefers_large_text: a11y_prefs.large_text,
             window_active: a11y_prefs.window_active,
             clip_bounds,
+            content_language: language.clone(),
         };
 
         let bounds = arena.bounds(id);
@@ -637,6 +651,7 @@ fn paint_widget_cached(
             child_id,
             frame,
             theme_scope,
+            language.as_ref(),
             text_backend,
             next_clip,
             a11y_prefs,
@@ -673,6 +688,7 @@ fn paint_widget_cached(
                 prefers_large_text: a11y_prefs.large_text,
                 window_active: a11y_prefs.window_active,
                 clip_bounds,
+                content_language: language.clone(),
             };
             node.widget.after_paint(&view, &ctx);
         }
@@ -714,6 +730,7 @@ fn paint_widget_cached(
                 prefers_large_text: a11y_prefs.large_text,
                 window_active: a11y_prefs.window_active,
                 clip_bounds,
+                content_language: language.clone(),
             };
             let bounds = arena.bounds(id);
             let node = arena.get(id).expect("node id is active (guarded above)");

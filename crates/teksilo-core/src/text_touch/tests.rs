@@ -1023,6 +1023,7 @@ fn replay_emits_the_painter_between_a_clip_and_a_magnifying_transform() {
         prefers_large_text: false,
         window_active: true,
         clip_bounds: None,
+        content_language: None,
     };
     let mut canvas = Canvas::new();
     let clip = Rect::new(10.0, 20.0, 96.0, 44.0);
@@ -1132,6 +1133,7 @@ fn the_lens_paints_with_the_transform_its_request_composes() {
         prefers_large_text: false,
         window_active: true,
         clip_bounds: None,
+        content_language: None,
     };
     // Painting at `request.lens` is only legitimate because that is where the
     // layer puts the node — the premise the paint path relies on when it takes

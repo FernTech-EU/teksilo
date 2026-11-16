@@ -676,14 +676,17 @@ fn find_node_by_role_and_label() {
         AutomationOp::FindNode {
             role: Some("Button".into()),
             label: None,
+            language: None,
         },
         AutomationOp::FindNode {
             role: None,
             label: Some("Find Me".into()),
+            language: None,
         },
         AutomationOp::FindNode {
             role: Some("button".into()), // case-insensitive
             label: Some("Find Me".into()),
+            language: None,
         },
     ] {
         let reply = execute(&mut tree, &mut ops, &op, &default_settle());
@@ -704,6 +707,7 @@ fn find_node_no_match_is_null() {
         &AutomationOp::FindNode {
             role: Some("Slider".into()),
             label: None,
+            language: None,
         },
         &default_settle(),
     );
@@ -2389,6 +2393,7 @@ fn right_click_opens_the_context_menu_factory() {
         &AutomationOp::FindNode {
             role: Some("Menu".into()),
             label: None,
+            language: None,
         },
         &default_settle(),
     );
@@ -5660,4 +5665,130 @@ fn a_settle_runs_the_post_mount_actions() {
     assert!(reply.is_ok());
     assert_eq!(tree.focused(), Some(target), "the queued focus move ran");
     assert!(!tree.has_pending_mount_actions());
+}
+
+// ---------------------------------------------------------------------------
+// Content language
+// ---------------------------------------------------------------------------
+
+/// A label with text runs, the shape every visible label has.
+#[derive(Debug)]
+struct RunLabel(&'static str);
+
+impl Widget for RunLabel {
+    fn layout_response(&self, proposal: SizeProposal, _ctx: &LayoutContext) -> LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+    fn accessibility(&self, builder: &mut teksilo_core::accessibility::AccessNodeBuilder) {
+        use teksilo_core::accessibility::text_runs::{TextRunSource, push_text_runs};
+        builder.set_role(accesskit::Role::Label);
+        builder.set_name(self.0);
+        push_text_runs(builder, None, &TextRunSource::flat(self.0, 0));
+    }
+}
+
+/// A French window holding a label declared Japanese and one that declares
+/// nothing.
+fn french_window_with_a_japanese_label() -> (WidgetTree, WidgetId, WidgetId) {
+    let mut tree = WidgetTree::new();
+    tree.set_locale("fr-FR".to_owned());
+    let ja = tree.add(
+        RunLabel("日本語")
+            .content_language(teksilo_core::language::LanguageTag::parse("ja").unwrap()),
+    );
+    let fr = tree.add(RunLabel("français"));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    (tree, ja, fr)
+}
+
+#[test]
+fn a_snapshot_states_a_language_only_where_one_was_declared() {
+    let (mut tree, ja, fr) = french_window_with_a_japanese_label();
+    assert_valid(&mut tree);
+    let reply = run(&mut tree, &AutomationOp::SnapshotTree { max_depth: None });
+    let AutomationReply::Ok { data } = reply else {
+        panic!("{reply:?}");
+    };
+    let nodes: Vec<SemanticNode> = serde_json::from_value(data["nodes"].clone()).unwrap();
+    let find = |id: WidgetId| nodes.iter().find(|n| n.id == node_ref(id)).unwrap();
+
+    let ja_node = find(ja);
+    assert_eq!(ja_node.language.as_deref(), Some("ja"));
+    assert_eq!(
+        ja_node.text.as_ref().and_then(|t| t.language.as_deref()),
+        Some("ja")
+    );
+    let fr_node = find(fr);
+    assert_eq!(fr_node.language, None, "nothing was declared on it");
+    assert_eq!(
+        fr_node.text.as_ref().and_then(|t| t.language.as_deref()),
+        Some("fr-FR"),
+        "its text is read in the window's locale"
+    );
+    let root = nodes
+        .iter()
+        .find(|n| Some(n.id) == data["root"].as_u64())
+        .unwrap();
+    assert_eq!(
+        root.language, None,
+        "the root's locale is not a declaration"
+    );
+}
+
+#[test]
+fn find_node_matches_the_language_a_node_is_read_in() {
+    let (mut tree, ja, fr) = french_window_with_a_japanese_label();
+    let find = |tree: &mut WidgetTree, language: &str| {
+        let reply = run(
+            tree,
+            &AutomationOp::FindNode {
+                role: Some("Label".into()),
+                label: None,
+                language: Some(language.into()),
+            },
+        );
+        let AutomationReply::Ok { data } = reply else {
+            panic!("{reply:?}");
+        };
+        data["node"].as_u64()
+    };
+    assert_eq!(find(&mut tree, "ja"), Some(node_ref(ja)));
+    assert_eq!(
+        find(&mut tree, "JA"),
+        Some(node_ref(ja)),
+        "case does not matter"
+    );
+    assert_eq!(
+        find(&mut tree, "fr-fr"),
+        Some(node_ref(fr)),
+        "an inherited language matches"
+    );
+    assert_eq!(find(&mut tree, "ar"), None);
+}
+
+#[test]
+fn language_equals_asserts_the_language_a_node_is_read_in() {
+    let (mut tree, ja, fr) = french_window_with_a_japanese_label();
+    let assert_language = |tree: &mut WidgetTree, id: WidgetId, value: &str| {
+        run(
+            tree,
+            &AutomationOp::AssertNode {
+                node: node_ref(id),
+                assertion: Assertion::LanguageEquals {
+                    value: value.into(),
+                },
+            },
+        )
+    };
+    assert!(assert_language(&mut tree, ja, "ja").is_ok());
+    assert!(assert_language(&mut tree, fr, "fr-FR").is_ok());
+    let fail = assert_language(&mut tree, fr, "ja");
+    let AutomationReply::Err { code, message } = fail else {
+        panic!("{fail:?}");
+    };
+    assert_eq!(code, codes::ASSERTION_FAILED);
+    assert!(
+        message.contains("fr-FR") && message.contains("ja"),
+        "{message}"
+    );
 }

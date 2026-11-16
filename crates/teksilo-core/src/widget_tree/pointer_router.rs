@@ -615,6 +615,7 @@ impl WidgetTree {
             let mut ctx = self
                 .make_event_context(&mut *ops)
                 .with_dispatch_node(id)
+                .with_content_language(self.content_language(id))
                 .with_dispatch_target(focus)
                 .with_local_frame(frame);
             let response = if let Some(node) = self.arena.get_mut(id) {
@@ -2463,7 +2464,10 @@ impl WidgetTree {
                     handlers.on_commit_edit.take()
                 });
                 let Some(mut handler) = handler else { continue };
-                let mut ctx = self.make_event_context(&mut *ops).with_dispatch_node(id);
+                let mut ctx = self
+                    .make_event_context(&mut *ops)
+                    .with_dispatch_node(id)
+                    .with_content_language(self.content_language(id));
                 handler(&mut ctx);
                 if let Some(node) = self.arena.get_mut(id) {
                     let handlers = if external {
@@ -2926,6 +2930,7 @@ impl WidgetTree {
             let mut ctx = self
                 .make_event_context(&mut *ops)
                 .with_dispatch_node(id)
+                .with_content_language(self.content_language(id))
                 .with_dispatch_target(target)
                 .with_local_frame(frame);
             ctx.press_claimed_by_interactive_child =
@@ -2967,6 +2972,7 @@ impl WidgetTree {
             let mut ctx = self
                 .make_event_context(&mut *ops)
                 .with_dispatch_node(id)
+                .with_content_language(self.content_language(id))
                 .with_dispatch_target(target)
                 .with_local_frame(frame);
             ctx.press_claimed_by_interactive_child =
@@ -3070,6 +3076,7 @@ impl WidgetTree {
         let mut ctx = self
             .make_event_context(&mut *ops)
             .with_dispatch_node(target)
+            .with_content_language(self.content_language(target))
             .with_dispatch_target(target)
             .with_local_frame(frame);
         let gesture_cx = self.recognizer_context(target);

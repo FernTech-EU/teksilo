@@ -171,6 +171,9 @@ pub struct EventContext<'ops> {
     /// `None` for a context made outside per-node dispatch (a gesture timer, a
     /// key-capture callback, an async completion).
     pub(crate) dispatch_node: Option<WidgetId>,
+    /// The language of the content of `dispatch_node`. See
+    /// [`content_language`](EventContext::content_language).
+    pub(crate) content_language: Option<crate::language::LanguageTag>,
     /// The handler space of `dispatch_node`: the frame its pointer positions
     /// were localised into. Read by [`to_local`](EventContext::to_local).
     pub(crate) local_frame: Option<crate::arena::LocalFrame>,
@@ -556,6 +559,7 @@ impl<'ops> EventContext<'ops> {
             pointer_capture: None,
             pointer_captor: None,
             dispatch_node: None,
+            content_language: None,
             local_frame: None,
             dispatch_target: None,
             focus_origin: None,
@@ -685,6 +689,29 @@ impl<'ops> EventContext<'ops> {
     pub(crate) fn with_dispatch_node(mut self, node: WidgetId) -> Self {
         self.dispatch_node = Some(node);
         self
+    }
+
+    /// Record the language of the content of the node whose handler is about
+    /// to run.
+    pub(crate) fn with_content_language(
+        mut self,
+        language: Option<crate::language::LanguageTag>,
+    ) -> Self {
+        self.content_language = language;
+        self
+    }
+
+    /// The language of the content of the widget whose handler is running:
+    /// its own
+    /// [`content_language`](crate::widget_builder::WidgetBuilder::content_language)
+    /// declaration, else its nearest ancestor's, else, inside an overlay, that
+    /// of the widget the overlay is attached to.
+    ///
+    /// `None` when nothing declares one (the content is in the application's
+    /// locale), and in a context made outside per-node dispatch (a gesture
+    /// timer, an action, an async completion), which belongs to no widget.
+    pub fn content_language(&self) -> Option<&crate::language::LanguageTag> {
+        self.content_language.as_ref()
     }
 
     /// Record the handler space of the node whose handler is about to run —

@@ -479,6 +479,9 @@ pub struct HandlerSet {
     /// When `Some(..)`, this node is a focus region (an F6 stop) with this
     /// name. See [`HandlerSet::focus_region`].
     pub(crate) focus_region: Option<Prop<String>>,
+    /// When `Some(..)`, the language of this node's content and of its
+    /// subtree's. See [`HandlerSet::content_language`].
+    pub(crate) content_language: Option<Prop<Option<crate::language::LanguageTag>>>,
     /// When `Some(true)`, this node and its WHOLE subtree are invisible
     /// to pointer hit-testing (decorative overlays — count badges,
     /// watermarks). See [`super::arena::WidgetNode::hit_transparent`].
@@ -554,6 +557,7 @@ impl HandlerSet {
             multi_contact,
             keyboard_capture,
             focus_region,
+            content_language,
             hit_transparent,
             hit_slop,
             no_hit_slop,
@@ -602,6 +606,7 @@ impl HandlerSet {
             multi_contact: None,
             keyboard_capture: None,
             focus_region: None,
+            content_language: None,
             hit_transparent: None,
             hit_slop: None,
             no_hit_slop: None,
@@ -1095,6 +1100,48 @@ impl HandlerSet {
     /// (a terminal) keeps F6; Ctrl+Tab leaves it.
     pub fn focus_region(mut self, name: impl Into<Prop<String>>) -> Self {
         self.focus_region = Some(name.into());
+        self
+    }
+
+    /// Declare the language this node's content is written in, for the node
+    /// and its whole subtree: the equivalent of HTML's `lang` attribute.
+    ///
+    /// `None` declares nothing, so the node inherits its parent's language. A
+    /// `Signal<Option<LanguageTag>>` (or a `Signal<LanguageTag>`) keeps the
+    /// declaration live: a field whose target language the user changes, an
+    /// editor following the document it shows.
+    ///
+    /// Who reads it:
+    ///
+    /// - **Assistive technology.** The node a screen reader reaches carries
+    ///   the language, so a reader that switches voices by language can read
+    ///   it in the right one. A node is given the language only where it
+    ///   differs from what it inherits in the accessibility tree; a layout
+    ///   container that declares one is still pruned from that tree, and its
+    ///   children carry the language in its place. What the platforms do with
+    ///   it differs: Windows reports it for every element and every text
+    ///   range, macOS and Linux only on text read through their text
+    ///   interfaces. See `docs/accessibility-overrides.md`.
+    /// - **Widgets**, through `content_language()` on the layout, paint and
+    ///   event contexts.
+    ///
+    /// The content of an overlay (a popover, a dropdown, a context menu)
+    /// inherits the language of the widget it is attached to.
+    ///
+    /// The window's own language is the application's locale, which the
+    /// accessibility tree's root already carries: declare a language only
+    /// where content differs from the interface (a field holding a
+    /// translation, the prose of a document, a language's own name in a
+    /// language list).
+    ///
+    /// Merging a subtree into one accessibility node
+    /// ([`access_merge_subtree`](WidgetBuilder::access_merge_subtree)) keeps only the
+    /// merging node's language: a merged label cannot hold two.
+    pub fn content_language(
+        mut self,
+        language: impl Into<Prop<Option<crate::language::LanguageTag>>>,
+    ) -> Self {
+        self.content_language = Some(language.into());
         self
     }
 
@@ -1656,6 +1703,16 @@ impl<W: Widget> WidgetWithHandlers<W> {
     /// [`HandlerSet::focus_region`].
     pub fn focus_region(mut self, name: impl Into<Prop<String>>) -> Self {
         self.handler_set.focus_region = Some(name.into());
+        self
+    }
+
+    /// Declare the language of this widget's content and its subtree's. See
+    /// [`HandlerSet::content_language`].
+    pub fn content_language(
+        mut self,
+        language: impl Into<Prop<Option<crate::language::LanguageTag>>>,
+    ) -> Self {
+        self.handler_set.content_language = Some(language.into());
         self
     }
 
@@ -2633,6 +2690,16 @@ pub trait WidgetBuilder: Widget + Sized + 'static {
     /// move focus to, announcing `name`. See [`HandlerSet::focus_region`].
     fn focus_region(self, name: impl Into<Prop<String>>) -> WidgetWithHandlers<Self> {
         WidgetWithHandlers::new(self).focus_region(name)
+    }
+
+    /// Declare the language this widget's content is written in, for it and
+    /// its subtree: HTML's `lang`. Read by assistive technology and by text
+    /// widgets. See [`HandlerSet::content_language`].
+    fn content_language(
+        self,
+        language: impl Into<Prop<Option<crate::language::LanguageTag>>>,
+    ) -> WidgetWithHandlers<Self> {
+        WidgetWithHandlers::new(self).content_language(language)
     }
 
     /// Make this widget and its whole subtree invisible to pointer

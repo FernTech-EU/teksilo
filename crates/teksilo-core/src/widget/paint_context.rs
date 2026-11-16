@@ -73,6 +73,14 @@ pub struct PaintContext<'a> {
     /// instead of processing the whole document. Correct under arbitrary
     /// nesting, since it is the intersection of *all* clipping ancestors.
     pub clip_bounds: Option<Rect>,
+    /// The language of the content of the widget being painted: its own
+    /// [`content_language`](crate::widget_builder::WidgetBuilder::content_language)
+    /// declaration, else its nearest ancestor's, else, inside an overlay, that
+    /// of the widget the overlay is attached to. `None` when nothing declares
+    /// one: the content is in the application's locale. The same value
+    /// [`LayoutContext::content_language`](super::LayoutContext::content_language)
+    /// reports for the widget.
+    pub content_language: Option<crate::language::LanguageTag>,
 }
 
 impl PaintContext<'_> {

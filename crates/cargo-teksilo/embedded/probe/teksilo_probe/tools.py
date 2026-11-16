@@ -151,8 +151,10 @@ def find_node(
     window_id: int | None = None,
     role: str | None = None,
     label: str | None = None,
+    language: str | None = None,
 ) -> Any:
-    """Find the first node matching a role and/or label.
+    """Find the first node matching a role, a label and/or the language it is
+    read in.
 
     Read-only tool.
     """
@@ -160,6 +162,7 @@ def find_node(
         "window_id": window_id,
         "role": role,
         "label": label,
+        "language": language,
     }
     return session.call("find_node", **_present(args))
 
@@ -173,7 +176,8 @@ def assert_node(
     value: str | None = None,
     flag: bool | None = None,
 ) -> Any:
-    """Assert a property of a node (role/label/value/toggled/expanded/…).
+    """Assert a property of a node
+    (role/label/value/toggled/expanded/language/…).
 
     Read-only tool.
     """

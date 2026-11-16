@@ -48,12 +48,12 @@ pub const TOOL_CATALOG: &[ToolDescriptor] = &[
     },
     ToolDescriptor {
         name: "find_node",
-        description: "Find the first node matching a role and/or label.",
+        description: "Find the first node matching a role, a label and/or the language it is read in.",
         mutating: false,
     },
     ToolDescriptor {
         name: "assert_node",
-        description: "Assert a property of a node (role/label/value/toggled/expanded/…).",
+        description: "Assert a property of a node (role/label/value/toggled/expanded/language/…).",
         mutating: false,
     },
     ToolDescriptor {
