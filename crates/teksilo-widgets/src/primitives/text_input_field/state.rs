@@ -186,10 +186,16 @@ pub(crate) struct TextInputState {
     /// engine's own default font, which is what every field did before the
     /// style could be chosen.
     pub text_style: Option<TextStyle>,
-    /// Where the text sits in a viewport wider than it. `None` keeps the
-    /// field's original placement (start at the left edge, scroll to follow
-    /// the caret); see `TextInputField::text_alignment`.
+    /// Where the text sits in a viewport wider than it. `None` starts it at
+    /// the start edge of its resolved direction; see
+    /// `TextInputField::text_alignment`.
     pub text_alignment: Option<HAlignment>,
+    /// The direction the text reads in, resolved from the field's
+    /// `base_direction`, its text, its content language and the window's
+    /// direction by `TextInputField::sync_direction`. Decides where an
+    /// unaligned text starts, what leading and trailing mean, and the
+    /// direction a screen reader is told.
+    pub resolved_direction: teksilo_core::environment::LayoutDirection,
     /// How far below the top of the field the text line starts, in logical
     /// pixels. Zero unless a [`text_style`](Self::text_style) is set, in which
     /// case `paint` centres the shaped line in the field's height. Every
@@ -475,6 +481,7 @@ impl TextInputState {
             engine_base_size: PRIVATE_ENGINE_BASE_SIZE,
             text_style: None,
             text_alignment: None,
+            resolved_direction: teksilo_core::environment::LayoutDirection::LeftToRight,
             text_offset_y: 0.0,
             image_cache: ImageCache::new(),
             max_length,

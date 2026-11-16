@@ -278,6 +278,54 @@ impl RichTextEngine {
         self.flow.echo_char()
     }
 
+    /// The language of every block that does not state one, a BCP 47 tag:
+    /// passed to the shaper (a font's language-specific forms) and used to
+    /// choose how Han characters are drawn. `None` states none. A block's own
+    /// language, from the document, wins; nothing is written to the document.
+    ///
+    /// Takes effect at the next layout: the caller forces a full one after
+    /// changing it.
+    pub fn set_default_language(&mut self, language: Option<&str>) {
+        self.flow.set_default_language(language);
+    }
+
+    /// The language given to blocks that state none.
+    pub fn default_language(&self) -> Option<&str> {
+        self.flow.default_language()
+    }
+
+    /// The base direction of every block that stores none. `Auto` lets each
+    /// block's text decide (its first strongly directional character). A
+    /// block's own stored direction wins; nothing is written to the
+    /// document.
+    ///
+    /// Takes effect at the next layout: the caller forces a full one after
+    /// changing it.
+    pub fn set_default_direction(&mut self, direction: text_typeset::TextDirection) {
+        self.flow.set_default_direction(direction);
+    }
+
+    /// The base direction given to blocks that store none.
+    pub fn default_direction(&self) -> text_typeset::TextDirection {
+        self.flow.default_direction()
+    }
+
+    /// The direction an `Auto` block takes when its text has no strongly
+    /// directional character (an empty block, or digits and punctuation).
+    /// `Auto` and `LeftToRight` give left to right.
+    ///
+    /// Takes effect at the next layout: the caller forces a full one after
+    /// changing it.
+    pub fn set_neutral_direction(&mut self, direction: text_typeset::TextDirection) {
+        self.flow.set_neutral_direction(direction);
+    }
+
+    /// The direction given to `Auto` blocks with no strongly directional
+    /// character.
+    pub fn neutral_direction(&self) -> text_typeset::TextDirection {
+        self.flow.neutral_direction()
+    }
+
     /// Whether the snapshots this engine pulls from the document itself, in
     /// [`relayout_block_snapshot`](Self::relayout_block_snapshot) and
     /// [`apply_paint_highlights_for_range`](Self::apply_paint_highlights_for_range),
@@ -1137,6 +1185,8 @@ mod tests {
 
         BlockLayoutParams {
             base_direction: Default::default(),
+            neutral_direction: Default::default(),
+            language: None,
             block_id,
             position: 0,
             text: text.to_string(),

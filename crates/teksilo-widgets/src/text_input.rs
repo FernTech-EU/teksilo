@@ -33,8 +33,11 @@
 //!   theme) or a fixed `TextStyle`. The field's height follows the style's
 //!   line, so a small style gives a short field and a large one a tall field.
 //! - [`text_alignment`](TextInput::text_alignment) — where a text narrower
-//!   than the field sits: start, centre or end, mirrored in a right-to-left
-//!   layout. A longer text scrolls as usual.
+//!   than the field sits: start, centre or end, mirrored for a right-to-left
+//!   text. A longer text scrolls as usual.
+//! - [`base_direction`](TextInput::base_direction): the direction the text
+//!   reads in: by default its own (its first strongly directional character,
+//!   else the declared `content_language`, else the window's).
 //! - [`text_color`](TextInput::text_color) — the colour of the text and the
 //!   caret. A disabled field still greys out. For one colour at rest and
 //!   another while editing, map the field's focus:
@@ -203,6 +206,8 @@ pub struct TextInput {
     /// Forwarded to the inner field's `text_alignment`, and applied to the
     /// placeholder.
     text_alignment: Option<HAlignment>,
+    /// Forwarded to the inner field's `base_direction`.
+    base_direction: Option<Prop<crate::text_base_direction::TextBaseDirection>>,
     /// Forwarded to the inner field's `text_color`.
     text_color: Option<ColorProp>,
     show_clear_button: bool,
@@ -273,6 +278,7 @@ impl TextInput {
             min_height: None,
             text_style: None,
             text_alignment: None,
+            base_direction: None,
             text_color: None,
             show_clear_button: false,
             leading_slot: None,
@@ -420,11 +426,29 @@ impl TextInput {
     }
 
     /// Where the text — and the placeholder — sits when it is narrower than
-    /// the field: at its start, in the middle, or at its end, mirrored in a
-    /// right-to-left layout. Text wider than the field scrolls as usual.
+    /// the field: at its start, in the middle, or at its end. The text's start
+    /// is that of its own direction (see [`base_direction`](Self::base_direction)),
+    /// the placeholder's the window's. Text wider than the field scrolls as
+    /// usual.
     /// Forwarded to [`TextInputField::text_alignment`].
     pub fn text_alignment(mut self, alignment: HAlignment) -> Self {
         self.text_alignment = Some(alignment);
+        self
+    }
+
+    /// The direction the typed text reads in: [`Auto`](crate::TextBaseDirection::Auto)
+    /// (the default) follows the text, then the declared
+    /// [`content_language`](teksilo_core::widget_builder::WidgetBuilder::content_language),
+    /// then the window. Forwarded to [`TextInputField::base_direction`],
+    /// where the details live.
+    ///
+    /// The placeholder is the interface's text, so it stays at the window's
+    /// leading edge.
+    pub fn base_direction(
+        mut self,
+        direction: impl Into<Prop<crate::text_base_direction::TextBaseDirection>>,
+    ) -> Self {
+        self.base_direction = Some(direction.into());
         self
     }
 

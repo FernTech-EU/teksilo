@@ -130,6 +130,12 @@ pub struct TextRunSource<'a> {
     /// [`text`](Self::text), in ascending order. Set through
     /// [`speak_as`](Self::speak_as), which keeps the order and the limits.
     pub spoken_as: Vec<(usize, String)>,
+    /// The language of the text, a BCP 47 tag, written on every run when it
+    /// differs from what the runs inherit from their parent: a paragraph of
+    /// an editor in its own language. `None` (the default) inherits, which
+    /// is right for a label: the walker gives the label's node its
+    /// `content_language`. Set through [`with_language`](Self::with_language).
+    pub language: Option<String>,
 }
 
 /// A retained layout one widget can lend to another widget's
@@ -232,6 +238,7 @@ impl<'a> TextRunSource<'a> {
             rects_are_absolute: false,
             base_direction: TextDirection::LeftToRight,
             spoken_as: Vec::new(),
+            language: None,
         }
     }
 
@@ -315,6 +322,7 @@ impl<'a> TextRunSource<'a> {
             rects_are_absolute: false,
             base_direction,
             spoken_as: Vec::new(),
+            language: None,
         }
     }
 
@@ -343,6 +351,7 @@ impl<'a> TextRunSource<'a> {
                     rects_are_absolute: true,
                     base_direction: owned.base_direction,
                     spoken_as: owned.spoken_as,
+                    language: owned.language,
                 }
             }
             None => {
@@ -387,6 +396,17 @@ impl<'a> TextRunSource<'a> {
     /// inferred from the first measured segment.
     pub fn with_base_direction(mut self, direction: TextDirection) -> Self {
         self.base_direction = direction;
+        self
+    }
+
+    /// Write `language`, a BCP 47 tag, on every run: for a source whose text
+    /// is in another language than the node the runs hang from. `None`
+    /// leaves the runs to inherit.
+    pub fn with_language(mut self, language: Option<&str>) -> Self {
+        self.language = language
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned);
         self
     }
 
@@ -930,6 +950,7 @@ fn emit_runs(
                     bounds_are_absolute: source.rects_are_absolute,
                     text_direction: direction,
                     attrs: source.attrs,
+                    language: source.language.clone(),
                 },
             );
             if let Some(id) = id {
@@ -1009,6 +1030,7 @@ fn emit_run(
             bounds_are_absolute: source.rects_are_absolute,
             text_direction: run.direction,
             attrs: source.attrs,
+            language: source.language.clone(),
         },
     )?;
     emission.runs.push(EmittedRun {

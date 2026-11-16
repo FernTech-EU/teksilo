@@ -179,6 +179,7 @@ Every public widget in `teksilo-widgets`, grouped by category. Each page links t
 - [FormatShortcut](editor_shortcuts.md) — The editors' own rebindable commands: bold and the rest of `RichTextEditor`'s formatting (`FormatShortcut`), comment and…
 - [NotificationEntry](notification.md) — Persistent notification archive — the storage and data-model layer backing `NotificationLog`, `NotificationCenterButton`, and `NotificationLogDialog`
 - [PopoverSurface](popover_surface.md) — `PopoverSurface` — the themed panel a popover's content sits in
+- [TextBaseDirection](text_base_direction.md) — The base direction of a text a user types: the direction its paragraph reads in, which decides where the text starts, where an empty field puts its caret, and…
 - [TreeRowMeta](tree_source.md) — Type-erased data source adapter for `TreeView`
 
 ## TabWidget (submodule)

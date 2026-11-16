@@ -41,6 +41,7 @@
 | `Self` | [`text_height(height: f32)`](#textinputfield-text_height) |
 | `Self` | [`text_style(style: impl Into<TextStyleProp>)`](#textinputfield-text_style) |
 | `Self` | [`text_alignment(alignment: HAlignment)`](#textinputfield-text_alignment) |
+| `Self` | [`base_direction(direction: impl Into<Prop<crate::text_base_direction::TextBaseDirection>>)`](#textinputfield-base_direction) |
 | `Self` | [`text_color(color: impl Into<ColorProp>)`](#textinputfield-text_color) |
 | `Self` | [`interaction_signal(signal: Signal<InteractionState>)`](#textinputfield-interaction_signal) |
 | `Self` | [`input_mask(mask: impl AsRef<str>)`](#textinputfield-input_mask) |
@@ -138,8 +139,12 @@ Features:
   `text_alignment` places a text
   narrower than the field at its start, centre or end;
   `text_color` colours the text and the
-  caret, from a colour, a role or a signal. All three are unset by
-  default, and the field then looks as it always has.
+  caret, from a colour, a role or a signal.
+- Direction: `base_direction` is the
+  direction the text reads in, by default its own (its first strongly
+  directional character, else the declared `content_language`, else the
+  window's). An unaligned text starts at the start edge of that
+  direction, and the arrows move the caret the way they point.
 - Right-click context menu (Cut / Copy / Paste / Select All).
 - AccessKit `Role::TextInput` with value, selection, and
   character/word boundary metadata.
@@ -478,8 +483,34 @@ caret, as an unaligned field does. The caret, a click, the selection,
 the IME candidate window, the touch handles and the character extents a
 screen reader is given all follow the placement.
 
-Unset, the text starts at the left edge whatever the layout direction,
-as it always has.
+Leading and trailing are those of the text's own direction (see
+`base_direction`), not the window's: in a
+right-to-left window, a Latin text aligned to its leading edge sits on
+the left.
+
+Unset, the text starts at the start edge of its own direction: the
+left for a left-to-right text, the right for a right-to-left one.
+
+<a id="textinputfield-base_direction"></a>
+
+#### `pub fn base_direction( mut self, direction: impl Into<Prop<crate::text_base_direction::TextBaseDirection>>, ) -> Self`
+
+The direction the text reads in, which decides where it starts, where
+an empty field puts its caret and which way a screen reader is told it
+runs. Accepts a `TextBaseDirection` or a
+signal of one.
+
+`Auto`, the default, follows the
+text: its first strongly directional character, else the language
+declared with
+`content_language`
+on or above the field, else the window's direction. So an Arabic text
+reads right to left in a left-to-right window, and an empty field
+declared Arabic opens with its caret on the right. See
+`text_base_direction`.
+
+The direction is given to the editing engine and nothing is written to
+the text: undo, the clipboard and the value are unaffected.
 
 <a id="textinputfield-text_color"></a>
 

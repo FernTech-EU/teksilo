@@ -52,6 +52,9 @@ impl Widget for TextInput {
         if let Some(alignment) = self.text_alignment {
             field = field.text_alignment(alignment);
         }
+        if let Some(direction) = self.base_direction.clone() {
+            field = field.base_direction(direction);
+        }
         if let Some(color) = self.text_color.clone() {
             field = field.text_color(color);
         }

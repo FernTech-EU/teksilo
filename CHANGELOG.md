@@ -13,6 +13,15 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Widgets
+
+- **Right-to-left text in a text field is visible.** Arabic or Hebrew typed
+  into a `TextInput`, `SearchField` or `PasswordField` was laid out at an
+  infinite x: nothing was drawn, and every caret, click and selection
+  position was infinite. It now sits in the field (text-typeset 3.2).
+
 ### Added
 
 #### Core
@@ -34,9 +43,25 @@ by crate for clarity, not because crates version independently.
 - **`LanguageTag`**, a BCP 47 language tag checked and written in canonical
   case (`en-us` becomes `en-US`, `en_US` is accepted), with
   `likely_direction()`. In the prelude.
+- **A text run can state its own language**: `TextRunSource::with_language`,
+  and a `language` field on `TextRunSpec`.
+
+#### Canvas
+
+- **`TextBackend::layout_in_language`** lays a `TextLayoutRequest` (one of
+  the four layout calls) out for text in a given language; its default
+  ignores the language, so other backends keep working. `Canvas` gained
+  `draw_text_in_language` and `draw_paragraph_in_language`.
 
 #### Widgets
 
+- **Text inputs read in their own direction.** `TextInputField`,
+  `TextInput`, `SearchField` and `RichTextEditor` take a `base_direction`
+  (`TextBaseDirection::{Auto, LeftToRight, RightToLeft}`, or a signal of
+  one). `Auto`, the default, follows the text's first strongly directional
+  character, then the declared `content_language`, then the window: an empty
+  field declared Arabic opens with its caret on the right. The editing engine
+  is told the direction and the language; nothing is written to the text.
 - **`ComboBox::item_language`** declares the language of each item, on its
   dropdown row and on the closed combo's value. `LanguageSwitcher` uses it:
   each language's own name is read in that language, while the control keeps
@@ -51,6 +76,26 @@ by crate for clarity, not because crates version independently.
   `effective_languages`, and `NodeTextInfo` a `language` field.
 
 ### Changed
+
+#### Widgets
+
+- **Every text input now follows the direction of its text** (the new
+  `base_direction`, `Auto` by default). Arabic or Hebrew typed into a field in
+  a left-to-right window starts at the right edge and is announced right to
+  left; `text_alignment(Leading)` and `Trailing` follow the text's direction
+  rather than the window's, so Latin text aligned to its leading edge in a
+  right-to-left window sits on the left. The arrow keys move the caret the
+  way they point through right-to-left text, as the rich text editor already
+  did. A field that must stay left to right sets
+  `.base_direction(TextBaseDirection::LeftToRight)`; see "Text that reads in
+  its own direction" in `docs/i18n.md`.
+- **Text is shaped in its language.** Labels (`TextWidget`, and every
+  control drawing its text with one), the text inputs and the rich text editor
+  pass the declared `content_language` to the shaper, which uses a font's
+  language-specific forms (OpenType `locl`) and draws Han in the language's
+  forms: the endonym 日本語 in a French list is drawn with Japanese glyphs.
+  A rich text paragraph with a language of its own (or the document's
+  default) is read in it by a screen reader. Requires text-typeset 3.2.
 
 #### Internationalization
 

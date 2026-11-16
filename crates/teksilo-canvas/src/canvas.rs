@@ -457,6 +457,19 @@ impl Canvas {
         style: &TextStyle,
         color: Color,
     ) -> Option<crate::geometry::Size> {
+        self.draw_text_in_language(text, position, style, color, None)
+    }
+
+    /// [`draw_text`](Self::draw_text) for text written in `language`, a BCP
+    /// 47 tag: see [`TextBackend::layout_in_language`].
+    pub fn draw_text_in_language(
+        &mut self,
+        text: &str,
+        position: Rect,
+        style: &TextStyle,
+        color: Color,
+        language: Option<&str>,
+    ) -> Option<crate::geometry::Size> {
         let backend = self.text_backend.as_ref()?;
         let mut backend = backend.borrow_mut();
 
@@ -465,7 +478,11 @@ impl Canvas {
         // both paths produce the same TypesetterBridge cache key, avoiding
         // duplicate cache entries and inconsistent truncation.
         let max_width = Some(position.width + 0.5);
-        let layout = backend.layout_single_line(text, style, max_width);
+        let layout = backend.layout_in_language(
+            crate::text_backend::TextLayoutRequest::SingleLine { text, max_width },
+            style,
+            language,
+        );
         let glyphs = backend.ensure_glyphs(&layout);
         self.frame.layout_keys.push(layout.layout_key);
 
@@ -828,11 +845,34 @@ impl Canvas {
         color: Color,
         max_lines: Option<usize>,
     ) -> Option<crate::geometry::Size> {
+        self.draw_paragraph_in_language(text, rect, style, color, max_lines, None)
+    }
+
+    /// [`draw_paragraph`](Self::draw_paragraph) for text written in
+    /// `language`, a BCP 47 tag: see
+    /// [`TextBackend::layout_in_language`].
+    pub fn draw_paragraph_in_language(
+        &mut self,
+        text: &str,
+        rect: Rect,
+        style: &TextStyle,
+        color: Color,
+        max_lines: Option<usize>,
+        language: Option<&str>,
+    ) -> Option<crate::geometry::Size> {
         let backend = self.text_backend.as_ref()?;
         let mut backend = backend.borrow_mut();
 
         let max_width = (rect.width + 0.5).max(0.0);
-        let layout = backend.layout_paragraph(text, style, max_width, max_lines);
+        let layout = backend.layout_in_language(
+            crate::text_backend::TextLayoutRequest::Paragraph {
+                text,
+                max_width,
+                max_lines,
+            },
+            style,
+            language,
+        );
         let glyphs = backend.ensure_glyphs(&layout);
         self.frame.layout_keys.push(layout.layout_key);
 

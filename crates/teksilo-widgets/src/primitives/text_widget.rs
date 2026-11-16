@@ -70,7 +70,7 @@ use std::rc::Rc;
 use teksilo_canvas::ellipsis::{ELLIPSIS, Ellipsized, ellipsize_ranges};
 use teksilo_canvas::text_backend::{
     CharGeom, HitTarget, LineEnd, LineTruncation, TextDirection, TextGeometry, TextLayout,
-    TextLine, TextLineSegment,
+    TextLayoutRequest, TextLine, TextLineSegment,
 };
 use teksilo_canvas::{Canvas, EllipsisMode, Point, Rect, Size, SizeProposal, TextOverflow};
 
@@ -671,6 +671,7 @@ impl Widget for TextWidget {
     ) -> teksilo_core::widget::LayoutResponse {
         let text = self.text.get();
         let style = self.style.resolve(&ctx.theme.typography);
+        let language = ctx.content_language().map(|tag| tag.as_str());
         let Some(backend) = self.text_backend.as_ref().or(ctx.text_backend) else {
             // Mock fallback when no backend is available (e.g. very early
             // bootstrap). Assume 8px/char for measurement.
@@ -704,10 +705,32 @@ impl Widget for TextWidget {
             // never drawn.
             let layout = match self.overflow {
                 TextOverflow::Wrap => match max_width {
-                    Some(w) => backend.layout_paragraph_markup(&text, &style, w, self.max_lines),
-                    None => backend.layout_single_line_markup(&text, &style, None),
+                    Some(w) => backend.layout_in_language(
+                        TextLayoutRequest::ParagraphMarkup {
+                            source: &text,
+                            max_width: w,
+                            max_lines: self.max_lines,
+                        },
+                        &style,
+                        language,
+                    ),
+                    None => backend.layout_in_language(
+                        TextLayoutRequest::SingleLineMarkup {
+                            source: &text,
+                            max_width: None,
+                        },
+                        &style,
+                        language,
+                    ),
                 },
-                _ => backend.layout_single_line_markup(&text, &style, max_width),
+                _ => backend.layout_in_language(
+                    TextLayoutRequest::SingleLineMarkup {
+                        source: &text,
+                        max_width,
+                    },
+                    &style,
+                    language,
+                ),
             };
             return Size::new(layout.width, layout.height).into();
         }
@@ -717,27 +740,56 @@ impl Widget for TextWidget {
         let size = match self.overflow {
             TextOverflow::Wrap => match max_width {
                 Some(w) => {
-                    let layout = backend.layout_paragraph(&text, &style, w, self.max_lines);
+                    let layout = backend.layout_in_language(
+                        TextLayoutRequest::Paragraph {
+                            text: &text,
+                            max_width: w,
+                            max_lines: self.max_lines,
+                        },
+                        &style,
+                        language,
+                    );
                     Size::new(layout.width, layout.height)
                 }
                 None => {
                     // Unconstrained width: no basis for wrapping, so measure
                     // as a single line.
-                    let layout = backend.layout_single_line(&text, &style, None);
+                    let layout = backend.layout_in_language(
+                        TextLayoutRequest::SingleLine {
+                            text: &text,
+                            max_width: None,
+                        },
+                        &style,
+                        language,
+                    );
                     Size::new(layout.width, layout.height)
                 }
             },
             TextOverflow::Ellipsis(EllipsisMode::Trailing) => {
                 // text-typeset truncates with trailing "…" when a max_width
                 // is supplied — let it do the work.
-                let layout = backend.layout_single_line(&text, &style, max_width);
+                let layout = backend.layout_in_language(
+                    TextLayoutRequest::SingleLine {
+                        text: &text,
+                        max_width,
+                    },
+                    &style,
+                    language,
+                );
                 Size::new(layout.width, layout.height)
             }
             TextOverflow::Ellipsis(mode) => match max_width {
                 // Middle / Leading: compute the truncated display string
                 // first, then measure it unconstrained.
                 None => {
-                    let layout = backend.layout_single_line(&text, &style, None);
+                    let layout = backend.layout_in_language(
+                        TextLayoutRequest::SingleLine {
+                            text: &text,
+                            max_width: None,
+                        },
+                        &style,
+                        language,
+                    );
                     Size::new(layout.width, layout.height)
                 }
                 Some(max_w) => {
@@ -748,7 +800,14 @@ impl Widget for TextWidget {
                         mode,
                         &mut *backend,
                     );
-                    let layout = backend.layout_single_line(&truncated, &style, None);
+                    let layout = backend.layout_in_language(
+                        TextLayoutRequest::SingleLine {
+                            text: &truncated,
+                            max_width: None,
+                        },
+                        &style,
+                        language,
+                    );
                     Size::new(layout.width, layout.height)
                 }
             },
@@ -762,7 +821,18 @@ impl Widget for TextWidget {
         if is_ellipsis && self.shrink {
             let min_w = self
                 .min_shrink_width
-                .unwrap_or_else(|| backend.layout_single_line("…", &style, None).width)
+                .unwrap_or_else(|| {
+                    backend
+                        .layout_in_language(
+                            TextLayoutRequest::SingleLine {
+                                text: "…",
+                                max_width: None,
+                            },
+                            &style,
+                            language,
+                        )
+                        .width
+                })
                 .min(size.width);
             teksilo_core::widget::LayoutResponse::shrinkable(
                 size,
@@ -798,6 +868,7 @@ impl Widget for TextWidget {
         ctx: &LayoutContext,
     ) {
         let text = self.text.get();
+        let language = ctx.content_language().map(|tag| tag.as_str());
         let base_direction = match ctx.layout_direction {
             teksilo_core::environment::LayoutDirection::RightToLeft => {
                 teksilo_core::accesskit::TextDirection::RightToLeft
@@ -823,13 +894,23 @@ impl Widget for TextWidget {
 
         let (layout, retained_text, remapped) = if self.markup {
             let layout = match self.overflow {
-                TextOverflow::Wrap => backend.layout_paragraph_markup(
-                    &text,
+                TextOverflow::Wrap => backend.layout_in_language(
+                    TextLayoutRequest::ParagraphMarkup {
+                        source: &text,
+                        max_width: max_width.max(0.0),
+                        max_lines: self.max_lines,
+                    },
                     &style,
-                    max_width.max(0.0),
-                    self.max_lines,
+                    language,
                 ),
-                _ => backend.layout_single_line_markup(&text, &style, Some(max_width)),
+                _ => backend.layout_in_language(
+                    TextLayoutRequest::SingleLineMarkup {
+                        source: &text,
+                        max_width: Some(max_width),
+                    },
+                    &style,
+                    language,
+                ),
             };
             // Markup ranges index the rendered text, so that is what the
             // label announces and what a reader reviews — not the source
@@ -843,12 +924,26 @@ impl Widget for TextWidget {
         } else {
             match self.overflow {
                 TextOverflow::Wrap => {
-                    let layout =
-                        backend.layout_paragraph(&text, &style, max_width.max(0.0), self.max_lines);
+                    let layout = backend.layout_in_language(
+                        TextLayoutRequest::Paragraph {
+                            text: &text,
+                            max_width: max_width.max(0.0),
+                            max_lines: self.max_lines,
+                        },
+                        &style,
+                        language,
+                    );
                     (Some(layout), text.clone(), None)
                 }
                 TextOverflow::Ellipsis(EllipsisMode::Trailing) => {
-                    let layout = backend.layout_single_line(&text, &style, Some(max_width));
+                    let layout = backend.layout_in_language(
+                        TextLayoutRequest::SingleLine {
+                            text: &text,
+                            max_width: Some(max_width),
+                        },
+                        &style,
+                        language,
+                    );
                     (Some(layout), text.clone(), None)
                 }
                 TextOverflow::Ellipsis(mode) => {
@@ -856,7 +951,14 @@ impl Widget for TextWidget {
                     // from the source, so the geometry has to be mapped
                     // back onto it before anyone can review the label.
                     let cut = ellipsize_ranges(&text, &style, bounds.width, mode, &mut *backend);
-                    let layout = backend.layout_single_line(&cut.display, &style, None);
+                    let layout = backend.layout_in_language(
+                        TextLayoutRequest::SingleLine {
+                            text: &cut.display,
+                            max_width: None,
+                        },
+                        &style,
+                        language,
+                    );
                     let remapped = layout
                         .geometry
                         .as_deref()
@@ -883,6 +985,7 @@ impl Widget for TextWidget {
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
         let text = self.text.get();
+        let language = ctx.content_language.as_ref().map(|tag| tag.as_str());
         let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
         let style = self.style.resolve(&ctx.theme.typography);
 
@@ -897,13 +1000,23 @@ impl Widget for TextWidget {
             let layout = {
                 let mut backend = backend_rc.borrow_mut();
                 match self.overflow {
-                    TextOverflow::Wrap => backend.layout_paragraph_markup(
-                        &text,
+                    TextOverflow::Wrap => backend.layout_in_language(
+                        TextLayoutRequest::ParagraphMarkup {
+                            source: &text,
+                            max_width: (bounds.width + 0.5).max(0.0),
+                            max_lines: self.max_lines,
+                        },
                         &style,
-                        (bounds.width + 0.5).max(0.0),
-                        self.max_lines,
+                        language,
                     ),
-                    _ => backend.layout_single_line_markup(&text, &style, Some(bounds.width + 0.5)),
+                    _ => backend.layout_in_language(
+                        TextLayoutRequest::SingleLineMarkup {
+                            source: &text,
+                            max_width: Some(bounds.width + 0.5),
+                        },
+                        &style,
+                        language,
+                    ),
                 }
             };
             let link_color = ctx.theme.colors.text_link;
@@ -921,10 +1034,17 @@ impl Widget for TextWidget {
 
         match self.overflow {
             TextOverflow::Wrap => {
-                canvas.draw_paragraph(&text, bounds, &style, color, self.max_lines);
+                canvas.draw_paragraph_in_language(
+                    &text,
+                    bounds,
+                    &style,
+                    color,
+                    self.max_lines,
+                    language,
+                );
             }
             TextOverflow::Ellipsis(EllipsisMode::Trailing) => {
-                canvas.draw_text(&text, bounds, &style, color);
+                canvas.draw_text_in_language(&text, bounds, &style, color, language);
             }
             TextOverflow::Ellipsis(mode) => {
                 // Produce the truncated display string via the canvas's
@@ -939,7 +1059,7 @@ impl Widget for TextWidget {
                     ),
                     None => text.clone(),
                 };
-                canvas.draw_text(&truncated, bounds, &style, color);
+                canvas.draw_text_in_language(&truncated, bounds, &style, color, language);
             }
         }
     }
@@ -1060,6 +1180,94 @@ mod tests {
 
     fn tree_with_mock_backend() -> WidgetTree {
         WidgetTree::new().with_text_backend(Rc::new(RefCell::new(MockTextBackend::new())))
+    }
+
+    /// A mock backend that records the language of every layout it is asked
+    /// for, and the text.
+    struct LanguageRecorder {
+        inner: MockTextBackend,
+        asked: Rc<RefCell<Vec<(String, Option<String>)>>>,
+    }
+
+    impl teksilo_canvas::TextBackend for LanguageRecorder {
+        fn layout_single_line(
+            &mut self,
+            text: &str,
+            style: &teksilo_tokens::TextStyle,
+            max_width: Option<f32>,
+        ) -> TextLayout {
+            self.asked.borrow_mut().push((text.to_owned(), None));
+            self.inner.layout_single_line(text, style, max_width)
+        }
+
+        fn layout_in_language(
+            &mut self,
+            request: TextLayoutRequest<'_>,
+            style: &teksilo_tokens::TextStyle,
+            language: Option<&str>,
+        ) -> TextLayout {
+            let text = match request {
+                TextLayoutRequest::SingleLine { text, .. }
+                | TextLayoutRequest::Paragraph { text, .. } => text,
+                TextLayoutRequest::SingleLineMarkup { source, .. }
+                | TextLayoutRequest::ParagraphMarkup { source, .. } => source,
+            };
+            self.asked
+                .borrow_mut()
+                .push((text.to_owned(), language.map(str::to_owned)));
+            teksilo_canvas::lay_out_ignoring_language(&mut self.inner, request, style)
+        }
+
+        fn ensure_glyphs(&mut self, layout: &TextLayout) -> Vec<teksilo_canvas::GlyphQuad> {
+            self.inner.ensure_glyphs(layout)
+        }
+    }
+
+    /// Every layout a label asks for, in layout and in paint, wrapping or
+    /// not, is asked in the language declared around it.
+    #[test]
+    fn a_label_lays_out_and_paints_in_its_content_language() {
+        use teksilo_core::widget_builder::WidgetBuilder;
+        let asked = Rc::new(RefCell::new(Vec::new()));
+        let backend = LanguageRecorder {
+            inner: MockTextBackend::new(),
+            asked: asked.clone(),
+        };
+        let mut tree = WidgetTree::new().with_text_backend(Rc::new(RefCell::new(backend)));
+        let japanese = tree.add(TextWidget::new(lit!("日本語")));
+        let wrapped = tree.add(TextWidget::new(lit!("中文 段落")).overflow(TextOverflow::Wrap));
+        let plain = tree.add(TextWidget::new(lit!("français")));
+        let column = tree.add(
+            crate::primitives::VStack::new()
+                .child(japanese)
+                .child(wrapped)
+                .content_language(teksilo_core::language::LanguageTag::parse("ja").unwrap()),
+        );
+        tree.add(crate::primitives::VStack::new().child(column).child(plain));
+        tree.layout(SizeProposal::exact(200.0, 200.0));
+        tree.render();
+
+        let asked = asked.borrow();
+        let languages_of = |text: &str| -> Vec<Option<String>> {
+            asked
+                .iter()
+                .filter(|(t, _)| t == text)
+                .map(|(_, l)| l.clone())
+                .collect()
+        };
+        for text in ["日本語", "中文 段落"] {
+            let seen = languages_of(text);
+            assert!(!seen.is_empty(), "{text} was laid out");
+            assert!(
+                seen.iter().all(|l| l.as_deref() == Some("ja")),
+                "{text}: {seen:?}"
+            );
+        }
+        let seen = languages_of("français");
+        assert!(
+            !seen.is_empty() && seen.iter().all(Option::is_none),
+            "{seen:?}"
+        );
     }
 
     #[test]

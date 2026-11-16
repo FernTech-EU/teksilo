@@ -11,8 +11,10 @@
 use teksilo_canvas::{Point, SizeProposal};
 use teksilo_core::environment::LayoutDirection;
 use teksilo_core::event::PointerButton;
+use teksilo_core::widget_builder::WidgetBuilder;
 use teksilo_core::widget_id::WidgetId;
 use teksilo_core::widget_tree::WidgetTree;
+use teksilo_text::text_document::MoveMode;
 use teksilo_tokens::{Color, FontWeight, HAlignment, TextRole, TextStyle, TextStyleRole};
 
 use super::state::{PRIVATE_ENGINE_BASE_SIZE, SharedState};
@@ -332,16 +334,36 @@ fn a_trailing_short_text_ends_at_the_fields_end() {
     assert!((field.x_of(0) - (origin().x + FIELD_WIDTH - run)).abs() < 0.01);
 }
 
-/// Leading is the start side: the right edge in a right-to-left layout.
+/// Leading is the start side of the text's own direction: in a right-to-left
+/// layout, a Latin text's start is still its left. (Before text inputs
+/// followed their text, leading was the window's: this text sat on the right.)
 #[test]
-fn leading_is_the_start_side_in_a_right_to_left_layout() {
+fn leading_is_the_start_side_of_the_texts_own_direction() {
     let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
     tree.set_layout_direction(LayoutDirection::RightToLeft);
     let field = Field::with_tree(
         tree,
         TextInputField::new(Signal::new("abcd".into())).text_alignment(HAlignment::Leading),
     );
+    assert!(
+        (field.x_of(0) - origin().x).abs() < 0.01,
+        "{}",
+        field.x_of(0)
+    );
+}
+
+/// A field told to read right to left puts a leading-aligned text on the
+/// right, whatever the text and the window.
+#[test]
+fn leading_is_the_right_edge_of_a_right_to_left_field() {
+    let field = Field::new(
+        TextInputField::new(Signal::new("abcd".into()))
+            .text_alignment(HAlignment::Leading)
+            .base_direction(crate::TextBaseDirection::RightToLeft),
+    );
     let run = field.run_width();
+    // In a right-to-left paragraph the Latin run's start is its left end,
+    // and the run ends at the field's right edge.
     assert!(
         (field.x_of(0) - (origin().x + FIELD_WIDTH - run)).abs() < 0.01,
         "{}",
@@ -508,4 +530,186 @@ fn a_disabled_field_keeps_the_disabled_colour() {
             .iter()
             .all(|c| *c == theme.colors.text_disabled.to_array())
     );
+}
+
+// ---------------------------------------------------------------------------
+// Base direction
+// ---------------------------------------------------------------------------
+
+const ARABIC: &str = "مرحبا بالعالم";
+
+impl Field {
+    /// Every caret boundary of the text, in window x.
+    fn caret_xs(&self) -> Vec<f32> {
+        let n = self
+            .state
+            .borrow()
+            .document
+            .to_plain_text()
+            .unwrap()
+            .chars()
+            .count();
+        (0..=n).map(|i| self.x_of(i)).collect()
+    }
+
+    fn resolved(&self) -> LayoutDirection {
+        self.state.borrow().resolved_direction
+    }
+
+    /// The direction the field's text is announced with.
+    fn announced(&mut self) -> Option<teksilo_core::accesskit::TextDirection> {
+        let update = self.tree.sync_accessibility();
+        let infos = teksilo_core::accessibility::audit::text_infos(&update);
+        let node = teksilo_core::accessibility::widget_id_to_node_id(self.field);
+        infos.get(&node).and_then(|info| info.direction)
+    }
+}
+
+fn in_tree(direction: LayoutDirection) -> WidgetTree {
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    tree.set_layout_direction(direction);
+    tree
+}
+
+/// Arabic typed in a left-to-right window reads right to left: it sits at
+/// the field's right edge and is announced right to left. Every caret
+/// position is a real one: an unbounded line used to put an Arabic text, its
+/// caret included, at infinity.
+#[test]
+fn arabic_text_in_a_left_to_right_window_reads_right_to_left() {
+    let mut field = Field::new(TextInputField::new(Signal::new(ARABIC.into())));
+    assert_eq!(field.resolved(), LayoutDirection::RightToLeft);
+    let xs = field.caret_xs();
+    assert!(xs.iter().all(|x| x.is_finite()), "{xs:?}");
+    let right = origin().x + FIELD_WIDTH;
+    let max = xs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let min = xs.iter().copied().fold(f32::INFINITY, f32::min);
+    assert!(max <= right + 0.01 && max > right - 4.0, "ends at {max}");
+    assert!(min > origin().x + FIELD_WIDTH / 2.0, "starts at {min}");
+    // The logical start of a right-to-left text is its right end.
+    assert!((field.x_of(0) - max).abs() < 0.01);
+    assert_eq!(
+        field.announced(),
+        Some(teksilo_core::accesskit::TextDirection::RightToLeft)
+    );
+}
+
+/// With nothing to read, the declared language decides, then the window.
+#[test]
+fn an_empty_field_takes_its_languages_direction_then_the_windows() {
+    let tag = |s: &str| teksilo_core::language::LanguageTag::parse(s).unwrap();
+    let caret_side = |tree: WidgetTree, language: Option<&str>| {
+        let field = TextInputField::new(Signal::new(String::new()));
+        let mut tree = tree;
+        let slot = field.state_slot.clone();
+        let wrapped = crate::primitives::Padding::symmetric(120.0, 20.0).child(field);
+        match language {
+            Some(language) => {
+                tree.add(
+                    crate::primitives::VStack::new()
+                        .child(wrapped)
+                        .content_language(tag(language)),
+                );
+            }
+            None => {
+                tree.add(crate::primitives::VStack::new().child(wrapped));
+            }
+        }
+        tree.layout(SizeProposal::exact(400.0, 400.0));
+        tree.render();
+        let state = slot.borrow().clone().unwrap();
+        let st = state.borrow();
+        let x = origin().x + st.engine.caret_rect(0, CursorAffinity::Downstream)[0] - st.scroll_x;
+        (st.resolved_direction, x)
+    };
+    let (direction, x) = caret_side(in_tree(LayoutDirection::LeftToRight), Some("ar"));
+    assert_eq!(direction, LayoutDirection::RightToLeft);
+    assert!(
+        x > origin().x + FIELD_WIDTH - 4.0,
+        "an Arabic field opens on the right: {x}"
+    );
+
+    let (direction, x) = caret_side(in_tree(LayoutDirection::RightToLeft), Some("ja"));
+    assert_eq!(direction, LayoutDirection::LeftToRight);
+    assert!(
+        x < origin().x + 4.0,
+        "a Japanese field opens on the left: {x}"
+    );
+
+    let (direction, x) = caret_side(in_tree(LayoutDirection::RightToLeft), None);
+    assert_eq!(direction, LayoutDirection::RightToLeft);
+    assert!(
+        x > origin().x + FIELD_WIDTH - 4.0,
+        "the window decides: {x}"
+    );
+}
+
+/// An explicit direction is used as given; the text does not overrule it.
+#[test]
+fn an_explicit_direction_overrules_the_text() {
+    let field = Field::new(
+        TextInputField::new(Signal::new(ARABIC.into()))
+            .base_direction(crate::TextBaseDirection::LeftToRight),
+    );
+    assert_eq!(field.resolved(), LayoutDirection::LeftToRight);
+    let min = field.caret_xs().into_iter().fold(f32::INFINITY, f32::min);
+    assert!((min - origin().x).abs() < 0.5, "starts at the left: {min}");
+}
+
+/// A bound direction moves the text when it changes, and nothing is written
+/// to the field's value.
+#[test]
+fn a_bound_direction_moves_the_text_when_it_changes() {
+    let direction = Signal::new(crate::TextBaseDirection::LeftToRight);
+    let text = Signal::new("abcd".to_string());
+    let mut field = Field::new(TextInputField::new(text.clone()).base_direction(direction.clone()));
+    assert!((field.x_of(0) - origin().x).abs() < 0.01);
+    direction.set(crate::TextBaseDirection::RightToLeft);
+    field.render();
+    assert_eq!(field.resolved(), LayoutDirection::RightToLeft);
+    assert!(
+        field.x_of(0) > origin().x + FIELD_WIDTH / 2.0,
+        "{}",
+        field.x_of(0)
+    );
+    assert_eq!(text.get(), "abcd");
+}
+
+/// The arrows move the caret the way they point: through Arabic text, the
+/// left arrow goes forward through the text.
+#[test]
+fn the_arrows_move_visually_through_right_to_left_text() {
+    use teksilo_core::event::{Key, Modifiers};
+    let mut field = Field::new(TextInputField::new(Signal::new(ARABIC.into())));
+    field.tree.focus(field.field);
+    field
+        .state
+        .borrow()
+        .cursor
+        .set_position(0, MoveMode::MoveAnchor);
+    field.render();
+    let before = field.x_of(0);
+    field.tree.press_key(Key::ArrowLeft, Modifiers::NONE);
+    field.render();
+    let position = field.state.borrow().cursor.position();
+    assert_eq!(position, 1, "left is forward in Arabic");
+    assert!(field.x_of(position) < before, "and the caret moved left");
+    field.tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(field.state.borrow().cursor.position(), 0);
+}
+
+/// Latin text keeps the arrows as they were.
+#[test]
+fn the_arrows_are_unchanged_in_left_to_right_text() {
+    use teksilo_core::event::{Key, Modifiers};
+    let mut field = Field::new(TextInputField::new(Signal::new("abcd".into())));
+    field.tree.focus(field.field);
+    field
+        .state
+        .borrow()
+        .cursor
+        .set_position(0, MoveMode::MoveAnchor);
+    field.render();
+    field.tree.press_key(Key::ArrowRight, Modifiers::NONE);
+    assert_eq!(field.state.borrow().cursor.position(), 1);
 }

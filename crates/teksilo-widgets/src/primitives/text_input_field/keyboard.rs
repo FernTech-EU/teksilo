@@ -158,33 +158,33 @@ pub(crate) fn handle_key(
             //
             // A masked field is one word, as on every desktop platform: its
             // words would tell where the hidden text has its spaces.
-            Key::ArrowLeft => {
+            // An arrow moves the caret the way it points on screen: through a
+            // right-to-left run, left is forward through the text. The run the
+            // caret sits in decides, as in the rich text editor, so a Latin
+            // word inside an Arabic text steps the way it reads.
+            Key::ArrowLeft | Key::ArrowRight => {
                 let step = caret_step(*modifiers);
+                let rtl = st.engine.has_full_layout()
+                    && st.engine.direction_at(st.cursor.position())
+                        == teksilo_text::TextDirection::RightToLeft;
+                let forward = (*key == Key::ArrowRight) != rtl;
                 if !shift && step == CaretStep::Character && st.cursor.has_selection() {
-                    let start = st.cursor.selection_start();
-                    st.cursor.set_position(start, MoveMode::MoveAnchor);
-                } else {
-                    let op = match step {
-                        CaretStep::Character => MoveOperation::Left,
-                        CaretStep::Word if st.should_mask() => MoveOperation::Start,
-                        CaretStep::Word => MoveOperation::WordLeft,
-                        CaretStep::LineEdge => MoveOperation::Start,
+                    let target = if forward {
+                        st.cursor.selection_end()
+                    } else {
+                        st.cursor.selection_start()
                     };
-                    word_step::move_cursor(&st.document, &st.cursor, op, mode);
-                }
-                true
-            }
-            Key::ArrowRight => {
-                let step = caret_step(*modifiers);
-                if !shift && step == CaretStep::Character && st.cursor.has_selection() {
-                    let end = st.cursor.selection_end();
-                    st.cursor.set_position(end, MoveMode::MoveAnchor);
+                    st.cursor.set_position(target, MoveMode::MoveAnchor);
                 } else {
-                    let op = match step {
-                        CaretStep::Character => MoveOperation::Right,
-                        CaretStep::Word if st.should_mask() => MoveOperation::End,
-                        CaretStep::Word => MoveOperation::WordRight,
-                        CaretStep::LineEdge => MoveOperation::End,
+                    let op = match (step, forward) {
+                        (CaretStep::Character, false) => MoveOperation::Left,
+                        (CaretStep::Character, true) => MoveOperation::Right,
+                        (CaretStep::Word, false) if st.should_mask() => MoveOperation::Start,
+                        (CaretStep::Word, true) if st.should_mask() => MoveOperation::End,
+                        (CaretStep::Word, false) => MoveOperation::WordLeft,
+                        (CaretStep::Word, true) => MoveOperation::WordRight,
+                        (CaretStep::LineEdge, false) => MoveOperation::Start,
+                        (CaretStep::LineEdge, true) => MoveOperation::End,
                     };
                     word_step::move_cursor(&st.document, &st.cursor, op, mode);
                 }

@@ -45,8 +45,12 @@
 //!   [`text_alignment`](TextInputField::text_alignment) places a text
 //!   narrower than the field at its start, centre or end;
 //!   [`text_color`](TextInputField::text_color) colours the text and the
-//!   caret, from a colour, a role or a signal. All three are unset by
-//!   default, and the field then looks as it always has.
+//!   caret, from a colour, a role or a signal.
+//! - Direction: [`base_direction`](TextInputField::base_direction) is the
+//!   direction the text reads in, by default its own (its first strongly
+//!   directional character, else the declared `content_language`, else the
+//!   window's). An unaligned text starts at the start edge of that
+//!   direction, and the arrows move the caret the way they point.
 //! - Right-click context menu (Cut / Copy / Paste / Select All).
 //! - AccessKit `Role::TextInput` with value, selection, and
 //!   character/word boundary metadata.
@@ -253,6 +257,8 @@ pub struct TextInputField {
     text_style: Option<TextStyleProp>,
     /// See [`text_alignment`](Self::text_alignment).
     text_alignment: Option<HAlignment>,
+    /// See [`base_direction`](Self::base_direction).
+    base_direction: Prop<crate::text_base_direction::TextBaseDirection>,
     /// See [`text_color`](Self::text_color). `None` paints the theme's
     /// primary text colour.
     text_color: Option<ColorProp>,
@@ -384,6 +390,7 @@ impl TextInputField {
             default_name: None,
             text_style: None,
             text_alignment: None,
+            base_direction: Prop::Static(crate::text_base_direction::TextBaseDirection::Auto),
             text_color: None,
             external_interaction: None,
             mask: None,
@@ -664,10 +671,39 @@ impl TextInputField {
     /// the IME candidate window, the touch handles and the character extents a
     /// screen reader is given all follow the placement.
     ///
-    /// Unset, the text starts at the left edge whatever the layout direction,
-    /// as it always has.
+    /// Leading and trailing are those of the text's own direction (see
+    /// [`base_direction`](Self::base_direction)), not the window's: in a
+    /// right-to-left window, a Latin text aligned to its leading edge sits on
+    /// the left.
+    ///
+    /// Unset, the text starts at the start edge of its own direction: the
+    /// left for a left-to-right text, the right for a right-to-left one.
     pub fn text_alignment(mut self, alignment: HAlignment) -> Self {
         self.text_alignment = Some(alignment);
+        self
+    }
+
+    /// The direction the text reads in, which decides where it starts, where
+    /// an empty field puts its caret and which way a screen reader is told it
+    /// runs. Accepts a [`TextBaseDirection`](crate::TextBaseDirection) or a
+    /// signal of one.
+    ///
+    /// [`Auto`](crate::TextBaseDirection::Auto), the default, follows the
+    /// text: its first strongly directional character, else the language
+    /// declared with
+    /// [`content_language`](teksilo_core::widget_builder::WidgetBuilder::content_language)
+    /// on or above the field, else the window's direction. So an Arabic text
+    /// reads right to left in a left-to-right window, and an empty field
+    /// declared Arabic opens with its caret on the right. See
+    /// [`text_base_direction`](crate::text_base_direction).
+    ///
+    /// The direction is given to the editing engine and nothing is written to
+    /// the text: undo, the clipboard and the value are unaffected.
+    pub fn base_direction(
+        mut self,
+        direction: impl Into<Prop<crate::text_base_direction::TextBaseDirection>>,
+    ) -> Self {
+        self.base_direction = direction.into();
         self
     }
 
@@ -1043,20 +1079,42 @@ pub(crate) fn line_height_of(style: &TextStyle) -> f32 {
     style.size * style.line_height
 }
 
-/// The reading direction the field's runs are announced with.
-///
-/// The single-line editing engine reports no per-segment direction, so the
-/// ambient layout direction is the only answer available; a right-to-left
-/// field therefore announces right-to-left even for Latin content, which is
-/// what the surrounding UI does too.
-fn base_text_direction(
-    direction: teksilo_core::environment::LayoutDirection,
-) -> teksilo_core::accesskit::TextDirection {
-    match direction {
-        teksilo_core::environment::LayoutDirection::RightToLeft => {
-            teksilo_core::accesskit::TextDirection::RightToLeft
+impl TextInputField {
+    /// Resolve the field's direction for `language` and the window's
+    /// direction, hand the editing engine the language and the directions it
+    /// lays out with, and keep the resolved direction for placement and for
+    /// the screen reader. A change forces the engine to lay out again.
+    ///
+    /// Run from layout and from paint: typing changes the text, and with it
+    /// an `Auto` direction, without a layout pass.
+    fn sync_direction(
+        &self,
+        st: &mut TextInputState,
+        language: Option<&teksilo_core::language::LanguageTag>,
+        window: teksilo_core::environment::LayoutDirection,
+    ) {
+        use crate::text_base_direction::{neutral_direction, to_engine};
+        let base = self.base_direction.get();
+        let engine_language = language.map(|tag| tag.as_str());
+        let engine_direction = base.for_engine();
+        let engine_neutral = to_engine(neutral_direction(language, window));
+        if st.engine.default_language() != engine_language
+            || st.engine.default_direction() != engine_direction
+            || st.engine.neutral_direction() != engine_neutral
+        {
+            st.engine.set_default_language(engine_language);
+            st.engine.set_default_direction(engine_direction);
+            st.engine.set_neutral_direction(engine_neutral);
+            st.needs_full_layout = true;
         }
-        _ => teksilo_core::accesskit::TextDirection::LeftToRight,
+        // The text the engine lays out: a mask is neutral, and a field with
+        // no echo lays out nothing.
+        let text = if st.should_mask() {
+            String::new()
+        } else {
+            st.document.to_plain_text().unwrap_or_default()
+        };
+        st.resolved_direction = base.resolve(&text, language, window);
     }
 }
 
@@ -1089,7 +1147,12 @@ fn ensure_caret_visible_h(st: &mut TextInputState, follow: CaretFollow) {
     let caret_w = caret[2].max(1.0);
     let vw = follow.text_viewport_width;
 
-    if let Some(alignment) = st.text_alignment {
+    // An unaligned text starts at the start edge of its own direction, which
+    // for a right-to-left text is the right.
+    let alignment = st
+        .text_alignment
+        .or(follow.rtl.then_some(HAlignment::Leading));
+    if let Some(alignment) = alignment {
         // The caret's width is part of the run, or a trailing-aligned caret at
         // the end of the text would sit one pixel outside the clip.
         let run = st.engine.max_content_width() + caret_w;

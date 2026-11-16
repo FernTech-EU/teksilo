@@ -47,6 +47,7 @@ Rich text editor and viewer widget.
 | `Self` | [`selection_color(color: impl Into<ColorProp>)`](#richtexteditor-selection_color) |
 | `Self` | [`caret_color(color: impl Into<ColorProp>)`](#richtexteditor-caret_color) |
 | `Self` | [`text_color(color: impl Into<ColorProp>)`](#richtexteditor-text_color) |
+| `Self` | [`base_direction(direction: impl Into<teksilo_core::signal::Prop<crate::text_base_direction::TextBaseDirection>>)`](#richtexteditor-base_direction) |
 | `Self` | [`v_scroll_policy(policy: ScrollPolicy)`](#richtexteditor-v_scroll_policy) |
 | `Self` | [`h_scroll_policy(policy: ScrollPolicy)`](#richtexteditor-h_scroll_policy) |
 | `Self` | [`estimate_height_before_layout(on: bool)`](#richtexteditor-estimate_height_before_layout) |
@@ -641,6 +642,30 @@ Override the default text color. Accepts a `Color`, theme role, or
 tracks the theme's `editor_fg` role (so dark / light swaps follow
 automatically). A role or `Signal` stays reactive; a bare `Color` pins
 it.
+
+<a id="richtexteditor-base_direction"></a>
+
+#### `pub fn base_direction( self, direction: impl Into<teksilo_core::signal::Prop<crate::text_base_direction::TextBaseDirection>>, ) -> Self`
+
+The direction of every paragraph that stores none of its own: a
+`TextBaseDirection` or a signal of one.
+
+`Auto`, the default, lets each
+paragraph's text decide (its first strongly directional character);
+a paragraph with none (an empty one) takes the direction of the
+language declared with
+`content_language`
+on or above the editor, else the window's. An explicit direction
+applies to every paragraph that stores none.
+
+Nothing is written to the document: a paragraph turned around with
+`set_direction` keeps its own direction, and
+undo, saving and the clipboard never see this one.
+
+The declared `content_language` reaches the editor's paragraphs in the
+same way, after a paragraph's own language and the document's default:
+it picks the font's forms for the language and how Han characters are
+drawn.
 
 <a id="richtexteditor-v_scroll_policy"></a>
 

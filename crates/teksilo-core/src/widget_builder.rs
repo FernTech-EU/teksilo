@@ -1123,7 +1123,11 @@ impl HandlerSet {
     ///   range, macOS and Linux only on text read through their text
     ///   interfaces. See `docs/accessibility-overrides.md`.
     /// - **Widgets**, through `content_language()` on the layout, paint and
-    ///   event contexts.
+    ///   event contexts. The text inputs and the rich text editor of
+    ///   `teksilo-widgets` hand it to their editing engine, which shapes with
+    ///   it, and fall back on its direction for a text with no strongly
+    ///   directional character (an empty field declared Arabic opens on the
+    ///   right).
     ///
     /// The content of an overlay (a popover, a dropdown, a context menu)
     /// inherits the language of the widget it is attached to.

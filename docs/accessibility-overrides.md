@@ -406,7 +406,13 @@ target.set(LanguageTag::parse("ar").ok());
 It is not an `access_*` method because it is not only for assistive
 technology: any widget can read the language of its content from
 `ctx.content_language()` on the layout, paint and event contexts
-(`WidgetTree::content_language(id)` in a test).
+(`WidgetTree::content_language(id)` in a test). `TextWidget` lays its text
+out in it through `TextBackend::layout_in_language`, so a label's glyphs are
+the language's (OpenType `locl`, and Han drawn in Japanese, Korean, Simplified
+or Traditional Chinese forms). The text inputs and the rich text editor hand it
+to their editing engine, which shapes with it, and fall back on its direction
+for a text with no strongly directional character: see
+[Text that reads in its own direction](i18n.md#text-that-reads-in-its-own-direction).
 
 - **`LanguageTag`** is a BCP 47 language identifier, checked and written in
   canonical case (`en-us` becomes `en-US`; `en_US` is accepted). Extensions
@@ -432,9 +438,12 @@ technology: any widget can read the language of its content from
 - **Merge.** A merged node (`access_merge_subtree`) carries the merging
   widget's language. A descendant in another language cannot be represented
   in one merged label.
-- **One language per node.** A label holding two languages ("日本語
-  (japonais)") is read in the label's. A language for each run is not
-  implemented.
+- **One language per node, and per run.** A label holding two languages
+  ("日本語 (japonais)") is read in the label's. Below a node, each text run
+  can state a language of its own (`TextRunSource::with_language`): a
+  `RichTextEditor` paragraph whose document gives it a language (its own, or
+  the document's default) states it on its runs and its text container, so a
+  document in Japanese is read in Japanese inside an editor declared French.
 - **Reactive.** A bound declaration re-walks the accessibility tree, and lays
   out and repaints the declaring subtree, when it changes.
 

@@ -56,10 +56,10 @@
 use std::collections::HashMap;
 
 use teksilo_canvas::{LineEnd, Point, Rect, TextGeometry};
-use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accessibility::text_runs::{
     LinkSpan, TextRunSource, push_text_runs, push_text_runs_with_links,
 };
+use teksilo_core::accessibility::{AccessNodeBuilder, is_synthetic};
 use teksilo_core::accesskit::NodeId;
 use teksilo_text::text_document::{
     BlockSnapshot, CellSnapshot, FlowElementSnapshot, FragmentContent, FrameSnapshot, ListInfo,
@@ -820,6 +820,22 @@ impl<'a> FlowWalk<'a> {
             marker_run = self.marker_run(builder, parent, marker, block.position, id, marker_box);
         }
 
+        // A block in its own language (its own, or the document's default)
+        // says so on its text container and on every run, which is where a
+        // reader reads it from. The editor's node keeps the language it was
+        // declared in.
+        let block_language = block
+            .block_format
+            .language
+            .as_deref()
+            .map(str::trim)
+            .filter(|language| !language.is_empty());
+        if let Some(language) = block_language {
+            if let Some(container) = parent.filter(|node| is_synthetic(*node)) {
+                builder.set_language_on_child(container, language);
+            }
+        }
+        let source = source.with_language(block_language);
         let emission = self.runs_and_links(builder, block, parent, cell_text.is_some(), &source);
         if let (Some(marker), Some(first)) = (marker_run, emission.runs.first()) {
             builder.link_runs_on_line(&[marker, first.id]);

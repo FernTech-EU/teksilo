@@ -513,6 +513,30 @@ impl Widget for RichTextEditorBody {
             }
         }
 
+        // The language and direction of every paragraph that states none: the
+        // editor's base direction, the content language declared around it,
+        // and for a paragraph with no strongly directional character, that
+        // language's direction or the window's. Baked at layout, so a change
+        // forces a relayout and a render this frame. Nothing reaches the
+        // document.
+        {
+            use crate::text_base_direction::{neutral_direction, to_engine};
+            let language = ctx.content_language.as_ref();
+            let engine_language = language.map(|tag| tag.as_str());
+            let engine_direction = st.base_direction.get().for_engine();
+            let engine_neutral = to_engine(neutral_direction(language, ctx.layout_direction));
+            if st.engine.default_language() != engine_language
+                || st.engine.default_direction() != engine_direction
+                || st.engine.neutral_direction() != engine_neutral
+            {
+                st.engine.set_default_language(engine_language);
+                st.engine.set_default_direction(engine_direction);
+                st.engine.set_neutral_direction(engine_neutral);
+                st.needs_full_layout = true;
+                st.pending_full_render = true;
+            }
+        }
+
         // Idempotent echo — `place_children` already adopted these exact bounds
         // during layout, so this is normally a no-op. It stays so that any path
         // which paints without a preceding layout still sizes the engine.

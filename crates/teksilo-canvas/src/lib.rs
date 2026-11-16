@@ -66,6 +66,7 @@ pub use svg::{
 };
 pub use text_backend::{
     AtlasInfo, CharGeom, EllipsisMode, GlyphValidation, HitTarget, LineEnd, LineTruncation,
-    MockTextBackend, TextBackend, TextDirection, TextGeometry, TextLayout, TextLayoutSpan,
-    TextLine, TextLineSegment, TextLink, TextOverflow, TextSpanKind, quantize_raster_scale,
+    MockTextBackend, TextBackend, TextDirection, TextGeometry, TextLayout, TextLayoutRequest,
+    TextLayoutSpan, TextLine, TextLineSegment, TextLink, TextOverflow, TextSpanKind,
+    lay_out_ignoring_language, quantize_raster_scale,
 };

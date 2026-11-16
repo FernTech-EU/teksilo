@@ -29,6 +29,7 @@ content and escapes ancestor clipping (same pattern as `ComboBox`).
 | `Self` | [`on_submit_fn(f: impl Fn(&mut EventContext) + 'static)`](#searchfield-on_submit_fn) |
 | `Self` | [`on_text_inserted(f: impl Fn(EditSource, usize) + 'static)`](#searchfield-on_text_inserted) |
 | `Self` | [`writing_tools(allowed: impl Into<Prop<bool>>)`](#searchfield-writing_tools) |
+| `Self` | [`base_direction(direction: impl Into<Prop<crate::text_base_direction::TextBaseDirection>>)`](#searchfield-base_direction) |
 | `Self` | [`with_suggestions(f: impl Fn(&str) -> Vec<String> + 'static)`](#searchfield-with_suggestions) |
 | `Self` | [`max_suggestions(n: usize)`](#searchfield-max_suggestions) |
 | `Self` | [`min_chars(n: usize)`](#searchfield-min_chars) |
@@ -200,6 +201,16 @@ whether they may read its text and replace it. Other platforms have no
 such feature. Defaults to `true`; static or a `Signal<bool>`. Forwarded
 to the inner field; see
 `TextInputField::writing_tools`.
+
+<a id="searchfield-base_direction"></a>
+
+#### `pub fn base_direction( mut self, direction: impl Into<Prop<crate::text_base_direction::TextBaseDirection>>, ) -> Self`
+
+The direction the query reads in: `Auto`
+(the default) follows the text, then the declared
+`content_language`,
+then the window. Forwarded to
+`TextInputField::base_direction`.
 
 <a id="searchfield-with_suggestions"></a>
 

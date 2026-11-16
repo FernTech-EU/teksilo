@@ -44,9 +44,19 @@ struct LayoutCacheKey {
     /// indexes glyph quads baked at a specific bitmap density — entries
     /// at different scales must not alias.
     raster_scale_bits: u32,
+    /// The language the text was laid out in (the label flow's default
+    /// language at layout time): the same text in two languages can be
+    /// shaped with different glyphs.
+    language: Option<String>,
 }
 
 impl LayoutCacheKey {
+    /// The same key, for text laid out in `language`.
+    fn in_language(mut self, language: Option<&str>) -> Self {
+        self.language = language.map(str::to_owned);
+        self
+    }
+
     fn new_single_line(
         text: &str,
         style: &TextStyle,
@@ -63,6 +73,7 @@ impl LayoutCacheKey {
             max_width_bits: max_width.map(|w| (w * scale_factor).to_bits()),
             mode: LayoutMode::SingleLine,
             raster_scale_bits: raster_scale.to_bits(),
+            language: None,
         }
     }
 
@@ -86,6 +97,7 @@ impl LayoutCacheKey {
             max_width_bits: Some((max_width * scale_factor).to_bits()),
             mode: LayoutMode::Paragraph(cap),
             raster_scale_bits: raster_scale.to_bits(),
+            language: None,
         }
     }
 }
@@ -664,6 +676,25 @@ impl TextBackend for TypesetterBridge {
         self.raster_scale
     }
 
+    /// The label flow is told the language for this layout, and back to none
+    /// after it, so a plain layout call never inherits it. The language is
+    /// part of every cache key.
+    fn layout_in_language(
+        &mut self,
+        request: teksilo_canvas::TextLayoutRequest<'_>,
+        style: &TextStyle,
+        language: Option<&str>,
+    ) -> TextLayout {
+        let language = language.map(str::trim).filter(|l| !l.is_empty());
+        if language.is_none() {
+            return teksilo_canvas::lay_out_ignoring_language(self, request, style);
+        }
+        self.label_flow.set_default_language(language);
+        let layout = teksilo_canvas::lay_out_ignoring_language(self, request, style);
+        self.label_flow.set_default_language(None);
+        layout
+    }
+
     fn layout_single_line(
         &mut self,
         text: &str,
@@ -676,7 +707,8 @@ impl TextBackend for TypesetterBridge {
             max_width,
             self.service.scale_factor(),
             self.raster_scale,
-        );
+        )
+        .in_language(self.label_flow.default_language());
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -746,6 +778,7 @@ impl TextBackend for TypesetterBridge {
             self.service.scale_factor(),
             self.raster_scale,
         );
+        let cache_key = cache_key.in_language(self.label_flow.default_language());
 
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -815,6 +848,7 @@ impl TextBackend for TypesetterBridge {
             max_width_bits: max_width.map(|w| (w * self.service.scale_factor()).to_bits()),
             mode: LayoutMode::SingleLineMarkup,
             raster_scale_bits: self.raster_scale.to_bits(),
+            language: self.label_flow.default_language().map(str::to_owned),
         };
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -900,6 +934,7 @@ impl TextBackend for TypesetterBridge {
             max_width_bits: Some((max_width * self.service.scale_factor()).to_bits()),
             mode: LayoutMode::ParagraphMarkup(cap),
             raster_scale_bits: self.raster_scale.to_bits(),
+            language: self.label_flow.default_language().map(str::to_owned),
         };
         if let Some(cached) = self.layout_cache.get(&cache_key) {
             return cached.clone();
@@ -1062,6 +1097,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_label_in_a_language_is_cached_apart_and_leaves_no_language_behind() {
+        use teksilo_canvas::TextLayoutRequest;
+        let mut bridge = TypesetterBridge::new_with_default_font();
+        let style = TextStyle::default();
+        let request = TextLayoutRequest::SingleLine {
+            text: "\u{015F}ir",
+            max_width: None,
+        };
+        let plain = bridge.layout_single_line("\u{015F}ir", &style, None);
+        let romanian = bridge.layout_in_language(request, &style, Some("ro"));
+        let turkish = bridge.layout_in_language(request, &style, Some("tr"));
+        assert_ne!(plain.layout_key, romanian.layout_key);
+        assert_ne!(romanian.layout_key, turkish.layout_key);
+        assert_eq!(
+            bridge
+                .layout_in_language(request, &style, Some("ro"))
+                .layout_key,
+            romanian.layout_key,
+            "the same language hits the cache"
+        );
+        assert_eq!(
+            bridge.layout_in_language(request, &style, None).layout_key,
+            plain.layout_key,
+            "no language is the plain layout"
+        );
+        assert_eq!(
+            bridge
+                .layout_single_line("\u{015F}ir", &style, None)
+                .layout_key,
+            plain.layout_key,
+            "a plain call after a language one is not in that language"
+        );
+        assert_eq!(bridge.label_flow.default_language(), None);
+        for request in [
+            TextLayoutRequest::Paragraph {
+                text: "a b c",
+                max_width: 100.0,
+                max_lines: None,
+            },
+            TextLayoutRequest::SingleLineMarkup {
+                source: "**a**",
+                max_width: None,
+            },
+            TextLayoutRequest::ParagraphMarkup {
+                source: "*a* b",
+                max_width: 100.0,
+                max_lines: Some(2),
+            },
+        ] {
+            let none = bridge.layout_in_language(request, &style, None);
+            let ja = bridge.layout_in_language(request, &style, Some("ja"));
+            assert_ne!(none.layout_key, ja.layout_key, "{request:?}");
+        }
+    }
+
+    #[test]
     fn layout_single_line_returns_nonzero_size() {
         let mut bridge = TypesetterBridge::new_with_default_font();
         let layout = bridge.layout_single_line("Hello", &TextStyle::default(), None);
@@ -1144,6 +1235,8 @@ mod tests {
         use text_typeset::layout::block::{BlockLayoutParams, FragmentParams};
         BlockLayoutParams {
             base_direction: Default::default(),
+            neutral_direction: Default::default(),
+            language: None,
             block_id: id,
             position: 0,
             text: text.to_string(),

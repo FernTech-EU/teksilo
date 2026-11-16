@@ -99,6 +99,8 @@ pub use self::lists::list_style_is_ordered;
 #[cfg(test)]
 mod a11y_walk_cost;
 #[cfg(test)]
+mod base_direction_tests;
+#[cfg(test)]
 mod composition_tests;
 #[cfg(test)]
 mod cursor_signal_tests;
@@ -584,6 +586,33 @@ impl RichTextEditor {
     /// it.
     pub fn text_color(self, color: impl Into<ColorProp>) -> Self {
         self.state.borrow_mut().text_color_prop = Some(color.into());
+        self
+    }
+
+    /// The direction of every paragraph that stores none of its own: a
+    /// [`TextBaseDirection`](crate::TextBaseDirection) or a signal of one.
+    ///
+    /// [`Auto`](crate::TextBaseDirection::Auto), the default, lets each
+    /// paragraph's text decide (its first strongly directional character);
+    /// a paragraph with none (an empty one) takes the direction of the
+    /// language declared with
+    /// [`content_language`](teksilo_core::widget_builder::WidgetBuilder::content_language)
+    /// on or above the editor, else the window's. An explicit direction
+    /// applies to every paragraph that stores none.
+    ///
+    /// Nothing is written to the document: a paragraph turned around with
+    /// [`set_direction`](Self::set_direction) keeps its own direction, and
+    /// undo, saving and the clipboard never see this one.
+    ///
+    /// The declared `content_language` reaches the editor's paragraphs in the
+    /// same way, after a paragraph's own language and the document's default:
+    /// it picks the font's forms for the language and how Han characters are
+    /// drawn.
+    pub fn base_direction(
+        self,
+        direction: impl Into<teksilo_core::signal::Prop<crate::text_base_direction::TextBaseDirection>>,
+    ) -> Self {
+        self.state.borrow_mut().base_direction = direction.into();
         self
     }
 
@@ -4514,6 +4543,13 @@ impl Widget for RichTextEditor {
                 ]
             };
             let registry = ctx.binding_registry();
+            // A bound direction is applied in the body's paint, which lays the
+            // text out again when it changes.
+            self.state.borrow().base_direction.register_if_bound(
+                viewport_id,
+                registry,
+                teksilo_core::binding::BindingLevel::RepaintOnly,
+            );
             for prop in props.iter().flatten() {
                 prop.register_if_bound(
                     viewport_id,

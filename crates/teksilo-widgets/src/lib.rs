@@ -117,6 +117,7 @@ pub mod stepper;
 pub mod styles;
 pub mod tab_widget;
 pub mod table_view;
+pub mod text_base_direction;
 pub mod text_input;
 pub mod text_scale_control;
 pub mod theme_switcher;
@@ -287,6 +288,7 @@ pub use table_view::{
     TruncationPolicy,
 };
 pub use teksilo_tokens::Orientation;
+pub use text_base_direction::TextBaseDirection;
 pub use text_input::{TextInput, ValidationState};
 pub use text_scale_control::TextScaleControl;
 pub use theme_switcher::ThemeSwitcher;

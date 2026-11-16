@@ -134,6 +134,8 @@ pub struct SearchField {
     on_text_inserted: Option<Rc<dyn Fn(EditSource, usize)>>,
     /// Forwarded to the inner `TextInput`; see [`SearchField::writing_tools`].
     writing_tools: Prop<bool>,
+    /// Forwarded to the inner `TextInput`; see [`SearchField::base_direction`].
+    base_direction: Option<Prop<crate::text_base_direction::TextBaseDirection>>,
     /// ARIA combobox wiring for an **externally owned** listbox — a command
     /// palette's result list, not this field's own suggestion popup — forwarded
     /// to the inner `TextInput` and from there to the focusable
@@ -180,6 +182,7 @@ impl SearchField {
             on_submit: None,
             on_text_inserted: None,
             writing_tools: Prop::Static(true),
+            base_direction: None,
             external_active_descendant: None,
             external_controls: None,
             root_child_id: None,
@@ -264,6 +267,19 @@ impl SearchField {
     /// [`TextInputField::writing_tools`](crate::primitives::TextInputField::writing_tools).
     pub fn writing_tools(mut self, allowed: impl Into<Prop<bool>>) -> Self {
         self.writing_tools = allowed.into();
+        self
+    }
+
+    /// The direction the query reads in: [`Auto`](crate::TextBaseDirection::Auto)
+    /// (the default) follows the text, then the declared
+    /// [`content_language`](teksilo_core::widget_builder::WidgetBuilder::content_language),
+    /// then the window. Forwarded to
+    /// [`TextInputField::base_direction`](crate::primitives::TextInputField::base_direction).
+    pub fn base_direction(
+        mut self,
+        direction: impl Into<Prop<crate::text_base_direction::TextBaseDirection>>,
+    ) -> Self {
+        self.base_direction = Some(direction.into());
         self
     }
 
@@ -443,6 +459,9 @@ impl Widget for SearchField {
             input = input.on_text_inserted(move |source, chars| (cb)(source, chars));
         }
         input = input.writing_tools(self.writing_tools.clone());
+        if let Some(direction) = self.base_direction.clone() {
+            input = input.base_direction(direction);
+        }
         // The combobox wiring goes on the field, the node that holds focus:
         // a screen reader reads a combobox's popup state and follows its
         // active descendant on the focused node, never on an ancestor.

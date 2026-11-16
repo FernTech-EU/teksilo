@@ -377,6 +377,11 @@ pub(crate) struct EditorState {
     pub caret_color_prop: Option<teksilo_core::color_prop::ColorProp>,
     pub selection_color_prop: Option<teksilo_core::color_prop::ColorProp>,
     pub background_prop: Option<teksilo_core::color_prop::ColorProp>,
+    /// The base direction of every block that stores none, set by
+    /// `RichTextEditor::base_direction` and given to the engine by
+    /// `RichTextEditorBody::paint` with the content language around the
+    /// editor. Nothing is written to the document.
+    pub base_direction: teksilo_core::signal::Prop<crate::text_base_direction::TextBaseDirection>,
 
     /// Last code-block background colour applied to the engine. A
     /// change forces a full `layout_full` (not just a render) because
@@ -1057,6 +1062,9 @@ impl EditorState {
             caret_color_prop: None,
             selection_color_prop: None,
             background_prop: None,
+            base_direction: teksilo_core::signal::Prop::Static(
+                crate::text_base_direction::TextBaseDirection::Auto,
+            ),
             last_code_block_bg: None,
             last_code_block_fg: None,
             last_link_fg: None,

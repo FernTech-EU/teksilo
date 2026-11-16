@@ -225,6 +225,7 @@
 - [TableHeader](widgets/table_header.md)
 - [TableView](widgets/table_view.md)
 - [TabWidget](widgets/tab_widget.md)
+- [TextBaseDirection](widgets/text_base_direction.md)
 - [TextInput](widgets/text_input.md)
 - [TextInputField](widgets/text_input_field.md)
 - [TextScaleControl](widgets/text_scale_control.md)

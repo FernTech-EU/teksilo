@@ -35,6 +35,7 @@
 | `Self` | [`min_height(height: f32)`](#textinput-min_height) |
 | `Self` | [`text_style(style: impl Into<TextStyleProp>)`](#textinput-text_style) |
 | `Self` | [`text_alignment(alignment: HAlignment)`](#textinput-text_alignment) |
+| `Self` | [`base_direction(direction: impl Into<Prop<crate::text_base_direction::TextBaseDirection>>)`](#textinput-base_direction) |
 | `Self` | [`text_color(color: impl Into<ColorProp>)`](#textinput-text_color) |
 | `Self` | [`leading_slot(widget: impl Widget + 'static)`](#textinput-leading_slot) |
 | `Self` | [`trailing_slot(widget: impl Widget + 'static)`](#textinput-trailing_slot) |
@@ -98,8 +99,11 @@ TextInput::new(search.clone())
   theme) or a fixed `TextStyle`. The field's height follows the style's
   line, so a small style gives a short field and a large one a tall field.
 - `text_alignment` — where a text narrower
-  than the field sits: start, centre or end, mirrored in a right-to-left
-  layout. A longer text scrolls as usual.
+  than the field sits: start, centre or end, mirrored for a right-to-left
+  text. A longer text scrolls as usual.
+- `base_direction`: the direction the text
+  reads in: by default its own (its first strongly directional character,
+  else the declared `content_language`, else the window's).
 - `text_color` — the colour of the text and the
   caret. A disabled field still greys out. For one colour at rest and
   another while editing, map the field's focus:
@@ -302,9 +306,24 @@ theme; the global text scale multiplies the size.
 #### `pub fn text_alignment(mut self, alignment: HAlignment) -> Self` (default: `None`)
 
 Where the text — and the placeholder — sits when it is narrower than
-the field: at its start, in the middle, or at its end, mirrored in a
-right-to-left layout. Text wider than the field scrolls as usual.
+the field: at its start, in the middle, or at its end. The text's start
+is that of its own direction (see `base_direction`),
+the placeholder's the window's. Text wider than the field scrolls as
+usual.
 Forwarded to `TextInputField::text_alignment`.
+
+<a id="textinput-base_direction"></a>
+
+#### `pub fn base_direction( mut self, direction: impl Into<Prop<crate::text_base_direction::TextBaseDirection>>, ) -> Self`
+
+The direction the typed text reads in: `Auto`
+(the default) follows the text, then the declared
+`content_language`,
+then the window. Forwarded to `TextInputField::base_direction`,
+where the details live.
+
+The placeholder is the interface's text, so it stays at the window's
+leading edge.
 
 <a id="textinput-text_color"></a>
 

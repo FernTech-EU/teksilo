@@ -286,6 +286,62 @@ pub fn quantize_raster_scale(scale: f32) -> f32 {
     STEP.powi(bucket)
 }
 
+/// What to lay out, for [`TextBackend::layout_in_language`]: one variant
+/// for each of the trait's four layout methods, with their arguments.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TextLayoutRequest<'a> {
+    /// [`TextBackend::layout_single_line`].
+    SingleLine {
+        text: &'a str,
+        max_width: Option<f32>,
+    },
+    /// [`TextBackend::layout_paragraph`].
+    Paragraph {
+        text: &'a str,
+        max_width: f32,
+        max_lines: Option<usize>,
+    },
+    /// [`TextBackend::layout_single_line_markup`].
+    SingleLineMarkup {
+        source: &'a str,
+        max_width: Option<f32>,
+    },
+    /// [`TextBackend::layout_paragraph_markup`].
+    ParagraphMarkup {
+        source: &'a str,
+        max_width: f32,
+        max_lines: Option<usize>,
+    },
+}
+
+/// `request` through the four layout methods, without a language: the
+/// default of [`TextBackend::layout_in_language`], and what a backend that
+/// does shape by language does for `None`.
+pub fn lay_out_ignoring_language<B: TextBackend + ?Sized>(
+    backend: &mut B,
+    request: TextLayoutRequest<'_>,
+    style: &TextStyle,
+) -> TextLayout {
+    match request {
+        TextLayoutRequest::SingleLine { text, max_width } => {
+            backend.layout_single_line(text, style, max_width)
+        }
+        TextLayoutRequest::Paragraph {
+            text,
+            max_width,
+            max_lines,
+        } => backend.layout_paragraph(text, style, max_width, max_lines),
+        TextLayoutRequest::SingleLineMarkup { source, max_width } => {
+            backend.layout_single_line_markup(source, style, max_width)
+        }
+        TextLayoutRequest::ParagraphMarkup {
+            source,
+            max_width,
+            max_lines,
+        } => backend.layout_paragraph_markup(source, style, max_width, max_lines),
+    }
+}
+
 /// Trait for text layout and glyph rasterization backends.
 /// Implemented by teksilo-text (wrapping text-typeset) for real rendering,
 /// and by a mock for headless tests.
@@ -367,6 +423,24 @@ pub trait TextBackend {
         max_lines: Option<usize>,
     ) -> TextLayout {
         self.layout_paragraph(source, style, max_width, max_lines)
+    }
+
+    /// Lay out `request` for text written in `language`, a BCP 47 tag
+    /// (`"ja"`, `"sr-Cyrl"`), or in no stated language with `None`.
+    ///
+    /// A backend that shapes by language uses it to pick a font's
+    /// language-specific forms (OpenType `locl`) and how Han characters are
+    /// drawn, and keeps layouts of the same text in different languages
+    /// apart in its caches. The default ignores the language and calls the
+    /// matching layout method, so a backend that does not shape by language
+    /// keeps working.
+    fn layout_in_language(
+        &mut self,
+        request: TextLayoutRequest<'_>,
+        style: &TextStyle,
+        _language: Option<&str>,
+    ) -> TextLayout {
+        lay_out_ignoring_language(self, request, style)
     }
 
     /// Produce GPU-ready glyph quads for a previously laid-out text.
@@ -947,6 +1021,24 @@ mod tests {
             let q = quantize_raster_scale(raw);
             assert_eq!(quantize_raster_scale(q), q, "not idempotent at {raw}");
         }
+    }
+
+    #[test]
+    fn a_backend_that_does_not_shape_by_language_ignores_it() {
+        let mut backend = MockTextBackend::new();
+        let style = TextStyle::default();
+        let plain = backend.layout_paragraph("one two three", &style, 40.0, None);
+        let in_japanese = backend.layout_in_language(
+            TextLayoutRequest::Paragraph {
+                text: "one two three",
+                max_width: 40.0,
+                max_lines: None,
+            },
+            &style,
+            Some("ja"),
+        );
+        assert_eq!(in_japanese.width, plain.width);
+        assert_eq!(in_japanese.line_count, plain.line_count);
     }
 
     #[test]

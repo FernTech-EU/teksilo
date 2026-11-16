@@ -110,6 +110,9 @@ pub struct TextRunSpec {
     pub bounds_are_absolute: bool,
     pub text_direction: TextDirection,
     pub attrs: TextRunAttributes,
+    /// The language of this run's text, a BCP 47 tag, when it differs from
+    /// what the run inherits from the node it hangs from. `None` inherits.
+    pub language: Option<String>,
 }
 
 /// A Teksilo affine as AccessKit expresses one.
@@ -1324,6 +1327,20 @@ impl AccessNodeBuilder {
         }
     }
 
+    /// Give the synthetic child `child` the language `language`, a BCP 47
+    /// tag: a block of an editor written in its own language, whose text
+    /// container a reader reads it from. A no-op for a child this builder
+    /// did not push.
+    pub fn set_language_on_child(&mut self, child: NodeId, language: &str) {
+        if let Some((_, node)) = self
+            .children_collected
+            .iter_mut()
+            .find(|(id, _)| *id == child)
+        {
+            node.set_language(language);
+        }
+    }
+
     /// Push a `Role::Link` child on the current node. Used by label
     /// widgets (e.g. `TextWidget` with `.markup(true)` enabled) to
     /// expose inline `[label](url)` links as individual accessible
@@ -1983,6 +2000,7 @@ impl AccessNodeBuilder {
             bounds_are_absolute,
             text_direction,
             attrs,
+            language,
             ..
         } = spec;
 
@@ -2005,6 +2023,9 @@ impl AccessNodeBuilder {
             node.set_character_widths(character_widths);
         }
         node.set_text_direction(text_direction);
+        if let Some(language) = language {
+            node.set_language(language);
+        }
         if bounds_are_absolute {
             node.set_bounds(accesskit::Rect {
                 x0: bounds.x as f64,

@@ -504,6 +504,14 @@ impl Widget for TextInputField {
             );
         }
 
+        // A direction bound to a signal places the text again when it
+        // changes, and re-announces it.
+        self.base_direction.register_if_bound(
+            ctx.self_id(),
+            ctx.binding_registry(),
+            teksilo_core::binding::BindingLevel::Relayout,
+        );
+
         // Bind caret_visible for repaint.
         {
             let st = self.state().borrow();
@@ -1062,8 +1070,12 @@ impl Widget for TextInputField {
         // the field's viewport. `sync_viewport` welds the width write to the
         // `needs_full_layout` flag it also serves as the detector for (see its
         // docs); paint calls it again as an idempotent echo.
+        let mut direction = teksilo_core::environment::LayoutDirection::LeftToRight;
         if let Some(state) = self.state.as_ref() {
-            state.borrow_mut().sync_viewport(bounds);
+            let mut st = state.borrow_mut();
+            st.sync_viewport(bounds);
+            self.sync_direction(&mut st, ctx.content_language(), ctx.layout_direction);
+            direction = st.resolved_direction;
         }
 
         if let Some(backend) = ctx.text_backend {
@@ -1071,7 +1083,7 @@ impl Widget for TextInputField {
                 bounds,
                 &self.measured_style(&ctx.theme.typography, ctx.text_scale),
                 backend,
-                base_text_direction(ctx.layout_direction),
+                crate::text_base_direction::to_accesskit(direction),
             );
         }
     }
@@ -1123,6 +1135,7 @@ impl Widget for TextInputField {
         let text_viewport_width = (bounds.width - suffix_width).max(0.0);
 
         st.engine.set_viewport(10_000.0, bounds.height);
+        self.sync_direction(&mut st, ctx.content_language.as_ref(), ctx.layout_direction);
 
         if st.needs_full_layout || !st.engine.has_full_layout() {
             st.layout_full_masked();
@@ -1169,7 +1182,7 @@ impl Widget for TextInputField {
         let follow = CaretFollow {
             text_viewport_width,
             margin: scroll_margin(&ctx.theme.input),
-            rtl: ctx.layout_direction == teksilo_core::environment::LayoutDirection::RightToLeft,
+            rtl: st.resolved_direction == teksilo_core::environment::LayoutDirection::RightToLeft,
         };
         st.caret_follow = Some(follow);
         ensure_caret_visible_h(&mut st, follow);
@@ -1279,13 +1292,14 @@ impl Widget for TextInputField {
         // the text as it was before it. Same shape as the `sync_viewport`
         // echo above; the backend caches by (text, style), so a frame that
         // only blinks the caret pays a lookup.
+        let direction = crate::text_base_direction::to_accesskit(st.resolved_direction);
         drop(st);
         if let Some(backend) = canvas.text_backend() {
             self.retain_text_geometry(
                 bounds,
                 &self.measured_style(&ctx.theme.typography, ctx.text_scale),
                 backend,
-                base_text_direction(ctx.layout_direction),
+                direction,
             );
         }
     }
@@ -1424,8 +1438,11 @@ impl Widget for TextInputField {
                     .with_base_direction(placed.base_direction),
             },
             // Never placed, painted without a measuring backend, or one
-            // edit ahead of the last measurement.
-            _ => TextRunSource::flat(&at_text, 0),
+            // edit ahead of the last measurement. The direction is known
+            // without measuring.
+            _ => TextRunSource::flat(&at_text, 0).with_base_direction(
+                crate::text_base_direction::to_accesskit(st.resolved_direction),
+            ),
         };
         let emission = if withhold {
             TextRunEmission::default()

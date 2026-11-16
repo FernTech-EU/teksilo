@@ -31,7 +31,7 @@ pub use text_typeset::{
     DecorationKind as TypesetterDecorationKind, DecorationRect, FontFaceId, FontFamilyInfo,
     GlyphQuad as TypesetterGlyphQuad, HitRegion, HitTestResult, ImageQuad, RelayoutError,
     RenderFrame, TableVisualInfo, TextDirection, TextFontService, WritingSystem,
-    WritingSystemIndexBuilder, WritingSystemSet,
+    WritingSystemIndexBuilder, WritingSystemSet, resolve_paragraph_direction,
 };
 
 pub use text_document;
