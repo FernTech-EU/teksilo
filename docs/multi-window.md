@@ -759,6 +759,111 @@ Notes:
   action there opens or raises is activated with it. An unused token is
   dropped at the end of the turn.
 
+**Single instance** (`teksilo::app::single_instance`, feature
+`single-instance`):
+
+The recipe above leaves the socket to the application. With the
+`single-instance` feature (off by default: `teksilo = { features =
+["single-instance"] }`) Teksilo provides it. `single_instance::acquire`
+holds an election in the application's runtime directory: the first
+process to hold it is the primary, every later launch a secondary,
+connected to it. Call it in `main` before building anything, so a
+secondary hands its command line over and exits without opening a window
+or touching the settings:
+
+```rust
+use teksilo::app::single_instance::{self, Election, InstanceMessage};
+use teksilo::prelude::*;
+
+fn main() {
+    let paths = AppPaths::new("eu", "FernTech", "MyApp").expect("a home directory");
+    let primary = match single_instance::acquire(&paths, "myapp") {
+        Ok(Election::Secondary(running)) => {
+            // Arguments, working directory and activation token; then exit.
+            if let Err(e) = running.forward_command_line() {
+                eprintln!("myapp: the running instance did not answer: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        Ok(Election::Primary(primary)) => Some(primary),
+        // No runtime directory (Windows, a Unix without
+        // $XDG_RUNTIME_DIR): run without one.
+        Err(e) => {
+            eprintln!("myapp: running as a separate instance: {e}");
+            None
+        }
+    };
+
+    let mut app = TeksiloAppBuilder::new()
+        .app_paths(paths)
+        .initial_window(main_window_config()) // its `.id("main")`
+        .on_external_with_ctx(|payload, ctx| {
+            let Some(message) = payload.downcast_ref::<InstanceMessage>() else {
+                return false;
+            };
+            // Untrusted input: any process of this user can send anything.
+            // `args[0]` is the program; options are left out here.
+            let documents: Vec<_> = message
+                .args
+                .iter()
+                .skip(1)
+                .filter(|arg| !arg.to_string_lossy().starts_with('-'))
+                .map(|arg| message.cwd.join(arg))
+                .collect();
+            if documents.is_empty() {
+                if let Some(main) = ctx.find_window("main") {
+                    ctx.focus_window(main);
+                }
+            }
+            for path in &documents {
+                open_or_raise_document(ctx, path); // the "document window" recipe
+            }
+            true
+        });
+    if let Some(primary) = primary {
+        app = app.single_instance(primary);
+    }
+    app.run();
+}
+```
+
+Notes:
+
+- The message is posted from the instance's own thread through the
+  external-event path, so `on_external_with_ctx` receives it with a live
+  `EventContext`, as above, and `on_app_event` and the observers see it
+  too. A launch that carried an activation token arrives wrapped in a
+  `WithActivationToken`; the handler still downcasts to `InstanceMessage`,
+  and the token goes to the first window it raises or opens.
+  `forward_command_line` takes the token out of the environment, so call it
+  before starting any thread.
+- A launch made while the primary is still starting waits for it, up to
+  10 seconds; the primary starts listening when its event loop starts.
+- **Same user only.** The runtime directory is the user's own and closed to
+  others, the socket is `0600`, and each side checks the user id of the
+  other end. That keeps other users out, not the user's own processes: any
+  of them can connect and send any arguments. Treat an `InstanceMessage`
+  like a command line typed by a stranger, and validate what it names
+  before opening or writing it. Nothing in Teksilo runs or opens anything a
+  message names.
+- Every message is bounded (1024 arguments, 256 KiB in all), and the
+  primary gives each connection 5 seconds in all, so a peer that sends
+  nothing, or a byte at a time, is dropped and the next launch served.
+- `key` names the instance. One per user is the application's name; one per
+  data directory is a key made from that directory (a hash of its path).
+- To let the user start a separate instance (a `--new-instance` option),
+  read the option yourself and do not call `acquire`; nothing in Teksilo
+  parses the command line.
+- The primary releases the name when its event loop ends. A process that
+  ends without unwinding (a crash, a kill, `std::process::exit`) leaves its
+  socket behind; the next launch wins the election, finds the socket stale
+  and removes it.
+- Unix only for now: on Windows `acquire` returns
+  `io::ErrorKind::Unsupported`, as it does for `AppPaths` with no runtime
+  directory. `teksilo_platform::single_instance::acquire` takes the
+  directory itself, for an application that keeps its own.
+
 **Cross-window read** (dim the inspector when the main window is
 fullscreen):
 
