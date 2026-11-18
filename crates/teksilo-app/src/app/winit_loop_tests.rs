@@ -6567,3 +6567,127 @@ fn held_key_child() {
             },
         );
 }
+
+/// Set, the test [`a_signal_before_the_loop_quits_it_as_it_starts`] is its
+/// own child process, writing what it saw into the directory it names.
+const WATCH_CHILD: &str = "TEKSILO_LOOP_TEST_WATCH_CHILD";
+
+/// An application holding a `TerminationWatch` lives through a `SIGTERM`
+/// that arrives before its loop, and its loop then quits as it starts: the
+/// application's guard is asked once with `QuitSource::Signal`, no window is
+/// built, and `run` returns. A second `SIGTERM` after `run` has returned is
+/// only counted, so the shutdown that follows finishes. Without the watch
+/// the first signal ended the process before the loop existed.
+#[test]
+#[ignore = "needs a display server and a wgpu adapter; CI runs it under Xvfb \
+            (see the test-x11 job in .github/workflows/ci.yml)"]
+fn a_signal_before_the_loop_quits_it_as_it_starts() {
+    if let Some(dir) = std::env::var_os(WATCH_CHILD) {
+        watch_child(std::path::PathBuf::from(dir));
+        return;
+    }
+    let dir = tempfile::tempdir().expect("a scratch directory");
+    let name = format!(
+        "{}::a_signal_before_the_loop_quits_it_as_it_starts",
+        module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest)
+    );
+    let mut child = std::process::Command::new(std::env::current_exe().expect("this test"))
+        .args([name.as_str(), "--exact", "--ignored", "--test-threads=1"])
+        .env(WATCH_CHILD, dir.path())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("the child starts");
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("the child is ours") {
+            break status;
+        }
+        if started.elapsed() > Duration::from_secs(60) {
+            let _ = child.kill();
+            panic!("the application signalled before its loop never ended");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        status.success(),
+        "the application lived through both signals and its claims held: {status:?}"
+    );
+    let read = |file: &str| std::fs::read_to_string(dir.path().join(file)).ok();
+    assert_eq!(
+        read("guard").as_deref(),
+        Some("Some(Signal)"),
+        "the application's guard was asked, and read where the quit came from"
+    );
+    assert_eq!(read("built"), None, "no window was built");
+    assert_eq!(
+        read("after").as_deref(),
+        Some("2"),
+        "the signal after the loop was counted"
+    );
+}
+
+/// The child of [`a_signal_before_the_loop_quits_it_as_it_starts`].
+fn watch_child(dir: std::path::PathBuf) {
+    let send_term = || {
+        let sent = std::process::Command::new("kill")
+            .args(["-TERM", &std::process::id().to_string()])
+            .status()
+            .expect("kill runs");
+        assert!(sent.success());
+    };
+    let wait_for = |watch: &crate::TerminationWatch, count: u32| {
+        let started = Instant::now();
+        while watch.signals_received() < count {
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "no signal heard"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    let watch = crate::TerminationWatch::install().expect("the watch");
+    send_term();
+    wait_for(&watch, 1);
+
+    let guard_file = dir.join("guard");
+    let built_file = dir.join("built");
+    TeksiloAppBuilder::new()
+        .theme(teksilo_core::presets::intui::light())
+        .termination_watch(&watch)
+        .on_quit_requested(move |ctx| {
+            let _ = std::fs::write(&guard_file, format!("{:?}", ctx.quit_source()));
+            teksilo_core::CloseResponse::Veto
+        })
+        .initial_window(
+            WindowConfig::new()
+                .title("teksilo loop test: signalled before the loop")
+                .size(200, 120)
+                .root(move |tree, _state| {
+                    let _ = std::fs::write(&built_file, "");
+                    tree.add(logging_leaf(&Default::default(), false))
+                }),
+        )
+        .run_with(
+            || {
+                EventLoop::<AppEvent>::with_user_event()
+                    .with_x11()
+                    .with_any_thread(true)
+                    .build()
+                    .expect("winit could not build an X11 event loop (is DISPLAY set?)")
+            },
+            |mut event_loop, app| {
+                event_loop
+                    .run_app_on_demand(app)
+                    .expect("winit event loop exited with error");
+                assert!(app.wm.quit_completed(), "the run ended by the quit");
+                assert_eq!(app.wm.window_count(), 0, "and no window was opened");
+            },
+        );
+
+    send_term();
+    wait_for(&watch, 2);
+    std::fs::write(dir.join("after"), watch.signals_received().to_string())
+        .expect("the after file");
+}

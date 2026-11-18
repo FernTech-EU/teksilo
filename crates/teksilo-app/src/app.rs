@@ -1423,6 +1423,13 @@ struct TeksiloAppHandler {
     /// (Unix), each unless the process ignored it when the watch started.
     #[cfg(unix)]
     quit_signals: Option<teksilo_platform::os_quit::SignalWatch>,
+    /// The application's [`TerminationWatch`](crate::TerminationWatch), in
+    /// place of [`quit_signals`](Self::quit_signals) when it has one.
+    termination_watch: Option<crate::TerminationWatch>,
+    /// Set once [`termination_watch`](Self::termination_watch) hands its
+    /// signals to this loop: `true` while a signal it heard before is still
+    /// to be carried out, which `resumed` does.
+    signal_before_loop: Option<bool>,
     /// AppKit's `terminate:` asks the application (macOS): the hook was
     /// tried, whether it took or not (a failure is said once).
     #[cfg(target_os = "macos")]
@@ -1494,6 +1501,8 @@ impl TeksiloAppHandler {
             termination_signals: false,
             #[cfg(unix)]
             quit_signals: None,
+            termination_watch: None,
+            signal_before_loop: None,
             #[cfg(target_os = "macos")]
             terminate_hooked: false,
             #[cfg(target_os = "windows")]
@@ -1580,8 +1589,22 @@ impl TeksiloAppHandler {
                 );
             }
         }
+        if let Some(watch) = &self.termination_watch
+            && self.signal_before_loop.is_none()
+            && let Some(proxy) = self.wm.event_proxy().cloned()
+        {
+            self.signal_before_loop = Some(watch.attach_loop(move |signal| {
+                teksilo_core::AppEventPoster::post_external(&proxy, Box::new(signal));
+            }));
+        }
+        // Not beside a `TerminationWatch`: the listener has one watch at a
+        // time, and this one, dropped as the loop ends, would leave the
+        // signals ending the process during the application's shutdown.
         #[cfg(unix)]
-        if self.termination_signals && self.quit_signals.is_none() {
+        if self.termination_watch.is_none()
+            && self.termination_signals
+            && self.quit_signals.is_none()
+        {
             let proxy = self.wm.event_proxy().cloned();
             if let Some(proxy) = proxy {
                 match teksilo_platform::os_quit::SignalWatch::new(move |signal| {
@@ -5235,6 +5258,16 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         self.wm.watch_session();
         // The operating system's own requests to quit, from the first turn.
         self.watch_os_quit();
+        // A termination signal came before the loop: the application quits
+        // as it would for one now, before its first window is created.
+        if self.signal_before_loop == Some(true) {
+            self.signal_before_loop = Some(false);
+            self.quit_now(crate::quit::QuitSource::Signal, event_loop);
+            if self.wm.quit_completed() {
+                self.started = true;
+                return;
+            }
+        }
         // Likewise for the desktop's appearance, while the theme follows it.
         self.wm.sync_os_theme_watch();
 
@@ -5752,6 +5785,11 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         {
             self.quit_signals = None;
         }
+        // The application's watch goes on, remembering a signal while its
+        // shutdown runs.
+        if let Some(watch) = &self.termination_watch {
+            watch.detach_loop();
+        }
         // Last: a launch that wins the name from now on reads the settings
         // as they were written above, and no flush of this instance follows
         // to overwrite what it writes.
@@ -6088,6 +6126,8 @@ pub struct TeksiloAppBuilder {
     /// Whether a termination signal quits the application; see
     /// [`handle_termination_signals`](Self::handle_termination_signals).
     termination_signals: bool,
+    /// See [`termination_watch`](Self::termination_watch).
+    termination_watch: Option<crate::TerminationWatch>,
     /// Whether macOS may merge the windows into tabs; see
     /// [`window_tabbing`](Self::window_tabbing).
     window_tabbing: bool,
@@ -6164,6 +6204,7 @@ impl TeksiloAppBuilder {
             app_root: None,
             quit_guard: None,
             termination_signals: true,
+            termination_watch: None,
             window_tabbing: false,
             windows_text_store: true,
             event_source: None,
@@ -6880,7 +6921,10 @@ impl TeksiloAppBuilder {
     /// Turn it off for an application that handles these signals itself
     /// (with its own `signal-hook` registration, for instance); its
     /// handlers then run alone. Before the loop starts and once it has
-    /// ended, the two signals keep their default meaning. One the process
+    /// ended, the two signals keep their default meaning, unless the
+    /// application holds a [`TerminationWatch`](crate::TerminationWatch)
+    /// (see [`termination_watch`](Self::termination_watch)), which also
+    /// overrides `false` here. One the process
     /// was started with ignored (`SIGHUP` under `nohup`) is left ignored
     /// throughout. One the application sets to ignored, or hands to a
     /// handler of its own, after the loop has started takes it from the
@@ -6891,6 +6935,30 @@ impl TeksiloAppBuilder {
     /// manager (systemd) takes either as a normal stop.
     pub fn handle_termination_signals(mut self, handled: bool) -> Self {
         self.termination_signals = handled;
+        self
+    }
+
+    /// Carry out `SIGTERM` and `SIGHUP` through `watch` while the event
+    /// loop runs (Unix; the watch does nothing elsewhere), so they keep the
+    /// process alive before the loop and after it too: see
+    /// [`TerminationWatch`](crate::TerminationWatch). The application keeps
+    /// its own handle, to read once `run` has returned.
+    ///
+    /// While the loop runs, a signal quits the application as
+    /// [`handle_termination_signals`](Self::handle_termination_signals)
+    /// describes. A signal that came before `run` quits it as the loop
+    /// starts, before its first window is created, with
+    /// [`QuitSource::Signal`](teksilo_core::QuitSource::Signal): the
+    /// application's guard is asked once, as for a signal during the loop.
+    /// Once the loop has ended, a signal is only remembered.
+    ///
+    /// The watch decides: `handle_termination_signals(false)` has no
+    /// effect beside it. A watch the application installed and did not
+    /// pass here is used all the same, since the process has one listener
+    /// and one watch at a time; passing it says so, and keeps it alive for
+    /// the loop.
+    pub fn termination_watch(mut self, watch: &crate::TerminationWatch) -> Self {
+        self.termination_watch = Some(watch.clone());
         self
     }
 
@@ -7489,6 +7557,9 @@ impl TeksiloAppBuilder {
         app.wm.set_app_quit_guard(self.quit_guard);
         app.settings = opened_settings;
         app.termination_signals = self.termination_signals;
+        app.termination_watch = self
+            .termination_watch
+            .or_else(crate::TerminationWatch::current);
         app.external_ctx_handler = self.external_ctx_handler;
         // Held even when it cannot listen: releasing the name would let the
         // next launch start a second instance of an application that asked
@@ -7521,6 +7592,11 @@ impl TeksiloAppBuilder {
         // such a driver's windows are exposed from the end of its loop to
         // this line.
         app.wm.disconnect_redraw_wakers();
+        // As `exiting` does, for a driver that never calls it: the loop that
+        // would carry a signal out is gone.
+        if let Some(watch) = &app.termination_watch {
+            watch.detach_loop();
+        }
 
         // Flush any pending settings writes synchronously before the
         // process exits. `exiting` flushed already; this catches what the

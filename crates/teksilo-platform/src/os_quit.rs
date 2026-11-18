@@ -200,6 +200,9 @@ pub struct TerminationSignal {
 /// `SIGTERM`'s number, the same on every platform that has it.
 pub const SIGTERM: i32 = 15;
 
+/// `SIGHUP`'s number, the same on every platform that has it.
+pub const SIGHUP: i32 = 1;
+
 /// `WM_CLOSE` reached winit's hidden event-loop window (Windows): what
 /// `taskkill` without `/F` sends when it picks that window, as it does when
 /// the application has no window open. With none open it quits the

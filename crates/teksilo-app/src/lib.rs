@@ -18,6 +18,7 @@ pub(crate) mod quit;
 pub(crate) mod redraw_gate;
 #[cfg(feature = "single-instance")]
 pub mod single_instance;
+pub mod termination_watch;
 pub mod window_config;
 pub(crate) mod window_identity;
 pub mod window_manager;
@@ -33,6 +34,7 @@ pub use app_event_observers::AppEventObservers;
 pub use automation_bridge::TeksiloAppBuilderAutomationExt;
 pub use default_post_root::DefaultPostRoot;
 pub use native_theme::{NativeThemeFactory, NativeThemeRequest, resolve_native_theme};
+pub use termination_watch::{TerminationSignalKind, TerminationWatch};
 pub use window_config::{
     ModalConfig, PostRootBuilder, RootBuilder, TeksiloWindowId, WindowConfig,
     WindowRemovedCallback, WindowRemovedEvent,

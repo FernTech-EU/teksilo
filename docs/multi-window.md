@@ -1404,7 +1404,8 @@ wait for the kill, which is why the quit is overruling. A signal that
 arrives once the quit has completed (systemd ends a login session with
 `SIGTERM` and `SIGHUP` together) asks nobody again. Before the loop
 starts and once it has ended they keep their default meaning (the process
-ends). A signal the process was started with ignored stays ignored, during
+ends), unless the application holds a `TerminationWatch` (below). A signal
+the process was started with ignored stays ignored, during
 the loop and after it: under `nohup`, `SIGHUP` neither quits the
 application nor ends it. `SIGINT` keeps its default too, as in Qt and GTK applications:
 Ctrl+C in a terminal is a developer stopping the program. A process that
@@ -1412,6 +1413,55 @@ quits this way exits with status 0, as it ended cleanly. An application
 that handles these signals itself turns this off with
 `TeksiloAppBuilder::handle_termination_signals(false)`, and its own handlers
 then run alone.
+
+**Termination signals before and after the loop.** An application that
+starts work before `run()` and shuts it down after (a backend with
+connections, a database, threads) installs a `TerminationWatch` at the top
+of `main` and gives it to the builder. While a handle to it lives,
+`SIGTERM` and `SIGHUP` no longer end the process:
+
+- before the loop, a signal is remembered: `watch.signalled()` tells `main`,
+  which can skip `run()` and go straight to its shutdown; an application
+  that calls `run()` anyway quits as the loop starts, before its first
+  window is created, through the overruling quit above
+  (`QuitSource::Signal`, the application's guard asked once);
+- while the loop runs, a signal quits the application as above;
+- once the loop has ended, a signal is only remembered, so the shutdown
+  finishes within its own bound; `watch.signals_received()` read before the
+  shutdown tells a new signal from the one that caused the quit.
+
+```rust
+use teksilo::prelude::*;
+
+fn main() {
+    let watch = TerminationWatch::install().expect("termination signals");
+    let backend = Backend::start();
+    if watch.signalled().is_none() {
+        TeksiloAppBuilder::new()
+            .termination_watch(&watch)
+            .initial_window(WindowConfig::new().root(|tree, _| tree.add(Root::new())))
+            .run();
+    }
+    backend.shutdown(std::time::Duration::from_secs(5));
+    drop(watch); // from here on the signals end the process again
+}
+```
+
+Every handle is a clone of one watch (`install()` called again returns
+it), and dropping the last one gives the signals their default meaning
+back, so an application that wants cover to the very end keeps a handle
+until `main` returns. With a watch in place, `handle_termination_signals`
+is not consulted, and a watch the application installed is used by the
+loop even if it was not passed to the builder: the process has one
+listener and one watch at a time. The rules above hold for it too: a
+signal the process was started with ignored stays ignored and is never
+counted, and a disposition the application sets itself later takes that
+signal from the watch. On macOS, where `run()` does not return when AppKit
+carries out the quit, the shutdown goes in the `Drop` of a service
+registered with `app_state` (it runs as the loop ends), holding a clone of
+the watch if it needs to read it. On Windows there are no such signals:
+`install()` succeeds and the watch does nothing, so one `main` serves every
+platform.
 
 **Logging out on Linux.** Teksilo does not register with a session
 manager (XSMP, GNOME's `org.gnome.SessionManager`, the desktop portal's
