@@ -109,6 +109,10 @@ by crate for clarity, not because crates version independently.
   translations: its titles, their accessible names and mnemonics (Alt+letter
   included), and its menus' rows, inline or collapsed to a hamburger. A menu
   open at the switch closes.
+- **A long run with no break opportunity stays inside its label.** A line of
+  asterisks or dashes wider than a monospaced `TextWidget` was cut one glyph
+  late, so the label was laid out and drawn wider than its box, and a
+  `ScrollArea` around it grew a horizontal scroll bar (text-typeset 3.2.1).
 - **Text callbacks can use their editor.** `RichTextEditor`'s
   `on_text_inserted` and `on_change`, `TextInputField::on_text_inserted` and
   `CodeEditor::on_change` can read and edit the editor through its handle, for
