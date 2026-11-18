@@ -91,6 +91,9 @@ by crate for clarity, not because crates version independently.
   held the last reference to something that observes the same signal. The
   same holds for the observers of `ListModel`, `TreeModel`, `ChartModel` and
   the sort and chart projections.
+- **A click on a part of an overlay that takes no focus no longer moves
+  focus to the widget the overlay is attached to**, which closed an overlay
+  that dismisses when focus leaves it.
 - **`EventContext::dismiss_modal` called from outside any modal** (an async
   completion, a `run_after_mount` action) closes the window's topmost in-tree
   modal. It closed nothing, silently.
@@ -112,6 +115,9 @@ by crate for clarity, not because crates version independently.
 
 #### Widgets
 
+- **A click selects an item of a searchable `ComboBox`'s list, and so a font
+  in a `FontPicker`.** The list closed on the press and nothing was selected;
+  only the keyboard and a touch tap worked.
 - **A `MenuBar` follows a live locale change** or a reload of the
   translations: its titles, their accessible names and mnemonics (Alt+letter
   included), and its menus' rows, inline or collapsed to a hamburger. A menu
