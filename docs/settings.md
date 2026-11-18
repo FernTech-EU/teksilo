@@ -83,6 +83,17 @@ Custom persistent handles must be registered with `SettingsRegistry` to receive
 watcher updates. Outside the app event loop, call `Reloadable::reload_from_disk`
 or `SettingsFile::reload_if_stale` explicitly.
 
+## Where the files go
+
+`AppPaths` resolves one directory per kind of file: `config_dir` (settings),
+`data_dir` (what the user would miss), `state_dir` (log files and history),
+`cache_dir` (what can be rebuilt) and `runtime_dir` (sockets and locks).
+`create_state_dir`, `create_cache_dir` and `create_runtime_dir` make them. On
+Windows and macOS there is no state directory, so `state_dir` is the data
+directory there. `AppPaths::from_dirs(config, data)` sets state to `data` and
+cache to `data/cache`; `AppPaths::for_testing(root)` puts all of them at `root`.
+The per-platform table is in the [`AppPaths` API](settings/path.md).
+
 ## Constraints
 
 - `SettingsFile` writes synchronously. Avoid writing on every pointer move or frame.

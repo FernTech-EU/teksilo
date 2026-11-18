@@ -14,6 +14,15 @@
 //! | Windows | `%APPDATA%\<Organization>\<Application>\config` | `%APPDATA%\<Organization>\<Application>\data` |
 //! | macOS | `~/Library/Application Support/<bundle id>/config` | `~/Library/Application Support/<bundle id>/data` |
 //!
+//! [`AppPaths::state_dir`] (logs, history) and [`AppPaths::cache_dir`]
+//! (what can be rebuilt) complete the set:
+//!
+//! | Platform | State directory | Cache directory |
+//! |---|---|---|
+//! | Linux and other Unix | `$XDG_STATE_HOME/<app>`, by default `~/.local/state/<app>` | `$XDG_CACHE_HOME/<app>`, by default `~/.cache/<app>` |
+//! | Windows | the data directory (the platform has no state directory) | `%LOCALAPPDATA%\<Organization>\<Application>\cache` |
+//! | macOS | the data directory (the platform has no state directory) | `~/Library/Caches/<bundle id>` |
+//!
 //! `<app>` is the application's name in lower case, and the bundle id is
 //! `<qualifier>.<organization in lower case>.<Application>`, spaces made
 //! hyphens in both: `AppPaths::new("eu", "FernTech", "Skribisto")` gives
@@ -62,8 +71,8 @@ use std::path::{Path, PathBuf};
 
 use etcetera::{AppStrategy, AppStrategyArgs};
 
-/// Resolved OS-correct application directories (config, data, and the
-/// runtime directory for sockets and locks).
+/// Resolved OS-correct application directories (config, data, state, cache,
+/// and the runtime directory for sockets and locks).
 ///
 /// Construct with [`AppPaths::new`] for production code, or
 /// [`AppPaths::for_testing`] in tests and headless CI environments.
@@ -73,6 +82,8 @@ use etcetera::{AppStrategy, AppStrategyArgs};
 pub struct AppPaths {
     config_dir: PathBuf,
     data_dir: PathBuf,
+    state_dir: PathBuf,
+    cache_dir: PathBuf,
     runtime_dir: Option<PathBuf>,
 }
 
@@ -104,6 +115,9 @@ impl AppPaths {
         Some(Self {
             config_dir: strategy.config_dir(),
             data_dir: strategy.data_dir(),
+            // Windows has none: its state goes with the data.
+            state_dir: strategy.state_dir().unwrap_or_else(|| strategy.data_dir()),
+            cache_dir: strategy.cache_dir(),
             // `$XDG_RUNTIME_DIR/<app>` (when set and absolute), none on Windows.
             runtime_dir: strategy.runtime_dir(),
         })
@@ -121,9 +135,15 @@ impl AppPaths {
         let runtime_dir = darwin_user_temp_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join(args.bundle_id());
+        let data_dir = root.join("data");
         let paths = Self {
             config_dir: root.join("config"),
-            data_dir: root.join("data"),
+            // macOS has no state directory: its state goes with the data.
+            state_dir: data_dir.clone(),
+            cache_dir: etcetera::app_strategy::Apple::new(args.clone())
+                .ok()?
+                .cache_dir(),
+            data_dir,
             runtime_dir: Some(runtime_dir),
         };
         // Where `etcetera::choose_app_strategy` put them on macOS up to 0.21.0.
@@ -136,21 +156,28 @@ impl AppPaths {
 
     /// Construct an `AppPaths` rooted at an arbitrary directory. Used by
     /// tests so that no test ever touches the user's real config tree.
-    /// `config_dir`, `data_dir` and `runtime_dir` all resolve to `root`.
+    /// Every directory (config, data, state, cache and runtime) resolves to
+    /// `root`.
     pub fn for_testing(root: &Path) -> Self {
         Self {
             config_dir: root.to_path_buf(),
             data_dir: root.to_path_buf(),
+            state_dir: root.to_path_buf(),
+            cache_dir: root.to_path_buf(),
             runtime_dir: Some(root.to_path_buf()),
         }
     }
 
     /// Construct from explicit config and data directories. Useful when
     /// an application wants to override one or both (e.g. portable mode).
-    /// It has no [`runtime_dir`](Self::runtime_dir).
+    /// It has no [`runtime_dir`](Self::runtime_dir); its
+    /// [`state_dir`](Self::state_dir) is `data_dir` and its
+    /// [`cache_dir`](Self::cache_dir) is `data_dir/cache`.
     pub fn from_dirs(config_dir: PathBuf, data_dir: PathBuf) -> Self {
         Self {
             config_dir,
+            state_dir: data_dir.clone(),
+            cache_dir: data_dir.join("cache"),
             data_dir,
             runtime_dir: None,
         }
@@ -166,6 +193,38 @@ impl AppPaths {
     /// per-window state — anything larger than a configuration file.
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
+    }
+
+    /// The platform-correct state directory, for what an application keeps
+    /// between runs but would not back up or carry to another machine: log
+    /// files, history. The module documentation says where it is on each
+    /// platform; where the platform has no state directory (Windows, macOS)
+    /// it is [`data_dir`](Self::data_dir). It is not created here:
+    /// [`create_state_dir`](Self::create_state_dir) does that.
+    pub fn state_dir(&self) -> &Path {
+        &self.state_dir
+    }
+
+    /// The platform-correct cache directory, for what can be rebuilt and may
+    /// be deleted at any time. The module documentation says where it is on
+    /// each platform. It is not created here:
+    /// [`create_cache_dir`](Self::create_cache_dir) does that.
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
+    }
+
+    /// Create [`state_dir`](Self::state_dir) and its parents if they do not
+    /// exist, and return it.
+    pub fn create_state_dir(&self) -> io::Result<&Path> {
+        fs::create_dir_all(&self.state_dir)?;
+        Ok(&self.state_dir)
+    }
+
+    /// Create [`cache_dir`](Self::cache_dir) and its parents if they do not
+    /// exist, and return it.
+    pub fn create_cache_dir(&self) -> io::Result<&Path> {
+        fs::create_dir_all(&self.cache_dir)?;
+        Ok(&self.cache_dir)
     }
 
     /// Resolve a per-concern config file by name (without extension).
@@ -424,6 +483,38 @@ mod tests {
         );
         assert_eq!(paths.data_file("cache"), dir.path().join("cache.toml"));
         assert_eq!(paths.runtime_dir(), Some(dir.path()));
+        assert_eq!(paths.state_dir(), dir.path());
+        assert_eq!(paths.cache_dir(), dir.path());
+    }
+
+    #[test]
+    fn from_dirs_derives_state_and_cache_from_the_data_dir() {
+        let data = tempdir().unwrap();
+        let paths = AppPaths::from_dirs(PathBuf::from("cfg"), data.path().to_path_buf());
+
+        assert_eq!(paths.state_dir(), data.path());
+        assert_eq!(paths.cache_dir(), data.path().join("cache"));
+    }
+
+    #[test]
+    fn the_state_and_cache_directories_are_created_with_their_parents() {
+        let data = tempdir().unwrap();
+        let paths = AppPaths::from_dirs(PathBuf::from("cfg"), data.path().join("a/b"));
+
+        let cache = paths.create_cache_dir().unwrap();
+        assert!(cache.is_dir());
+        assert_eq!(paths.create_state_dir().unwrap(), data.path().join("a/b"));
+        assert!(paths.state_dir().is_dir());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn on_linux_state_and_cache_are_the_applications_own_under_xdg() {
+        let paths = AppPaths::new("eu", "FernTech", "Test App").unwrap();
+        assert!(paths.state_dir().ends_with("test-app"));
+        assert!(paths.cache_dir().ends_with("test-app"));
+        assert_ne!(paths.state_dir(), paths.data_dir());
+        assert_ne!(paths.cache_dir(), paths.data_dir());
     }
 
     #[test]
@@ -465,6 +556,8 @@ mod tests {
             AppPaths {
                 config_dir: dir.to_path_buf(),
                 data_dir: dir.to_path_buf(),
+                state_dir: dir.to_path_buf(),
+                cache_dir: dir.to_path_buf(),
                 runtime_dir: Some(dir.to_path_buf()),
             }
         }
