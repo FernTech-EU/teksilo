@@ -26,10 +26,13 @@
 //! cannot move here, since this crate already depends on `teksilo-automation`
 //! (for the bridge's endpoint types) and the dependency cannot go both ways.
 //!
-//! Arguments and the working directory travel as the bytes the operating
-//! system gave them, so a file name that is not UTF-8 reaches the primary
-//! unchanged.
+//! Arguments and the working directory travel as the operating system gave
+//! them: on Unix as their bytes, so a file name that is not UTF-8 reaches the
+//! primary unchanged; on Windows as their UTF-16 code units, each in two
+//! little-endian bytes, so one with an unpaired surrogate does too. Both ends
+//! run on one machine, so the two encodings never meet.
 
+use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -44,7 +47,8 @@ pub(super) const MAX_ARGS: usize = 65536;
 
 /// The most bytes one request may hold, everything included: Linux's
 /// `ARG_MAX` with the default 8 MiB stack, so an ordinary large command line
-/// (a few thousand files from a file manager) fits.
+/// (a few thousand files from a file manager) fits. A Windows command line
+/// is at most 32767 UTF-16 code units, 64 KiB, far below it.
 pub(super) const MAX_REQUEST: usize = 2 * 1024 * 1024;
 
 /// The longest activation token, in bytes. Wayland and X11 tokens are a few
@@ -143,9 +147,9 @@ pub(super) fn encode_request(
     let mut out = vec![VERSION];
     out.extend_from_slice(&(args.len() as u32).to_le_bytes());
     for arg in args {
-        push_bytes(&mut out, os_bytes(arg)?);
+        push_bytes(&mut out, &os_bytes(arg)?);
     }
-    push_bytes(&mut out, os_bytes(cwd.as_os_str())?);
+    push_bytes(&mut out, &os_bytes(cwd.as_os_str())?);
     match activation_token {
         Some(token) => {
             out.push(1);
@@ -263,19 +267,27 @@ impl<'a> Cursor<'a> {
 }
 
 #[cfg(unix)]
-fn os_bytes(s: &OsStr) -> io::Result<&[u8]> {
+fn os_bytes(s: &OsStr) -> io::Result<Cow<'_, [u8]>> {
     use std::os::unix::ffi::OsStrExt;
-    Ok(s.as_bytes())
+    Ok(Cow::Borrowed(s.as_bytes()))
 }
 
-#[cfg(not(unix))]
-fn os_bytes(s: &OsStr) -> io::Result<&[u8]> {
-    s.to_str().map(str::as_bytes).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "an argument that is not Unicode",
-        )
-    })
+#[cfg(windows)]
+fn os_bytes(s: &OsStr) -> io::Result<Cow<'_, [u8]>> {
+    use std::os::windows::ffi::OsStrExt;
+    Ok(Cow::Owned(utf16le_bytes(s.encode_wide())))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn os_bytes(s: &OsStr) -> io::Result<Cow<'_, [u8]>> {
+    s.to_str()
+        .map(|s| Cow::Borrowed(s.as_bytes()))
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "an argument that is not Unicode",
+            )
+        })
 }
 
 #[cfg(unix)]
@@ -284,11 +296,38 @@ fn os_string(bytes: &[u8]) -> Result<OsString, DecodeError> {
     Ok(OsString::from_vec(bytes.to_vec()))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn os_string(bytes: &[u8]) -> Result<OsString, DecodeError> {
+    use std::os::windows::ffi::OsStringExt;
+    utf16le_units(bytes)
+        .map(|units| OsString::from_wide(&units))
+        .ok_or(DecodeError::Malformed(
+            "an argument of an odd number of bytes",
+        ))
+}
+
+#[cfg(not(any(unix, windows)))]
 fn os_string(bytes: &[u8]) -> Result<OsString, DecodeError> {
     String::from_utf8(bytes.to_vec())
         .map(OsString::from)
         .map_err(|_| DecodeError::Malformed("an argument that is not UTF-8"))
+}
+
+/// UTF-16 code units as the bytes Windows strings travel as. Any `u16`
+/// goes, a lone surrogate included: no validation, so nothing is lost.
+#[cfg(any(windows, test))]
+fn utf16le_bytes(units: impl IntoIterator<Item = u16>) -> Vec<u8> {
+    units.into_iter().flat_map(u16::to_le_bytes).collect()
+}
+
+/// The inverse of [`utf16le_bytes`]: `None` for an odd number of bytes.
+#[cfg(any(windows, test))]
+fn utf16le_units(bytes: &[u8]) -> Option<Vec<u16>> {
+    let (pairs, rest) = bytes.as_chunks::<2>();
+    if !rest.is_empty() {
+        return None;
+    }
+    Some(pairs.iter().map(|&pair| u16::from_le_bytes(pair)).collect())
 }
 
 #[cfg(test)]
@@ -331,6 +370,52 @@ mod tests {
         let raw = OsString::from_vec(vec![b'f', 0xff, 0xfe, b'.', b't']);
         let bytes = encode_request(std::slice::from_ref(&raw), Path::new("/"), None).unwrap();
         assert_eq!(decode_request(&bytes).unwrap().args, vec![raw]);
+    }
+
+    /// The Windows encoding, checked on every platform: a lone surrogate
+    /// and a pair both survive, low byte first, and an odd length is refused.
+    #[test]
+    fn utf16_code_units_round_trip_as_little_endian_bytes() {
+        let units = [0x0066, 0xd800, 0x002e, 0xd83d, 0xde00, 0xdc00, 0xffff, 0];
+        let bytes = utf16le_bytes(units);
+        assert_eq!(&bytes[..4], &[0x66, 0x00, 0x00, 0xd8]);
+        assert_eq!(bytes.len(), 2 * units.len());
+        assert_eq!(utf16le_units(&bytes).unwrap(), units);
+        assert_eq!(utf16le_units(&[]).unwrap(), Vec::<u16>::new());
+        assert_eq!(utf16le_units(&bytes[..3]), None);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn arguments_that_are_not_unicode_arrive_unchanged() {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        // An unpaired high surrogate, an unpaired low one, and a pair.
+        let raw = OsString::from_wide(&[0x66, 0xd800, 0x2e, 0xdc00, 0xd83d, 0xde00]);
+        assert!(raw.to_str().is_none());
+        let cwd = OsString::from_wide(&[0x43, 0x3a, 0x5c, 0xdfff]);
+        let bytes =
+            encode_request(std::slice::from_ref(&raw), Path::new(&cwd), Some("tok")).unwrap();
+        let message = decode_request(&bytes).unwrap();
+        assert_eq!(message.args, vec![raw.clone()]);
+        assert_eq!(
+            message.args[0].encode_wide().collect::<Vec<_>>(),
+            raw.encode_wide().collect::<Vec<_>>()
+        );
+        assert_eq!(message.cwd.as_os_str(), cwd.as_os_str());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_argument_of_an_odd_number_of_bytes_is_malformed() {
+        let mut bytes = vec![VERSION];
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        push_bytes(&mut bytes, &[0x41, 0x00, 0x42]);
+        push_bytes(&mut bytes, &[]);
+        bytes.push(0);
+        assert!(matches!(
+            decode_request(&bytes),
+            Err(DecodeError::Malformed(_))
+        ));
     }
 
     #[test]

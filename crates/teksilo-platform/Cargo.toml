@@ -90,7 +90,8 @@ automation = ["dep:teksilo-automation"]
 # One running instance per user (`single_instance`): the election on a
 # private local socket, and the message a second launch hands the first.
 # GUI-free (no window, no event loop): the election uses `std` and, on
-# Unix, the `libc` this crate already links. Off by default; `teksilo-app` and `teksilo` forward it under the
+# Unix, the `libc` this crate already links, on Windows a named pipe through
+# the `windows` bindings it already links. Off by default; `teksilo-app` and `teksilo` forward it under the
 # same name.
 single-instance = []
 
@@ -222,7 +223,8 @@ windows = { workspace = true, features = [
     "Win32_System_Memory",                # GlobalLock / GlobalUnlock
     "Win32_System_SystemServices",        # CF_HDROP / CF_UNICODETEXT clipboard format constants
     "Win32_System_DataExchange",          # RegisterClipboardFormatW (CFSTR_INETURL)
-    # Automation-bridge named-pipe transport (`automation_transport/windows.rs`).
+    # Automation-bridge named-pipe transport (`automation_transport/windows.rs`)
+    # and the single-instance election (`single_instance/windows.rs`).
     # These cost nothing when the `automation` feature is off: cargo
     # features are additive per-crate, and unused bindings are dead code.
     "Win32_System_Pipes",                 # CreateNamedPipeW / ConnectNamedPipe / WaitNamedPipeW / PIPE_*

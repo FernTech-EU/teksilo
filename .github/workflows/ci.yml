@@ -164,8 +164,9 @@ jobs:
           cargo test -p teksilo-theme-kde --features bundled-fonts,system-fonts
 
       # The single-instance service is behind a feature nothing in the
-      # workspace turns on; its Unix socket code runs only here and on macOS
-      # (test-cross), and is linted in the clippy job.
+      # workspace turns on; its Unix socket code runs only here and on macOS,
+      # its named pipes on Windows (test-cross), and it is linted in the
+      # clippy job.
       - name: Test single-instance
         run: |
           cargo test -p teksilo-platform --features single-instance --lib single_instance
@@ -356,13 +357,11 @@ jobs:
         run: cargo test -p cargo-teksilo
 
       # The single-instance feature, off in every workspace build: the
-      # `getpeereid` path on macOS, and on Windows (where `acquire` answers
-      # `Unsupported`) a build that must stay free of warnings.
+      # `getpeereid` path on macOS, and the named-pipe backend on Windows.
       - name: Lint single-instance
         run: cargo clippy -p teksilo-platform -p teksilo-app --all-targets --features teksilo-platform/single-instance,teksilo-app/single-instance -- -D warnings -A deprecated
 
       - name: Test single-instance
-        if: matrix.os == 'macos-latest'
         run: |
           cargo test -p teksilo-platform --features single-instance --lib single_instance
           cargo test -p teksilo-app --features single-instance --lib single_instance

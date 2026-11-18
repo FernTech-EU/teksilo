@@ -765,9 +765,9 @@ Notes:
 The recipe above leaves the socket to the application. With the
 `single-instance` feature (off by default: `teksilo = { features =
 ["single-instance"] }`) Teksilo provides it. `single_instance::acquire`
-holds an election in the application's runtime directory: the first
-process to hold it is the primary, every later launch a secondary,
-connected to it. Call it in `main` before building anything, so a
+holds an election in the application's runtime directory (on Windows, on a
+named pipe named after its data directory): the first process to hold it is
+the primary, every later launch a secondary, connected to it. Call it in `main` before building anything, so a
 secondary hands its command line over and exits without opening a window
 or touching the settings:
 
@@ -787,8 +787,8 @@ fn main() {
             return;
         }
         Ok(Election::Primary(primary)) => Some(primary),
-        // No runtime directory (Windows, a Unix without
-        // $XDG_RUNTIME_DIR): run without one.
+        // No runtime directory (a Unix without $XDG_RUNTIME_DIR):
+        // run without one.
         Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
             eprintln!("myapp: running as a separate instance: {e}");
             None
@@ -858,8 +858,9 @@ Notes:
   does not answer, `PermissionDenied` for a directory that is not the
   user's) is reported and the launch exits, as above.
 - **Same user only.** The runtime directory is the user's own and closed to
-  others, the socket is `0600`, and each side checks the user id of the
-  other end. That keeps other users out, not the user's own processes: any
+  others, the socket is `0600` (on Windows the pipe's access list grants the
+  user alone), and each side checks the user of the process at the other
+  end. That keeps other users out, not the user's own processes: any
   of them can connect and send any arguments. Treat an `InstanceMessage`
   like a command line typed by a stranger, and validate what it names
   before opening or writing it. Nothing in Teksilo runs or opens anything a
@@ -871,7 +872,8 @@ Notes:
 - `key` names the instance. One per user is the application's name; one per
   data directory is a key made from that directory (a hash of its path).
   Any key of up to 64 characters fits: the files in the runtime directory are
-  named from a hash of the key, not the key itself.
+  named from a hash of the key, not the key itself (on Windows the pipe from
+  a hash of the data directory's path and the key).
 - To let the user start a separate instance (a `--new-instance` option),
   read the option yourself and do not call `acquire`; nothing in Teksilo
   parses the command line.
@@ -879,8 +881,14 @@ Notes:
   settings flush, so the next launch reads the settings it wrote. A process
   that ends without unwinding (a crash, a kill, `std::process::exit`) leaves
   its socket behind; the next launch wins the election, finds the socket
-  stale and removes it.
-- Unix only for now: on Windows `acquire` returns
+  stale and removes it. On Windows nothing is left behind: the pipe goes with
+  the process.
+- On Windows the running instance takes one launch at a time, from the
+  moment it is elected: a launch that finds it serving another waits its
+  turn, up to 5 seconds, and `acquire` then fails with `TimedOut`. Dropping
+  the instance waits for the launch it is serving, if any, so the name is
+  free when the drop returns.
+- Unix and Windows: elsewhere `acquire` returns
   `io::ErrorKind::Unsupported`, as it does for `AppPaths` with no runtime
   directory. `teksilo_platform::single_instance::acquire` takes the
   directory itself, for an application that keeps its own.

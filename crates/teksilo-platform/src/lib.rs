@@ -24,6 +24,8 @@ pub mod open_uri;
 pub mod os_quit;
 pub mod os_theme;
 pub mod pen;
+#[cfg(all(windows, any(feature = "automation", feature = "single-instance")))]
+mod pipe_security;
 pub mod pointer_backend;
 pub mod safe_area;
 pub mod session;

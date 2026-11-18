@@ -40,15 +40,8 @@ use std::time::Duration;
 use teksilo_automation::wire::Endpoint;
 use windows::Win32::Foundation::{
     CloseHandle, ERROR_BROKEN_PIPE, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_PIPE_BUSY,
-    ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL,
-    LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
-};
-use windows::Win32::Security::Authorization::{
-    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
-};
-use windows::Win32::Security::{
-    GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
-    TokenUser,
+    ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, HANDLE,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_OVERLAPPED, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
@@ -59,12 +52,11 @@ use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS,
     PIPE_TYPE_BYTE, PIPE_WAIT, WaitNamedPipeW,
 };
-use windows::Win32::System::Threading::{
-    CreateEventW, GetCurrentProcess, INFINITE, OpenProcessToken, ResetEvent, WaitForSingleObject,
-};
-use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::System::Threading::{CreateEventW, INFINITE, ResetEvent, WaitForSingleObject};
+use windows::core::PCWSTR;
 
 use super::{BoundTransport, TransportListener, TransportStream};
+use crate::pipe_security::OwnerOnlySecurity;
 
 /// Pipe buffer hint. Frames are read in chunks anyway; this only sizes the
 /// kernel's staging buffers.
@@ -81,115 +73,6 @@ fn wide(s: &str) -> Vec<u16> {
 
 fn last_io_error(context: &str) -> io::Error {
     io::Error::other(format!("{context}: {}", io::Error::last_os_error()))
-}
-
-// ---------------------------------------------------------------------------
-// Security descriptor
-// ---------------------------------------------------------------------------
-
-/// An owner-only security descriptor, freed on drop.
-struct OwnerOnlySecurity {
-    descriptor: PSECURITY_DESCRIPTOR,
-}
-
-impl OwnerOnlySecurity {
-    /// Build `D:P(A;;GA;;;<current user SID>)`.
-    ///
-    /// `GA` (generic all) rather than a narrower mask because the only
-    /// principal on the ACL is the creating user, and creating a *second*
-    /// instance of the pipe needs `FILE_CREATE_PIPE_INSTANCE` — a narrower
-    /// grant would lock the server out of its own next `accept`.
-    fn current_user() -> io::Result<Self> {
-        let sid = current_user_sid_string()?;
-        let sddl = wide(&format!("D:P(A;;GA;;;{sid})"));
-        let mut descriptor = PSECURITY_DESCRIPTOR::default();
-        // SAFETY: `sddl` is a NUL-terminated UTF-16 buffer that outlives the
-        // call; the descriptor is an out-parameter we own and free on drop.
-        unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(
-                PCWSTR(sddl.as_ptr()),
-                SDDL_REVISION_1,
-                &mut descriptor,
-                None,
-            )
-        }
-        .map_err(|e| io::Error::other(format!("building the pipe security descriptor: {e}")))?;
-        Ok(Self { descriptor })
-    }
-
-    fn attributes(&self) -> SECURITY_ATTRIBUTES {
-        SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: self.descriptor.0,
-            bInheritHandle: false.into(),
-        }
-    }
-}
-
-impl Drop for OwnerOnlySecurity {
-    fn drop(&mut self) {
-        if !self.descriptor.is_invalid() {
-            // SAFETY: allocated by ConvertStringSecurityDescriptorToSecurityDescriptorW.
-            unsafe {
-                let _ = LocalFree(Some(HLOCAL(self.descriptor.0)));
-            }
-        }
-    }
-}
-
-/// The current process token's user SID, in `S-1-5-…` string form.
-fn current_user_sid_string() -> io::Result<String> {
-    // SAFETY: every pointer below is either a stack out-parameter or a slice we
-    // own; `token` is closed before returning on every path.
-    unsafe {
-        let mut token = HANDLE::default();
-        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
-            .map_err(|e| io::Error::other(format!("opening the process token: {e}")))?;
-        let _guard = HandleGuard(token);
-
-        // Size probe: this call is expected to fail with ERROR_INSUFFICIENT_BUFFER.
-        let mut needed = 0u32;
-        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
-        if needed == 0 {
-            return Err(last_io_error("sizing the token user information"));
-        }
-        let mut buf = vec![0u8; needed as usize];
-        GetTokenInformation(
-            token,
-            TokenUser,
-            Some(buf.as_mut_ptr().cast()),
-            needed,
-            &mut needed,
-        )
-        .map_err(|e| io::Error::other(format!("reading the token user information: {e}")))?;
-
-        let token_user = &*(buf.as_ptr() as *const TOKEN_USER);
-        let mut sid_str = PWSTR::null();
-        ConvertSidToStringSidW(token_user.User.Sid, &mut sid_str)
-            .map_err(|e| io::Error::other(format!("formatting the user SID: {e}")))?;
-        let owned = sid_str.to_string().unwrap_or_default();
-        let _ = LocalFree(Some(HLOCAL(sid_str.0.cast())));
-        if owned.is_empty() {
-            return Err(io::Error::other(
-                "the user SID formatted to an empty string",
-            ));
-        }
-        Ok(owned)
-    }
-}
-
-/// Closes a HANDLE on drop.
-struct HandleGuard(HANDLE);
-
-impl Drop for HandleGuard {
-    fn drop(&mut self) {
-        if !self.0.is_invalid() {
-            // SAFETY: we own this handle.
-            unsafe {
-                let _ = CloseHandle(self.0);
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -669,30 +552,6 @@ mod tests {
         assert!(n.starts_with(r"\\.\pipe\"), "{n}");
         assert!(n.ends_with("-4242"), "{n}");
         assert!(n.len() < 256, "pipe names are capped at 256 characters");
-    }
-
-    #[test]
-    fn the_current_user_sid_is_resolvable() {
-        // The DACL is built from this; if it cannot be read, `bind` must fail
-        // rather than fall back to the permissive default descriptor.
-        let sid = current_user_sid_string().expect("current user SID");
-        assert!(sid.starts_with("S-1-"), "{sid}");
-    }
-
-    #[test]
-    fn the_descriptor_is_owner_only_and_protected() {
-        let sec = OwnerOnlySecurity::current_user().expect("descriptor");
-        assert!(!sec.descriptor.is_invalid());
-        let attrs = sec.attributes();
-        assert_eq!(
-            attrs.nLength as usize,
-            std::mem::size_of::<SECURITY_ATTRIBUTES>()
-        );
-        assert!(!attrs.lpSecurityDescriptor.is_null());
-        assert!(
-            !attrs.bInheritHandle.as_bool(),
-            "handles must not be inheritable"
-        );
     }
 
     /// The eager pre-creation in `accept` only works if the pipe allows a

@@ -34,27 +34,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use super::protocol::{self, DecodeError, InstanceMessage, Reply};
-
-/// The longest key, in bytes.
-const MAX_KEY: usize = 64;
+use super::{ELECTION_PATIENCE, FORWARD_DEADLINE, PEER_DEADLINE, RETRY, check_key, fnv1a_64};
 
 /// Conservative ceiling for a socket path, below the 104-byte `sun_path` of
 /// macOS with room for the closing NUL (the automation bridge's limit).
 const MAX_SOCKET_PATH: usize = 100;
-
-/// How long a starter waits for an instance that holds the lock to answer
-/// on its socket.
-const ELECTION_PATIENCE: Duration = Duration::from_secs(5);
-
-/// How long a secondary waits for the primary to take its message.
-const FORWARD_DEADLINE: Duration = Duration::from_secs(10);
-
-/// How long the primary gives one connection, in all.
-const PEER_DEADLINE: Duration = Duration::from_secs(5);
-
-/// The pause between two attempts, and after an `accept` that failed for a
-/// reason that may last (out of file descriptors).
-const RETRY: Duration = Duration::from_millis(20);
 
 /// How often the serving thread refreshes the times of its files.
 const TOUCH_INTERVAL: Duration = Duration::from_secs(3600);
@@ -125,19 +109,6 @@ fn acquire_within(dir: &Path, key: &str, patience: Duration) -> io::Result<Outco
     }
 }
 
-fn check_key(key: &str) -> io::Result<()> {
-    let allowed = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-');
-    if key.is_empty() || key.len() > MAX_KEY || !key.bytes().all(allowed) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "single-instance key {key:?} is not 1 to {MAX_KEY} characters of A-Z, a-z, 0-9, '.', '_' and '-'"
-            ),
-        ));
-    }
-    Ok(())
-}
-
 /// The socket and the lock file of `key` in `dir`: `<16 hex digits>.sock`
 /// and `.lock`, named from [`fnv1a_64`] of the key rather than from the key.
 ///
@@ -151,17 +122,6 @@ fn endpoint_paths(dir: &Path, key: &str) -> (PathBuf, PathBuf) {
         dir.join(format!("{stem}.sock")),
         dir.join(format!("{stem}.lock")),
     )
-}
-
-/// 64-bit FNV-1a. Written here because the name must not change between two
-/// builds of an application, and `std`'s hashers are not promised to be
-/// stable across Rust releases or processes.
-fn fnv1a_64(bytes: &[u8]) -> u64 {
-    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    bytes.iter().fold(OFFSET_BASIS, |hash, &byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
-    })
 }
 
 /// Connect to `socket`, waiting at most `timeout` for room in its backlog.
@@ -701,6 +661,7 @@ impl Secondary {
 
 #[cfg(test)]
 mod tests {
+    use super::super::MAX_KEY;
     use super::*;
     use std::ffi::OsString;
     use std::sync::mpsc;
