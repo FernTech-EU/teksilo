@@ -137,6 +137,17 @@ pub(crate) fn handle_key(
     // The platform accelerator — ⌘ on macOS, Ctrl elsewhere. See the
     // rich-text sibling for why this is not `ctrl() || super_key()`.
     let ctrl = modifiers.command();
+
+    // A key that types text joins the batch the frame inserts, so a burst of
+    // typing stays one insertion and one layout. Any other key acts on the
+    // text as typed: the batch goes in first, as in the rich text editor.
+    let types_text = !ctrl
+        && text
+            .as_deref()
+            .is_some_and(|t| t.chars().any(|c| !c.is_control()));
+    if !types_text {
+        state.borrow_mut().apply_pending_chars();
+    }
     let mode = if shift {
         MoveMode::KeepAnchor
     } else {
@@ -248,6 +259,7 @@ pub(crate) fn handle_key(
                 if let Some(ref on_submit) = st.on_submit {
                     let submit = on_submit.clone();
                     drop(st);
+                    super::settle_before_callback(state);
                     submit(ctx);
                     return EventResponse::Handled;
                 }
@@ -276,14 +288,16 @@ pub(crate) fn handle_key(
                             .filter(|c| st.char_filter_admits(*c))
                             .collect();
                         if !clean.is_empty() {
-                            // Max-length enforcement: compute remaining capacity.
+                            // Max-length enforcement: compute remaining capacity,
+                            // counting what this frame's batch already holds.
                             if let Some(max) = st.max_length {
                                 let current_len = st
                                     .document
                                     .to_plain_text()
                                     .unwrap_or_default()
                                     .chars()
-                                    .count();
+                                    .count()
+                                    + st.pending_chars.chars().count();
                                 let sel_len = if st.cursor.has_selection() {
                                     st.cursor
                                         .selected_text()
@@ -450,6 +464,8 @@ pub(crate) fn run_standard_edit(
     }
     {
         let mut st = state.borrow_mut();
+        // After what was typed before the command in this frame.
+        st.apply_pending_chars();
         if declines(&st, command, empty_history_passes_on) {
             return false;
         }
@@ -850,14 +866,16 @@ fn push_pending_chars(
     }
     {
         let mut st = state.borrow_mut();
-        // Max-length enforcement.
+        // Max-length enforcement, counting what this frame's batch already
+        // holds.
         if let Some(max) = st.max_length {
             let current_len = st
                 .document
                 .to_plain_text()
                 .unwrap_or_default()
                 .chars()
-                .count();
+                .count()
+                + st.pending_chars.chars().count();
             let sel_len = if st.cursor.has_selection() {
                 st.cursor
                     .selected_text()

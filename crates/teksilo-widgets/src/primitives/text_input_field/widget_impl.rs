@@ -902,6 +902,7 @@ impl Widget for TextInputField {
                     // what makes the answer the host's own.
                     touch_for_focus.dismiss();
                     sync_cursor_signals(&state_for_focus);
+                    settle_before_callback(&state_for_focus);
                 }
                 if let Some(cb) = commit_callback {
                     cb(ctx);
@@ -923,7 +924,7 @@ impl Widget for TextInputField {
                 let state = self.state().clone();
                 move |ctx| {
                     keyboard::finish_composition(&state, ctx);
-                    crate::common::notices::deliver(&state);
+                    settle_before_callback(&state);
                     let commit = state.borrow().on_commit.clone();
                     if let Some(commit) = commit {
                         commit(ctx);

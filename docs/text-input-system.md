@@ -233,7 +233,12 @@ the text of a range, the selection and caret, the composition range, where the
 first line of a range is drawn, and the character nearest a point. A query
 answers `None` when the widget cannot answer (no layout yet, busy, a secure
 field). A widget that batches typed characters until its next frame must
-answer as if they were already in the document. `Utf16Index` converts between
+answer as if they were already in the document, and insert them before
+anything else acts on the text: a key that types nothing, a standard edit
+command, an assistive technology's action, a press, and its own callbacks that
+read the text. `TextInputField` also writes its bound `Signal<String>` before
+`on_submit`, its validator, `on_commit` and `on_blur` run, so they read every
+character typed before them, in the same frame too. `Utf16Index` converts between
 characters and the UTF-16 offsets the platform uses. A widget that does not
 implement the trait still receives `ImeCommit`s; Dictation and Writing Tools
 need the answers to start.

@@ -448,7 +448,8 @@ impl TextInputField {
 
     /// Hard cap on document length in `char`s (grapheme count is
     /// approximated — each `char` counts as one unit, matching
-    /// `String::chars().count()`).
+    /// `String::chars().count()`). Characters typed in the current frame
+    /// and not inserted yet count too.
     pub fn max_length(mut self, max_length: usize) -> Self {
         self.max_length = Some(max_length);
         self
@@ -457,6 +458,9 @@ impl TextInputField {
     /// Closure fired on `Enter`. Unlike `on_blur_fn`, this does
     /// not move focus — the field stays focused and the caret
     /// stays where it was.
+    ///
+    /// The bound `Signal<String>` holds every character typed before the
+    /// `Enter` when it runs, those typed in the same frame included.
     pub fn on_submit_fn(mut self, f: impl Fn(&mut EventContext) + 'static) -> Self {
         self.on_submit = Some(Box::new(f));
         self
@@ -1293,6 +1297,28 @@ fn catch_up_layout(state: &mut TextInputState) -> bool {
     had_events
 }
 
+/// Before a callback that reads the field's text runs (`on_submit`, the
+/// validator, `on_commit`, `on_blur`): insert the typing batched for this
+/// frame, write the text to the bound signal, and report the arrivals, all of
+/// which the frame tick would otherwise do only after the callback. Call it
+/// with the state not borrowed.
+///
+/// The bound signal is written here rather than left to the tick because the
+/// callbacks read it: a key handled in the same frame as an edit (typing, a
+/// Backspace) would hand them the text from before that edit.
+fn settle_before_callback(state: &SharedState) {
+    let publish = {
+        let mut st = state.borrow_mut();
+        st.apply_pending_chars();
+        let text = st.document.to_plain_text().unwrap_or_default();
+        (st.text_signal.get() != text).then(|| (st.text_signal.clone(), text))
+    };
+    if let Some((signal, text)) = publish {
+        signal.set(text);
+    }
+    crate::common::notices::deliver(state);
+}
+
 /// Simplified frame-loop tick for single-line text input.
 fn tick(state: &mut TextInputState, delta: f32) -> bool {
     // A composition the input method ended with its empty update and did not
@@ -1350,6 +1376,12 @@ fn handle_access_action(
     ctx: &mut EventContext,
 ) -> EventResponse {
     use teksilo_core::accesskit::{Action, ActionData};
+
+    // What was typed in this frame goes in before the action reads or writes
+    // the text. A selection carries its own offsets across it instead.
+    if action != Action::SetTextSelection {
+        state.borrow_mut().apply_pending_chars();
+    }
 
     match (action, data) {
         (Action::SetTextSelection, Some(ActionData::SetTextSelection(sel))) => {
@@ -1832,6 +1864,12 @@ mod input_editor_tests;
 #[cfg(test)]
 mod composition_tests;
 
+/// **A key, a command or a commit in the same frame as typing acts after
+/// it**: the typing waiting for the frame goes in first, and the callbacks
+/// read the bound signal with it.
+#[cfg(test)]
+mod same_frame_tests;
+
 /// A live handle on a [`TextInputField`] — its text-editing commands, for a
 /// caller outside the widget.
 ///
@@ -1887,15 +1925,22 @@ impl TextFieldHandle {
         self.slot.borrow().is_some()
     }
 
+    /// Run `f` on the field as typed: the typing batched for this frame goes
+    /// in first, so a read sees it and a command acts after it.
     fn with<R>(&self, f: impl FnOnce(&mut TextInputState) -> R) -> Option<R> {
         let state = self.slot.borrow().as_ref()?.clone();
-        let result = f(&mut state.borrow_mut());
+        let result = {
+            let mut st = state.borrow_mut();
+            st.apply_pending_chars();
+            f(&mut st)
+        };
         // A paste or a select-all through the handle may have reported text.
         crate::common::notices::deliver(&state);
         Some(result)
     }
 
-    /// The field's current text.
+    /// The field's current text, the characters typed in this frame
+    /// included.
     pub fn text(&self) -> String {
         self.with(|st| st.document.to_plain_text().unwrap_or_default())
             .unwrap_or_default()
@@ -1906,9 +1951,10 @@ impl TextFieldHandle {
     ///
     /// For a composite that acts on what was typed from inside a key
     /// handler: two keys delivered in one batch reach it before any frame
-    /// runs, and reading [`text`](Self::text), or the bound signal, which
-    /// lags further still, would act on the text as it stood before the
-    /// first of them.
+    /// runs, and reading the bound signal, which follows at the frame, would
+    /// act on the text as it stood before the first of them. Unlike
+    /// [`text`](Self::text), it answers rather than panics while the field
+    /// is borrowed.
     ///
     /// `None` when the field is not built, or when its state is borrowed by
     /// a caller further up the stack. Such a caller is the field itself,
@@ -1940,12 +1986,7 @@ impl TextFieldHandle {
 
     /// Select the whole field.
     pub fn select_all(&self) {
-        self.with(|st| {
-            // What was typed in this frame goes in first: left for the frame,
-            // it went in over the selection.
-            st.apply_pending_chars();
-            st.cursor.select(SelectionType::Document);
-        });
+        self.with(|st| st.cursor.select(SelectionType::Document));
     }
 
     /// Copy the selection to the clipboard.

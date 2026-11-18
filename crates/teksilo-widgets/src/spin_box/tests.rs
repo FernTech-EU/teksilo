@@ -1770,6 +1770,17 @@ fn a_step_in_the_same_batch_as_the_digits_still_counts_them() {
 }
 
 #[test]
+fn an_enter_in_the_same_batch_as_the_digits_commits_them() {
+    // No frame runs between the typing and Enter.
+    let (mut tree, value, spin) = minutes_box();
+    type_over(&mut tree, spin, "35");
+    tree.press_key(Key::Enter, Modifiers::NONE);
+    assert_eq!(value.get(), 35, "committed as Enter is handled");
+    tick(&mut tree);
+    assert_eq!(field_text(&mut tree, spin), "35");
+}
+
+#[test]
 fn a_step_over_unreadable_text_restores_the_value_and_steps_nothing() {
     // Qt's `QAbstractSpinBox::stepBy`: the press that finds text it cannot
     // read puts the value back in the field and steps nothing, so the user
