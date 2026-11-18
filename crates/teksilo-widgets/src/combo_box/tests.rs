@@ -2032,3 +2032,40 @@ fn a_list_opened_again_is_alive_to_a_screen_reader() {
         let _ = listener.heard(&mut tree);
     }
 }
+
+/// A mouse click on a row of a searchable list commits it. The search field
+/// holds focus while the list is open, and the press must not move focus out
+/// of the list (to the combo box, the list's parent in the tree), which would
+/// close it under the pointer before the release. A frame is drawn between
+/// the press and the release, as for a real click.
+#[test]
+fn a_click_on_a_row_of_a_searchable_list_selects_it() {
+    use teksilo_core::event::PointerButton;
+    let mut tree = light_tree();
+    let selected = Signal::new(None::<String>);
+    let size = SizeProposal::exact(300.0, 400.0);
+    let cb = tree.add(ComboBox::new(fruits(), selected.clone()).searchable(true));
+    tree.layout(size);
+    tree.click(cb);
+    tree.layout(size);
+    let banana = tree
+        .find_by_label("Banana")
+        .expect("Banana row should be present in the dropdown");
+    let at = tree.bounds(banana).center();
+    tree.pointer_move(at);
+    tree.layout(size);
+    tree.pointer_down_button(at, PointerButton::Primary);
+    tree.layout(size);
+    assert_eq!(
+        tree.active_overlays().len(),
+        1,
+        "the press keeps the list open"
+    );
+    tree.pointer_up_button(at, PointerButton::Primary);
+    tree.layout(size);
+    assert_eq!(selected.get().as_deref(), Some("Banana"));
+    assert!(
+        tree.active_overlays().is_empty(),
+        "the click closes the list"
+    );
+}

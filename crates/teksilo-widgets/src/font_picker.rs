@@ -1051,4 +1051,105 @@ mod tests {
         tree.layout(SizeProposal::exact(300.0, 50.0));
         assert!(tree.bounds(id).width > 0.0);
     }
+
+    fn size() -> SizeProposal {
+        SizeProposal::exact(600.0, 500.0)
+    }
+
+    /// A picker as an application's settings page holds one: a `FormLayout`
+    /// row in a `ScrollArea`, a placeholder, and an `on_select` that writes
+    /// the choice to a persisted value. Many families, so the list is
+    /// virtualized. Returns the tree, the selection and the persisted value.
+    fn settings_page() -> (WidgetTree, Signal<Option<String>>, Signal<String>) {
+        let mut tree = light_tree();
+        let families: Vec<String> = (0..200).map(|i| format!("Family {i:03}")).collect();
+        let persisted = Signal::new("Family 000".to_string());
+        let selection = Signal::new(Some(persisted.get()));
+        let write_back = persisted.clone();
+        let picker = FontPicker::new(selection.clone())
+            .families(families)
+            .placeholder(lit!("Typeface"))
+            .on_select(move |f: &str, _ctx| write_back.set(f.to_string()));
+        let form =
+            crate::primitives::FormLayout::new().line(TextWidget::new(lit!("Typeface")), picker);
+        tree.add(crate::ScrollArea::new().child(form));
+        tree.layout(size());
+        (tree, selection, persisted)
+    }
+
+    /// Open the picker and return the centre of the row named `name`.
+    fn open_at_row(tree: &mut WidgetTree, name: &str) -> teksilo_canvas::Point {
+        let combo = tree
+            .find_by_role(teksilo_core::accesskit::Role::ComboBox)
+            .expect("the picker's combo box");
+        tree.click(combo);
+        tree.layout(size());
+        assert_eq!(tree.active_overlays().len(), 1, "the list is open");
+        let row = tree
+            .find_by_label(name)
+            .unwrap_or_else(|| panic!("{name} is in the open list"));
+        tree.bounds(row).center()
+    }
+
+    /// A mouse click on a row, as a real one arrives: the pointer moves onto
+    /// the row, and a frame is drawn between each event. `jitter` moves the
+    /// pointer that far between the press and the release.
+    fn click_row(tree: &mut WidgetTree, name: &str, jitter: f32) {
+        use teksilo_core::event::PointerButton;
+        let at = open_at_row(tree, name);
+        tree.pointer_move(at);
+        tree.layout(size());
+        tree.pointer_down_button(at, PointerButton::Primary);
+        tree.layout(size());
+        let release = teksilo_canvas::Point::new(at.x + jitter, at.y + jitter);
+        if jitter != 0.0 {
+            tree.pointer_move(release);
+            tree.layout(size());
+        }
+        tree.pointer_up_button(release, PointerButton::Primary);
+        tree.layout(size());
+    }
+
+    #[test]
+    fn a_mouse_click_on_a_row_selects_the_font() {
+        let (mut tree, selection, persisted) = settings_page();
+        click_row(&mut tree, "Family 003", 0.0);
+        assert_eq!(selection.get().as_deref(), Some("Family 003"));
+        assert_eq!(persisted.get(), "Family 003", "on_select ran");
+        assert!(tree.active_overlays().is_empty(), "the list closes");
+    }
+
+    #[test]
+    fn a_click_that_jitters_selects_the_font() {
+        let (mut tree, selection, _) = settings_page();
+        click_row(&mut tree, "Family 003", 2.0);
+        assert_eq!(selection.get().as_deref(), Some("Family 003"));
+    }
+
+    #[test]
+    fn a_tap_on_a_row_selects_the_font() {
+        let (mut tree, selection, _) = settings_page();
+        let at = open_at_row(&mut tree, "Family 003");
+        let contact = tree.new_contact();
+        tree.touch_down(contact, at);
+        tree.layout(size());
+        tree.touch_up(contact, at);
+        tree.layout(size());
+        assert_eq!(selection.get().as_deref(), Some("Family 003"));
+        tree.assert_no_leaked_pointer_state();
+    }
+
+    #[test]
+    fn arrows_and_enter_still_select_the_font() {
+        use teksilo_core::event::{Key, Modifiers};
+        let (mut tree, selection, persisted) = settings_page();
+        open_at_row(&mut tree, "Family 000");
+        for _ in 0..3 {
+            tree.press_key(Key::ArrowDown, Modifiers::NONE);
+        }
+        tree.press_key(Key::Enter, Modifiers::NONE);
+        tree.layout(size());
+        assert_eq!(selection.get().as_deref(), Some("Family 002"));
+        assert_eq!(persisted.get(), "Family 002");
+    }
 }

@@ -726,3 +726,133 @@ fn the_commit_crosses_from_a_popover_to_its_anchor_and_stops_at_a_modal() {
         assert_eq!(*log.borrow(), expected, "modal: {modal}");
     }
 }
+
+/// A widget whose overlay content is one of its own children, as a combo
+/// box's list is: `body` fills it, `content` is left to the overlay pass.
+#[derive(Debug)]
+struct Anchor {
+    body: WidgetId,
+    content: WidgetId,
+}
+
+impl crate::widget::Widget for Anchor {
+    fn layout_response(
+        &self,
+        proposal: SizeProposal,
+        _ctx: &crate::widget::LayoutContext,
+    ) -> crate::widget::LayoutResponse {
+        proposal.resolve(0.0, 0.0).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [crate::widget::WidgetPlacement],
+        _ctx: &crate::widget::LayoutContext,
+    ) {
+        for child in children.iter_mut() {
+            if child.id == self.content {
+                child.size = teksilo_canvas::Size::ZERO;
+                continue;
+            }
+            child.origin = bounds.origin();
+            child.size = bounds.size();
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        vec![self.body, self.content]
+    }
+}
+
+/// Overlay content of a fixed size, its children side by side.
+#[derive(Debug)]
+struct Strip(Vec<WidgetId>);
+
+impl crate::widget::Widget for Strip {
+    fn layout_response(
+        &self,
+        _proposal: SizeProposal,
+        _ctx: &crate::widget::LayoutContext,
+    ) -> crate::widget::LayoutResponse {
+        teksilo_canvas::Size::new(80.0, 20.0).into()
+    }
+
+    fn place_children(
+        &self,
+        bounds: teksilo_canvas::Rect,
+        _proposal: SizeProposal,
+        children: &mut [crate::widget::WidgetPlacement],
+        _ctx: &crate::widget::LayoutContext,
+    ) {
+        let width = bounds.width / children.len().max(1) as f32;
+        for (i, child) in children.iter_mut().enumerate() {
+            child.origin = teksilo_canvas::Point::new(bounds.x + width * i as f32, bounds.y);
+            child.size = teksilo_canvas::Size::new(width, bounds.height);
+        }
+    }
+
+    fn children(&self) -> Vec<WidgetId> {
+        self.0.clone()
+    }
+}
+
+/// A click on a plain row of an overlay whose content is a child of its
+/// focusable anchor (a searchable combo box's list, its search field holding
+/// focus) is not a click on the anchor: focus stays in the field, the overlay
+/// stays open through the press, and the row's tap runs on the release, with
+/// a frame between the two as a real click has.
+#[test]
+fn a_click_on_a_plain_row_of_an_overlay_built_under_its_anchor_does_not_focus_the_anchor() {
+    use crate::overlay::{DismissBehavior, OverlayPlacement, OverlayRequest};
+    for kind in [PointerKind::Mouse, PointerKind::Touch] {
+        let taps = Rc::new(Cell::new(0));
+        let mut tree = WidgetTree::new();
+        let field = tree.add(FillWidget::new().focusable());
+        let row = {
+            let taps = taps.clone();
+            tree.add(FillWidget::new().on_tap(move |_, _| taps.set(taps.get() + 1)))
+        };
+        let content = tree.add(Strip(vec![field, row]));
+        let body = tree.add(FillWidget::new());
+        let anchor = tree.add(Anchor { body, content }.focusable(true));
+        let size = SizeProposal::exact(200.0, 100.0);
+        tree.layout(size);
+        tree.show_overlay(OverlayRequest::new(
+            content,
+            anchor,
+            OverlayPlacement::Below,
+            DismissBehavior::EscapeOrClickOutside,
+        ));
+        tree.layout(size);
+        tree.focus(field);
+        let b = tree.bounds(row);
+        let at = teksilo_canvas::Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0);
+        match kind {
+            PointerKind::Touch => {
+                let contact = tree.new_contact();
+                tree.touch_down(contact, at);
+                tree.layout(size);
+                tree.touch_up(contact, at);
+            }
+            _ => {
+                tree.pointer_down_button(at, crate::event::PointerButton::Primary);
+                tree.layout(size);
+                tree.pointer_up_button(at, crate::event::PointerButton::Primary);
+            }
+        }
+        tree.layout(size);
+        assert_eq!(taps.get(), 1, "{kind:?}: the row's tap runs");
+        assert_eq!(
+            tree.focused(),
+            Some(field),
+            "{kind:?}: focus stays in the field"
+        );
+        assert_eq!(
+            tree.active_overlays().len(),
+            1,
+            "{kind:?}: the overlay stays open"
+        );
+    }
+}

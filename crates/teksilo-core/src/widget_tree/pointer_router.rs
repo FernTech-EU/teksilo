@@ -1290,7 +1290,7 @@ impl WidgetTree {
                     // Open the press record before the dispatch, so a handler
                     // asking `ctx.press_pending()` on its own `PointerDown`
                     // gets the answer the router already knows.
-                    let focusable = self.find_focusable_at_or_above(target);
+                    let focusable = self.click_focusable_at_or_above(target);
                     self.begin_press(focusable);
                     // An indirect pointer focuses on press, as it always has.
                     // A direct one waits for the release: a finger that lands
@@ -1700,7 +1700,7 @@ impl WidgetTree {
                         // that field, or scroll chrome, as for the pointer.
                         if *action == accesskit::Action::Click
                             && !self.in_scroll_chrome(id)
-                            && match self.find_focusable_at_or_above(id) {
+                            && match self.click_focusable_at_or_above(id) {
                                 Some(focusable) => !self.click_may_focus(focusable),
                                 None => !self.belongs_to_focused(id),
                             }
@@ -2579,6 +2579,30 @@ impl WidgetTree {
             .is_none_or(|node| node.focus_on_click)
     }
 
+    /// The focusable widget a click on `target` lands on or in: the nearest
+    /// one at or above it, looked for no further than the root of the overlay
+    /// `target` is in.
+    ///
+    /// An overlay's content can be built as a child of its anchor (a combo
+    /// box's list is), and a click on a plain row of it is not a click on the
+    /// anchor. Taking the anchor as the focusable would move focus out of the
+    /// overlay on the press, which closes it when focus is inside (the search
+    /// field of a searchable combo box) before the release can pick the row.
+    fn click_focusable_at_or_above(&self, target: WidgetId) -> Option<WidgetId> {
+        let mut current = Some(target);
+        while let Some(id) = current {
+            let node = self.arena.get(id)?;
+            if self.is_node_focusable(node) {
+                return Some(id);
+            }
+            if self.overlay_manager.find_by_content(id).is_some() {
+                return None;
+            }
+            current = self.arena.parent(id);
+        }
+        None
+    }
+
     /// Assign the focus a direct pointer's press deferred, if the release
     /// earned it.
     ///
@@ -2623,7 +2647,7 @@ impl WidgetTree {
         let Some(target) = self.hit_test_for(position, &releasing) else {
             return;
         };
-        if self.find_focusable_at_or_above(target) != Some(pressed) {
+        if self.click_focusable_at_or_above(target) != Some(pressed) {
             return;
         }
         if !self.click_may_focus(pressed) {
