@@ -138,6 +138,44 @@ fn install(builder: TeksiloAppBuilder) -> TeksiloAppBuilder {
     })
 }
 
+/// What this process's bridge put on disk: its descriptor and its endpoint.
+#[cfg(debug_assertions)]
+struct Published {
+    descriptor: std::path::PathBuf,
+    endpoint: teksilo_automation::wire::Endpoint,
+}
+
+#[cfg(debug_assertions)]
+impl Published {
+    /// Remove the descriptor and the endpoint's files. Removing what is
+    /// already gone does nothing, so this may run after the bridge thread's
+    /// own cleanup, or twice.
+    fn retract(&self) {
+        let _ = std::fs::remove_file(&self.descriptor);
+        automation_transport::release(&self.endpoint);
+    }
+}
+
+/// The bridge this process started, if any, for [`retract_endpoint`].
+#[cfg(debug_assertions)]
+static PUBLISHED: std::sync::Mutex<Option<Published>> = std::sync::Mutex::new(None);
+
+/// Remove the descriptor and the endpoint the bridge published, as the event
+/// loop ends.
+///
+/// The bridge thread removes them as it exits, but it waits in `accept` for
+/// the life of the process and is never unwound when the process ends, so
+/// without this every run left its descriptor behind, naming an endpoint
+/// nobody serves. Does nothing when no bridge was started, and after the
+/// first call.
+#[cfg(debug_assertions)]
+pub(crate) fn retract_endpoint() {
+    let published = PUBLISHED.lock().ok().and_then(|mut slot| slot.take());
+    if let Some(published) = published {
+        published.retract();
+    }
+}
+
 /// Bind the endpoint, publish its descriptor, and spawn the bridge thread.
 #[cfg(debug_assertions)]
 pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> std::io::Result<()> {
@@ -180,6 +218,12 @@ pub fn spawn_bridge_thread(proxy: crate::app::AppEventProxy, token: String) -> s
         // endpoint that answers nobody until the process exits.
         EndpointFile::remove(pid);
         return Err(e);
+    }
+    if let Ok(mut published) = PUBLISHED.lock() {
+        *published = Some(Published {
+            descriptor: descriptor_path.clone(),
+            endpoint: endpoint.clone(),
+        });
     }
 
     // Announce only now — after the bind, after the descriptor exists, and
@@ -356,6 +400,36 @@ mod tests {
                 .install_automation_bridge_in_debug()
                 .records_announcements()
         );
+    }
+
+    #[test]
+    fn retracting_removes_only_this_bridges_files_and_can_run_twice() {
+        let runtime = tempfile::tempdir().expect("temp dir");
+        let dir = runtime.path().join("teksilo-automation");
+        std::fs::create_dir_all(dir.join("100.d")).expect("socket dir");
+        let socket = dir.join("100.d").join("s");
+        std::fs::write(&socket, b"").expect("socket stand-in");
+        let ours = dir.join("100.json");
+        let theirs = dir.join("200.json");
+        std::fs::write(&ours, b"{}").expect("our descriptor");
+        std::fs::write(&theirs, b"{}").expect("another process's descriptor");
+
+        let published = Published {
+            descriptor: ours.clone(),
+            endpoint: teksilo_automation::wire::Endpoint::unix(
+                socket.to_string_lossy().into_owned(),
+            ),
+        };
+        published.retract();
+
+        assert!(!ours.exists(), "the descriptor is gone");
+        assert!(!socket.exists(), "the socket is gone");
+        assert!(!dir.join("100.d").exists(), "and so is its directory");
+        assert!(theirs.exists(), "another process's descriptor stays");
+
+        // The bridge thread's own cleanup may have run first.
+        published.retract();
+        assert!(theirs.exists());
     }
 
     #[test]

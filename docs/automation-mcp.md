@@ -195,6 +195,12 @@ shell, a container, or a remote session can, and then the descriptor is there
 rather than under `$TMPDIR`. Read the path out of the descriptor (or out of
 `--list`) rather than reconstructing it.
 
+The app removes its descriptor, and on Unix its socket and the socket's
+directory, when its event loop ends, however the application quit. A process
+that ends without its loop ending (`std::process::exit`, a crash, a kill)
+leaves them behind, and `--list` and `--attach` remove those when they find
+nothing listening (see above).
+
 ## Install
 
 Add the `automation` feature to the umbrella crate (debug-only by design):

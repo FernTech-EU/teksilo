@@ -5721,6 +5721,9 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
     /// one.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         self.wm.disconnect_redraw_wakers();
+        // Here rather than after `run`'s loop, which macOS never reaches.
+        #[cfg(all(feature = "automation", debug_assertions))]
+        crate::automation_bridge::retract_endpoint();
         // On macOS this is the last moment: AppKit ends the process right
         // after its `applicationWillTerminate:`, which reaches here, so
         // `run` never returns to flush, and nothing the application holds

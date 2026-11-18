@@ -97,6 +97,29 @@ pub fn bind(pid: u32) -> io::Result<BoundTransport> {
     }
 }
 
+/// Remove what [`bind`] left on disk for `endpoint`, without its listener.
+///
+/// Dropping the listener does this, but the bridge thread owns it and waits in
+/// `accept` for the life of the process, so an application that ends normally
+/// never drops it. Removing a file that is already gone is not an error, so
+/// this and the listener's `Drop` may run in either order. Call it only for an
+/// endpoint this process bound.
+///
+/// A named pipe leaves nothing on disk: it goes with the process's last
+/// handle to it.
+pub fn release(endpoint: &Endpoint) {
+    if endpoint.transport != Transport::Unix {
+        return;
+    }
+    let socket = std::path::Path::new(&endpoint.address);
+    let _ = std::fs::remove_file(socket);
+    // `bind` made this directory for the socket alone. `remove_dir` takes it
+    // only once it is empty, so nothing else that might be in it is lost.
+    if let Some(dir) = socket.parent() {
+        let _ = std::fs::remove_dir(dir);
+    }
+}
+
 /// What a [`probe`] found.
 ///
 /// `Busy` is deliberately distinct from `Dead`: "someone else is already
