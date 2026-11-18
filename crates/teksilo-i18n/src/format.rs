@@ -155,6 +155,13 @@ pub enum DateFields {
     /// A month with its year and no day: "août 2026", "August 2026". A month
     /// has no time of day, so a [`TimeStyle`] set beside it is ignored.
     YearMonth,
+    /// The weekday alone: "Monday", "lundi". At [`DateStyle::Short`] the
+    /// locale's abbreviation ("Mon", "lun."); [`DateStyle::Long`] and
+    /// [`DateStyle::Medium`] write it in full or abbreviated as CLDR has it.
+    Weekday,
+    /// Month and day without the year: "August 31", "31 août". A month
+    /// standing with a day is genitive where the language inflects it.
+    MonthDay,
 }
 
 impl DateFields {
@@ -163,6 +170,8 @@ impl DateFields {
             Self::YearMonthDay => IcuDateFields::YMD,
             Self::YearMonthDayWeekday => IcuDateFields::YMDE,
             Self::YearMonth => IcuDateFields::YM,
+            Self::Weekday => IcuDateFields::E,
+            Self::MonthDay => IcuDateFields::MD,
         }
     }
 

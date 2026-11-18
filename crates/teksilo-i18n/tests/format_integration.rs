@@ -363,6 +363,67 @@ fn a_month_with_its_year_is_written_without_a_day() {
     );
 }
 
+/// `date` in `lang` with the given fields and style, through the one-shot path.
+fn dated(lang: &str, fields: DateFields, style: DateStyle, date: jiff::civil::Date) -> String {
+    TeksiloDateTimeFormatter::new()
+        .date_style(style)
+        .date_fields(fields)
+        .format_in_locale(date.at(0, 0, 0, 0), &lid(lang))
+}
+
+#[test]
+fn a_weekday_alone_is_the_locales_name_for_it() {
+    let monday = jiff::civil::date(2026, 11, 16);
+    let long = DateStyle::Long;
+    assert_eq!(dated("en-US", DateFields::Weekday, long, monday), "Monday");
+    assert_eq!(dated("fr-FR", DateFields::Weekday, long, monday), "lundi");
+    assert_eq!(
+        dated("en-US", DateFields::Weekday, DateStyle::Short, monday),
+        "Mon"
+    );
+    assert_eq!(
+        dated("fr-FR", DateFields::Weekday, DateStyle::Short, monday),
+        "lun."
+    );
+}
+
+#[test]
+fn a_month_and_day_is_written_without_the_year_in_the_locales_order() {
+    let day = jiff::civil::date(2026, 8, 31);
+    let long = DateStyle::Long;
+    assert_eq!(dated("en-US", DateFields::MonthDay, long, day), "August 31");
+    assert_eq!(dated("fr-FR", DateFields::MonthDay, long, day), "31 août");
+    assert_eq!(
+        dated("ru-RU", DateFields::MonthDay, long, day),
+        "31 августа"
+    );
+}
+
+#[test]
+fn a_weekday_alone_follows_the_gregorian_calendar_choice_too() {
+    // The calendar override must not break the new field sets.
+    let monday = jiff::civil::date(2026, 11, 16);
+    let s = TeksiloDateTimeFormatter::new()
+        .date_style(DateStyle::Long)
+        .date_fields(DateFields::MonthDay)
+        .calendar_system(teksilo_i18n::CalendarSystem::Gregorian)
+        .format_in_locale(monday.at(0, 0, 0, 0), &lid("th-TH"));
+    assert!(s.contains("16"), "{s}");
+}
+
+#[test]
+fn a_weekday_can_carry_a_time() {
+    let s = TeksiloDateTimeFormatter::new()
+        .date_style(DateStyle::Short)
+        .date_fields(DateFields::Weekday)
+        .time_style(teksilo_i18n::TimeStyle::Short)
+        .format_in_locale(
+            jiff::civil::date(2026, 11, 16).at(14, 35, 0, 0),
+            &lid("en-US"),
+        );
+    assert!(s.starts_with("Mon") && s.contains("2:35"), "{s}");
+}
+
 #[test]
 fn a_month_with_its_year_ignores_a_time_style() {
     // ICU refuses a time on a calendar period. Passing the refusal on would
