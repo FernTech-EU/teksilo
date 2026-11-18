@@ -91,6 +91,10 @@ by crate for clarity, not because crates version independently.
   it for every window, with a `TextContrast` or a `Signal` of one that a
   preference can change while the application runs; `TextContrast::OFF`
   restores the previous rendering.
+- **Letters are evenly spaced.** Each glyph was drawn at the nearest whole
+  pixel, so the gap between two letters could be off by a pixel and words ran
+  together at text sizes. Glyphs are now drawn at their position to a quarter
+  of a pixel, as browsers draw them (text-typeset 3.3.0).
 
 ### Fixed
 

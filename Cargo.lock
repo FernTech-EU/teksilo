@@ -12523,9 +12523,9 @@ dependencies = [
 
 [[package]]
 name = "text-typeset"
-version = "3.2.1"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7193f3e678d14dc6cf06bcd3b7b13474e3a6e878a6821649fc91d10a8b848923"
+checksum = "de64341e4588557c8a8fdcad8fdcc6b1c37f450dda3f1bea1b69379c33afeb95"
 dependencies = [
  "etagere 0.3.0",
  "fontdb",
