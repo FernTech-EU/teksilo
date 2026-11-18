@@ -120,6 +120,15 @@ by crate for clarity, not because crates version independently.
   asterisks or dashes wider than a monospaced `TextWidget` was cut one glyph
   late, so the label was laid out and drawn wider than its box, and a
   `ScrollArea` around it grew a horizontal scroll bar (text-typeset 3.2.1).
+- **A key in the same frame as typed characters acts after them.** In
+  `TextInputField` (and `TextInput`, `PasswordField`, `SearchField`),
+  `CodeEditor` and `RichTextEditor`, a key, an edit command or an assistive
+  technology's action that arrived in the frame the characters were typed in
+  ran before they were inserted: Enter could submit a truncated value (a
+  password manager's auto-type, a bar-code reader), Backspace removed the
+  wrong character. `on_submit`, the validator, `on_commit` and `on_blur` now
+  find the bound signal holding everything typed before them, and
+  `max_length` counts the characters of the current frame.
 - **Text callbacks can use their editor.** `RichTextEditor`'s
   `on_text_inserted` and `on_change`, `TextInputField::on_text_inserted` and
   `CodeEditor::on_change` can read and edit the editor through its handle, for
