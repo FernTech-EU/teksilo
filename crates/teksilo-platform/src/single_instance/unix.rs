@@ -26,7 +26,7 @@
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -71,24 +71,26 @@ pub(super) fn acquire(dir: &Path, key: &str) -> io::Result<Outcome> {
 fn acquire_within(dir: &Path, key: &str, patience: Duration) -> io::Result<Outcome> {
     check_key(key)?;
     check_dir(dir)?;
-    let socket = dir.join(format!("{key}.sock"));
+    let (socket, lock_path) = endpoint_paths(dir, key);
     if socket.as_os_str().len() > MAX_SOCKET_PATH {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!(
-                "socket path {} is {} bytes, over the {MAX_SOCKET_PATH}-byte limit",
+                "the single-instance socket path {} is {} bytes, over the \
+                 {MAX_SOCKET_PATH}-byte limit of a socket path: use a directory \
+                 with a shorter path",
                 socket.display(),
                 socket.as_os_str().len()
             ),
         ));
     }
-    let lock_path = dir.join(format!("{key}.lock"));
     let deadline = Instant::now() + patience;
     loop {
         if let Some(lock) = try_lock(&lock_path)? {
             return Primary::bind(socket, lock_path, lock).map(Outcome::Primary);
         }
-        match UnixStream::connect(&socket) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match connect_within(&socket, left) {
             Ok(stream) => {
                 check_peer(&stream)?;
                 return Ok(Outcome::Secondary(Secondary {
@@ -96,11 +98,16 @@ fn acquire_within(dir: &Path, key: &str, patience: Duration) -> io::Result<Outco
                     deadline: FORWARD_DEADLINE,
                 }));
             }
-            // The lock holder has not bound its socket yet, or is leaving.
+            // The lock holder has not bound its socket yet, or is leaving, or
+            // its backlog is full: it is not accepting, and `connect_within`
+            // gave up at the deadline.
             Err(e)
                 if matches!(
                     e.kind(),
-                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                    io::ErrorKind::NotFound
+                        | io::ErrorKind::ConnectionRefused
+                        | io::ErrorKind::WouldBlock
+                        | io::ErrorKind::Interrupted
                 ) => {}
             Err(e) => return Err(e),
         }
@@ -129,6 +136,86 @@ fn check_key(key: &str) -> io::Result<()> {
         ));
     }
     Ok(())
+}
+
+/// The socket and the lock file of `key` in `dir`: `<16 hex digits>.sock`
+/// and `.lock`, named from [`fnv1a_64`] of the key rather than from the key.
+///
+/// A socket path is held to about 100 bytes, and the macOS per-user
+/// temporary directory takes half of that, which would leave less than a
+/// 64-character key. Two keys with one hash (a chance of 2^-64) share an
+/// instance.
+fn endpoint_paths(dir: &Path, key: &str) -> (PathBuf, PathBuf) {
+    let stem = format!("{:016x}", fnv1a_64(key.as_bytes()));
+    (
+        dir.join(format!("{stem}.sock")),
+        dir.join(format!("{stem}.lock")),
+    )
+}
+
+/// 64-bit FNV-1a. Written here because the name must not change between two
+/// builds of an application, and `std`'s hashers are not promised to be
+/// stable across Rust releases or processes.
+fn fnv1a_64(bytes: &[u8]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    bytes.iter().fold(OFFSET_BASIS, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(PRIME)
+    })
+}
+
+/// Connect to `socket`, waiting at most `timeout` for room in its backlog.
+///
+/// On Linux a blocking connect to a Unix-domain socket whose backlog is full
+/// waits for room, without end in `UnixStream::connect`, and a primary that
+/// holds the name without accepting keeps its backlog full. Linux bounds that
+/// wait by the socket's send timeout and fails with `EAGAIN` when it expires,
+/// so the timeout is set before connecting. A non-blocking connect and `poll`
+/// would not do: Linux answers a Unix-domain connect with `EAGAIN` at once,
+/// never `EINPROGRESS`, and nothing wakes a `poll` when room frees. macOS and
+/// the BSDs never wait: they refuse a connection to a full backlog with
+/// `ECONNREFUSED`, which the caller retries until its deadline.
+fn connect_within(socket: &Path, timeout: Duration) -> io::Result<UnixStream> {
+    let path = socket.as_os_str().as_bytes();
+    // SAFETY: all-zero bytes are a valid `sockaddr_un`.
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if path.len() >= addr.sun_path.len() || path.contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} cannot name a socket", socket.display()),
+        ));
+    }
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (to, &from) in addr.sun_path.iter_mut().zip(path) {
+        *to = from as libc::c_char;
+    }
+    // The path and its NUL. Where the address has a `sun_len`, the kernel
+    // sets it from this length.
+    let len =
+        (std::mem::offset_of!(libc::sockaddr_un, sun_path) + path.len() + 1) as libc::socklen_t;
+
+    // SAFETY: `socket` takes plain integers and returns a new descriptor or -1.
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `fd` was just created and nothing else owns it.
+    let stream = unsafe { UnixStream::from_raw_fd(fd) };
+    // As `std` does for its own sockets: a program the application starts
+    // must not hold the connection open.
+    // SAFETY: `fcntl` on a descriptor `stream` owns, for the whole call.
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // A zero timeout would mean "wait forever" to the kernel; `std` refuses it.
+    stream.set_write_timeout(Some(timeout.max(Duration::from_millis(1))))?;
+    // SAFETY: `addr` is a `sockaddr_un` of at least `len` bytes that outlives
+    // the call, on a descriptor `stream` owns.
+    let rc = unsafe { libc::connect(fd, (&raw const addr).cast(), len) };
+    if rc != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(stream)
 }
 
 /// Refuse a directory that is not the user's own and closed to others.
@@ -343,6 +430,10 @@ pub(super) struct Primary {
     /// The serving thread's wake-up: closing this end ends it.
     stop: Option<UnixStream>,
     peer_deadline: Duration,
+    /// The serving thread's stack size: an impossible one makes its spawn
+    /// fail.
+    #[cfg(test)]
+    stack_size: Option<usize>,
 }
 
 impl Primary {
@@ -371,6 +462,8 @@ impl Primary {
             listener: Some(listener),
             stop: None,
             peer_deadline: PEER_DEADLINE,
+            #[cfg(test)]
+            stack_size: None,
         };
         fs::set_permissions(&primary.socket, fs::Permissions::from_mode(0o600))?;
         Ok(primary)
@@ -387,6 +480,21 @@ impl Primary {
         // before the `accept` must not leave the thread blocked in it.
         listener.set_nonblocking(true)?;
         let (stop, stopped) = UnixStream::pair()?;
+        // The thread is started before it is given the listener, so a thread
+        // that cannot start leaves this instance its listener, and the name
+        // it holds can still be served by a later call.
+        let (hand_over, handed) = std::sync::mpsc::sync_channel::<Serving>(1);
+        let builder = std::thread::Builder::new().name("teksilo-single-instance".into());
+        #[cfg(test)]
+        let builder = match self.stack_size {
+            Some(size) => builder.stack_size(size),
+            None => builder,
+        };
+        builder.spawn(move || {
+            if let Ok(serving) = handed.recv() {
+                serving.run();
+            }
+        })?;
         let serving = Serving {
             listener: self.listener.take().expect("checked above"),
             stopped,
@@ -395,9 +503,8 @@ impl Primary {
             peer_deadline: self.peer_deadline,
             on_message,
         };
-        std::thread::Builder::new()
-            .name("teksilo-single-instance".into())
-            .spawn(move || serving.run())?;
+        // The thread holds the receiving end until it has received.
+        let _ = hand_over.send(serving);
         self.stop = Some(stop);
         Ok(())
     }
@@ -492,6 +599,14 @@ impl Serving {
         };
         let request = protocol::read_frame(&mut io, protocol::MAX_REQUEST)?;
         let reply = match protocol::decode_request(&request) {
+            // A launch that gave up waiting has reported a failure, and its
+            // request, still in the backlog, must not be acted on as well.
+            Ok(_) if peer_hung_up(stream) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    "the second launch stopped waiting",
+                ));
+            }
             Ok(message) => {
                 (self.on_message)(message);
                 Reply::Accepted
@@ -504,6 +619,32 @@ impl Serving {
             }
         };
         protocol::write_frame(&mut io, &protocol::encode_reply(reply))
+    }
+}
+
+/// Whether the peer has closed its end. Its request, already read, is all it
+/// sent, so a peek that finds the end of the stream means it is gone; one
+/// that finds nothing yet means it is still waiting for the answer.
+fn peer_hung_up(stream: &UnixStream) -> bool {
+    let mut byte = 0u8;
+    // SAFETY: `byte` is valid for a write of one byte for the duration of the
+    // call, on a socket this function borrows. `MSG_PEEK` leaves the stream as
+    // it is and `MSG_DONTWAIT` returns at once.
+    let n = unsafe {
+        libc::recv(
+            stream.as_raw_fd(),
+            (&raw mut byte).cast(),
+            1,
+            libc::MSG_PEEK | libc::MSG_DONTWAIT,
+        )
+    };
+    match n {
+        0 => true,
+        n if n > 0 => false,
+        _ => !matches!(
+            io::Error::last_os_error().kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+        ),
     }
 }
 
@@ -588,6 +729,149 @@ mod tests {
         list.iter().map(OsString::from).collect()
     }
 
+    fn app_sock(dir: &Path) -> PathBuf {
+        endpoint_paths(dir, "app").0
+    }
+
+    fn app_lock(dir: &Path) -> PathBuf {
+        endpoint_paths(dir, "app").1
+    }
+
+    /// The published FNV-1a test vectors: the names must not change between
+    /// two builds of an application.
+    #[test]
+    fn the_file_names_are_a_stable_hash_of_the_key() {
+        assert_eq!(fnv1a_64(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a_64(b"a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a_64(b"foobar"), 0x8594_4171_f739_67e8);
+        let (sock, lock) = endpoint_paths(Path::new("/d"), "a");
+        assert_eq!(sock, Path::new("/d/af63dc4c8601ec8c.sock"));
+        assert_eq!(lock, Path::new("/d/af63dc4c8601ec8c.lock"));
+    }
+
+    /// The longest key fits under a directory as long as the macOS per-user
+    /// temporary directory with an application's bundle id in it.
+    #[test]
+    fn the_longest_key_fits_in_a_long_directory() {
+        let root = private_dir();
+        let base = root.path().as_os_str().len();
+        assert!(base < 69, "the temporary directory {base} bytes long");
+        let dir = root.path().join("d".repeat(70 - base - 1));
+        assert_eq!(dir.as_os_str().len(), 70);
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let (a, b) = ("a".repeat(MAX_KEY), "b".repeat(MAX_KEY));
+        let _first = primary(acquire(&dir, &a).unwrap());
+        let _other = primary(acquire(&dir, &b).unwrap());
+        let _second = secondary(acquire(&dir, &a).unwrap());
+        let mut names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        names.sort();
+        let mut expected = vec![
+            endpoint_paths(&dir, &a).0,
+            endpoint_paths(&dir, &a).1,
+            endpoint_paths(&dir, &b).0,
+            endpoint_paths(&dir, &b).1,
+        ];
+        expected.sort();
+        assert_eq!(names, expected, "one socket and one lock file per key");
+    }
+
+    #[test]
+    fn a_path_too_long_for_a_socket_is_refused_with_its_length() {
+        let root = private_dir();
+        let dir = root.path().join("d".repeat(MAX_SOCKET_PATH));
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let err = acquire(&dir, "app").err().expect("refused");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("byte limit"), "{err}");
+    }
+
+    /// A primary whose backlog is full and that never accepts does not hold
+    /// a starter past its patience. Linux would block the starter's connect
+    /// without end; macOS refuses it.
+    #[test]
+    fn a_full_backlog_does_not_outlast_the_patience() {
+        let dir = private_dir();
+        let held = File::create(app_lock(dir.path())).unwrap();
+        held.try_lock().unwrap();
+        let listener = UnixListener::bind(app_sock(dir.path())).unwrap();
+        // SAFETY: `listen` on a listening socket this test owns; it only
+        // lowers the backlog to its least.
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
+        // The one connection a backlog of nothing still queues on Linux.
+        let _queued = UnixStream::connect(app_sock(dir.path()));
+
+        let started = Instant::now();
+        let err = acquire_within(dir.path(), "app", Duration::from_millis(300))
+            .err()
+            .expect("no room");
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    /// The reviewer's scenario: a launch that timed out before the primary
+    /// listened has reported a failure, so its request is not delivered.
+    #[test]
+    fn a_launch_that_gave_up_is_not_delivered() {
+        let dir = private_dir();
+        let mut p = primary(acquire(dir.path(), "app").unwrap());
+        let mut s = secondary(acquire(dir.path(), "app").unwrap());
+        s.deadline = Duration::from_millis(200);
+        let err = s
+            .forward(&args(&["gave-up"]), Path::new("/"), None)
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+
+        let (tx, rx) = mpsc::channel();
+        p.listen(Box::new(move |m| {
+            let _ = tx.send(m);
+        }))
+        .unwrap();
+        // Served after the one that gave up, which is first in the backlog.
+        secondary(acquire(dir.path(), "app").unwrap())
+            .forward(&args(&["waited"]), Path::new("/"), None)
+            .unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap().args,
+            args(&["waited"])
+        );
+        assert!(rx.try_recv().is_err());
+    }
+
+    /// A serving thread that cannot start leaves the listener, and a later
+    /// `listen` serves. glibc refuses the impossible stack at
+    /// `pthread_create`, which `std` reports as an error.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_listen_that_could_not_start_can_be_retried() {
+        let dir = private_dir();
+        let mut p = primary(acquire(dir.path(), "app").unwrap());
+        p.stack_size = Some(1 << 60);
+        assert!(p.listen(Box::new(|_| {})).is_err());
+        p.stack_size = None;
+        let (tx, rx) = mpsc::channel();
+        p.listen(Box::new(move |m| {
+            let _ = tx.send(m);
+        }))
+        .unwrap();
+        secondary(acquire(dir.path(), "app").unwrap())
+            .forward(&args(&["retried"]), Path::new("/"), None)
+            .unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap().args,
+            args(&["retried"])
+        );
+    }
+
     #[test]
     fn the_second_election_in_one_process_is_a_secondary() {
         let dir = private_dir();
@@ -602,9 +886,9 @@ mod tests {
     fn the_socket_is_owner_only() {
         let dir = private_dir();
         let _p = primary(acquire(dir.path(), "app").unwrap());
-        let mode = fs::metadata(dir.path().join("app.sock")).unwrap().mode() & 0o777;
+        let mode = fs::metadata(app_sock(dir.path())).unwrap().mode() & 0o777;
         assert_eq!(mode, 0o600);
-        let mode = fs::metadata(dir.path().join("app.lock")).unwrap().mode() & 0o777;
+        let mode = fs::metadata(app_lock(dir.path())).unwrap().mode() & 0o777;
         assert_eq!(mode, 0o600);
     }
 
@@ -664,7 +948,7 @@ mod tests {
     #[test]
     fn a_stale_socket_of_this_user_is_removed() {
         let dir = private_dir();
-        let path = dir.path().join("app.sock");
+        let path = app_sock(dir.path());
         // A listener dropped without removing its file: what a process that
         // ended without unwinding leaves.
         drop(UnixListener::bind(&path).unwrap());
@@ -682,7 +966,7 @@ mod tests {
     #[test]
     fn a_file_or_a_link_at_the_sockets_place_is_left_alone() {
         let dir = private_dir();
-        let path = dir.path().join("app.sock");
+        let path = app_sock(dir.path());
         fs::write(&path, b"not a socket").unwrap();
         let err = acquire(dir.path(), "app").err().expect("refused");
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
@@ -712,7 +996,7 @@ mod tests {
         let dir = private_dir();
         let target = dir.path().join("target");
         fs::write(&target, b"kept").unwrap();
-        std::os::unix::fs::symlink(&target, dir.path().join("app.lock")).unwrap();
+        std::os::unix::fs::symlink(&target, app_lock(dir.path())).unwrap();
         assert!(acquire(dir.path(), "app").is_err());
         assert_eq!(fs::read(&target).unwrap(), b"kept");
     }
@@ -744,7 +1028,7 @@ mod tests {
     #[test]
     fn a_lock_held_with_no_socket_times_out() {
         let dir = private_dir();
-        let held = File::create(dir.path().join("app.lock")).unwrap();
+        let held = File::create(app_lock(dir.path())).unwrap();
         held.try_lock().unwrap();
         let started = Instant::now();
         let err = acquire_within(dir.path(), "app", Duration::from_millis(200))
@@ -759,8 +1043,8 @@ mod tests {
         let dir = private_dir();
         let (p, _rx) = listening(dir.path(), "app", PEER_DEADLINE);
         drop(p);
-        assert!(!dir.path().join("app.sock").exists());
-        assert!(!dir.path().join("app.lock").exists());
+        assert!(!app_sock(dir.path()).exists());
+        assert!(!app_lock(dir.path()).exists());
         let unheard = primary(acquire(dir.path(), "app").unwrap());
         drop(unheard);
         let _p = primary(acquire(dir.path(), "app").unwrap());
@@ -773,7 +1057,7 @@ mod tests {
         let deadline = Duration::from_millis(300);
         let dir = private_dir();
         let (_p, rx) = listening(dir.path(), "app", deadline);
-        let socket = dir.path().join("app.sock");
+        let socket = app_sock(dir.path());
 
         // Closed without an answer, within `deadline` and well under the
         // 5 seconds the test allows.

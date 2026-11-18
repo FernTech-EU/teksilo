@@ -789,9 +789,16 @@ fn main() {
         Ok(Election::Primary(primary)) => Some(primary),
         // No runtime directory (Windows, a Unix without
         // $XDG_RUNTIME_DIR): run without one.
-        Err(e) => {
+        Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
             eprintln!("myapp: running as a separate instance: {e}");
             None
+        }
+        // Anything else (an instance that holds the name and does not
+        // answer, a directory that is not the user's): starting a second
+        // instance could let two of them write the same files.
+        Err(e) => {
+            eprintln!("myapp: cannot tell whether myapp is already running: {e}");
+            std::process::exit(1);
         }
     };
 
@@ -839,7 +846,17 @@ Notes:
   `forward_command_line` takes the token out of the environment, so call it
   before starting any thread.
 - A launch made while the primary is still starting waits for it, up to
-  10 seconds; the primary starts listening when its event loop starts.
+  10 seconds; the primary starts listening when its event loop starts. A
+  launch that stopped waiting has reported its failure, and its message is
+  dropped rather than delivered late.
+- `forward` returning `Ok` means the running instance took the message into
+  its event queue, not that it acted on it: an instance quitting at that
+  moment may end before its handler runs.
+- Only `io::ErrorKind::Unsupported` means "no single-instance service
+  here", where running as a separate instance is the fallback. Any other
+  error from `acquire` (`TimedOut` from an instance that holds the name and
+  does not answer, `PermissionDenied` for a directory that is not the
+  user's) is reported and the launch exits, as above.
 - **Same user only.** The runtime directory is the user's own and closed to
   others, the socket is `0600`, and each side checks the user id of the
   other end. That keeps other users out, not the user's own processes: any
@@ -847,18 +864,22 @@ Notes:
   like a command line typed by a stranger, and validate what it names
   before opening or writing it. Nothing in Teksilo runs or opens anything a
   message names.
-- Every message is bounded (1024 arguments, 256 KiB in all), and the
-  primary gives each connection 5 seconds in all, so a peer that sends
-  nothing, or a byte at a time, is dropped and the next launch served.
+- Every message is bounded (65536 arguments, 2 MiB in all, Linux's
+  `ARG_MAX`), and the primary gives each connection 5 seconds in all, so a
+  peer that sends nothing, or a byte at a time, is dropped and the next
+  launch served.
 - `key` names the instance. One per user is the application's name; one per
   data directory is a key made from that directory (a hash of its path).
+  Any key of up to 64 characters fits: the files in the runtime directory are
+  named from a hash of the key, not the key itself.
 - To let the user start a separate instance (a `--new-instance` option),
   read the option yourself and do not call `acquire`; nothing in Teksilo
   parses the command line.
-- The primary releases the name when its event loop ends. A process that
-  ends without unwinding (a crash, a kill, `std::process::exit`) leaves its
-  socket behind; the next launch wins the election, finds the socket stale
-  and removes it.
+- The primary releases the name when its event loop ends, after its last
+  settings flush, so the next launch reads the settings it wrote. A process
+  that ends without unwinding (a crash, a kill, `std::process::exit`) leaves
+  its socket behind; the next launch wins the election, finds the socket
+  stale and removes it.
 - Unix only for now: on Windows `acquire` returns
   `io::ErrorKind::Unsupported`, as it does for `AppPaths` with no runtime
   directory. `teksilo_platform::single_instance::acquire` takes the

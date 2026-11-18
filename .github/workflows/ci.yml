@@ -163,6 +163,14 @@ jobs:
           cargo check -p teksilo-theme-kde --all-targets --features bundled-fonts,system-fonts
           cargo test -p teksilo-theme-kde --features bundled-fonts,system-fonts
 
+      # The single-instance service is behind a feature nothing in the
+      # workspace turns on; its Unix socket code runs only here and on macOS
+      # (test-cross), and is linted in the clippy job.
+      - name: Test single-instance
+        run: |
+          cargo test -p teksilo-platform --features single-instance --lib single_instance
+          cargo test -p teksilo-app --features single-instance --lib single_instance
+
       # cargo-teksilo's `semantic` feature (search embeddings) pulls in
       # fastembed -> ort (ONNX Runtime) plus the onig_sys / esaxx-rs C/C++ sys
       # crates. If that build ever breaks on some platform, `cargo install
@@ -310,6 +318,8 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
+          # For the single-instance lint below.
+          components: clippy
 
       # This job builds the whole workspace, so it owns the write for its
       # platform's key; the Automation job on the same platform shares that key
@@ -344,6 +354,18 @@ jobs:
 
       - name: Test cargo-teksilo (semantic feature)
         run: cargo test -p cargo-teksilo
+
+      # The single-instance feature, off in every workspace build: the
+      # `getpeereid` path on macOS, and on Windows (where `acquire` answers
+      # `Unsupported`) a build that must stay free of warnings.
+      - name: Lint single-instance
+        run: cargo clippy -p teksilo-platform -p teksilo-app --all-targets --features teksilo-platform/single-instance,teksilo-app/single-instance -- -D warnings -A deprecated
+
+      - name: Test single-instance
+        if: matrix.os == 'macos-latest'
+        run: |
+          cargo test -p teksilo-platform --features single-instance --lib single_instance
+          cargo test -p teksilo-app --features single-instance --lib single_instance
 
   # The automation bridge is the one subsystem whose *transport* differs per OS
   # — a Unix socket on Linux/macOS, a named pipe on Windows — so it is the one
@@ -894,6 +916,10 @@ jobs:
       # default build turns on.
       - name: Lint (live-image-timings)
         run: cargo clippy -p teksilo-app -p live-image-demo -p live-image-bench --all-targets --features teksilo-app/live-image-timings -- -D warnings -A deprecated
+
+      # The single-instance service exists only behind its feature.
+      - name: Lint (single-instance)
+        run: cargo clippy -p teksilo-platform -p teksilo-app --all-targets --features teksilo-platform/single-instance,teksilo-app/single-instance -- -D warnings -A deprecated
 
   # The off-thread wake protocols are lock-free, and a lost wake there is a
   # picture that freezes until something unrelated redraws, which no ordinary

@@ -19,9 +19,13 @@
 //!
 //! ## Where it works
 //!
-//! On Unix (Linux, macOS, the BSDs) the name is a Unix-domain socket,
-//! `<key>.sock`, beside a lock file, `<key>.lock`, in the directory given to
-//! [`acquire`]. On Windows [`acquire`] returns
+//! On Unix (Linux, macOS, the BSDs) the name is a Unix-domain socket beside
+//! a lock file, in the directory given to [`acquire`]. Their names are made
+//! from the key (16 hexadecimal digits of its 64-bit FNV-1a hash, so a
+//! 64-character key fits the length a socket path is held to under the long
+//! macOS per-user temporary directory); they are an implementation detail,
+//! not something to look for. Two keys with the same hash, a chance of
+//! 2^-64, would share an instance. On Windows [`acquire`] returns
 //! [`io::ErrorKind::Unsupported`]: a named pipe would serve, but the check
 //! that the pipe found was made by the same user (a pipe name is global, so
 //! another user may have taken it first) is not written yet.
@@ -37,10 +41,10 @@
 //! untrusted input, to validate like a command line. Nothing here runs or
 //! opens anything a message names.
 //!
-//! Every exchange is bounded: at most 1024 arguments, 256 KiB in all and an
-//! activation token of 1 KiB; the primary gives each connection 5 seconds
-//! in all, so a peer that sends nothing, or one byte at a time, is dropped
-//! and the next connection served.
+//! Every exchange is bounded: at most 65536 arguments, 2 MiB in all (Linux's
+//! `ARG_MAX`) and an activation token of 1 KiB; the primary gives each
+//! connection 5 seconds in all, so a peer that sends nothing, or one byte at a
+//! time, is dropped and the next connection served.
 //!
 //! ## A process that ends without unwinding
 //!
@@ -54,6 +58,8 @@ use std::ffi::OsString;
 use std::io;
 use std::path::Path;
 
+// Off Unix only `InstanceMessage` is used; the rest serves `unix` and tests.
+#[cfg_attr(not(unix), allow(dead_code))]
 mod protocol;
 #[cfg(unix)]
 mod unix;
@@ -81,11 +87,16 @@ pub enum Election {
 /// else being refused with [`io::ErrorKind::InvalidInput`]. Two processes
 /// with the same directory and key are instances of one application.
 ///
-/// A process that finds an instance starting (it holds the lock and has not
-/// yet bound its socket) waits for it, for at most 5 seconds, and then
-/// fails with [`io::ErrorKind::TimedOut`]. A file at the socket's place that
-/// is not a socket of this user is never removed: the election fails with
+/// A process that finds an instance starting (it holds the lock and has not yet
+/// bound its socket), or one with no room for another connection (it has
+/// stopped accepting them), waits for it, for at most 5 seconds in all, and
+/// then fails with [`io::ErrorKind::TimedOut`]. A file at the socket's place
+/// that is not a socket of this user is never removed: the election fails with
 /// [`io::ErrorKind::AlreadyExists`].
+///
+/// The socket's path must fit the system's limit (about 100 bytes): a
+/// directory with a longer path is refused with
+/// [`io::ErrorKind::InvalidInput`].
 ///
 /// [`io::ErrorKind::Unsupported`] on Windows and on any platform that is not
 /// Unix; see the module documentation.
@@ -112,7 +123,8 @@ pub fn acquire(endpoint_dir: &Path, key: &str) -> io::Result<Election> {
 /// Connections that arrive before [`listen`](Self::listen) wait, unanswered,
 /// and are served once it is called: a second launch made while the first
 /// is still starting is not lost, as long as the first starts listening
-/// within the 10 seconds the second waits for its answer.
+/// within the 10 seconds the second waits for its answer. One that stopped
+/// waiting has reported a failure, and its message is dropped.
 ///
 /// Dropping it stops serving, removes the socket and the lock file, and
 /// frees the name for the next [`acquire`]. A message being served as it is
@@ -134,7 +146,9 @@ impl PrimaryInstance {
     /// event loop). A second launch learns that its message was handed over
     /// once `on_message` returns, so keep it short.
     ///
-    /// Fails if the thread cannot be started, or when called a second time.
+    /// Fails when called again after it succeeded, and when the thread
+    /// cannot be started: the instance then keeps its socket and the name,
+    /// and `listen` may be called again.
     pub fn listen(
         &mut self,
         on_message: impl Fn(InstanceMessage) + Send + 'static,
@@ -163,6 +177,13 @@ pub struct SecondaryInstance {
 impl SecondaryInstance {
     /// Hand `args`, `cwd` and `activation_token` to the running instance and
     /// wait for it to take them, for at most 10 seconds.
+    ///
+    /// `Ok` means the running instance took the message (`teksilo-app` posts
+    /// it to its event queue), not that it acted on it: an instance that is
+    /// shutting down as it takes it may end before handling it. A launch that
+    /// stopped waiting is not delivered, unless it stopped in the moment
+    /// between the running instance checking that it still waits and handing
+    /// the message over.
     ///
     /// Fails with [`io::ErrorKind::InvalidInput`] before sending anything
     /// when the message is over a bound (see the module documentation), with

@@ -40,10 +40,12 @@ use std::path::{Path, PathBuf};
 pub(super) const VERSION: u8 = 1;
 
 /// The most arguments one request may carry.
-pub(super) const MAX_ARGS: usize = 1024;
+pub(super) const MAX_ARGS: usize = 65536;
 
-/// The most bytes one request may hold, everything included.
-pub(super) const MAX_REQUEST: usize = 256 * 1024;
+/// The most bytes one request may hold, everything included: Linux's
+/// `ARG_MAX` with the default 8 MiB stack, so an ordinary large command line
+/// (a few thousand files from a file manager) fits.
+pub(super) const MAX_REQUEST: usize = 2 * 1024 * 1024;
 
 /// The longest activation token, in bytes. Wayland and X11 tokens are a few
 /// dozen.
@@ -175,7 +177,9 @@ pub(super) fn decode_request(bytes: &[u8]) -> Result<InstanceMessage, DecodeErro
     if count > MAX_ARGS {
         return Err(DecodeError::Malformed("too many arguments"));
     }
-    let mut args = Vec::with_capacity(count);
+    // Each argument takes at least its 4-byte length, so the bytes left
+    // bound the count, not the count the sender claims.
+    let mut args = Vec::with_capacity(count.min(cursor.0.len() / 4));
     for _ in 0..count {
         args.push(os_string(cursor.bytes()?)?);
     }
@@ -336,7 +340,8 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
 
         let as_many = vec![OsString::from("x"); MAX_ARGS];
-        assert!(encode_request(&as_many, Path::new("/"), None).is_ok());
+        let bytes = encode_request(&as_many, Path::new("/"), None).unwrap();
+        assert_eq!(decode_request(&bytes).unwrap().args.len(), MAX_ARGS);
 
         let token = "t".repeat(MAX_TOKEN + 1);
         let err = encode_request(&[], Path::new("/"), Some(&token)).unwrap_err();

@@ -5731,10 +5731,6 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // Here rather than after `run`'s loop, which macOS never reaches.
         #[cfg(all(feature = "automation", debug_assertions))]
         crate::automation_bridge::retract_endpoint();
-        #[cfg(feature = "single-instance")]
-        {
-            self.single_instance = None;
-        }
         // On macOS this is the last moment: AppKit ends the process right
         // after its `applicationWillTerminate:`, which reaches here, so
         // `run` never returns to flush, and nothing the application holds
@@ -5755,6 +5751,13 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         #[cfg(unix)]
         {
             self.quit_signals = None;
+        }
+        // Last: a launch that wins the name from now on reads the settings
+        // as they were written above, and no flush of this instance follows
+        // to overwrite what it writes.
+        #[cfg(feature = "single-instance")]
+        {
+            self.single_instance = None;
         }
     }
 
