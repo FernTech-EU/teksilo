@@ -5022,10 +5022,17 @@ impl WindowManager {
     pub fn drain_pending_modal_dismissals(&mut self) -> Vec<TeksiloWindowId> {
         let mut windows_to_close = Vec::new();
         for managed in self.windows.values_mut() {
-            if managed.tree.drain_pending_modal_dismissal()
-                && (managed.modal || self.modal_hosts.contains(&managed.teksilo_id))
-            {
+            if !managed.tree.drain_pending_modal_dismissal() {
+                continue;
+            }
+            if managed.modal || self.modal_hosts.contains(&managed.teksilo_id) {
                 windows_to_close.push(managed.teksilo_id);
+            } else {
+                #[cfg(debug_assertions)]
+                eprintln!(
+                    "teksilo-app: dismiss_modal called in a window with no modal open in its \
+                     tree and that is not a modal window itself; nothing closed"
+                );
             }
         }
         if let Some(tree) = &mut self.app_tree

@@ -798,6 +798,18 @@ For the general case (may land in-tree or in a native window),
 `ctx.present_modal(request)` picks the presentation at dispatch time
 based on `ModalPresentation::Auto` and platform capability.
 
+`ctx.dismiss_modal()` closes a dialog whichever presentation it got. From a
+widget inside an in-window dialog (a `Centered` or top-placed overlay: a
+`ModalRequest` presented in the window, a `MessageBox`, the command palette),
+that dialog closes. From a context outside any dialog (the completion of a
+`spawn_local_with`, a `run_after_mount` action), the topmost dialog open in
+the window closes, so a dialog can close itself once the work it started has
+succeeded. With no dialog open in its tree, a native dialog window closes
+itself, and any other window closes nothing (a debug build says so). An
+in-window dialog closed either way runs its dismiss callback with
+`DismissReason::Programmatic`. To close one particular dialog whatever else is
+open, close it by identity with `ctx.dismiss_overlay_by_content(content)`.
+
 Commands sent in a dialog route the same way whichever presentation it got.
 A native modal window has a tree of its own: an intent sent there, or a key
 pressed there, reaches that tree's actions and shortcuts first. A dialog

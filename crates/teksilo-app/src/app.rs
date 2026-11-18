@@ -8491,6 +8491,28 @@ mod tests {
     }
 
     #[test]
+    fn dismiss_modal_from_an_async_completion_closes_an_in_tree_message_box() {
+        // A completion of `spawn_local_with` gets a context anchored at the
+        // content root, outside the dialog: the dialog must close all the
+        // same, and report as any programmatic dismissal does.
+        let seen = message_box_dismissed_by(a_question(), |tree| {
+            tree.run_with_event_context(&mut teksilo_core::NoopWindowOps, |ctx| {
+                ctx.dismiss_modal();
+            });
+            assert!(
+                !tree.has_pending_modal_dismissal(),
+                "the dialog in the tree was closed, so the window is not asked to"
+            );
+        })
+        .expect("the dismissal reports its result");
+
+        assert_eq!(
+            seen.dismissal,
+            teksilo_widgets::MessageBoxDismissal::Programmatic
+        );
+    }
+
+    #[test]
     fn clicking_outside_an_in_tree_message_box_reports_its_result() {
         let seen = message_box_dismissed_by(a_question(), click_outside);
 

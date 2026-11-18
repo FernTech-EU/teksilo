@@ -3722,7 +3722,10 @@ impl WidgetTree {
             let modal = self.intent_walk(source_widget, &[]).2;
             (self.intent_route(source_widget, &[], true).crossings, modal)
         };
-        if ctx.dismiss_modal && !self.dismiss_modal_for_source(source_widget, &mut *ops) {
+        if ctx.dismiss_modal
+            && !self.dismiss_modal_for_source(source_widget, &mut *ops)
+            && !self.dismiss_topmost_modal(&mut *ops)
+        {
             self.pending_modal_dismissal = true;
         }
         for callback in ctx.idle_callbacks {

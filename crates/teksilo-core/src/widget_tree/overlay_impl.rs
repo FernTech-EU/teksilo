@@ -1171,14 +1171,39 @@ impl WidgetTree {
         let Some(modal_overlay) = self.modal_overlay_for_widget(source_widget) else {
             return false;
         };
+        self.dismiss_modal_overlay(modal_overlay, ops);
+        true
+    }
 
+    /// Close the topmost in-tree modal that is not already on its way out,
+    /// for a `dismiss_modal` whose context has no modal of its own (an async
+    /// completion, a post-mount action): `false` when none is open.
+    pub(super) fn dismiss_topmost_modal(&mut self, ops: &mut dyn crate::window::WindowOps) -> bool {
+        let Some(modal_overlay) = self
+            .overlay_manager
+            .stack
+            .iter()
+            .rev()
+            .find(|overlay| overlay.placement.is_modal() && !overlay.is_dismissing())
+            .map(|overlay| overlay.id)
+        else {
+            return false;
+        };
+        self.dismiss_modal_overlay(modal_overlay, ops);
+        true
+    }
+
+    fn dismiss_modal_overlay(
+        &mut self,
+        modal_overlay: crate::overlay::OverlayId,
+        ops: &mut dyn crate::window::WindowOps,
+    ) {
         let mark = self.dismissal_mark();
         let (dismissed, focus_restore) = self
             .overlay_manager
             .dismiss_with_focus_restore(modal_overlay);
         self.dormant_dismissed_content(&dismissed, &mut *ops);
         self.return_focus_after_dismissal(focus_restore, mark, &mut *ops);
-        true
     }
 
     pub fn is_descendant_of(&self, widget_id: WidgetId, ancestor: WidgetId) -> bool {

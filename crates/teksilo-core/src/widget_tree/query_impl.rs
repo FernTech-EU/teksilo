@@ -587,4 +587,57 @@ mod tests {
         assert!(tree.drain_pending_modal_dismissal());
         assert!(!tree.has_pending_modal_dismissal());
     }
+
+    #[test]
+    fn dismiss_modal_from_outside_any_modal_closes_the_topmost_in_tree_modal() {
+        // An async completion and a post-mount action both get a context
+        // anchored at the content root, outside the dialog they close.
+        let mut tree = WidgetTree::new();
+        let page = tree.add(FillWidget::new().label("Page"));
+        let lower = tree.add(FixedWidget(120.0, 48.0));
+        let upper = tree.add(FixedWidget(120.0, 48.0));
+        tree.layout(SizeProposal::exact(320.0, 200.0));
+        for content in [lower, upper] {
+            tree.show_overlay(OverlayRequest::new(
+                content,
+                page,
+                OverlayPlacement::Centered,
+                DismissBehavior::Manual,
+            ));
+        }
+        tree.layout(SizeProposal::exact(320.0, 200.0));
+        assert_eq!(tree.active_overlays().len(), 2);
+
+        tree.queue_mount_action(Box::new(|ctx| ctx.dismiss_modal()));
+        tree.run_mount_actions(&mut crate::window::NoopWindowOps);
+        assert_eq!(
+            tree.overlay_manager().active_content_ids(),
+            vec![lower],
+            "the topmost modal closes, and only it"
+        );
+
+        tree.run_with_event_context(&mut crate::window::NoopWindowOps, |ctx| {
+            ctx.dismiss_modal();
+        });
+        assert!(tree.active_overlays().is_empty());
+        assert!(
+            !tree.has_pending_modal_dismissal(),
+            "a modal in the tree was closed: the window is not asked to close"
+        );
+    }
+
+    #[test]
+    fn dismiss_modal_from_outside_with_no_in_tree_modal_queues_window_dismissal() {
+        // A native modal window's own tree hosts no in-tree modal: the
+        // dismissal still asks the window to close.
+        let mut tree = WidgetTree::new();
+        tree.add(FillWidget::new().label("Page"));
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+
+        tree.run_with_event_context(&mut crate::window::NoopWindowOps, |ctx| {
+            ctx.dismiss_modal();
+        });
+
+        assert!(tree.drain_pending_modal_dismissal());
+    }
 }

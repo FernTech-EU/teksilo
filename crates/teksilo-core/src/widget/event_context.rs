@@ -2189,6 +2189,26 @@ impl<'ops> EventContext<'ops> {
 
     /// Dismiss the current framework-owned modal presentation.
     ///
+    /// Which one closes depends on where this context comes from:
+    ///
+    /// - From a widget inside an in-tree modal (a `Centered` or `TopCenter`
+    ///   overlay: a dialog, a message box, the command palette, any
+    ///   [`ModalRequest`](crate::modal::ModalRequest) presented in the
+    ///   window), that modal closes.
+    /// - From a context outside any modal (an async completion, a
+    ///   [`run_after_mount`](crate::BuildContext::run_after_mount) action, a
+    ///   widget on the page), the topmost in-tree modal of this window
+    ///   closes, when one is open.
+    /// - Otherwise the window itself is asked to close when it is a native
+    ///   modal window; in any other window nothing closes (a debug build
+    ///   says so on stderr).
+    ///
+    /// An in-tree modal closes the same way on every route: its dismiss
+    /// callback runs with [`DismissReason::Programmatic`](crate::overlay::DismissReason::Programmatic)
+    /// and focus goes back to where it was taken from. To close one dialog
+    /// whatever else is open, close it by identity with
+    /// [`dismiss_overlay_by_content`](Self::dismiss_overlay_by_content).
+    ///
     /// For a modal presented in the window, an intent this handler sends is
     /// dispatched once the modal has closed, so the modal's own actions no
     /// longer take it: [`send_intent`](Self::send_intent) walks on from the
