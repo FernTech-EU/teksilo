@@ -138,6 +138,42 @@ impl PrefixSumOffsets {
         delta
     }
 
+    /// Insert `n` unmeasured rows before row `at` (clamped to the end), every
+    /// row from `at` on keeping its height one slot further down.
+    pub(crate) fn insert_rows(&mut self, at: usize, n: usize) {
+        let at = at.min(self.heights.len());
+        self.heights
+            .splice(at..at, std::iter::repeat_n(self.estimated, n));
+        self.measured.splice(at..at, std::iter::repeat_n(false, n));
+        self.offsets.resize(self.heights.len() + 1, 0.0);
+        self.mark_dirty(at);
+    }
+
+    /// Remove rows `range` (clamped), the rows after it keeping their heights.
+    pub(crate) fn remove_rows(&mut self, range: std::ops::Range<usize>) {
+        let end = range.end.min(self.heights.len());
+        let start = range.start.min(end);
+        self.heights.drain(start..end);
+        self.measured.drain(start..end);
+        self.offsets.truncate(self.heights.len() + 1);
+        self.mark_dirty(start);
+    }
+
+    /// Move the `count` rows at `from` so the first lands at `to`, a
+    /// post-removal index as in `DataChange::ItemsMoved`. Every row keeps its
+    /// own height. Out-of-range blocks are ignored.
+    pub(crate) fn move_rows(&mut self, from: usize, to: usize, count: usize) {
+        let rows = self.heights.len();
+        if count == 0 || from + count > rows || to + count > rows || from == to {
+            return;
+        }
+        let heights: Vec<f32> = self.heights.drain(from..from + count).collect();
+        let measured: Vec<bool> = self.measured.drain(from..from + count).collect();
+        self.heights.splice(to..to, heights);
+        self.measured.splice(to..to, measured);
+        self.mark_dirty(from.min(to));
+    }
+
     /// Invalidate rows in `[start, end)` (clamped) back to the estimate.
     pub(crate) fn invalidate(&mut self, start: usize, end: usize) {
         let end = end.min(self.heights.len());
@@ -284,6 +320,46 @@ mod tests {
         assert_eq!(p.row_top(2), 156.0); // 98 + 50 + 8
         // Re-setting to the same value yields zero delta (no oscillation).
         assert_eq!(p.set_row_height(0, 90.0), 0.0);
+    }
+
+    #[test]
+    fn inserted_rows_push_measured_heights_down_with_their_rows() {
+        let mut p = PrefixSumOffsets::new(3, 10.0, 0.0, 0.0, 0.0);
+        p.set_row_height(0, 40.0);
+        p.set_row_height(2, 70.0);
+        p.insert_rows(1, 2);
+        assert_eq!(p.rows(), 5);
+        assert_eq!(p.row_height(0), 40.0);
+        assert!(!p.is_measured(1) && !p.is_measured(2));
+        assert_eq!(p.row_height(1), 10.0);
+        assert_eq!(p.row_height(4), 70.0);
+        assert!(p.is_measured(4));
+        assert_eq!(p.row_top(4), 40.0 + 10.0 + 10.0 + 10.0);
+        assert_eq!(p.total(), 140.0);
+    }
+
+    #[test]
+    fn removed_rows_take_only_their_own_heights() {
+        let mut p = PrefixSumOffsets::new(4, 10.0, 0.0, 0.0, 0.0);
+        p.set_row_height(3, 70.0);
+        p.remove_rows(0..2);
+        assert_eq!(p.rows(), 2);
+        assert_eq!(p.row_height(1), 70.0);
+        assert!(p.is_measured(1));
+        assert_eq!(p.row_top(1), 10.0);
+        assert_eq!(p.total(), 80.0);
+    }
+
+    #[test]
+    fn moved_rows_keep_their_heights() {
+        let mut p = PrefixSumOffsets::new(4, 10.0, 0.0, 0.0, 0.0);
+        p.set_row_height(0, 40.0);
+        // Row 0 to the end: removed, then reinserted at post-removal index 3.
+        p.move_rows(0, 3, 1);
+        assert_eq!(p.row_height(3), 40.0);
+        assert!(p.is_measured(3));
+        assert_eq!(p.row_top(3), 30.0);
+        assert_eq!(p.total(), 70.0);
     }
 
     #[test]

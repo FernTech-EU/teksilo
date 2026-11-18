@@ -31,6 +31,7 @@ use std::rc::Rc;
 
 use teksilo_canvas::Rect;
 use teksilo_core::widget::EventContext;
+use teksilo_data::DataChange;
 
 use super::row_offsets::PrefixSumOffsets;
 
@@ -276,6 +277,71 @@ impl RowMetrics {
             }
             None => self.reset(new_count),
         }
+    }
+
+    /// [`apply_divergence`](Self::apply_divergence) for a view that keeps
+    /// the reader's place across model changes.
+    ///
+    /// Measured heights belong to rows, not to indices: rows inserted,
+    /// removed or moved above a measured row leave its height in place at its
+    /// new index, and an updated row loses only its own. Dropping everything
+    /// from the first changed index instead would put every row below an
+    /// insertion back at the estimate, and the row the reader is looking at
+    /// would jump by the error. Exact heights re-derive from the callback,
+    /// which is keyed by index, as `apply_divergence` does.
+    ///
+    /// The row count follows the change itself rather than `new_count`: an
+    /// observer handed several changes in a row (`ListModel::reconcile_by_key`)
+    /// sees the model's final length for each, while every change's indices
+    /// are relative to the list as the previous one left it. A change naming
+    /// rows the table does not hold, or a reset, falls back to
+    /// `apply_divergence(divergence, new_count)`.
+    pub(crate) fn apply_change(
+        &mut self,
+        change: &DataChange,
+        divergence: Option<usize>,
+        new_count: usize,
+    ) {
+        let rows = self.count;
+        let count = match change {
+            DataChange::ItemsInserted { range } if range.start <= rows => rows + range.len(),
+            DataChange::ItemsRemoved { range } if range.end <= rows => rows - range.len(),
+            DataChange::ItemsMoved { from, to, count }
+                if from + count <= rows && to + count <= rows =>
+            {
+                rows
+            }
+            DataChange::ItemUpdated { index } if *index < rows => rows,
+            DataChange::WindowLoaded { range } if range.end <= rows => rows,
+            _ => return self.apply_divergence(divergence, new_count),
+        };
+        match (&self.mode, &mut self.offsets) {
+            (RowMode::AutoMeasure { .. }, Some(off)) => {
+                match change {
+                    DataChange::ItemsInserted { range } => {
+                        off.insert_rows(range.start, range.len())
+                    }
+                    DataChange::ItemsRemoved { range } => off.remove_rows(range.clone()),
+                    DataChange::ItemsMoved { from, to, count } => off.move_rows(*from, *to, *count),
+                    DataChange::ItemUpdated { index } => off.invalidate(*index, *index + 1),
+                    DataChange::WindowLoaded { range } => off.invalidate(range.start, range.end),
+                    DataChange::Reset => {}
+                }
+                self.count = count;
+            }
+            _ => {
+                self.resize(count);
+                if let Some(d) = divergence {
+                    self.invalidate_from(d);
+                }
+            }
+        }
+    }
+
+    /// The number of rows the table holds: the model's length as of the last
+    /// layout pass or model change, whichever came last.
+    pub(crate) fn count(&self) -> usize {
+        self.count
     }
 
     /// Total content height for `count` rows (self-syncs the row count).

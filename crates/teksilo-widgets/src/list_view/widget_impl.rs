@@ -132,7 +132,13 @@ impl<T: 'static> Widget for ListView<T> {
             let row_sel = self.row_selection.clone();
             let focused = self.focused_index.clone();
             let row_actions = self.row_actions.clone();
+            let anchor_geometry = self.keep_position_on_insert.then(|| self.geometry());
+            let scroll_y = self.scroll_y.clone();
+            let viewport_height = self.viewport_height.clone();
             move |change| {
+                let anchor = anchor_geometry
+                    .as_ref()
+                    .and_then(|geometry| super::ReadingAnchor::take(geometry, scroll_y.get()));
                 // Keep row metrics in step with the data: rows before
                 // the first changed index keep their (seeded or
                 // measured) heights, the rest re-derive.
@@ -148,9 +154,15 @@ impl<T: 'static> Widget for ListView<T> {
                     // their real divergence through the side-channel.
                     DataChange::Reset => (first_changed)(),
                 };
-                metrics
-                    .borrow_mut()
-                    .apply_divergence(divergence, (len_fn)());
+                if anchor_geometry.is_some() {
+                    metrics
+                        .borrow_mut()
+                        .apply_change(change, divergence, (len_fn)());
+                } else {
+                    metrics
+                        .borrow_mut()
+                        .apply_divergence(divergence, (len_fn)());
+                }
                 // The provider's counts follow the model, so they are read
                 // again — lazily, on the next geometric query, by which time
                 // a provider observing the same model has caught up too.
@@ -158,6 +170,13 @@ impl<T: 'static> Widget for ListView<T> {
                 // above survives a regrouping untouched.
                 if let Some(ref sections) = sections {
                     sections.invalidate();
+                }
+                // Before the selection follows the change: a focused view
+                // reveals its selected row from the selection's observer, and
+                // must find it where the reader left it, not past the
+                // viewport at the old offset.
+                if let (Some(anchor), Some(geometry)) = (anchor, anchor_geometry.as_ref()) {
+                    anchor.restore(change, geometry, &scroll_y, viewport_height.get());
                 }
                 // Keep selection in step: index-shift (index model) or prune
                 // orphaned keys (keyed model).

@@ -371,6 +371,40 @@ range is long enough to hold it, it is a one-shot, it stands down the moment
 anything else moves the scroll, and it never yanks a reader back after a later
 reflow.
 
+### Keeping the reader's place
+
+A chat history loads older messages when the reader scrolls to the top, and
+inserts them at index 0. By default a `ListView` keeps its offset as a number,
+so the new page slides into view and the message the reader was on moves down
+by its height. `ListView::keep_position_on_insert(true)` keeps the row at the
+top of the viewport where it is on screen instead, as a browser's
+`overflow-anchor` does:
+
+```rust
+let history = ListView::new(messages.clone(), |_i, message, _selected| {
+    Box::new(MessageBubble::new(message))
+})
+.auto_item_height(64.0)
+.keep_position_on_insert(true);
+
+// Later, when the older page arrives:
+messages.reconcile_by_key(older_then_current, |m| m.id);
+```
+
+Rows inserted at or before the first visible row, removed before it, or moved
+across it shift the offset by their height, in the layout pass that shows them,
+so no frame shows the new rows in the reader's place. A change after that row
+moves nothing. With `item_height` or `item_height_fn` the shift is exact at
+once; with `auto_item_height` an inserted row counts at the estimate until it
+is measured, and the measurement corrects the offset as it does for any row
+above the viewport, while the rows already there keep their measured heights.
+
+The view anchors on the rows a change names, so the model has to name them:
+`ListModel::insert` and `reconcile_by_key` do (the latter reports a page put in
+front as one insertion). `replace_all` and `clear` report only that everything
+may have changed, and leave the offset alone. A `ListViewHandle` reveal asked
+for in the same turn is applied after the shift and wins.
+
 ## 6. Touch, pan, and kinetic behaviour
 
 A finger scrolls a `ScrollArea` because the area **declares** itself a pan

@@ -421,6 +421,8 @@ pub struct ListView<T: 'static> {
     /// after its measure pass. Created with the view so a handle taken before
     /// mount reaches every pane the view builds.
     reveal: SharedRowReveal,
+    /// See [`keep_position_on_insert`](Self::keep_position_on_insert).
+    keep_position_on_insert: bool,
 }
 
 impl<T: 'static> ListView<T> {
@@ -554,6 +556,7 @@ impl<T: 'static> ListView<T> {
             pinned_header_id: None,
             pane_built_headers: Rc::new(Cell::new((0, 0))),
             reveal: RowReveal::new(),
+            keep_position_on_insert: false,
         }
     }
 
@@ -630,6 +633,41 @@ impl<T: 'static> ListView<T> {
     pub fn auto_item_height(mut self, estimated: f32) -> Self {
         self.height_source = HeightSource::Auto { estimated };
         self.remake_metrics();
+        self
+    }
+
+    /// Keep the reader's place when rows are inserted or removed above it
+    /// (default `false`).
+    ///
+    /// With it on, the row at the top of the viewport (the first one at
+    /// least partly visible) keeps its position on screen across every
+    /// model change that says which rows it touched: rows inserted at or
+    /// before its index, removed before it, or moved across it shift the
+    /// scroll offset by their height, in the same layout pass that shows
+    /// them. A change after that row moves nothing, as without the option.
+    /// This is a chat history loading older messages at index 0, or the
+    /// browser's `overflow-anchor`.
+    ///
+    /// - With [`item_height`](Self::item_height) or
+    ///   [`item_height_fn`](Self::item_height_fn) the shift is exact at once.
+    /// - With [`auto_item_height`](Self::auto_item_height) an inserted row
+    ///   counts at the estimate until it is measured, and the measurement
+    ///   then corrects the offset as it does for any row above the viewport.
+    ///   The rows already there keep their measured heights at their new
+    ///   indices, so the reader's row does not move while they settle.
+    /// - When the reader's row is itself removed, the first row after the
+    ///   removed ones takes its place; when it is itself moved, the view
+    ///   does not follow it.
+    /// - A change that only says the whole list may differ
+    ///   (`DataChange::Reset`, from `ListModel::replace_all` or `clear`)
+    ///   carries no rows to anchor on and leaves the offset alone. Use
+    ///   `ListModel::reconcile_by_key`, which reports the rows it inserts,
+    ///   removes and moves, or `ListModel::insert`.
+    ///
+    /// A [`ListViewHandle`] reveal pending at the same time still wins: it is
+    /// applied after the shift, in the same pass.
+    pub fn keep_position_on_insert(mut self, keep: bool) -> Self {
+        self.keep_position_on_insert = keep;
         self
     }
 
@@ -1527,6 +1565,71 @@ impl ListViewHandle {
     }
 }
 
+/// The row at the top of the viewport and its content-space top, taken just
+/// before a model change reaches the row table, for
+/// [`ListView::keep_position_on_insert`].
+#[derive(Debug, Clone, Copy)]
+struct ReadingAnchor {
+    index: usize,
+    top: f32,
+}
+
+impl ReadingAnchor {
+    /// The first row at least partly visible at `scroll`.
+    ///
+    /// Read against the table's own row count, not the model's: the model has
+    /// already changed when its observer runs, and the change's indices are
+    /// relative to the list the table still describes.
+    fn take(geometry: &sections::ListGeometry, scroll: f32) -> Option<Self> {
+        let count = geometry.metrics().borrow().count();
+        if count == 0 {
+            return None;
+        }
+        let (index, _) = geometry.visible_range(scroll, 0.0, count, 0);
+        (index < count).then(|| Self {
+            index,
+            top: geometry.item_span(index, count).0,
+        })
+    }
+
+    /// Shift `scroll_y` by how far the row moved in content space, once
+    /// `change` has been applied to the row table.
+    fn restore(
+        self,
+        change: &DataChange,
+        geometry: &sections::ListGeometry,
+        scroll_y: &Signal<f32>,
+        viewport: f32,
+    ) {
+        let count = geometry.metrics().borrow().count();
+        let Some(index) = self.index_after(change).filter(|&i| i < count) else {
+            return;
+        };
+        let top = geometry.item_span(index, count).0;
+        let max = (geometry.total_height(count) - viewport).max(0.0);
+        let scroll = scroll_y.get();
+        let target = (scroll + top - self.top).clamp(0.0, max);
+        if (target - scroll).abs() > 0.001 {
+            scroll_y.set(target);
+        }
+    }
+
+    /// The row that stands where the anchor stood once `change` is applied.
+    fn index_after(self, change: &DataChange) -> Option<usize> {
+        match change {
+            // The first row after the removed ones takes the reader's place.
+            DataChange::ItemsRemoved { range } if range.contains(&self.index) => Some(range.start),
+            // Following the reader's own row would scroll to wherever it went.
+            DataChange::ItemsMoved { from, count, .. }
+                if (*from..from + count).contains(&self.index) =>
+            {
+                None
+            }
+            _ => teksilo_data::data_change::adjust_single_index_for_change(self.index, change),
+        }
+    }
+}
+
 impl<T: 'static> std::fmt::Debug for ListView<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ListView")
@@ -1546,6 +1649,9 @@ mod checkbox_keyboard_tests;
 
 #[cfg(test)]
 mod handle_tests;
+
+#[cfg(test)]
+mod keep_position_tests;
 
 #[cfg(test)]
 mod cursor_tests;
