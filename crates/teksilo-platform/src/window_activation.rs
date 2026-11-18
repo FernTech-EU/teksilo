@@ -127,6 +127,37 @@ pub fn apply_creation_token(
     attrs
 }
 
+/// The activation token this process's launcher gave it, taken out of the
+/// environment: `XDG_ACTIVATION_TOKEN` (Wayland), else `DESKTOP_STARTUP_ID`
+/// (X11). Both variables are removed, so a child this process starts does
+/// not inherit a token that is spent. `None` off Wayland/X11, and when
+/// neither is set.
+///
+/// For a process with no window of its own to give the token to: a second
+/// launch handing it to the running instance (see
+/// [`SecondaryInstance::forward_command_line`](crate::single_instance::SecondaryInstance::forward_command_line)).
+/// A window built with `WindowConfig::activate_from_env` takes it by itself.
+///
+/// Call it before any other thread is started (from `main`, before building
+/// the application): removing an environment variable while another thread
+/// reads the environment is undefined behaviour on most Unix C libraries.
+#[cfg(feature = "single-instance")]
+pub fn activation_token_from_env() -> Option<String> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let token = ["XDG_ACTIVATION_TOKEN", "DESKTOP_STARTUP_ID"]
+            .into_iter()
+            .filter_map(|name| std::env::var(name).ok())
+            .find(|token| !token.is_empty());
+        winit::platform::startup_notify::reset_activation_token_env();
+        token
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        None
+    }
+}
+
 /// Ask the compositor for an `xdg_activation_v1` token for `window` (to hand to
 /// another window or a child process). Returns `true` if a request was issued —
 /// the token then arrives via `WindowEvent::ActivationTokenDone`. Returns `false`

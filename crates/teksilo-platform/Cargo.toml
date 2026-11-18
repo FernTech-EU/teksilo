@@ -87,6 +87,13 @@ native-menu = []
 # crate: it uses the `windows` bindings this crate already links.
 automation = ["dep:teksilo-automation"]
 
+# One running instance per user (`single_instance`): the election on a
+# private local socket, and the message a second launch hands the first.
+# GUI-free (no window, no event loop): the election uses `std` and, on
+# Unix, the `libc` this crate already links. Off by default; `teksilo-app` and `teksilo` forward it under the
+# same name.
+single-instance = []
+
 # `PlatformWindow::live_texture_timings`: the renderer's histograms of its
 # live pass, in release builds too. Forwards teksilo-render's feature.
 live-image-timings = ["teksilo-render/live-image-timings"]

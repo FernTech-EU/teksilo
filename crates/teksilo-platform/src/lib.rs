@@ -25,6 +25,8 @@ pub mod pen;
 pub mod pointer_backend;
 pub mod safe_area;
 pub mod session;
+#[cfg(feature = "single-instance")]
+pub mod single_instance;
 pub mod soft_keyboard;
 pub mod taskbar;
 pub mod text_input_hook;
