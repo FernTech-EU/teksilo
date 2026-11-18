@@ -23,6 +23,7 @@
 //! pressure. text-typeset's `register_font_shared` accepts an
 //! `Arc<Mmap>` directly, so the bytes are never copied to the heap.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use text_typeset::SharedFontData;
@@ -33,6 +34,14 @@ const CANDIDATES: &[&str] = &[
     "/usr/share/fonts/noto/NotoColorEmoji.ttf",
     "/usr/share/fonts/NotoColorEmoji.ttf",
     "/usr/local/share/fonts/NotoColorEmoji.ttf",
+    // openSUSE.
+    "/usr/share/fonts/truetype/NotoColorEmoji.ttf",
+    // Fedora up to 43: the CBDT build.
+    "/usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf",
+    "/usr/share/fonts/google-noto-color-emoji-fonts/NotoColorEmoji.ttf",
+    // Fedora 44: the COLRv1 build, which text-typeset paints (`atlas/colr.rs`).
+    // After the bitmap builds, which every renderer draws.
+    "/usr/share/fonts/google-noto-color-emoji-fonts/Noto-COLRv1.ttf",
 ];
 
 #[cfg(target_os = "macos")]
@@ -49,7 +58,13 @@ const CANDIDATES: &[&str] = &[];
 /// [`text_typeset::TextFontService::register_font_shared`]. Returns
 /// `None` if no candidate exists.
 pub(crate) fn load_system_emoji_data() -> Option<SharedFontData> {
-    CANDIDATES.iter().find_map(|path| mmap_font(path))
+    let path = first_existing(CANDIDATES, |path| Path::new(path).is_file())?;
+    mmap_font(path)
+}
+
+/// The first of `candidates` that `exists`, in list order.
+fn first_existing<'a>(candidates: &[&'a str], exists: impl Fn(&str) -> bool) -> Option<&'a str> {
+    candidates.iter().copied().find(|path| exists(path))
 }
 
 fn mmap_font(path: &str) -> Option<SharedFontData> {
@@ -61,4 +76,39 @@ fn mmap_font(path: &str) -> Option<SharedFontData> {
     // is the same as for any other system asset we load.
     let mmap = unsafe { memmap2::Mmap::map(&file).ok()? };
     Some(Arc::new(mmap))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_first_candidate_that_exists_wins() {
+        let list = ["/a/one.ttf", "/b/two.ttf", "/c/three.ttf"];
+        assert_eq!(
+            first_existing(&list, |p| p != "/a/one.ttf"),
+            Some("/b/two.ttf")
+        );
+        assert_eq!(first_existing(&list, |_| true), Some("/a/one.ttf"));
+        assert_eq!(first_existing(&list, |_| false), None);
+    }
+
+    /// A file that is in the list but absent is skipped, not an end of the
+    /// search: a distribution has one of the paths, not the first.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fedora_44_is_found_where_only_its_font_exists() {
+        const FEDORA: &str = "/usr/share/fonts/google-noto-color-emoji-fonts/Noto-COLRv1.ttf";
+        assert_eq!(first_existing(CANDIDATES, |p| p == FEDORA), Some(FEDORA));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_bitmap_build_is_preferred_to_the_colrv1_one() {
+        let colr = "Noto-COLRv1.ttf";
+        let found = first_existing(CANDIDATES, |_| true).unwrap();
+        assert!(!found.ends_with(colr));
+        let last = CANDIDATES.last().unwrap();
+        assert!(last.ends_with(colr));
+    }
 }
