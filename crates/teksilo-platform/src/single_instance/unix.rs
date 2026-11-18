@@ -388,7 +388,7 @@ impl Timed<'_> {
 
 impl Read for Timed<'_> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.stream.set_read_timeout(Some(self.left()?))?;
+        unless_shut(self.stream.set_read_timeout(Some(self.left()?)))?;
         let mut stream = self.stream;
         stream.read(buf).map_err(expired_as_timed_out)
     }
@@ -396,13 +396,30 @@ impl Read for Timed<'_> {
 
 impl Write for Timed<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.stream.set_write_timeout(Some(self.left()?))?;
+        unless_shut(self.stream.set_write_timeout(Some(self.left()?)))?;
         let mut stream = self.stream;
         stream.write(buf).map_err(expired_as_timed_out)
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+/// The result of setting a socket timeout, with the refusal of a shut socket
+/// taken as no error.
+///
+/// XNU refuses to set any option on a socket whose connection is shut in
+/// both directions, as it is as soon as the peer closes, with `EINVAL`. A
+/// primary that answers and closes before the secondary reads its reply
+/// leaves the secondary such a socket. It never blocks: a read returns what
+/// is still buffered, the reply, then the end of the stream, and a write
+/// fails at once, so the call goes ahead without the timeout. The timeout is
+/// always a valid one here, so `EINVAL` has no other cause.
+fn unless_shut(result: io::Result<()>) -> io::Result<()> {
+    match result {
+        Err(e) if cfg!(target_vendor = "apple") && e.raw_os_error() == Some(libc::EINVAL) => Ok(()),
+        result => result,
     }
 }
 
@@ -801,10 +818,25 @@ mod tests {
         held.try_lock().unwrap();
         let listener = UnixListener::bind(app_sock(dir.path())).unwrap();
         // SAFETY: `listen` on a listening socket this test owns; it only
-        // lowers the backlog to its least.
-        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
-        // The one connection a backlog of nothing still queues on Linux.
-        let _queued = UnixStream::connect(app_sock(dir.path()));
+        // lowers the backlog. Not to 0, which XNU reads as its largest.
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 1) }, 0);
+        // Linux queues one connection more than the backlog, XNU as many, so
+        // the backlog is filled until a connection finds no room.
+        let mut queued = Vec::new();
+        let full = loop {
+            match connect_within(&app_sock(dir.path()), Duration::from_millis(50)) {
+                Ok(stream) if queued.len() < 16 => queued.push(stream),
+                Ok(_) => panic!("{} connections queued on a backlog of 1", queued.len()),
+                Err(e) => break e,
+            }
+        };
+        assert!(
+            matches!(
+                full.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::ConnectionRefused
+            ),
+            "{full:?}"
+        );
 
         let started = Instant::now();
         let err = acquire_within(dir.path(), "app", Duration::from_millis(300))
@@ -1123,6 +1155,21 @@ mod tests {
             rx.recv_timeout(Duration::from_secs(5)).unwrap().args,
             args(&["good"])
         );
+    }
+
+    /// A reply the peer sent before closing is read, though XNU refuses the
+    /// read timeout on the socket the close shut.
+    #[test]
+    fn what_a_closed_peer_sent_is_still_read() {
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        protocol::write_frame(&mut &theirs, b"reply").unwrap();
+        drop(theirs);
+        let mut io = Timed {
+            stream: &ours,
+            deadline: Instant::now() + Duration::from_secs(5),
+        };
+        assert_eq!(protocol::read_frame(&mut io, 64).unwrap(), b"reply");
+        assert_eq!(io.read(&mut [0u8; 1]).unwrap(), 0);
     }
 
     #[test]
