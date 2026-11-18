@@ -109,6 +109,8 @@ mod cursor_signal_tests;
 #[cfg(test)]
 mod find_highlight_tests;
 #[cfg(test)]
+mod fit_width_tests;
+#[cfg(test)]
 mod input_document_tests;
 #[cfg(test)]
 mod input_editor_tests;
@@ -235,6 +237,9 @@ pub struct RichTextEditor {
     /// Maximum visible-text height expressed in lines. Hard-caps
     /// the intrinsic height — see [`max_lines`](Self::max_lines).
     max_lines: Option<u32>,
+    /// Whether the editor is as wide as its text. See
+    /// [`fit_width`](Self::fit_width).
+    fit_width: bool,
     /// See [`text_style`](Self::text_style). Resolved against the theme in
     /// `build`; `None` leaves the engine's default face and size.
     text_style: Option<TextStyleProp>,
@@ -351,6 +356,7 @@ impl RichTextEditor {
             custom_context_menu: None,
             min_lines: None,
             max_lines: None,
+            fit_width: false,
             text_style: None,
             style_override: None,
             root_child_id: None,
@@ -822,6 +828,38 @@ impl RichTextEditor {
     /// measures the visible text area, not the outer widget.
     pub fn max_lines(mut self, n: u32) -> Self {
         self.max_lines = Some(n);
+        self
+    }
+
+    /// Be as wide as the text rather than the width offered. Off by default:
+    /// the editor takes the proposal's width.
+    ///
+    /// On, the reported width is the widest line of the text laid out at the
+    /// proposed width, never more than that width, as a
+    /// [`TextWidget`](crate::TextWidget) reports its own: in an `HStack`
+    /// beside a `Spacer`, a viewer of "Hi" is two letters wide. Offered no
+    /// width (a stack measuring its child), it is the natural width of the
+    /// longest paragraph on one line. Half a pixel of slack is added, as a
+    /// label adds it, so that laid out at the width it asked for the text
+    /// breaks its lines exactly where it did when measured; a stack that
+    /// measures it, then offers it that width back, gets the same width
+    /// again. An editor that shows a caret also keeps room for it, so an empty
+    /// one is still a few pixels wide; it is measured again at each edit.
+    ///
+    /// Paragraph alignment (centre, end, a right-to-left paragraph) places
+    /// the lines within the fitted width. The height is unchanged:
+    /// [`min_lines`](Self::min_lines) / [`max_lines`](Self::max_lines) still
+    /// make it intrinsic, measured at the width offered, which wraps the same
+    /// lines; without them the editor still takes the proposal's height.
+    ///
+    /// Rigid when fitting (`flex = 0`, no shrink), like a wrapping label: a
+    /// long text wraps at the width the parent offers, so give it that width
+    /// (a column, a `MaxSize` capping a chat bubble) rather than an `HStack`
+    /// slot, which measures its children unbounded. Each measurement lays the
+    /// whole text out once more, so it suits short texts: messages, captions,
+    /// a composer.
+    pub fn fit_width(mut self, fit: bool) -> Self {
+        self.fit_width = fit;
         self
     }
 
@@ -3999,6 +4037,7 @@ pub(crate) struct RichTextEditorBody {
     state: SharedState,
     min_lines: Option<u32>,
     max_lines: Option<u32>,
+    fit_width: bool,
 }
 
 impl std::fmt::Debug for RichTextEditorBody {
@@ -4641,6 +4680,7 @@ impl Widget for RichTextEditor {
             state: self.state.clone(),
             min_lines: self.min_lines,
             max_lines: self.max_lines,
+            fit_width: self.fit_width,
         };
         // The name goes on the body, the node focus is published on; see
         // [`label`](Self::label). `LocalizedString -> Prop<String>` keeps it

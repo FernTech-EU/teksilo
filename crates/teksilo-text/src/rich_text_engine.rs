@@ -460,24 +460,7 @@ impl RichTextEngine {
     // --- Layout ----------------------------------------------------------
 
     pub fn layout_full(&mut self, flow: &FlowSnapshot) {
-        // Fill any per-editor default typography onto a disposable copy of the
-        // snapshot (never the live document). When no defaults are set this is a
-        // zero-cost borrow of the caller's snapshot.
-        let filled: std::borrow::Cow<FlowSnapshot> =
-            if typography_defaults::needs_snapshot_fill(&self.typography_defaults)
-                || self.text_style.is_some()
-            {
-                let mut owned = flow.clone();
-                if typography_defaults::needs_snapshot_fill(&self.typography_defaults) {
-                    typography_defaults::apply_to_flow(&mut owned, &self.typography_defaults);
-                }
-                if let Some(base) = self.base_font() {
-                    typography_defaults::apply_base_to_flow(&mut owned, base);
-                }
-                std::borrow::Cow::Owned(owned)
-            } else {
-                std::borrow::Cow::Borrowed(flow)
-            };
+        let filled = self.filled(flow);
         let flow: &FlowSnapshot = &filled;
         {
             let bridge = self.shared.borrow();
@@ -491,6 +474,63 @@ impl RichTextEngine {
         if !spans.is_empty() {
             self.flow.apply_paint_spans_for(spans);
         }
+    }
+
+    /// Fill any per-editor default typography and the text style onto a
+    /// disposable copy of the snapshot (never the live document). When neither
+    /// is set this is a zero-cost borrow of the caller's snapshot.
+    fn filled<'f>(&self, flow: &'f FlowSnapshot) -> std::borrow::Cow<'f, FlowSnapshot> {
+        let defaults = typography_defaults::needs_snapshot_fill(&self.typography_defaults);
+        if !defaults && self.text_style.is_none() {
+            return std::borrow::Cow::Borrowed(flow);
+        }
+        let mut owned = flow.clone();
+        if defaults {
+            typography_defaults::apply_to_flow(&mut owned, &self.typography_defaults);
+        }
+        if let Some(base) = self.base_font() {
+            typography_defaults::apply_base_to_flow(&mut owned, base);
+        }
+        std::borrow::Cow::Owned(owned)
+    }
+
+    /// The widest line and the height of `flow` laid out `width` wide, as
+    /// [`layout_full`](Self::layout_full) would lay it out at that viewport
+    /// width and `font_scale`, without touching this engine's own layout.
+    /// `None` lays every paragraph out on one line, as does
+    /// [`WrapMode::None`].
+    ///
+    /// For a widget sizing itself to its text: laid out again at any width from
+    /// the one this reports up to `width`, the text wraps exactly as it did
+    /// here, since every line still fits and none could take its next word. The
+    /// width is that of the widest line, margins included, as
+    /// [`max_content_width`](Self::max_content_width) reports it. A full
+    /// layout per call: meant for short texts.
+    pub fn measure(
+        &self,
+        flow: &FlowSnapshot,
+        width: Option<f32>,
+        font_scale: f32,
+    ) -> teksilo_canvas::Size {
+        let mut probe = DocumentFlow::new();
+        match (self.wrap_mode, width) {
+            (WrapMode::Word, Some(width)) => {
+                probe.set_content_width_auto();
+                probe.set_viewport(width.max(0.0), self.flow.viewport_height());
+            }
+            _ => probe.set_content_width(f32::INFINITY),
+        }
+        probe.set_font_scale(font_scale);
+        probe.set_zoom(self.flow.zoom());
+        probe.set_hyphenate_justified(self.flow.hyphenate_justified());
+        probe.set_echo_char(self.flow.echo_char());
+        probe.set_default_language(self.flow.default_language());
+        probe.set_default_direction(self.flow.default_direction());
+        probe.set_neutral_direction(self.flow.neutral_direction());
+        let filled = self.filled(flow);
+        let bridge = self.shared.borrow();
+        probe.layout_full(bridge.service(), &filled);
+        teksilo_canvas::Size::new(probe.max_content_width(), probe.content_height())
     }
 
     /// Recolor the cached layout from the snapshot's paint-only highlight
@@ -1115,6 +1155,39 @@ mod tests {
             (h2 - h1 * 2.0).abs() < h1 * 0.1,
             "2x font scale should ~double content height: {h1} vs {h2}"
         );
+    }
+
+    /// `measure` lays the text out at the width it is given, as `layout_full`
+    /// would at that viewport, and leaves the engine's own layout alone.
+    #[test]
+    fn measure_matches_a_layout_at_that_width_and_changes_nothing() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("A sentence that wraps at a narrow width.\nShort.")
+            .unwrap();
+        let flow = doc.snapshot_flow();
+
+        let mut at_120 = RichTextEngine::private_default();
+        at_120.set_viewport(120.0, 300.0);
+        at_120.layout_full(&flow);
+
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(400.0, 300.0);
+        engine.layout_full(&flow);
+        let own = (engine.max_content_width(), engine.content_height());
+
+        let measured = engine.measure(&flow, Some(120.0), 1.0);
+        assert_eq!(measured.width, at_120.max_content_width());
+        assert_eq!(measured.height, at_120.content_height());
+        assert!(measured.width <= 120.0);
+        assert_eq!(
+            (engine.max_content_width(), engine.content_height()),
+            own,
+            "the engine's own layout is untouched"
+        );
+
+        let one_line = engine.measure(&flow, None, 1.0);
+        assert!(one_line.width > 120.0, "no wrapping: {}", one_line.width);
+        assert!(one_line.height < measured.height);
     }
 
     #[test]

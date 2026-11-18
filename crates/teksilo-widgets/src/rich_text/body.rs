@@ -114,6 +114,40 @@ fn height_debug() -> bool {
     *ON.get_or_init(|| std::env::var_os("TEKSILO_HEIGHT_DEBUG").is_some())
 }
 
+/// What `fit_width` adds to the widest line: the slack `TextWidget` lays its
+/// text out with, so a width that is the widest line to the last bit does
+/// not wrap that line again when the editor is laid out at it.
+const FIT_SLACK: f32 = 0.5;
+
+/// Room for the caret after the widest line of an editor that shows one,
+/// as wide as text-typeset draws it. It is also the whole width of an empty
+/// editor, which still has to show where typing goes.
+const FIT_CARET_ROOM: f32 = 2.0;
+
+impl RichTextEditorBody {
+    /// The width and height of the text laid out at `proposal`'s width, for
+    /// `fit_width`: the widest line, with [`FIT_SLACK`] and the caret's room,
+    /// never wider than the proposal.
+    fn fitted_extent(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
+        let st = self.state.borrow();
+        let flow = st.flow_snapshot();
+        let measured = st.engine.measure(
+            &flow,
+            proposal.width,
+            st.effective_font_scale(ctx.text_scale),
+        );
+        let caret = match st.policy.caret_policy {
+            CaretPolicy::Hidden => 0.0,
+            _ => FIT_CARET_ROOM,
+        };
+        let mut width = measured.width + FIT_SLACK + caret;
+        if let Some(offered) = proposal.width {
+            width = width.min(offered.max(0.0));
+        }
+        Size::new(width, measured.height)
+    }
+}
+
 impl Widget for RichTextEditorBody {
     fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
         // Bind `caret_visible` to the framework's repaint tracker so
@@ -242,6 +276,16 @@ impl Widget for RichTextEditorBody {
                 teksilo_core::binding::BindingLevel::Relayout,
             );
         }
+        // An editor as wide as its text is measured again whenever the text
+        // changes: an edit that leaves the height alone still moves the width.
+        if self.fit_width {
+            let version = self.state.borrow().document_version.clone();
+            version.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::binding::BindingLevel::Relayout,
+            );
+        }
 
         Vec::new()
     }
@@ -251,7 +295,11 @@ impl Widget for RichTextEditorBody {
         proposal: SizeProposal,
         ctx: &LayoutContext,
     ) -> teksilo_core::widget::LayoutResponse {
-        let w = proposal.width.unwrap_or(200.0).max(0.0);
+        let fitted = self.fit_width.then(|| self.fitted_extent(proposal, ctx));
+        let w = match fitted {
+            Some(extent) => extent.width,
+            None => proposal.width.unwrap_or(200.0).max(0.0),
+        };
 
         // Greedy mode (default, behaviour unchanged): both knobs
         // unset → consume the proposal exactly as before.
@@ -323,6 +371,9 @@ impl Widget for RichTextEditorBody {
         // measure anything has asked for, and falls back to the floor only when
         // neither is known yet.
         let content_h = match (st.engine.has_full_layout(), proposal.width) {
+            // Measured at this proposal, which is the height the text has at
+            // the fitted width too: the lines break in the same places.
+            _ if fitted.is_some() => fitted.map_or(0.0, |extent| extent.height),
             (true, _) => st.engine.content_height(),
             // **At the width the text will actually wrap at**, which is the viewport
             // the body was last *placed* at — not the width of whichever measurement

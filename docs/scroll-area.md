@@ -157,6 +157,27 @@ RichTextEditor::editor(doc)
     .v_scroll_policy(ScrollPolicy::AlwaysOff)
 ```
 
+The width is the proposal's, whatever the text: in an `HStack` beside a
+`Spacer` a viewer of "Hi" takes half the row. `.fit_width(true)` makes it as
+wide as its widest line at the width it is offered, as a `TextWidget` is, with
+the half pixel of slack a label takes so the lines break where they did; offered
+no width, it is the longest paragraph on one line. The height is still the
+intrinsic one above, at that width. A chat bubble:
+
+```rust
+RichTextEditor::read_only(doc)
+    .text_style(TextStyleRole::Body)
+    .min_lines(1)
+    .fit_width(true)
+```
+
+Like a wrapping label it does not shrink (`flex = 0`, `shrink = 0`): a long
+message wraps at the width its parent offers, so give it that width (a column,
+a `MaxSize`) rather than an `HStack` slot, which measures it unbounded. An
+editable editor keeps room for its caret, empty or not, and is measured again
+as it is typed into. Each measurement lays the text out, so keep it to short
+texts.
+
 The reveal walk handles the rest: `RichTextEditor` overrides
 `Widget::focus_reveal_rect` to nominate the **caret line** rather than its whole
 (page-tall) box, so focusing it scrolls the page to the caret instead of to the

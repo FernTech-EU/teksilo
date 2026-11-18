@@ -163,7 +163,7 @@ Themed framing, sectioning, and window-level structure.
 ## Text input family
 
 - [TextInput](../crates/teksilo-widgets/src/text_input.rs), styled single-line input on top of `TextInputField`; `ValidationState`. Save its text in `on_commit_fn` (runs on a real blur and before a command from a control that takes no focus, once per edit); `on_blur_fn` only says focus left.
-- [RichTextEditor](../crates/teksilo-widgets/src/rich_text.rs), full editing surface with IME, formatting commands, undo/redo, intrinsic-mode sizing (`min_lines` / `max_lines`); also runs read-only as the rich-text viewer (`ScrollPolicy`).
+- [RichTextEditor](../crates/teksilo-widgets/src/rich_text.rs), full editing surface with IME, formatting commands, undo/redo, intrinsic-mode sizing (`min_lines` / `max_lines`, and `fit_width` for a width that follows the text); also runs read-only as the rich-text viewer (`ScrollPolicy`).
 - [CodeEditor / PlainTextEditor](../crates/teksilo-widgets/src/code_editor/widget.rs), multi-line source / plain-text editors over one core: gutter, current-line band, injected language-agnostic indentation / comment / bracket handling, multiple carets, caret-anchored completion, paragraph/run accessibility. See [docs/code-editor.md](code-editor.md).
 - [LogView](../crates/teksilo-widgets/src/code_editor/log_view.rs), read-only, append-only, tail-following streaming view scaling to 100k+ lines via windowed layout; derived follow-tail, scrollback cap, injected per-line severity colour, windowed accessibility. See [docs/log-view.md](log-view.md).
 - [SpinBox](../crates/teksilo-widgets/src/spin_box.rs), numeric input with `WrapMode`, `StepType`, `ButtonLayout`, `WheelMode`, `WidthPolicy`.
