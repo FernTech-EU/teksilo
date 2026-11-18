@@ -13,6 +13,108 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### App and platform
+
+- **Single instance (feature `single-instance`).**
+  `teksilo::app::single_instance::acquire` elects one running instance per
+  user, and `TeksiloAppBuilder::single_instance` hands it to the application.
+  A second launch sends its arguments, working directory and activation token
+  to the running instance and exits; the application receives them in
+  `on_external_with_ctx` as an `InstanceMessage`. The election is a socket in
+  the runtime directory on Linux and macOS and a named pipe private to the
+  user on Windows; either way only the same user's processes can take part.
+- **`ctx.open_uri(uri)` and `ctx.open_path(path)`** open a link or a file with
+  the desktop's handler (`xdg-open`, `open`, `ShellExecuteW`), never through a
+  shell. `javascript:`, `vbscript:`, `data:` and `file:` URIs are refused. An
+  `OpenUriHandle` registered in app-state replaces the desktop's handler, for
+  tests and for applications with a route of their own.
+- **Icons from the desktop's icon theme.**
+  `IconWidget::themed("document-send-symbolic")` draws an icon by its
+  freedesktop name on Linux and BSD desktops: symbolic icons are tinted,
+  full-colour ones keep their colours, and `.fallback(icon)` is drawn where
+  the theme lacks the name or there is no icon theme.
+  `teksilo_platform::icon_theme` is the lookup itself.
+
+#### Widgets
+
+- **`TextWidget::text_align(TextAlign)`** places each line of a label
+  (`Leading`, `Center`, `Trailing`, following the layout direction), so the
+  lines of a wrapped sentence can be centred. `TextAlign` now lives in
+  `teksilo_canvas` and the prelude; `teksilo_scene::TextAlign` is the same
+  type.
+- **`RichTextEditor::fit_width(true)`** makes an editor or a read-only viewer
+  as wide as its text, for chat bubbles and captions.
+- **`RichTextEditor::text_style(..)`** gives the editor's unformatted text the
+  size and family of a theme text style, following theme changes. Sizes a
+  document names are kept.
+- **`ListView::keep_position_on_insert(true)`** keeps the row at the top of
+  the viewport in place when rows are inserted or removed above it, such as a
+  chat history loading older messages at index 0.
+- **`StandardListItem::label_fills_width` and
+  `StandardTreeItem::label_fills_width`** let the label column take the row's
+  free width, so a `label_slot` and the subtitle row end at the row's end.
+
+#### Settings and i18n
+
+- **`AppPaths::state_dir()` and `cache_dir()`** (with `create_state_dir()` and
+  `create_cache_dir()`), for log files and files that can be rebuilt. On
+  Windows and macOS the state directory is the data directory.
+- **`DateFields::Weekday` and `DateFields::MonthDay`** for
+  `TeksiloDateTimeFormatter`, rendered by ICU in the locale's own form
+  ("Monday", "lundi", "August 31", "31 août").
+
+### Changed
+
+#### Widgets
+
+- **A `Banner` title wraps** instead of being cut at one line, and the banner
+  grows taller with it. `Banner::title_single_line(true)` keeps the single
+  line.
+- **In a right-to-left layout a label's lines sit against its right edge**
+  when the label is wider than they are; they were flush left.
+
+### Fixed
+
+#### Core
+
+- **Dropping an `ObserverHandle`, or replacing a `Signal`'s value, no longer
+  panics with `BorrowMutError`** when the removed callback or the old value
+  held the last reference to something that observes the same signal. The
+  same holds for the observers of `ListModel`, `TreeModel`, `ChartModel` and
+  the sort and chart projections.
+- **`EventContext::dismiss_modal` called from outside any modal** (an async
+  completion, a `run_after_mount` action) closes the window's topmost in-tree
+  modal. It closed nothing, silently.
+
+#### App and platform
+
+- **`build_headless` gives the window tree and the application tree the
+  builder's `event_source`**, so widgets that call `subscribe_event` build
+  headless. A headless app delivers no events: what is posted is discarded.
+- **Native mode on KDE Plasma follows the desktop portal's light or dark
+  choice** when it states one. Where the `kdeglobals` colours disagree with
+  it, stock Breeze of the portal's preference is used, with the user's accent,
+  fonts and animation speed.
+- **A debug build with the automation bridge removes its endpoint descriptor**
+  (and, on Unix, its socket) when the application quits, instead of leaving
+  one behind after every run.
+- **The `system-emoji` feature finds Fedora's colour emoji font**, and the
+  older Fedora and openSUSE paths.
+
+#### Widgets
+
+- **A `MenuBar` follows a live locale change** or a reload of the
+  translations: its titles, their accessible names and mnemonics (Alt+letter
+  included), and its menus' rows, inline or collapsed to a hamburger. A menu
+  open at the switch closes.
+- **Text callbacks can use their editor.** `RichTextEditor`'s
+  `on_text_inserted` and `on_change`, `TextInputField::on_text_inserted` and
+  `CodeEditor::on_change` can read and edit the editor through its handle, for
+  example to replace an emoticon as it is typed. They panicked with "already
+  mutably borrowed".
+
 ## [0.27.0] - 2026-11-16
 
 ### Fixed
