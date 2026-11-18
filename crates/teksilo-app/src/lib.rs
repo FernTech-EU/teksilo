@@ -34,6 +34,7 @@ pub use app_event_observers::AppEventObservers;
 pub use automation_bridge::TeksiloAppBuilderAutomationExt;
 pub use default_post_root::DefaultPostRoot;
 pub use native_theme::{NativeThemeFactory, NativeThemeRequest, resolve_native_theme};
+pub use teksilo_render::TextContrast;
 pub use termination_watch::{TerminationSignalKind, TerminationWatch};
 pub use window_config::{
     ModalConfig, PostRootBuilder, RootBuilder, TeksiloWindowId, WindowConfig,

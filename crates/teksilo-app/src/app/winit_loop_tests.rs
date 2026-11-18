@@ -43,6 +43,9 @@
 //! - **(e)/(f)** the theme's `touch_enabled` reaches both an open window's
 //!   translator (`WindowManager::set_theme`) and a window created afterwards
 //!   (`input_loop::wire_translator`);
+//! - **(as)** the builder's text contrast reaches a window's renderer as it
+//!   is created (`WindowManager::create_window`), and a change to the signal
+//!   reaches it at the end of the turn (`WindowManager::sync_text_contrast`);
 //! - **(b)** the modal-blocked guard both swallows input and still delivers
 //!   `Resized`, and a click on the blocked window, or its taking the focus,
 //!   brings back a minimised modal child, and a raise it is owed is paid
@@ -802,6 +805,12 @@ fn only_window(app: &TeksiloAppHandler) -> WindowId {
 /// Everything the claims need in one loop session: a 400 × 300 window whose
 /// root is the same recording leaf the headless steps use. The root builder
 /// also records the redraw waker its tree already holds, as a thin pointer.
+/// Claim (as)'s text contrast: anything but the default.
+const STRONGER_TEXT: teksilo_render::TextContrast = teksilo_render::TextContrast {
+    gamma: 1.0,
+    contrast: 0.5,
+};
+
 fn app_with_recorder(log: &Shared, waker_at_build: &Rc<Cell<usize>>) -> TeksiloAppBuilder {
     let log = log.clone();
     let waker_at_build = waker_at_build.clone();
@@ -1069,6 +1078,9 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
     > = Rc::default();
     let exit_flood_in = exit_flood.clone();
     let counter = app_events_seen.clone();
+    // Claim (as): a text contrast other than the default, bound to a signal.
+    let contrast = teksilo_core::signal::Signal::new(STRONGER_TEXT);
+    let contrast_in = contrast.clone();
     // Claim (y)'s settings: an hour's debounce, so only a flush writes them.
     let settings_dir = tempfile::tempdir().expect("a scratch directory");
     let settings_path =
@@ -1081,7 +1093,8 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
                 .with_store_name("settings")
                 .with_debounce(Duration::from_secs(3600)),
         )
-        .settings_watch(false);
+        .settings_watch(false)
+        .text_contrast(contrast_in);
     let builder = builder.on_app_event(move |event| {
         if matches!(event, AppEvent::External(_)) {
             counter.set(counter.get() + 1);
@@ -1353,6 +1366,33 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "a window created under a touch-off theme must be born with the \
          switch already thrown"
         );
+
+        // -- (as) the app's text contrast reaches every window's renderer
+        //
+        // The window was created with the value the builder was given, and a
+        // handler's change to the signal reaches the open windows at the end
+        // of the turn, which draws them again: no tree changed, so nothing
+        // else would.
+        let text_contrast_of = |app: &TeksiloAppHandler| {
+            app.wm.windows_map()[&window]
+                .platform_window
+                .renderer()
+                .text_contrast()
+        };
+        assert_eq!(
+            text_contrast_of(app),
+            STRONGER_TEXT,
+            "a window is created with the app's text contrast"
+        );
+        contrast.set(teksilo_render::TextContrast::OFF);
+        app.about_to_wait(event_loop);
+        assert_eq!(
+            text_contrast_of(app),
+            teksilo_render::TextContrast::OFF,
+            "a change to the signal reaches the open window in one turn"
+        );
+        contrast.set(STRONGER_TEXT);
+        app.about_to_wait(event_loop);
 
         // -- (g) a window awaiting its redraw does not hold the loop awake
         //

@@ -87,9 +87,10 @@ by crate for clarity, not because crates version independently.
 - **Text is as dark as in other applications.** Glyph edges were blended in
   linear light, which drew dark text on a light page about a quarter lighter
   than a browser draws it, and light text on a dark page heavier. They are now
-  blended as Chromium blends them. `Renderer::set_text_contrast` takes a
-  `TextContrast` to adjust it, and `TextContrast::OFF` restores the previous
-  rendering.
+  blended as Chromium blends them. `TeksiloAppBuilder::text_contrast` adjusts
+  it for every window, with a `TextContrast` or a `Signal` of one that a
+  preference can change while the application runs; `TextContrast::OFF`
+  restores the previous rendering.
 
 ### Fixed
 

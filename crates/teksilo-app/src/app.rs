@@ -13,6 +13,7 @@ use teksilo_core::event_source::{
     AppEventPoster, EventSource, EventSourceAdapter, SubscriptionId, TreeAppContext,
 };
 use teksilo_core::modal::{ModalCloseBehavior, ModalContent, ModalPresentation, ModalRequest};
+use teksilo_core::signal::Prop;
 use teksilo_core::{DismissBehavior, OverlayPlacement, OverlayRequest};
 use teksilo_core::{WidgetId, WidgetTree};
 use teksilo_i18n::{I18nConfig, I18nManager, LanguageIdentifier};
@@ -2358,6 +2359,9 @@ impl TeksiloAppHandler {
         // holds the shortcuts its rows name, and the native menu bar shows
         // the menu as it is.
         self.wm.sync_application_menu();
+        // A text contrast bound to a signal a handler has just set: nothing
+        // in any tree changed, so only this says the windows need drawing.
+        redraw_all |= self.wm.sync_text_contrast();
         if redraw_all {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
@@ -6107,6 +6111,7 @@ pub struct TeksiloAppBuilder {
     /// at `run`.
     native_theme: Option<crate::native_theme::NativeThemeFactory>,
     pen_batching: teksilo_platform::PenBatching,
+    text_contrast: Prop<teksilo_render::TextContrast>,
     typesetter: Option<SharedTypesetter>,
     font_registrars: Vec<Box<dyn teksilo_text::FontRegistrar>>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
@@ -6192,6 +6197,7 @@ impl TeksiloAppBuilder {
             theme_mode: ThemeMode::Manual,
             native_theme: None,
             pen_batching: teksilo_platform::PenBatching::default(),
+            text_contrast: Prop::Static(teksilo_render::TextContrast::DEFAULT),
             typesetter: None,
             font_registrars: Vec::new(),
             app_event_handler: None,
@@ -6635,6 +6641,34 @@ impl TeksiloAppBuilder {
     /// Applies to every window; set it before `run`.
     pub fn pen_batching(mut self, mode: teksilo_platform::PenBatching) -> Self {
         self.pen_batching = mode;
+        self
+    }
+
+    /// How glyph edges are blended onto the page, in every window.
+    ///
+    /// The default, [`TextContrast::DEFAULT`](teksilo_render::TextContrast::DEFAULT),
+    /// draws text as dark as a browser does. A larger `contrast`, or a
+    /// `gamma` below 1.2, makes the edges of dark text on a light page
+    /// heavier, which some readers find easier on the eyes;
+    /// [`TextContrast::OFF`](teksilo_render::TextContrast::OFF) blends them
+    /// in linear light, lighter still.
+    ///
+    /// Pass a [`Signal`](teksilo_core::signal::Signal) to change it while the
+    /// application runs (a preference the user adjusts): every window draws
+    /// again with the new value at the end of the turn that set it.
+    ///
+    /// ```ignore
+    /// let contrast = Signal::new(TextContrast::DEFAULT);
+    /// TeksiloAppBuilder::new()
+    ///     .text_contrast(contrast.clone())
+    ///     .app_state(contrast) // for the preference dialog to set
+    ///     .run();
+    /// ```
+    pub fn text_contrast(
+        mut self,
+        text_contrast: impl Into<Prop<teksilo_render::TextContrast>>,
+    ) -> Self {
+        self.text_contrast = text_contrast.into();
         self
     }
 
@@ -7552,6 +7586,7 @@ impl TeksiloAppBuilder {
         // rather than threaded through `TeksiloAppHandler::new`'s already long
         // parameter list.
         app.wm.set_pen_batching(self.pen_batching);
+        app.wm.set_text_contrast(self.text_contrast);
         app.wm.set_native_theme(self.native_theme);
         app.wm.set_records_announcements(self.records_announcements);
         app.wm.set_app_quit_guard(self.quit_guard);

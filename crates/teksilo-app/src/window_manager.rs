@@ -23,6 +23,7 @@ use teksilo_platform::AccessibilityPreferences;
 use teksilo_platform::PlatformWindow;
 use teksilo_platform::create_title_bar_host;
 use teksilo_platform::event_translation::TranslationState;
+use teksilo_render::TextContrast;
 #[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::WindowLevel;
@@ -905,6 +906,12 @@ pub struct WindowManager {
     /// How the app resolves its theme (Manual, FollowSystem, Native).
     theme_mode: ThemeMode,
     pen_batching: teksilo_platform::PenBatching,
+    /// How every window's renderer blends glyph edges, as the app asked for
+    /// it. See [`TeksiloAppBuilder::text_contrast`](crate::TeksiloAppBuilder::text_contrast).
+    text_contrast: Prop<TextContrast>,
+    /// The value of [`text_contrast`](Self::text_contrast) the renderers
+    /// were last given, so a turn can tell a change from a repeat.
+    applied_text_contrast: TextContrast,
     /// The app's own [`ThemeMode::Native`] theme, asked before the default
     /// (IntUI coloured by the desktop). See
     /// [`TeksiloAppBuilder::native_theme`](crate::TeksiloAppBuilder::native_theme).
@@ -1138,6 +1145,8 @@ impl WindowManager {
             user_text_scale: 1.0,
             theme_mode: ThemeMode::Manual,
             pen_batching: teksilo_platform::PenBatching::default(),
+            text_contrast: Prop::Static(TextContrast::DEFAULT),
+            applied_text_contrast: TextContrast::DEFAULT,
             native_theme: None,
             os_theme: None,
             records_announcements: false,
@@ -1201,6 +1210,38 @@ impl WindowManager {
     /// [`PenBatching`](teksilo_platform::PenBatching).
     pub fn set_pen_batching(&mut self, mode: teksilo_platform::PenBatching) {
         self.pen_batching = mode;
+    }
+
+    /// How every window blends glyph edges: a fixed value, or a signal
+    /// followed from then on. Applied to the open windows at once and to
+    /// every window created later.
+    pub(crate) fn set_text_contrast(&mut self, text_contrast: Prop<TextContrast>) {
+        self.text_contrast = text_contrast;
+        self.sync_text_contrast();
+    }
+
+    /// Give every window's renderer the text contrast the app asks for now,
+    /// if it changed since the last call. Returns whether it did, in which
+    /// case every window has to be drawn again: nothing in a tree changed.
+    pub(crate) fn sync_text_contrast(&mut self) -> bool {
+        let wanted = self.text_contrast.get();
+        if wanted == self.applied_text_contrast {
+            return false;
+        }
+        self.applied_text_contrast = wanted;
+        for managed in self.windows.values_mut() {
+            managed
+                .platform_window
+                .renderer_mut()
+                .set_text_contrast(wanted);
+        }
+        true
+    }
+
+    /// The text contrast the renderers were last given.
+    #[cfg(test)]
+    pub(crate) fn applied_text_contrast(&self) -> TextContrast {
+        self.applied_text_contrast
     }
 
     /// The app's own [`ThemeMode::Native`] theme, asked before the default
@@ -2591,6 +2632,8 @@ impl WindowManager {
                 primed_atlas_version = version;
             }
         }
+        pw.renderer_mut()
+            .set_text_contrast(self.applied_text_contrast);
 
         // Attach this window's state to the tree so widgets can bind
         // against its own window signals via `ctx.window()`.
@@ -6475,6 +6518,36 @@ mod close_guard_tests {
                 .has_pending_modal_dismissal()
         );
         assert!(!wm.owes_turn_work(), "drained, the turn owes nothing");
+    }
+
+    /// A text contrast bound to a signal is followed: a turn after the
+    /// signal changes reports that the windows must be drawn again, once,
+    /// and a turn with nothing changed reports nothing.
+    #[test]
+    fn a_text_contrast_signal_is_followed_turn_by_turn() {
+        use teksilo_core::signal::Signal;
+        use teksilo_render::TextContrast;
+
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        assert_eq!(wm.applied_text_contrast(), TextContrast::DEFAULT);
+
+        let stronger = TextContrast {
+            gamma: 1.0,
+            contrast: 0.5,
+        };
+        let contrast = Signal::new(stronger);
+        wm.set_text_contrast(contrast.clone().into());
+        assert_eq!(
+            wm.applied_text_contrast(),
+            stronger,
+            "applied as it is set, so the first window is created with it"
+        );
+        assert!(!wm.sync_text_contrast(), "nothing changed since");
+
+        contrast.set(TextContrast::OFF);
+        assert!(wm.sync_text_contrast(), "the change asks for a redraw");
+        assert_eq!(wm.applied_text_contrast(), TextContrast::OFF);
+        assert!(!wm.sync_text_contrast(), "once");
     }
 
     #[test]
