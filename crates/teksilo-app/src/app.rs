@@ -6976,6 +6976,16 @@ impl TeksiloAppBuilder {
     }
 
     /// Build a headless app for testing (no window, no GPU).
+    ///
+    /// The [event source](Self::event_source), when one is given, reaches
+    /// both trees as in [`run`](Self::run), so a widget's
+    /// `BuildContext::subscribe_event` subscribes to it. A headless app has
+    /// no event loop, though: what the source publishes, and anything else
+    /// posted to the trees' `AppEventPoster`, is discarded, and no
+    /// subscription callback runs. A test that needs the events delivered
+    /// gives a tree of its own a poster that keeps them and replays them
+    /// (the `docs/async.md` "Events from an `EventSource`" recipe). Without
+    /// an event source the trees have no poster at all.
     pub fn build_headless(mut self) -> HeadlessApp {
         // Install the tooltip registry before anything else — widgets
         // that read from it during their first build (e.g. rich
@@ -7048,12 +7058,19 @@ impl TeksiloAppBuilder {
             app_tree.set_layout_direction(mgr.direction_signal().get());
         }
 
-        // Install the app-state registry (if any) before running the root
-        // builder so that widgets' `build()` methods can call
-        // `ctx.app_state::<T>()`.
-        if !self.app_state_registry.is_empty() {
-            let ctx =
-                std::rc::Rc::new(TreeAppContext::empty().with_app_state(self.app_state_registry));
+        // Install the app-state registry and the event source (if any)
+        // before running the root builders so that widgets' `build()` methods
+        // can call `ctx.app_state::<T>()` and `ctx.subscribe_event(..)`.
+        let event_source = self.event_source.take();
+        if !self.app_state_registry.is_empty() || event_source.is_some() {
+            let base = match event_source {
+                Some(adapter) => TreeAppContext::with_source_and_poster(
+                    adapter,
+                    std::sync::Arc::new(DiscardingPoster),
+                ),
+                None => TreeAppContext::empty(),
+            };
+            let ctx = std::rc::Rc::new(base.with_app_state(self.app_state_registry));
             if let Some(app_tree) = app_tree.as_mut() {
                 app_tree.set_app_context(ctx.clone());
             }
@@ -7566,6 +7583,14 @@ fn install_i18n(tree: &mut WidgetTree, cfg: &I18nConfig) -> Rc<I18nManager> {
     tree.set_locale(mgr.locale_signal().get().to_string());
     tree.set_layout_direction(mgr.direction_signal().get());
     mgr
+}
+
+/// The poster of a headless app's trees: with no event loop behind them,
+/// there is nowhere to deliver what is posted.
+struct DiscardingPoster;
+
+impl AppEventPoster for DiscardingPoster {
+    fn post_subscription_event(&self, _sub_id: SubscriptionId, _event: Box<dyn Any + Send>) {}
 }
 
 /// A headless app for testing (no window, no GPU).

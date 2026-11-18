@@ -212,8 +212,11 @@ finishes; loop on `tick` until `pending_len()` is non-zero, then drain.
 The data path needs no executor, but it does need a poster. A source publishes
 on its own thread, the framework hands each event to the tree's
 `AppEventPoster`, and the app's event loop runs the `subscribe_event` callback
-on the UI thread. A headless tree has no event loop, so a test gives the tree a
-poster that keeps what it is given, then replays it:
+on the UI thread. A headless tree has no event loop. `build_headless` gives its
+trees the builder's `event_source` with a poster that discards what it is
+given, so widgets that subscribe build there but no event reaches them. A test
+that needs the events gives a tree of its own a poster that keeps them, then
+replays them:
 
 ```rust
 use std::any::Any;
