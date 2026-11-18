@@ -693,10 +693,15 @@ impl<T: 'static> ListDataSource for SortFilterListModel<T> {
             id,
             Rc::new(move |observer_id| {
                 if let Some(strong) = weak.upgrade() {
-                    strong
-                        .borrow_mut()
-                        .observers
-                        .retain(|e| e.id != observer_id);
+                    // A callback may own the last reference to another
+                    // observer of this model: it is dropped only once the
+                    // borrow is released.
+                    let removed = {
+                        let mut guard = strong.borrow_mut();
+                        let index = guard.observers.iter().position(|e| e.id == observer_id);
+                        index.map(|i| guard.observers.remove(i))
+                    };
+                    drop(removed);
                 }
             }),
         )

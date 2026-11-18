@@ -291,7 +291,14 @@ impl<T: 'static> ListModel<T> {
             self.inner.clone(),
             id,
             Rc::new(move |observer_id| {
-                inner.borrow_mut().observers.retain(|e| e.id != observer_id);
+                // A callback may own the last reference to another observer of
+                // this model: it is dropped only once the borrow is released.
+                let removed = {
+                    let mut guard = inner.borrow_mut();
+                    let index = guard.observers.iter().position(|e| e.id == observer_id);
+                    index.map(|i| guard.observers.remove(i))
+                };
+                drop(removed);
             }),
         )
     }
@@ -700,6 +707,38 @@ mod tests {
         let model: ListModel<String> = ListModel::new();
         assert!(model.is_empty());
         assert_eq!(model.len(), 0);
+    }
+
+    /// A model that observes its own list, kept alive only by another
+    /// observer's callback: removing that observer drops the model, whose
+    /// own handle then removes itself from the same list.
+    #[test]
+    fn removing_an_observer_that_owns_the_last_reference_to_another_does_not_panic() {
+        struct Owner {
+            items: ListModel<u8>,
+            own: RefCell<Vec<ObserverHandle>>,
+        }
+        let owner = Rc::new(Owner {
+            items: ListModel::new(),
+            own: RefCell::new(Vec::new()),
+        });
+        owner
+            .own
+            .borrow_mut()
+            .push(owner.items.observe_changes(|_| {}));
+        let items = owner.items.clone();
+        let held = Rc::clone(&owner);
+        let handle = owner.items.observe_changes(move |_| {
+            let _ = &held;
+        });
+        drop(owner);
+
+        drop(handle);
+        let fired = Rc::new(Cell::new(false));
+        let f = fired.clone();
+        let _h = items.observe_changes(move |_| f.set(true));
+        items.push(1);
+        assert!(fired.get(), "the model still notifies after the removal");
     }
 
     #[test]

@@ -144,7 +144,15 @@ fn observe_inner<T: 'static>(
         remover: {
             let inner = inner.clone();
             Rc::new(move |observer_id| {
-                inner.borrow_mut().observers.retain(|e| e.id != observer_id);
+                // The callback may own the last reference to something that
+                // observes this same signal, whose handles then re-enter this
+                // remover: it is dropped only once the borrow is released.
+                let removed = {
+                    let mut guard = inner.borrow_mut();
+                    let index = guard.observers.iter().position(|e| e.id == observer_id);
+                    index.map(|i| guard.observers.remove(i))
+                };
+                drop(removed);
             })
         },
     }
@@ -574,6 +582,10 @@ impl<T: Clone + 'static> Signal<T> {
     /// additions or removals made during a callback take effect only on
     /// subsequent notifications.
     ///
+    /// The replaced value is dropped after the notifications, with no borrow
+    /// held, and so is a removed observer's callback: either may own the last
+    /// reference to something that observes or writes this same signal.
+    ///
     /// # Feedback loops
     ///
     /// Re-entrancy is supported, but a write cascade that never settles — A's
@@ -586,13 +598,16 @@ impl<T: Clone + 'static> Signal<T> {
     pub fn try_set(&self, value: T) -> Result<(), SignalAccessError> {
         match &self.kind {
             SignalKind::Mutable { inner, .. } => {
-                let (snapshot, callbacks) = {
+                // The old value is moved out rather than overwritten: its Drop
+                // may touch this signal (drop an `ObserverHandle` on it, read
+                // it), which must not happen under the borrow.
+                let (old, snapshot, callbacks) = {
                     let mut guard = inner.borrow_mut();
-                    guard.value = value;
+                    let old = std::mem::replace(&mut guard.value, value);
                     guard.generation = guard.generation.wrapping_add(1);
                     let callbacks: Vec<_> =
                         guard.observers.iter().map(|e| e.callback.clone()).collect();
-                    (guard.value.clone(), callbacks)
+                    (old, guard.value.clone(), callbacks)
                 };
                 // Debug-only: a re-entrant observer bumps this depth; an
                 // unbounded feedback loop trips the limit and panics with a
@@ -602,6 +617,9 @@ impl<T: Clone + 'static> Signal<T> {
                 for cb in &callbacks {
                     cb(&snapshot);
                 }
+                // After the notifications, so a write made by the old value's
+                // Drop reaches observers after this one, as the latest value.
+                drop(old);
                 Ok(())
             }
             SignalKind::Derived { .. } => Err(SignalAccessError::ReadOnly),
@@ -1978,6 +1996,50 @@ mod tests {
         let b = s.observe(|_| {});
         *b_slot.borrow_mut() = Some(b);
         s.set(1);
+    }
+
+    /// An application model that watches its own signal, kept alive only by
+    /// another observer's callback: removing that observer drops the model,
+    /// whose own handle then removes itself from the same signal.
+    #[test]
+    fn removing_an_observer_that_owns_the_last_reference_to_another_does_not_panic() {
+        use std::cell::RefCell;
+
+        struct Owner {
+            name: Signal<String>,
+            own: RefCell<Vec<ObserverHandle>>,
+        }
+        let owner = Rc::new(Owner {
+            name: Signal::new(String::new()),
+            own: RefCell::new(Vec::new()),
+        });
+        owner.own.borrow_mut().push(owner.name.observe(|_| {}));
+        let name = owner.name.clone();
+        let held = Rc::clone(&owner);
+        let handle = owner.name.observe(move |_| {
+            let _ = &held;
+        });
+        drop(owner);
+        assert_eq!(name.observer_count(), 2);
+
+        drop(handle);
+        assert_eq!(name.observer_count(), 0, "both observers are gone");
+    }
+
+    /// `set` replaces a value whose Drop removes an observer from the very
+    /// signal being written.
+    #[test]
+    fn set_drops_the_old_value_outside_the_borrow() {
+        struct Probe {
+            _handle: ObserverHandle,
+        }
+        let s: Signal<Option<Rc<Probe>>> = Signal::new(None);
+        let handle = s.observe(|_| {});
+        s.set(Some(Rc::new(Probe { _handle: handle })));
+        assert_eq!(s.observer_count(), 1);
+
+        s.set(None);
+        assert_eq!(s.observer_count(), 0, "the old value's handle detached");
     }
 
     /// The bug this exists to stop: `MenuEntry::enabled(..)` takes any

@@ -352,7 +352,14 @@ impl<T: 'static> TreeModel<T> {
             self.inner.clone(),
             id,
             Rc::new(move |observer_id| {
-                inner.borrow_mut().observers.retain(|e| e.id != observer_id);
+                // A callback may own the last reference to another observer of
+                // this model: it is dropped only once the borrow is released.
+                let removed = {
+                    let mut guard = inner.borrow_mut();
+                    let index = guard.observers.iter().position(|e| e.id == observer_id);
+                    index.map(|i| guard.observers.remove(i))
+                };
+                drop(removed);
             }),
         )
     }
