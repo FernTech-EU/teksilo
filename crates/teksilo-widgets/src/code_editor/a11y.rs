@@ -311,6 +311,11 @@ pub(crate) fn handle_access_action(
     data: Option<ActionData>,
     ctx: &mut EventContext,
 ) -> EventResponse {
+    // What was typed in this frame goes in before the action reads or writes
+    // the text. A selection carries its own offsets across it instead.
+    if action != Action::SetTextSelection {
+        super::frame_loop::flush_pending_chars(&mut state.borrow_mut());
+    }
     match (action, data) {
         (Action::SetTextSelection, Some(ActionData::SetTextSelection(sel))) => {
             let resolve = |pos: TextPosition| -> Option<usize> {
@@ -326,15 +331,19 @@ pub(crate) fn handle_access_action(
             match (resolve(sel.anchor), resolve(sel.focus)) {
                 (Some(anchor), Some(focus)) => {
                     {
-                        // Collapse to a single caret — an AT selection replaces
-                        // the whole caret set, honouring the no-two-carets
-                        // invariant the rest of the editor holds.
                         let mut st = state.borrow_mut();
-                        st.clear_extra_carets();
                         // The reader's positions are in the text this view lays
                         // out, which may be the recorded document's.
-                        let (anchor, focus) =
-                            (st.document_position(anchor), st.document_position(focus));
+                        let mut ends = [st.document_position(anchor), st.document_position(focus)];
+                        // What was typed in this frame goes in where it was
+                        // typed, at every caret; the reader's positions are in
+                        // the text it was shown, without it.
+                        super::frame_loop::flush_pending_chars_keeping(&mut st, &mut ends);
+                        let [anchor, focus] = ends;
+                        // Collapse to a single caret: an AT selection replaces
+                        // the whole caret set, honouring the no-two-carets
+                        // invariant the rest of the editor holds.
+                        st.clear_extra_carets();
                         st.cursor.set_position(anchor, MoveMode::MoveAnchor);
                         st.cursor.set_position(focus, MoveMode::KeepAnchor);
                         st.cursor_affinity = affinity_of_run_position(sel.focus.character_index);

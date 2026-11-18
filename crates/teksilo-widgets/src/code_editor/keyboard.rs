@@ -122,6 +122,18 @@ pub(super) fn handle_key(
     // table serves every platform.
     let ctrl = modifiers.command();
     let alt = modifiers.alt();
+
+    // A key that types text joins the batch the frame inserts, so a burst of
+    // typing stays one insertion. Any other key acts on the text as typed: the
+    // batch goes in first, at every caret, and is laid out, because Home, End,
+    // the vertical moves and the pages read the lines from the layout.
+    let types_text = !ctrl
+        && text
+            .as_deref()
+            .is_some_and(|t| t.chars().any(|c| !c.is_control()));
+    if !types_text && !state.borrow().pending_chars.is_empty() {
+        super::frame_loop::catch_up_layout(&mut state.borrow_mut());
+    }
     let mode = if shift {
         MoveMode::KeepAnchor
     } else {
@@ -497,6 +509,8 @@ pub(super) fn run_standard_edit(
     }
     {
         let mut st = state.borrow_mut();
+        // After what was typed before the command in this frame.
+        super::frame_loop::flush_pending_chars(&mut st);
         if declines(&st, command, empty_history_passes_on) {
             return false;
         }
@@ -1182,11 +1196,20 @@ fn replace_from_input_system(
 }
 
 /// Before a pointer moves the caret or starts a selection (a press, a tap's
-/// release, a hold, a multi-tap): a composition in progress ends with its
-/// text kept (see [`finish_composition`]), so the input method does not go on
-/// composing at the old place and commit there later. A press inside the
-/// composition's own text is no different, as in the other text surfaces.
+/// release, a hold, a multi-tap): the typing batched for this frame goes in
+/// where it was typed and is laid out, so the press hit-tests the text with
+/// it (left for the frame, it went in at the caret the press had just
+/// placed), then a composition in progress ends with its text kept (see
+/// [`finish_composition`]), so the input method does not go on composing at
+/// the old place and commit there later. A press inside the composition's own
+/// text is no different, as in the other text surfaces.
 pub(super) fn settle_before_press(state: &SharedState, ctx: &mut EventContext) {
+    let typed = !state.borrow().pending_chars.is_empty();
+    if typed {
+        super::frame_loop::catch_up_layout(&mut state.borrow_mut());
+        sync_cursor_signals(state);
+        ctx.request_frame();
+    }
     finish_composition(state, ctx);
 }
 

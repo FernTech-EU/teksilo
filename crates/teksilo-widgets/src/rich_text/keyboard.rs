@@ -313,13 +313,15 @@ pub(super) fn handle_key(
         let mut st = state.borrow_mut();
         st.select_all_level = 0;
         // A key that types text joins the batch below. Any other acts at
-        // once, so what was typed before it in this frame goes in first.
+        // once, so what was typed before it in this frame goes in first, and
+        // is laid out: Home, End, the vertical moves and the pages read the
+        // lines from the layout.
         let types_text = !ctrl
             && text
                 .as_deref()
                 .is_some_and(|t| t.chars().any(|c| !c.is_control()));
-        if !types_text {
-            super::frame_loop::flush_pending_chars(&mut st);
+        if !types_text && !st.pending_chars.is_empty() {
+            super::frame_loop::catch_up_layout(&mut st);
         }
         let filter = st.policy.command_filter;
         // One predicate for Tab, shared with the accessibility description.
@@ -929,6 +931,9 @@ pub(super) enum HistoryStep {
 /// the caret: End on a wrapped line shows it at the end of that line, and an
 /// undo that did nothing showed it at the start of the next one.
 pub(super) fn history_step(st: &mut EditorState, step: HistoryStep) {
+    // After what was typed before the step in this frame: the handle's undo
+    // and redo come here without a key.
+    super::frame_loop::flush_pending_chars(st);
     let document = st.document.clone();
     let steps = history_has_step(&document, step);
     match step {

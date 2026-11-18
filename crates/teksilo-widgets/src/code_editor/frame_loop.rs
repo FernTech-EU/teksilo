@@ -222,6 +222,26 @@ pub(crate) fn flush_pending_chars(state: &mut CodeEditorState) -> bool {
     true
 }
 
+/// [`flush_pending_chars`] for something other than a key that is about to
+/// move the caret or the selection to `offsets` (an assistive client's
+/// selection), read from the text without the batch: the batch goes in where
+/// it was typed, and each offset is carried across it as the document carries
+/// a cursor. Left for the next frame, the batch went in at the caret the move
+/// had just placed, over the selection it had just made.
+pub(crate) fn flush_pending_chars_keeping(state: &mut CodeEditorState, offsets: &mut [usize]) {
+    if state.pending_chars.is_empty() {
+        return;
+    }
+    let held: Vec<_> = offsets
+        .iter()
+        .map(|&at| state.document.cursor_at(at))
+        .collect();
+    flush_pending_chars(state);
+    for (offset, cursor) in offsets.iter_mut().zip(held) {
+        *offset = cursor.position();
+    }
+}
+
 /// Insert `text` at every caret.
 ///
 /// Applied back-to-front so that each insertion cannot invalidate the positions

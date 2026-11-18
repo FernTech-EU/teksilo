@@ -270,6 +270,32 @@ fn the_utf16_index_is_kept_until_an_edit_and_rebuilt_after_it() {
 // ── Typing not yet inserted ─────────────────────────────────────────────────
 
 #[test]
+fn the_handle_undoes_after_typing_not_yet_inserted() {
+    // A toolbar's Undo in the same frame as the typing takes the typing back,
+    // as Ctrl+Z does.
+    let mut editor = Editor::with_text("ab", 400.0);
+    editor.handle.select_range(2, 2);
+    editor.tree.type_text(editor.id, "cd");
+    editor.handle.undo();
+    editor.settle();
+    assert_eq!(editor.doc.to_plain_text().unwrap(), "ab");
+}
+
+#[test]
+fn end_after_typing_not_yet_inserted_reaches_the_end_of_the_line() {
+    let mut editor = Editor::with_text("ab", 400.0);
+    editor.handle.select_range(0, 0);
+    editor.tree.type_text(editor.id, "cd");
+    editor.tree.press_key(
+        teksilo_core::event::Key::End,
+        teksilo_core::event::Modifiers::NONE,
+    );
+    editor.settle();
+    assert_eq!(editor.doc.to_plain_text().unwrap(), "cdab");
+    assert_eq!(editor.handle.state.borrow().cursor.position(), 4);
+}
+
+#[test]
 fn typing_not_yet_inserted_is_answered_as_inserted() {
     let mut editor = Editor::with_text("ab", 400.0);
     editor.handle.select_range(2, 2);

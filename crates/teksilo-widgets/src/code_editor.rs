@@ -64,6 +64,8 @@ mod motion_tests;
 #[cfg(test)]
 mod route_click_tests;
 #[cfg(test)]
+mod same_frame_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod touch_tests;
@@ -564,6 +566,14 @@ impl CodeEditorHandle {
         Self { state }
     }
 
+    /// The editor's state as typed, for a command: the typing batched for this
+    /// frame goes in first, so the command acts after it.
+    fn typed(&self) -> std::cell::RefMut<'_, CodeEditorState> {
+        let mut st = self.state.borrow_mut();
+        frame_loop::flush_pending_chars(&mut st);
+        st
+    }
+
     /// The caret's document position.
     pub fn cursor_position(&self) -> usize {
         self.state.borrow().cursor.position()
@@ -605,34 +615,34 @@ impl CodeEditorHandle {
     /// this is the same command from outside. With nothing to undo it does
     /// nothing, and leaves every caret where it was.
     pub fn undo(&self) {
-        keyboard::history_step(&mut self.state.borrow_mut(), keyboard::HistoryStep::Undo);
+        keyboard::history_step(&mut self.typed(), keyboard::HistoryStep::Undo);
         sync_cursor_signals(&self.state);
     }
 
     /// Redo this editor's last undone edit.
     pub fn redo(&self) {
-        keyboard::history_step(&mut self.state.borrow_mut(), keyboard::HistoryStep::Redo);
+        keyboard::history_step(&mut self.typed(), keyboard::HistoryStep::Redo);
         sync_cursor_signals(&self.state);
     }
 
     /// Copy the selection to the clipboard.
     pub fn copy(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        clipboard::copy(&self.state.borrow(), ctx);
+        clipboard::copy(&self.typed(), ctx);
     }
 
     /// Cut the selection to the clipboard.
     pub fn cut(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        clipboard::cut(&mut self.state.borrow_mut(), ctx);
+        clipboard::cut(&mut self.typed(), ctx);
     }
 
     /// Paste over the selection.
     pub fn paste(&self, ctx: &teksilo_core::widget::EventContext<'_>) {
-        clipboard::paste(&mut self.state.borrow_mut(), ctx);
+        clipboard::paste(&mut self.typed(), ctx);
     }
 
     /// Select the whole document.
     pub fn select_all(&self) {
-        let st = self.state.borrow();
+        let st = self.typed();
         st.cursor
             .select(teksilo_text::text_document::SelectionType::Document);
     }
