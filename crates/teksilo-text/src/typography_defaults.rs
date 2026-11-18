@@ -16,7 +16,11 @@
 //! Size is deliberately **not** modelled here — preferred text size is a
 //! logical font-scale on the engine
 //! ([`RichTextEngine::set_font_scale`](crate::RichTextEngine::set_font_scale)),
-//! not a per-run default fill.
+//! not a per-run default fill. The one size filled per run is that of the
+//! engine's text style
+//! ([`RichTextEngine::set_text_style`](crate::RichTextEngine::set_text_style)),
+//! filled after these defaults, for text the document leaves
+//! unsized.
 
 use text_document::{BlockSnapshot, FlowElementSnapshot, FlowSnapshot, FragmentContent};
 
@@ -186,6 +190,88 @@ pub(crate) fn apply_to_block_params(
             if frag.font_family.is_none() {
                 frag.font_family = Some(family.clone());
             }
+        }
+    }
+}
+
+/// The family and size of an engine's text style
+/// ([`RichTextEngine::set_text_style`](crate::RichTextEngine::set_text_style)),
+/// filled onto the text that names neither, after the typography defaults: a
+/// run's own format wins, then [`EditorTypographyDefaults::font_family`], then
+/// this.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct BaseFont {
+    pub family: String,
+    /// Whole pixels, as text-typeset sizes every run: a style's `13.5` shapes
+    /// at 13 in a label too.
+    pub size_px: u32,
+}
+
+/// Fill `base` into every block of an owned flow snapshot, recursing into
+/// tables and sub-frames. Mutates the snapshot only, never the document.
+pub(crate) fn apply_base_to_flow(flow: &mut FlowSnapshot, base: &BaseFont) {
+    apply_base_to_elements(&mut flow.elements, base);
+}
+
+fn apply_base_to_elements(elements: &mut [FlowElementSnapshot], base: &BaseFont) {
+    for el in elements {
+        match el {
+            FlowElementSnapshot::Block(b) => apply_base_to_block(b, base),
+            FlowElementSnapshot::Table(t) => {
+                for cell in &mut t.cells {
+                    for b in &mut cell.blocks {
+                        apply_base_to_block(b, base);
+                    }
+                }
+            }
+            FlowElementSnapshot::Frame(fr) => apply_base_to_elements(&mut fr.elements, base),
+        }
+    }
+}
+
+/// Fill `base` into one block snapshot's text that names no family or size.
+///
+/// An empty paragraph gets an empty fragment carrying it, for the reason
+/// [`apply_to_block`] gives one the default family: the empty line is measured
+/// in the face and size its first character will take.
+pub(crate) fn apply_base_to_block(block: &mut BlockSnapshot, base: &BaseFont) {
+    if block.fragments.is_empty() {
+        block.fragments.push(FragmentContent::Text {
+            text: String::new(),
+            format: text_document::TextFormat::default(),
+            offset: 0,
+            length: 0,
+            element_id: 0,
+            word_starts: Vec::new(),
+        });
+    }
+    for frag in &mut block.fragments {
+        if let FragmentContent::Text { format, .. } = frag {
+            if format.font_family.is_none() {
+                format.font_family = Some(base.family.clone());
+            }
+            if format.font_point_size.is_none() {
+                format.font_point_size = Some(base.size_px);
+            }
+        }
+    }
+}
+
+/// The `BlockLayoutParams`-level counterpart of [`apply_base_to_block`], for
+/// the streaming paths [`apply_to_block_params`] serves.
+pub(crate) fn apply_base_to_block_params(
+    params: &mut text_typeset::layout::block::BlockLayoutParams,
+    base: &BaseFont,
+) {
+    for frag in &mut params.fragments {
+        if frag.image_name.is_some() {
+            continue;
+        }
+        if frag.font_family.is_none() {
+            frag.font_family = Some(base.family.clone());
+        }
+        if frag.font_point_size.is_none() {
+            frag.font_point_size = Some(base.size_px);
         }
     }
 }
@@ -378,5 +464,59 @@ mod tests {
             "list items must not be first-line indented"
         );
         assert_eq!(b.block_format.line_height, Some(1.5));
+    }
+
+    fn base() -> BaseFont {
+        BaseFont {
+            family: "Noto Sans".into(),
+            size_px: 13,
+        }
+    }
+
+    fn frag_size(b: &BlockSnapshot) -> Option<u32> {
+        let FragmentContent::Text { format, .. } = &b.fragments[0] else {
+            panic!("expected text fragment");
+        };
+        format.font_point_size
+    }
+
+    #[test]
+    fn a_base_font_fills_what_the_run_leaves_unnamed() {
+        let mut b = block("Hello", TextFormat::default(), BlockFormat::default());
+        apply_base_to_block(&mut b, &base());
+        assert_eq!(frag_family(&b), Some("Noto Sans"));
+        assert_eq!(frag_size(&b), Some(13));
+    }
+
+    #[test]
+    fn a_run_keeps_the_family_and_size_it_names() {
+        let named = TextFormat {
+            font_family: Some("Literata".into()),
+            font_point_size: Some(30),
+            ..Default::default()
+        };
+        let mut b = block("Hello", named, BlockFormat::default());
+        apply_base_to_block(&mut b, &base());
+        assert_eq!(frag_family(&b), Some("Literata"));
+        assert_eq!(frag_size(&b), Some(30));
+    }
+
+    #[test]
+    fn the_typography_defaults_family_comes_before_the_base_font() {
+        let mut b = block("Hello", TextFormat::default(), BlockFormat::default());
+        apply_to_block(&mut b, &defaults());
+        apply_base_to_block(&mut b, &base());
+        assert_eq!(frag_family(&b), Some("Literata"));
+        assert_eq!(frag_size(&b), Some(13));
+    }
+
+    #[test]
+    fn an_empty_block_measures_in_the_base_font() {
+        let mut b = block("", TextFormat::default(), BlockFormat::default());
+        b.fragments.clear();
+        apply_base_to_block(&mut b, &base());
+        assert_eq!(b.fragments.len(), 1);
+        assert_eq!(frag_family(&b), Some("Noto Sans"));
+        assert_eq!(frag_size(&b), Some(13));
     }
 }

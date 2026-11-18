@@ -35,7 +35,7 @@ use text_typeset::{CursorDisplay, DocumentFlow, FontFaceId, HitTestResult, Rende
 use crate::font_registrar::{EmbeddedInterRegistrar, FontRegistrar};
 use crate::shared_typesetter::SharedTypesetter;
 use crate::typesetter_bridge::TypesetterBridge;
-use crate::typography_defaults::{self, EditorTypographyDefaults};
+use crate::typography_defaults::{self, BaseFont, EditorTypographyDefaults};
 
 /// Wrap mode chosen at construction; forwarded to the owned
 /// [`DocumentFlow`] via `set_content_width_auto()` or
@@ -62,6 +62,9 @@ pub struct RichTextEngine {
     /// Non-destructive default typography filled onto the layout snapshot for
     /// runs / blocks with no explicit override. Never touches the document.
     typography_defaults: EditorTypographyDefaults,
+    /// See [`set_text_style`](Self::set_text_style): the style as given, for
+    /// the line height, and the family and size it fills.
+    text_style: Option<(teksilo_tokens::TextStyle, BaseFont)>,
     /// Whether the snapshots this engine pulls itself show the document's
     /// transient edits. See
     /// [`set_shows_transient_edits`](Self::set_shows_transient_edits).
@@ -91,6 +94,7 @@ impl RichTextEngine {
             default_face: None,
             wrap_mode: WrapMode::Word,
             typography_defaults: EditorTypographyDefaults::default(),
+            text_style: None,
             shows_transient_edits: true,
         };
         engine.flow.set_content_width_auto();
@@ -117,6 +121,7 @@ impl RichTextEngine {
             default_face,
             wrap_mode: WrapMode::Word,
             typography_defaults: EditorTypographyDefaults::default(),
+            text_style: None,
             shows_transient_edits: true,
         };
         engine.flow.set_content_width_auto();
@@ -168,6 +173,37 @@ impl RichTextEngine {
     /// The current default typography (see [`set_typography_defaults`](Self::set_typography_defaults)).
     pub fn typography_defaults(&self) -> &EditorTypographyDefaults {
         &self.typography_defaults
+    }
+
+    /// Shape the text that names no family or size in `style`'s family and
+    /// size, as a label in that style is shaped. `None`, the default, leaves
+    /// it in the shared service's default face at its default size (14 px for
+    /// [`EmbeddedInterRegistrar`]).
+    ///
+    /// A run whose format names a family or a size keeps it, and the
+    /// [`typography_defaults`](Self::set_typography_defaults)' family comes
+    /// before the style's. A heading is its level's ratio of the style's size.
+    /// The weight is left to the document (bold text stays bold), and so is
+    /// the line spacing; the style's `line_height` and `letter_spacing` are
+    /// not applied. [`default_line_height`](Self::default_line_height) is
+    /// measured in the style. Like the typography defaults, it is filled on the
+    /// layout snapshot, never written to the document, and takes effect at the
+    /// next layout, which the caller forces. The [font scale](Self::set_font_scale)
+    /// multiplies the style's size as it does every size.
+    pub fn set_text_style(&mut self, style: Option<&teksilo_tokens::TextStyle>) {
+        self.text_style = style.map(|style| {
+            let base = BaseFont {
+                family: style.family.clone(),
+                // Cut as text-typeset cuts every run's size.
+                size_px: style.size.max(0.0) as u32,
+            };
+            (style.clone(), base)
+        });
+    }
+
+    /// The family and size [`set_text_style`](Self::set_text_style) fills.
+    fn base_font(&self) -> Option<&BaseFont> {
+        self.text_style.as_ref().map(|(_, base)| base)
     }
 
     /// Current HiDPI display scale factor, read from the shared
@@ -393,8 +429,14 @@ impl RichTextEngine {
     /// content has been laid out (`RichTextEditor::min_lines` /
     /// `max_lines`). Returns `0.0` if no default font is registered
     /// on the shared service.
+    ///
+    /// With a [text style](Self::set_text_style), the line height of that
+    /// style instead.
     pub fn default_line_height(&self) -> f32 {
-        self.shared.borrow().default_line_height()
+        match &self.text_style {
+            Some((style, _)) => self.shared.borrow().measure_line_height(style),
+            None => self.shared.borrow().default_line_height(),
+        }
     }
 
     pub fn max_content_width(&self) -> f32 {
@@ -422,9 +464,16 @@ impl RichTextEngine {
         // snapshot (never the live document). When no defaults are set this is a
         // zero-cost borrow of the caller's snapshot.
         let filled: std::borrow::Cow<FlowSnapshot> =
-            if typography_defaults::needs_snapshot_fill(&self.typography_defaults) {
+            if typography_defaults::needs_snapshot_fill(&self.typography_defaults)
+                || self.text_style.is_some()
+            {
                 let mut owned = flow.clone();
-                typography_defaults::apply_to_flow(&mut owned, &self.typography_defaults);
+                if typography_defaults::needs_snapshot_fill(&self.typography_defaults) {
+                    typography_defaults::apply_to_flow(&mut owned, &self.typography_defaults);
+                }
+                if let Some(base) = self.base_font() {
+                    typography_defaults::apply_base_to_flow(&mut owned, base);
+                }
                 std::borrow::Cow::Owned(owned)
             } else {
                 std::borrow::Cow::Borrowed(flow)
@@ -533,6 +582,9 @@ impl RichTextEngine {
         // as `layout_full`.
         if typography_defaults::needs_snapshot_fill(&self.typography_defaults) {
             typography_defaults::apply_to_block(&mut snap, &self.typography_defaults);
+        }
+        if let Some(base) = self.base_font() {
+            typography_defaults::apply_base_to_block(&mut snap, base);
         }
         let block_id = snap.block_id;
         let opts = text_typeset::bridge::BridgeOptions {
@@ -647,12 +699,28 @@ impl RichTextEngine {
         &self,
         params: &'p text_typeset::layout::block::BlockLayoutParams,
     ) -> std::borrow::Cow<'p, text_typeset::layout::block::BlockLayoutParams> {
-        if typography_defaults::needs_params_fill(&self.typography_defaults) {
+        if self.needs_params_fill() {
             let mut owned = params.clone();
-            typography_defaults::apply_to_block_params(&mut owned, &self.typography_defaults);
+            self.fill_params(&mut owned);
             std::borrow::Cow::Owned(owned)
         } else {
             std::borrow::Cow::Borrowed(params)
+        }
+    }
+
+    /// Whether [`fill_params`](Self::fill_params) would change anything.
+    fn needs_params_fill(&self) -> bool {
+        typography_defaults::needs_params_fill(&self.typography_defaults)
+            || self.text_style.is_some()
+    }
+
+    /// The typography defaults, then the text style, on one block's params.
+    fn fill_params(&self, params: &mut text_typeset::layout::block::BlockLayoutParams) {
+        if typography_defaults::needs_params_fill(&self.typography_defaults) {
+            typography_defaults::apply_to_block_params(params, &self.typography_defaults);
+        }
+        if let Some(base) = self.base_font() {
+            typography_defaults::apply_base_to_block_params(params, base);
         }
     }
 
@@ -696,10 +764,10 @@ impl RichTextEngine {
         row_height: f32,
     ) {
         let filled: std::borrow::Cow<[(usize, text_typeset::layout::block::BlockLayoutParams)]> =
-            if typography_defaults::needs_params_fill(&self.typography_defaults) {
+            if self.needs_params_fill() {
                 let mut owned = window.to_vec();
                 for (_, params) in &mut owned {
-                    typography_defaults::apply_to_block_params(params, &self.typography_defaults);
+                    self.fill_params(params);
                 }
                 std::borrow::Cow::Owned(owned)
             } else {
@@ -744,16 +812,13 @@ impl RichTextEngine {
         total_rows: usize,
         row_height: f32,
     ) {
-        let fill = typography_defaults::needs_params_fill(&self.typography_defaults);
+        let fill = self.needs_params_fill();
         let window: Vec<(usize, text_typeset::layout::block::BlockLayoutParams)> = rows
             .iter()
             .map(|(idx, snap, tint)| {
                 let mut params = self.flow.block_params_for(snap);
                 if fill {
-                    typography_defaults::apply_to_block_params(
-                        &mut params,
-                        &self.typography_defaults,
-                    );
+                    self.fill_params(&mut params);
                 }
                 if let Some(color) = tint {
                     for fragment in &mut params.fragments {

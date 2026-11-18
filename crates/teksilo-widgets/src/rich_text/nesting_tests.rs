@@ -298,7 +298,7 @@ enum Surface {
     /// than the other variants.
     Keys(Box<WidgetTree>),
     /// The editor itself, whose own commands are asked.
-    Editor(RichTextEditor),
+    Editor(Box<RichTextEditor>),
     /// Nothing more: the handle's commands are asked.
     Handle,
 }
@@ -309,7 +309,7 @@ impl Mover {
         let handle = editor.handle();
         let surface = match through {
             Through::Keys => Surface::Keys(Box::new(mount_focused(editor))),
-            Through::Editor => Surface::Editor(editor),
+            Through::Editor => Surface::Editor(Box::new(editor)),
             Through::Handle => Surface::Handle,
         };
         Self { handle, surface }

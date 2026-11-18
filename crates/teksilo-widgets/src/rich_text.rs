@@ -133,6 +133,8 @@ mod table_selection_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod text_style_tests;
+#[cfg(test)]
 mod touch_tests;
 #[cfg(test)]
 mod transient_view_tests;
@@ -153,13 +155,13 @@ pub use policy::{
     READ_ONLY_PRESET, TabKey,
 };
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use teksilo_canvas::{Canvas, Point, Rect, Size, SizeProposal};
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::build_context::BuildContext;
-use teksilo_core::color_prop::ColorProp;
+use teksilo_core::color_prop::{ColorProp, TextStyleProp};
 use teksilo_core::shortcut::StandardEdit;
 use teksilo_core::signal::{Prop, Signal};
 use teksilo_core::styles::{
@@ -233,6 +235,9 @@ pub struct RichTextEditor {
     /// Maximum visible-text height expressed in lines. Hard-caps
     /// the intrinsic height — see [`max_lines`](Self::max_lines).
     max_lines: Option<u32>,
+    /// See [`text_style`](Self::text_style). Resolved against the theme in
+    /// `build`; `None` leaves the engine's default face and size.
+    text_style: Option<TextStyleProp>,
     /// Per-call style override for the chrome (border, padding, focus
     /// ring). Replaces the theme-wide `style_slots.rich_text_editor`
     /// and the default [`RecipeRichTextEditorStyle`] for just this
@@ -346,6 +351,7 @@ impl RichTextEditor {
             custom_context_menu: None,
             min_lines: None,
             max_lines: None,
+            text_style: None,
             style_override: None,
             root_child_id: None,
             body_id: None,
@@ -546,7 +552,8 @@ impl RichTextEditor {
     /// defaults — they never mutate the bound document (no undo entry, no
     /// `modified`); use [`set_typography_defaults`](Self::set_typography_defaults)
     /// or [`EditorHandle::set_typography_defaults`] to change them after mount.
-    /// Preferred text size is [`font_size_scale`](Self::font_size_scale).
+    /// The size of unformatted text is [`text_style`](Self::text_style)'s;
+    /// [`font_size_scale`](Self::font_size_scale) multiplies every size.
     pub fn typography_defaults(self, defaults: EditorTypographyDefaults) -> Self {
         {
             let mut st = self.state.borrow_mut();
@@ -832,10 +839,52 @@ impl RichTextEditor {
         self
     }
 
+    /// The size and family of the text the document leaves unformatted, from
+    /// a text style of the theme.
+    ///
+    /// Without it, such text is shaped in the typesetter's default face at its
+    /// default size: 14 px of the bundled Inter (`EmbeddedInterRegistrar`), or
+    /// whatever the application's `FontRegistrar` gives its default face,
+    /// whatever the theme's typography says. That is right for a document
+    /// editor, whose text sizes belong to the document, and it is the default
+    /// of [`editor`](Self::editor) and [`read_only`](Self::read_only) alike.
+    /// An editor that is part of the interface (a chat composer, a message
+    /// bubble, a help pane) passes [`TextStyleRole::Body`](teksilo_tokens::TextStyleRole::Body)
+    /// here, and its text then matches a [`TextWidget`](crate::TextWidget)
+    /// of that role: same face, same size, same line height.
+    ///
+    /// Accepts a [`TextStyleRole`](teksilo_tokens::TextStyleRole), resolved
+    /// against the theme's typography and again when the theme changes, or a
+    /// fixed [`TextStyle`](teksilo_tokens::TextStyle). What it sets:
+    ///
+    /// - the **size** of every run whose format names no size, and through it
+    ///   the size of headings, which are a ratio of it. A run whose format
+    ///   names a size keeps that size;
+    /// - the **family** of every run whose format names none, after the family
+    ///   of [`typography_defaults`](Self::typography_defaults), which wins;
+    /// - the **line height** of such text, which is the font's at that family
+    ///   and size, as in a label: the style's `line_height` multiplier is not
+    ///   applied (block formats and `typography_defaults` space lines), and
+    ///   [`min_lines`](Self::min_lines) / [`max_lines`](Self::max_lines) count
+    ///   lines of that height.
+    ///
+    /// The weight stays the document's (bold text stays bold), and the style's
+    /// `letter_spacing` is not applied. Nothing is written to the document.
+    ///
+    /// The global text scale multiplies the style's size once, as it multiplies
+    /// every size in the editor (see [`follow_text_scale`](Self::follow_text_scale)),
+    /// and so does [`font_size_scale`](Self::font_size_scale).
+    pub fn text_style(mut self, style: impl Into<TextStyleProp>) -> Self {
+        self.text_style = Some(style.into());
+        self
+    }
+
     /// Per-editor logical font-size multiplier (`1.0` = 100 %). Applied
     /// *before* shaping (same channel as accessibility text scale), so text
     /// grows, re-wraps, and stays sharp — the knob for a "Text size"
-    /// preference. Composed as
+    /// preference. It multiplies every size, the 14 px default (see
+    /// [`text_style`](Self::text_style)) and the sizes the document names.
+    /// Composed as
     /// `(follow_text_scale ? ctx.text_scale : 1.0) × font_size_scale`.
     /// Clamped to `[0.1, 10.0]`. Use [`set_font_size_scale`](Self::set_font_size_scale)
     /// after mount.
@@ -3995,6 +4044,34 @@ impl Widget for RichTextEditor {
             engine.set_shows_transient_edits(shows_transient_edits);
             st.engine = engine;
             st.needs_full_layout = true;
+        }
+        if let Some(prop) = self.text_style.clone() {
+            let theme_signal = ctx.theme_signal();
+            let resolved = prop.resolve(&theme_signal.get().typography);
+            {
+                let mut st = self.state.borrow_mut();
+                st.engine.set_text_style(Some(&resolved));
+                st.needs_full_layout = true;
+                st.content_dirty = true;
+            }
+            // A role follows the theme: a theme that ships another size or
+            // family for it shapes the text again.
+            if matches!(prop, TextStyleProp::Role(_)) {
+                let state = self.state.clone();
+                let applied = RefCell::new(resolved);
+                ctx.effect(&theme_signal, move |theme| {
+                    let resolved = prop.resolve(&theme.typography);
+                    if *applied.borrow() == resolved {
+                        return;
+                    }
+                    let mut st = state.borrow_mut();
+                    st.engine.set_text_style(Some(&resolved));
+                    st.needs_full_layout = true;
+                    st.content_dirty = true;
+                    st.pending_full_render = true;
+                    *applied.borrow_mut() = resolved;
+                });
+            }
         }
 
         // Stash the tree's frame-request handle on the state so the

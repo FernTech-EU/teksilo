@@ -100,6 +100,28 @@ and weight are filled onto the disposable layout snapshot, never onto the
 document; the weight is applied on the variable face's `wght` axis when the
 glyphs are rasterised.
 
+A `RichTextEditor` takes one the same way, `RichTextEditor::text_style`, for
+an editor that is part of the interface (a chat composer, a message bubble),
+whose text should read like a label of that role. Without it the editor's
+unformatted text is 14 px of the bundled Inter (or the size the application's
+`FontRegistrar` gives its default face) whatever the theme says, for
+`RichTextEditor::editor` and `RichTextEditor::read_only` alike, since in a
+document editor the sizes belong to the document. The style is not a font
+scale there: its size and family are filled onto the runs whose format names
+none, so a run that names a size keeps it, a heading is its level's ratio of
+the style's size, and the engine's font scale (the global text scale and
+`font_size_scale`) multiplies every size once:
+
+```text
+size of an unformatted run = style.size × engine.font_scale
+size of a run naming 30 px = 30 × engine.font_scale
+```
+
+The line height is the font's at that size and family, as in a `TextWidget`
+of the role; the style's `line_height` multiplier and its weight are not
+applied (bold text stays bold). `min_lines` and `max_lines` count lines of that
+height.
+
 This is distinct from two pre-existing factors, see the comparison below.
 
 ### `font_scale` vs `scale_factor`
