@@ -42,6 +42,7 @@ pub struct Banner {
     title: LocalizedString,
     description: Option<LocalizedString>,
     action: Option<Box<dyn Widget>>,
+    title_single_line: bool,
     on_dismiss: Option<Box<dyn Fn(&mut EventContext)>>,
     /// Per-call override for the banner strip chrome.
     style_override: Option<SharedBannerStyle>,
@@ -56,6 +57,7 @@ impl Banner {
             title: ls,
             description: None,
             action: None,
+            title_single_line: false,
             on_dismiss: None,
             style_override: None,
             root_child_id: None,
@@ -93,6 +95,14 @@ impl Banner {
     pub fn description(mut self, text: impl Into<LocalizedString>) -> Self {
         let ls: LocalizedString = text.into();
         self.description = Some(ls);
+        self
+    }
+
+    /// Keep the title on one line, elided at its end when it does not fit.
+    /// By default a title wraps, so a sentence stays readable in a narrow
+    /// banner and the banner grows taller instead.
+    pub fn title_single_line(mut self, single_line: bool) -> Self {
+        self.title_single_line = single_line;
         self
     }
 
@@ -134,11 +144,14 @@ impl Widget for Banner {
         ));
 
         // Title + optional description column.
+        let mut title_label = TextWidget::new(self.title.clone())
+            .style(TextStyleRole::BodyBold)
+            .color(TextRole::Primary);
+        if self.title_single_line {
+            title_label = title_label.single_line();
+        }
         let title = ctx.add(
-            TextWidget::new(self.title.clone())
-                .style(TextStyleRole::BodyBold)
-                .color(TextRole::Primary)
-                .single_line()
+            title_label
                 // The banner's own Role::Status node carries this title as
                 // its name, set on the node rather than drawn from this label
                 // through `labelled_by`: the adapters announce a live node
@@ -293,6 +306,65 @@ mod tests {
         let b = tree.bounds(id);
         assert!((b.width - 640.0).abs() < 0.01);
         assert!(b.height > 0.0);
+    }
+
+    const LONG: &str = "The password could not be kept in the keyring (access was refused), so the account was not added.";
+
+    fn banner_height(b: Banner, width: f32) -> f32 {
+        let mut tree = WidgetTree::new()
+            .with_theme(teksilo_core::presets::intui::light())
+            .with_text_backend(Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )));
+        let id = tree.add(b);
+        tree.layout(SizeProposal {
+            width: Some(width),
+            height: None,
+        });
+        tree.bounds(id).height
+    }
+
+    fn action() -> crate::button::Button {
+        crate::button::Button::new(lit!("Retry"))
+    }
+
+    #[test]
+    fn short_title_height_is_the_same_wrapping_or_not() {
+        let wrapping = banner_height(Banner::info(lit!("Heads up")), 280.0);
+        let single = banner_height(
+            Banner::info(lit!("Heads up")).title_single_line(true),
+            280.0,
+        );
+        assert!((wrapping - single).abs() < 0.01, "{wrapping} vs {single}");
+        assert!(wrapping > 0.0);
+    }
+
+    #[test]
+    fn long_title_wraps_and_grows_the_banner_by_default() {
+        type Make = fn(Banner) -> Banner;
+        let variants: [(&str, Make); 4] = [
+            ("plain", |b| b),
+            ("description", |b| b.description(lit!("Try again later."))),
+            ("action and close", |b| {
+                b.action(action()).on_dismiss(|_| {})
+            }),
+            ("all", |b| {
+                b.description(lit!("Try again later."))
+                    .action(action())
+                    .on_dismiss(|_| {})
+            }),
+        ];
+        for (name, make) in variants {
+            let wrapped = banner_height(make(Banner::error(lit!(LONG))), 280.0);
+            let elided = banner_height(
+                make(Banner::error(lit!(LONG)).title_single_line(true)),
+                280.0,
+            );
+            assert!(
+                wrapped > elided + 10.0,
+                "{name}: wrapped {wrapped} should exceed single line {elided}"
+            );
+        }
     }
 
     #[test]
