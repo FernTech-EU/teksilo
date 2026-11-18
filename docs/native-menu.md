@@ -310,8 +310,11 @@ addressable.
   application: every window's in-window rows and the native application menu
   show the new chord after the turn it was made in (see
   [Shortcuts and key equivalents](#shortcuts-and-key-equivalents)).
-- **Locale**: native titles follow a locale change, and a reload of the
-  translations. A row's title is updated in place; the menus' titles and the
+- **Locale**: the in-window bar follows a locale change, and a reload of the
+  translations: it is built again, so its titles, their mnemonics (Alt+letter
+  included) and accessible names, and the rows of its menus are in the new
+  language, collapsed to a hamburger or not. A menu open at that moment
+  closes. Native titles follow too. A row's title is updated in place; the menus' titles and the
   App menu's labels, which have nothing to update in place, by installing the
   menu again: the application menu at the end of the turn, a window's own
   `from_model` menu as its bar is rebuilt for the change.

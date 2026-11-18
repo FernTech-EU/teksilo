@@ -2582,3 +2582,257 @@ fn a_focused_title_is_drawn_highlighted() {
         "and loses it with the focus"
     );
 }
+
+// ── The bar follows the locale ──────────────────────────────────────
+
+/// A bar over a File menu (Save) and a Help menu, titled in English and
+/// French with mnemonics that change letter with the language
+/// (`&File`/`&Fichier`, `&Help`/`Ai&de`, `&Save`/`&Enregistrer`), English
+/// active. The translations are this thread's until the value is dropped.
+struct Bilingual {
+    t: WidgetTree,
+    bar: WidgetId,
+    mgr: std::rc::Rc<teksilo_i18n::I18nManager>,
+    /// The application menu's holder, for an application bar.
+    holder: Option<crate::menu::ApplicationMenu>,
+    /// How many times a window bar's Save row ran.
+    saved: std::rc::Rc<std::cell::Cell<u32>>,
+}
+
+impl Drop for Bilingual {
+    fn drop(&mut self) {
+        teksilo_i18n::thread_local::clear();
+    }
+}
+
+impl Bilingual {
+    fn new(application: bool, collapsed: bool) -> Self {
+        use std::any::{Any, TypeId};
+        use teksilo_i18n::{I18nConfig, I18nManager, thread_local};
+        thread_local::clear();
+        let cfg = I18nConfig::test_only(
+            "en-US",
+            &[("file", "&File"), ("help", "&Help"), ("save", "&Save")],
+        )
+        .with_locale(
+            "fr-FR",
+            &[
+                ("file", "&Fichier"),
+                ("help", "Ai&de"),
+                ("save", "&Enregistrer"),
+            ],
+        );
+        let mgr = I18nManager::from_config(&cfg);
+        thread_local::install(mgr.clone());
+        let title = |key: &'static str| {
+            teksilo_i18n::localized(move || teksilo_i18n::resolve_message(key, &[]))
+        };
+        let saved = std::rc::Rc::new(std::cell::Cell::new(0_u32));
+        let save = crate::menu::MenuEntry::new(title("save")).on_activate({
+            let saved = saved.clone();
+            move |_| saved.set(saved.get() + 1)
+        });
+        let model = crate::menu::MenuModel::new()
+            .menu(title("file"), |m| m.item(save))
+            .menu(title("help"), |m| m);
+        let mut t = collapsible_tree();
+        let (mut bar, holder) = if application {
+            let holder = crate::menu::ApplicationMenu::new();
+            holder.set(model);
+            let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
+            app_state.insert(
+                TypeId::of::<crate::menu::ApplicationMenu>(),
+                Box::new(holder.clone()),
+            );
+            t.set_app_context(Rc::new(
+                teksilo_core::event_source::TreeAppContext::empty().with_app_state(app_state),
+            ));
+            (MenuBar::application(), Some(holder))
+        } else {
+            (MenuBar::from_model(model), None)
+        };
+        if collapsed {
+            bar = bar.collapse_policy(CollapsePolicy::Always);
+        }
+        let bar = t.add(bar);
+        let mut b = Bilingual {
+            t,
+            bar,
+            mgr,
+            holder,
+            saved,
+        };
+        settle(&mut b.t);
+        b
+    }
+
+    fn switch_to_french(&mut self) {
+        self.mgr.set_locale("fr-FR".parse().unwrap());
+        self.t.set_locale("fr-FR".to_string());
+        settle(&mut self.t);
+    }
+
+    /// The triggers, in order, shown or not.
+    fn triggers(&self) -> Vec<WidgetId> {
+        collect_descendants_with_role(&self.t, self.bar, Role::MenuItem)
+    }
+
+    /// The triggers' accessible names.
+    fn names(&self) -> Vec<String> {
+        self.triggers()
+            .into_iter()
+            .map(|id| {
+                self.t
+                    .accessibility_node(id)
+                    .name()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    /// The access keys the walker publishes for the shown triggers.
+    fn access_keys(&self) -> Vec<String> {
+        let snapshot = self.t.accessibility_tree_snapshot();
+        self.triggers()
+            .into_iter()
+            .filter_map(|id| {
+                let node_id = teksilo_core::accessibility::widget_id_to_node_id(id);
+                snapshot
+                    .nodes
+                    .iter()
+                    .find(|(n, _)| *n == node_id)
+                    .and_then(|(_, node)| node.access_key().map(str::to_string))
+            })
+            .collect()
+    }
+
+    /// The trigger the window's Alt+`letter` opens, if any.
+    fn opened_by(&self, letter: char) -> Option<WidgetId> {
+        let action = self
+            .t
+            .window_state()
+            .and_then(|w| w.menubar_dispatcher())
+            .and_then(|d| {
+                d.try_handle(&MenubarKeyEvent {
+                    key: Key::Character(letter),
+                    modifiers: Modifiers::ALT,
+                })
+            });
+        match action {
+            Some(MenubarAction::OpenMenu { trigger_id, .. }) => Some(trigger_id),
+            _ => None,
+        }
+    }
+
+    /// Open the menu titled `title` with a click, revealing a collapsed bar
+    /// first.
+    fn open(&mut self, title: &str) {
+        if self.t.find_by_label(title).is_none() {
+            let hamburger = self.t.find_by_label("Menu").expect("the hamburger");
+            self.t.click(hamburger);
+            settle(&mut self.t);
+        }
+        let trigger = self.t.find_by_label(title).expect("the trigger");
+        self.t.click(trigger);
+        settle(&mut self.t);
+    }
+
+    /// How many times Save ran: in the window for a window bar, queued for
+    /// the application tree for an application bar.
+    fn saves(&self) -> usize {
+        match &self.holder {
+            Some(holder) => holder.take_pending().len(),
+            None => self.saved.get() as usize,
+        }
+    }
+
+    /// Everything the switch to French must have changed: the titles'
+    /// names, their mnemonics in the window's dispatcher, the rows of a menu
+    /// opened after it, and those rows' own mnemonics.
+    fn check_french(&mut self) {
+        assert_eq!(self.names(), ["Fichier", "Aide"], "the triggers' names");
+        if cfg!(not(target_os = "macos")) {
+            let triggers = self.triggers();
+            assert_eq!(self.opened_by('d'), Some(triggers[1]), "Alt+D opens Aide");
+            assert_eq!(self.opened_by('h'), None, "Alt+H opens nothing");
+        }
+        self.open("Fichier");
+        assert!(
+            focus_is_in_menu_holding(&self.t, "Enregistrer"),
+            "Fichier opens on its French row"
+        );
+        assert!(self.t.find_by_label("Save").is_none(), "no English row");
+        self.t.press_key(Key::Character('e'), Modifiers::NONE);
+        settle(&mut self.t);
+        assert_eq!(self.saves(), 1, "E chooses Enregistrer");
+    }
+}
+
+/// A `from_model` bar shows its titles, mnemonics and rows in the language
+/// switched to, including a menu opened before the switch. It kept the
+/// language it was built in until something rebuilt it.
+#[test]
+fn a_model_bar_follows_the_locale() {
+    let mut b = Bilingual::new(false, false);
+    assert_eq!(b.names(), ["File", "Help"], "precondition");
+    assert_eq!(b.access_keys(), ["F", "H"], "precondition");
+    let english_width = b.t.bounds(b.triggers()[0]).width;
+    b.open("File");
+    b.t.press_key(Key::Escape, Modifiers::NONE);
+    settle(&mut b.t);
+    b.switch_to_french();
+    assert_eq!(b.access_keys(), ["F", "D"], "the access keys");
+    assert!(
+        b.t.bounds(b.triggers()[0]).width > english_width,
+        "the title is drawn from the longer French label"
+    );
+    b.check_french();
+}
+
+/// The application menu's bar follows the locale the same way.
+#[test]
+fn an_application_bar_follows_the_locale() {
+    let mut b = Bilingual::new(true, false);
+    assert_eq!(b.names(), ["File", "Help"], "precondition");
+    b.switch_to_french();
+    assert_eq!(b.access_keys(), ["F", "D"], "the access keys");
+    b.check_french();
+}
+
+/// Collapsed to its hamburger, a bar follows the locale too, from a window
+/// model or the application menu.
+#[test]
+fn a_collapsed_bar_follows_the_locale() {
+    for application in [false, true] {
+        let mut b = Bilingual::new(application, true);
+        assert_eq!(b.names(), ["File", "Help"], "precondition");
+        b.switch_to_french();
+        b.check_french();
+    }
+}
+
+/// A menu open when the locale changes is closed, with no overlay left
+/// behind; a title holding the focus hands it to its new self; the window
+/// keeps its dispatcher, so F10 and Alt+letter still reach the bar.
+#[test]
+fn a_locale_switch_closes_an_open_menu_and_keeps_the_bar_working() {
+    let mut b = Bilingual::new(false, false);
+    b.open("File");
+    assert!(
+        !b.t.active_overlays().is_empty(),
+        "precondition: File is open"
+    );
+    b.switch_to_french();
+    assert!(b.t.active_overlays().is_empty(), "the open menu was closed");
+    assert!(b.t.window_state().unwrap().menubar_dispatcher().is_some());
+
+    let mut b = Bilingual::new(false, false);
+    let file = b.triggers()[0];
+    b.t.focus(file);
+    settle(&mut b.t);
+    b.switch_to_french();
+    assert_eq!(b.t.focused(), Some(b.triggers()[0]), "focus is on Fichier");
+    assert_eq!(b.t.find_by_label("Fichier"), Some(b.triggers()[0]));
+    b.check_french();
+}

@@ -64,6 +64,18 @@ impl Widget for MenuBar {
             );
         }
 
+        // The titles' accessible names and mnemonics, the window's Alt+letter
+        // table and each menu's own mnemonic and type-ahead tables are parsed
+        // from labels resolved at build, so the bar is built again when the
+        // locale changes or the translations are reloaded.
+        if let Some(translations) = teksilo_i18n::current_version_signal() {
+            translations.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::BindingLevel::Rebuild,
+            );
+        }
+
         // On macOS with `Suppress`, the global menu bar IS the menu — render
         // only the optional leading/trailing slots in-window (no triggers, no
         // F10/Alt dispatcher). For an application bar, only where the
