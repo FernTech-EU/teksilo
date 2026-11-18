@@ -115,6 +115,10 @@ terminal = ["dep:teksilo-terminal", "teksilo-terminal/alacritty"]
 # endpoint, token, or bridge. Also re-exports the GUI-free
 # `teksilo-automation` toolkit as `teksilo::automation`.
 automation = ["dep:teksilo-automation", "teksilo-app/automation"]
+# One running instance per user: `teksilo::app::single_instance::acquire`
+# and `TeksiloAppBuilder::single_instance` (see docs/multi-window.md,
+# "Single instance"). Off by default.
+single-instance = ["teksilo-app/single-instance"]
 
 # Timing histograms of the live-image pass (`LiveImage`), printed per window
 # by the idle trace (`TEKSILO_IDLE_TRACE=1`), in release builds too. Off by
@@ -230,7 +234,7 @@ tempfile = { workspace = true }
 [package.metadata.docs.rs]
 # Everything except the WebView engine backends, which need
 # WebKitGTK / Servo system libraries docs.rs does not have.
-features = ["automation", "async", "terminal", "theme-fluent",
+features = ["automation", "async", "single-instance", "terminal", "theme-fluent",
             "theme-kde", "theme-macos", "theme-material3", "web-view-headless"]
 
 # The workspace has ONE changelog, at the repository root, so these run from

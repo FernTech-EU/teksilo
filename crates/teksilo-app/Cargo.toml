@@ -61,6 +61,11 @@ automation = [
     "dep:serde_json",
     "dep:uuid",
 ]
+# One running instance per user: `single_instance::acquire` and
+# `TeksiloAppBuilder::single_instance`, which deliver a second launch's
+# command line to the running application as an external event. Forwards
+# teksilo-platform's feature of the same name. Off by default.
+single-instance = ["teksilo-platform/single-instance"]
 # The idle trace (`TEKSILO_IDLE_TRACE=1`) adds a line per window drawing a
 # live picture: the live pass's frame time, lock holds and commit-to-upload
 # delays, with the uploads and contended frames since the last line. Works

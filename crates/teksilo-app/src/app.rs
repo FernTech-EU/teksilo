@@ -1348,6 +1348,11 @@ struct TeksiloAppHandler {
     /// [`ExternalCtxHandler`]. Consulted only for payloads no framework router
     /// and no built-in downcast arm claimed.
     external_ctx_handler: Option<ExternalCtxHandler>,
+    /// The single-instance election this application won, serving its
+    /// second launches until the loop ends; see
+    /// [`TeksiloAppBuilder::single_instance`].
+    #[cfg(feature = "single-instance")]
+    single_instance: Option<crate::single_instance::PrimaryInstance>,
     initial_window: Option<WindowConfig>,
     initial_created: bool,
     /// The first `resumed` has run, and with it the startup check of
@@ -1463,6 +1468,8 @@ impl TeksiloAppHandler {
             wm,
             app_event_handler,
             external_ctx_handler: None,
+            #[cfg(feature = "single-instance")]
+            single_instance: None,
             initial_window,
             initial_created: false,
             started: false,
@@ -5724,6 +5731,10 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // Here rather than after `run`'s loop, which macOS never reaches.
         #[cfg(all(feature = "automation", debug_assertions))]
         crate::automation_bridge::retract_endpoint();
+        #[cfg(feature = "single-instance")]
+        {
+            self.single_instance = None;
+        }
         // On macOS this is the last moment: AppKit ends the process right
         // after its `applicationWillTerminate:`, which reaches here, so
         // `run` never returns to flush, and nothing the application holds
@@ -6059,6 +6070,9 @@ pub struct TeksiloAppBuilder {
     font_registrars: Vec<Box<dyn teksilo_text::FontRegistrar>>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
     external_ctx_handler: Option<ExternalCtxHandler>,
+    /// See [`single_instance`](Self::single_instance).
+    #[cfg(feature = "single-instance")]
+    single_instance: Option<crate::single_instance::PrimaryInstance>,
     on_ready: Vec<Box<dyn FnOnce(AppEventProxy)>>,
     initial_window: Option<WindowConfig>,
     /// When the application quits on its own. See [`QuitPolicy`].
@@ -6139,6 +6153,8 @@ impl TeksiloAppBuilder {
             font_registrars: Vec::new(),
             app_event_handler: None,
             external_ctx_handler: None,
+            #[cfg(feature = "single-instance")]
+            single_instance: None,
             on_ready: Vec::new(),
             initial_window: None,
             quit_policy: QuitPolicy::default(),
@@ -6656,6 +6672,26 @@ impl TeksiloAppBuilder {
         + 'static,
     ) -> Self {
         self.external_ctx_handler = Some(Box::new(handler));
+        self
+    }
+
+    /// Serve the second launches of a single-instance application, given the
+    /// [`PrimaryInstance`](crate::single_instance::PrimaryInstance) that
+    /// [`single_instance::acquire`](crate::single_instance::acquire) elected.
+    ///
+    /// When the event loop starts, the instance starts listening (a launch
+    /// made before then waits for it), and each second launch's
+    /// [`InstanceMessage`](crate::single_instance::InstanceMessage) is posted
+    /// to the main thread as an [`AppEvent::External`] payload, wrapped in a
+    /// [`WithActivationToken`] when it carries a token. Claim it in
+    /// [`on_external_with_ctx`](Self::on_external_with_ctx) by downcasting the
+    /// payload to `InstanceMessage`; [`on_app_event`](Self::on_app_event) and
+    /// the observers see it too. The instance is released (its socket and
+    /// lock removed, so the next launch is the primary) when the loop ends.
+    /// [`build_headless`](Self::build_headless) serves nothing and releases it.
+    #[cfg(feature = "single-instance")]
+    pub fn single_instance(mut self, primary: crate::single_instance::PrimaryInstance) -> Self {
+        self.single_instance = Some(primary);
         self
     }
 
@@ -7446,6 +7482,19 @@ impl TeksiloAppBuilder {
         app.settings = opened_settings;
         app.termination_signals = self.termination_signals;
         app.external_ctx_handler = self.external_ctx_handler;
+        // Held even when it cannot listen: releasing the name would let the
+        // next launch start a second instance of an application that asked
+        // for a single one.
+        #[cfg(feature = "single-instance")]
+        if let Some(mut primary) = self.single_instance {
+            let proxy = proxy.clone();
+            if let Err(e) = primary.listen(move |message| {
+                proxy.send_external_boxed(crate::single_instance::payload(message));
+            }) {
+                eprintln!("teksilo-app: the single-instance listener did not start: {e}");
+            }
+            app.single_instance = Some(primary);
+        }
         // After the app context, typesetter and theme mode are in place, so
         // the tree is seeded like a window's.
         app.wm.install_app_tree(

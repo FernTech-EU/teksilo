@@ -16,6 +16,8 @@ pub(crate) mod native_menu_route;
 pub mod native_theme;
 pub(crate) mod quit;
 pub(crate) mod redraw_gate;
+#[cfg(feature = "single-instance")]
+pub mod single_instance;
 pub mod window_config;
 pub(crate) mod window_identity;
 pub mod window_manager;
