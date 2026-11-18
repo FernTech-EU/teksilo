@@ -494,7 +494,7 @@ impl RichTextEngine {
         std::borrow::Cow::Owned(owned)
     }
 
-    /// The widest line and the height of `flow` laid out `width` wide, as
+    /// The natural width and the height of `flow` laid out `width` wide, as
     /// [`layout_full`](Self::layout_full) would lay it out at that viewport
     /// width and `font_scale`, without touching this engine's own layout.
     /// `None` lays every paragraph out on one line, as does
@@ -502,35 +502,135 @@ impl RichTextEngine {
     ///
     /// For a widget sizing itself to its text: laid out again at any width from
     /// the one this reports up to `width`, the text wraps exactly as it did
-    /// here, since every line still fits and none could take its next word. The
-    /// width is that of the widest line, margins included, as
-    /// [`max_content_width`](Self::max_content_width) reports it. A full
-    /// layout per call: meant for short texts.
+    /// here, since every line still fits and none could take its next word. A
+    /// paragraph counts its widest line with its margins, its list indent and,
+    /// on its first line, its first-line indent (a negative one, hanging,
+    /// counts against that line). A blockquote or any other frame counts the
+    /// natural width of what it holds plus its own margins, border and
+    /// padding, or the width it names. A table has no natural width of its
+    /// own, since its columns share whatever it is given: it counts as the
+    /// width it is laid out at, `width` (less what a frame around it takes);
+    /// offered none, text-typeset gives each column 200 px, and a table
+    /// naming column proportions counts as infinite, having no finite width
+    /// to divide. A full layout per call: meant for short texts.
     pub fn measure(
         &self,
         flow: &FlowSnapshot,
         width: Option<f32>,
         font_scale: f32,
     ) -> teksilo_canvas::Size {
-        let mut probe = DocumentFlow::new();
-        match (self.wrap_mode, width) {
-            (WrapMode::Word, Some(width)) => {
-                probe.set_content_width_auto();
-                probe.set_viewport(width.max(0.0), self.flow.viewport_height());
-            }
-            _ => probe.set_content_width(f32::INFINITY),
-        }
-        probe.set_font_scale(font_scale);
-        probe.set_zoom(self.flow.zoom());
-        probe.set_hyphenate_justified(self.flow.hyphenate_justified());
-        probe.set_echo_char(self.flow.echo_char());
-        probe.set_default_language(self.flow.default_language());
-        probe.set_default_direction(self.flow.default_direction());
-        probe.set_neutral_direction(self.flow.neutral_direction());
+        use text_typeset::layout::flow::FlowLayout;
+
         let filled = self.filled(flow);
+        let mut elements = text_typeset::bridge::convert_flow_with(&filled, &self.bridge_options());
+        // `DocumentFlow::layout_full` would fill these in, but it keeps the
+        // layout it builds to itself, and the frames are what this needs.
+        for (_, block) in &mut elements.blocks {
+            self.fill_block_defaults(block);
+        }
+        for (_, table) in &mut elements.tables {
+            self.fill_table_defaults(table);
+        }
+        for (_, frame) in &mut elements.frames {
+            self.fill_frame_defaults(frame);
+        }
+        let layout_width = match (self.wrap_mode, width) {
+            (WrapMode::Word, Some(width)) => width.max(0.0) / self.flow.zoom(),
+            _ => f32::INFINITY,
+        };
+
         let bridge = self.shared.borrow();
-        probe.layout_full(bridge.service(), &filled);
-        teksilo_canvas::Size::new(probe.max_content_width(), probe.content_height())
+        let service = bridge.service();
+        let mut layout = FlowLayout::new();
+        layout.scale_factor = service.scale_factor();
+        layout.font_scale = font_scale.clamp(0.1, 10.0);
+        enum Item<'e> {
+            Block(&'e text_typeset::layout::block::BlockLayoutParams),
+            Table(&'e text_typeset::layout::table::TableLayoutParams),
+            Frame(&'e text_typeset::layout::frame::FrameLayoutParams),
+        }
+        let mut items: Vec<(usize, Item)> = Vec::new();
+        items.extend(elements.blocks.iter().map(|(i, p)| (*i, Item::Block(p))));
+        items.extend(elements.tables.iter().map(|(i, p)| (*i, Item::Table(p))));
+        items.extend(elements.frames.iter().map(|(i, p)| (*i, Item::Frame(p))));
+        items.sort_by_key(|(index, _)| *index);
+        let registry = service.font_registry();
+        for (_, item) in items {
+            match item {
+                Item::Block(params) => layout.add_block(registry, params, layout_width),
+                Item::Table(params) => layout.add_table(registry, params, layout_width),
+                Item::Frame(params) => layout.add_frame(registry, params, layout_width),
+            }
+        }
+
+        let mut first_line_indents = std::collections::HashMap::new();
+        let mut frames = std::collections::HashMap::new();
+        for (_, block) in &elements.blocks {
+            first_line_indents.insert(block.block_id, block.text_indent);
+        }
+        for (_, frame) in &elements.frames {
+            natural_width::collect_frame(frame, &mut first_line_indents, &mut frames);
+        }
+        let natural = natural_width::Params {
+            first_line_indents,
+            frames,
+        };
+        let widest = layout
+            .blocks
+            .values()
+            .map(|block| natural.block(block))
+            .chain(layout.tables.values().map(natural_width::table))
+            .chain(layout.frames.values().map(|frame| natural.frame(frame)))
+            .fold(0.0, f32::max);
+        teksilo_canvas::Size::new(widest, layout.content_height)
+    }
+
+    /// The bridge options [`layout_full`](Self::layout_full) converts the
+    /// snapshot with: this flow's code-block colours, link colour, echo char
+    /// and justified hyphenation.
+    fn bridge_options(&self) -> text_typeset::bridge::BridgeOptions {
+        text_typeset::bridge::BridgeOptions {
+            code_block_background: self.flow.code_block_background(),
+            code_block_foreground: self.flow.code_block_foreground(),
+            link_foreground: self.flow.link_foreground(),
+            echo_char: self.flow.echo_char(),
+            hyphenate_justified: self.flow.hyphenate_justified(),
+        }
+    }
+
+    /// The language and directions this flow gives a block that states
+    /// none, as `DocumentFlow` fills them in.
+    fn fill_block_defaults(&self, block: &mut text_typeset::layout::block::BlockLayoutParams) {
+        use text_typeset::TextDirection;
+        if block.language.is_none() {
+            block.language = self.flow.default_language().map(str::to_owned);
+        }
+        if block.base_direction == TextDirection::Auto {
+            block.base_direction = self.flow.default_direction();
+        }
+        if block.neutral_direction == TextDirection::Auto {
+            block.neutral_direction = self.flow.neutral_direction();
+        }
+    }
+
+    fn fill_table_defaults(&self, table: &mut text_typeset::layout::table::TableLayoutParams) {
+        for cell in &mut table.cells {
+            for block in &mut cell.blocks {
+                self.fill_block_defaults(block);
+            }
+        }
+    }
+
+    fn fill_frame_defaults(&self, frame: &mut text_typeset::layout::frame::FrameLayoutParams) {
+        for (_, block) in &mut frame.blocks {
+            self.fill_block_defaults(block);
+        }
+        for (_, table) in &mut frame.tables {
+            self.fill_table_defaults(table);
+        }
+        for (_, nested) in &mut frame.frames {
+            self.fill_frame_defaults(nested);
+        }
     }
 
     /// Recolor the cached layout from the snapshot's paint-only highlight
@@ -627,14 +727,7 @@ impl RichTextEngine {
             typography_defaults::apply_base_to_block(&mut snap, base);
         }
         let block_id = snap.block_id;
-        let opts = text_typeset::bridge::BridgeOptions {
-            code_block_background: self.flow.code_block_background(),
-            code_block_foreground: self.flow.code_block_foreground(),
-            link_foreground: self.flow.link_foreground(),
-            echo_char: self.flow.echo_char(),
-            hyphenate_justified: self.flow.hyphenate_justified(),
-        };
-        let params = text_typeset::bridge::convert_block_with(&snap, &opts);
+        let params = text_typeset::bridge::convert_block_with(&snap, &self.bridge_options());
         {
             let bridge = self.shared.borrow();
             // `NoLayout` / `ScaleDirty` are ruled out by the `has_full_layout()`
@@ -1100,6 +1193,101 @@ impl RichTextEngine {
     }
 }
 
+/// The natural width [`RichTextEngine::measure`] reports, read off a laid-out
+/// flow. `max_content_width` cannot answer it: it counts a frame and a table
+/// at the width they were given (infinite, offered none), and a paragraph's
+/// lines without the first-line indent they were broken against.
+mod natural_width {
+    use std::collections::HashMap;
+
+    use text_typeset::layout::block::BlockLayout;
+    use text_typeset::layout::frame::{FrameLayout, FrameLayoutParams};
+    use text_typeset::layout::table::TableLayout;
+
+    /// What the layout does not keep of the params: each block's first-line
+    /// indent, and each frame's chrome and named width.
+    pub(super) struct Params<'p> {
+        pub(super) first_line_indents: HashMap<usize, f32>,
+        pub(super) frames: HashMap<usize, &'p FrameLayoutParams>,
+    }
+
+    /// Record `frame`, and the blocks and frames it holds at any depth.
+    pub(super) fn collect_frame<'p>(
+        frame: &'p FrameLayoutParams,
+        first_line_indents: &mut HashMap<usize, f32>,
+        frames: &mut HashMap<usize, &'p FrameLayoutParams>,
+    ) {
+        frames.insert(frame.frame_id, frame);
+        for (_, block) in &frame.blocks {
+            first_line_indents.insert(block.block_id, block.text_indent);
+        }
+        for (_, nested) in &frame.frames {
+            collect_frame(nested, first_line_indents, frames);
+        }
+    }
+
+    /// A table's columns share the width it is given, so that width is the
+    /// only one it has. Columns that divide an infinite width by proportions
+    /// can come out NaN, which `f32::max` would drop.
+    pub(super) fn table(table: &TableLayout) -> f32 {
+        if table.total_width.is_finite() {
+            table.total_width
+        } else {
+            f32::INFINITY
+        }
+    }
+
+    impl Params<'_> {
+        /// The widest line with the margins and the list indent
+        /// (`left_margin` holds both). The first line was broken against the
+        /// width less its indent, so it needs the indent beside it.
+        pub(super) fn block(&self, block: &BlockLayout) -> f32 {
+            let indent = self
+                .first_line_indents
+                .get(&block.block_id)
+                .copied()
+                .unwrap_or(0.0);
+            let widest = block
+                .lines
+                .iter()
+                .enumerate()
+                .map(|(i, line)| {
+                    if i == 0 {
+                        line.width + indent
+                    } else {
+                        line.width
+                    }
+                })
+                .fold(0.0, f32::max);
+            block.left_margin + widest + block.right_margin
+        }
+
+        /// What the frame holds, at its natural width, inside the frame's
+        /// margins, border and padding; or the width the frame names.
+        pub(super) fn frame(&self, frame: &FrameLayout) -> f32 {
+            let Some(params) = self.frames.get(&frame.frame_id) else {
+                return frame.total_width;
+            };
+            if params.width.is_some() {
+                return frame.total_width;
+            }
+            let content = frame
+                .blocks
+                .iter()
+                .map(|block| self.block(block))
+                .chain(frame.tables.iter().map(table))
+                .chain(frame.frames.iter().map(|nested| self.frame(nested)))
+                .fold(0.0, f32::max);
+            // `layout_frame` takes the border and the padding off both sides,
+            // whatever sides it draws the border on.
+            params.margin_left
+                + params.margin_right
+                + 2.0 * (params.border_width + params.padding)
+                + content
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1188,6 +1376,93 @@ mod tests {
         let one_line = engine.measure(&flow, None, 1.0);
         assert!(one_line.width > 120.0, "no wrapping: {}", one_line.width);
         assert!(one_line.height < measured.height);
+    }
+
+    fn markdown_flow(markdown: &str) -> FlowSnapshot {
+        let doc = TextDocument::new();
+        doc.set_markdown(markdown).unwrap().wait().unwrap();
+        doc.snapshot_flow()
+    }
+
+    /// The height `flow` has laid out `width` wide by the engine itself.
+    fn height_at(flow: &FlowSnapshot, width: f32) -> f32 {
+        let mut engine = RichTextEngine::private_default();
+        engine.set_viewport(width, 300.0);
+        engine.layout_full(flow);
+        engine.content_height()
+    }
+
+    /// A blockquote frame names no width, so it is laid out as wide as it is
+    /// offered; its natural width is its text's plus its own margin, border
+    /// and padding (16 + 2 × (3 + 8) from the bridge), offered a width or not.
+    #[test]
+    fn measure_gives_a_quote_the_width_of_its_text_and_frame() {
+        let engine = RichTextEngine::private_default();
+        let plain = TextDocument::new();
+        plain.set_plain_text("Quoted words").unwrap();
+        let text = engine.measure(&plain.snapshot_flow(), None, 1.0).width;
+
+        let quote = markdown_flow("> Quoted words\n");
+        let unbounded = engine.measure(&quote, None, 1.0);
+        assert!(unbounded.width.is_finite(), "{}", unbounded.width);
+        assert!(
+            (unbounded.width - (text + 38.0)).abs() < 0.01,
+            "text {text}, quote {}",
+            unbounded.width
+        );
+        assert_eq!(unbounded.height, height_at(&quote, unbounded.width));
+        let bounded = engine.measure(&quote, Some(400.0), 1.0);
+        assert_eq!(bounded.width, unbounded.width);
+
+        let nested = markdown_flow("> > Quoted words\n");
+        let nested = engine.measure(&nested, None, 1.0).width;
+        assert!((nested - (text + 76.0)).abs() < 0.01, "{nested}");
+    }
+
+    /// The first line is broken against the width less the indent, so the
+    /// indent is counted beside it.
+    #[test]
+    fn measure_counts_the_first_line_indent() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("Indented words").unwrap();
+        let engine = RichTextEngine::private_default();
+        let text = engine.measure(&doc.snapshot_flow(), None, 1.0).width;
+        let cursor = doc.cursor();
+        cursor
+            .set_block_format(&text_document::BlockFormat {
+                text_indent: Some(20),
+                ..Default::default()
+            })
+            .unwrap();
+        let flow = doc.snapshot_flow();
+        let indented = engine.measure(&flow, None, 1.0);
+        assert!(
+            (indented.width - (text + 20.0)).abs() < 0.01,
+            "{text} {indented:?}"
+        );
+        assert_eq!(
+            indented.height,
+            height_at(&flow, indented.width),
+            "one line"
+        );
+    }
+
+    /// A table's columns share what it is given: it is as wide as the width
+    /// offered, and offered none, as text-typeset lays it out then (200 px a
+    /// column), which is finite.
+    #[test]
+    fn measure_gives_a_table_the_width_it_is_laid_out_at() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("Hi").unwrap();
+        doc.cursor_at(2).insert_table(2, 2).unwrap();
+        let flow = doc.snapshot_flow();
+        let engine = RichTextEngine::private_default();
+        assert_eq!(engine.measure(&flow, Some(300.0), 1.0).width, 300.0);
+        let unbounded = engine.measure(&flow, None, 1.0).width;
+        assert!(
+            unbounded.is_finite() && unbounded >= 400.0,
+            "two columns of 200: {unbounded}"
+        );
     }
 
     #[test]

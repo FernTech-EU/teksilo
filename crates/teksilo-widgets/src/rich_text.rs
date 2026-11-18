@@ -844,7 +844,20 @@ impl RichTextEditor {
     /// breaks its lines exactly where it did when measured; a stack that
     /// measures it, then offers it that width back, gets the same width
     /// again. An editor that shows a caret also keeps room for it, so an empty
-    /// one is still a few pixels wide; it is measured again at each edit.
+    /// one is still a few pixels wide; it is measured again at each edit, and
+    /// when its size or typography changes
+    /// ([`set_font_size_scale`](Self::set_font_size_scale),
+    /// [`set_typography_defaults`](Self::set_typography_defaults)).
+    ///
+    /// A paragraph counts its margins, its list indent and the first-line
+    /// indent of its first line; a blockquote (or any other frame) the natural
+    /// width of what it holds plus its own margin, border and padding. A
+    /// table has no width of its own, its columns sharing whatever it is
+    /// given, so an editor holding one takes the width offered; offered none,
+    /// each column is 200 px wide, as text-typeset lays a table out then, and
+    /// a table that names column proportions makes the editor as wide as it
+    /// would be without `fit_width`. Justified lines fill the width they are
+    /// offered, so a justified paragraph that wraps takes it too.
     ///
     /// Paragraph alignment (centre, end, a right-to-left paragraph) places
     /// the lines within the fitted width. The height is unchanged:
@@ -2244,6 +2257,7 @@ impl RichTextEditor {
         st.last_font_scale = f32::NAN;
         st.needs_full_layout = true;
         st.content_dirty = true;
+        st.bump_typesetting();
         if let Some(handle) = &st.frame_request {
             handle.set(true);
         }
@@ -2261,6 +2275,7 @@ impl RichTextEditor {
         st.engine.set_typography_defaults(defaults);
         st.needs_full_layout = true;
         st.content_dirty = true;
+        st.bump_typesetting();
         if let Some(handle) = &st.frame_request {
             handle.set(true);
         }
@@ -3286,6 +3301,7 @@ impl EditorHandle {
         st.engine.set_typography_defaults(defaults);
         st.needs_full_layout = true;
         st.content_dirty = true;
+        st.bump_typesetting();
         if let Some(handle) = &st.frame_request {
             handle.set(true);
         }
@@ -3308,6 +3324,7 @@ impl EditorHandle {
         st.last_font_scale = f32::NAN;
         st.needs_full_layout = true;
         st.content_dirty = true;
+        st.bump_typesetting();
         if let Some(handle) = &st.frame_request {
             handle.set(true);
         }

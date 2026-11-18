@@ -175,8 +175,18 @@ Like a wrapping label it does not shrink (`flex = 0`, `shrink = 0`): a long
 message wraps at the width its parent offers, so give it that width (a column,
 a `MaxSize`) rather than an `HStack` slot, which measures it unbounded. An
 editable editor keeps room for its caret, empty or not, and is measured again
-as it is typed into. Each measurement lays the text out, so keep it to short
-texts.
+as it is typed into, and when its text size or typography changes
+(`set_font_size_scale`, `set_typography_defaults`). Each measurement lays the
+text out, so keep it to short texts.
+
+What counts toward the width: a paragraph's margins, its list indent and its
+first-line indent; a blockquote's text plus its own margin, border and padding,
+at every level of nesting. A table is the exception: its columns share whatever
+width it is given, so it has none of its own, and an editor holding one takes
+the width it is offered. Offered none, the table gets 200 px a column, as
+text-typeset lays a table out then (a table that names column proportions
+leaves the editor at the width it takes without `fit_width`). A justified
+paragraph that wraps fills its lines, so it takes the offered width too.
 
 The reveal walk handles the rest: `RichTextEditor` overrides
 `Widget::focus_reveal_rect` to nominate the **caret line** rather than its whole

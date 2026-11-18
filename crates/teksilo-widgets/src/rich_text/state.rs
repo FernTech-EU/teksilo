@@ -646,6 +646,13 @@ pub(crate) struct EditorState {
     /// a selection the walk held back (`reader_selection_held`).
     pub a11y_policy_version: Signal<u64>,
 
+    /// Bumped by every change of the size or the typography the text is set
+    /// in that edits nothing: the font size scale and the default typography
+    /// (see [`bump_typesetting`](Self::bump_typesetting)). A body as wide as
+    /// its text binds it at `Relayout`, because a change of either moves that
+    /// width and `document_version`, which means the document changed, stays.
+    pub typesetting_version: Signal<u64>,
+
     /// Whether the caret was last placed by the **pointer**. While set, the
     /// typewriter pin stands down and the click position becomes the new
     /// resting place; the next keystroke clears it and pinning resumes.
@@ -1001,6 +1008,13 @@ impl EditorState {
         self.a11y_policy_version.set(v.wrapping_add(1));
     }
 
+    /// Tell a body as wide as its text that the size or the typography of the
+    /// text changed (see [`typesetting_version`](Self::typesetting_version)).
+    pub(crate) fn bump_typesetting(&self) {
+        let v = self.typesetting_version.get();
+        self.typesetting_version.set(v.wrapping_add(1));
+    }
+
     pub fn new(
         document: TextDocument,
         engine: RichTextEngine,
@@ -1134,6 +1148,7 @@ impl EditorState {
             typewriter: None,
             tab_key: crate::common::editor_runtime::TabKey::Edit,
             a11y_policy_version: Signal::new(0),
+            typesetting_version: Signal::new(0),
             mouse_anchored: false,
             last_ime_area: None,
             // `Debounce::new` starts already-expired so the first tick

@@ -119,17 +119,52 @@ fn height_debug() -> bool {
 /// not wrap that line again when the editor is laid out at it.
 const FIT_SLACK: f32 = 0.5;
 
+/// The width a body offered none takes when it does not fit its text.
+const GREEDY_WIDTH: f32 = 200.0;
+
 /// Room for the caret after the widest line of an editor that shows one,
 /// as wide as text-typeset draws it. It is also the whole width of an empty
 /// editor, which still has to show where typing goes.
 const FIT_CARET_ROOM: f32 = 2.0;
 
+/// Give the engine the language and directions of every paragraph that states
+/// none: the editor's base direction, the content language declared around it,
+/// and for a paragraph with no strongly directional character, that language's
+/// direction or the window's. Baked at layout, so a change forces a relayout
+/// and a render. Nothing reaches the document.
+///
+/// Paint sets them before it lays the text out; a body fitting its width sets
+/// them before it measures, which happens first.
+fn sync_paragraph_defaults(
+    st: &mut EditorState,
+    language: Option<&teksilo_core::language::LanguageTag>,
+    window: teksilo_core::environment::LayoutDirection,
+) {
+    use crate::text_base_direction::{neutral_direction, to_engine};
+    let engine_language = language.map(|tag| tag.as_str());
+    let engine_direction = st.base_direction.get().for_engine();
+    let engine_neutral = to_engine(neutral_direction(language, window));
+    if st.engine.default_language() != engine_language
+        || st.engine.default_direction() != engine_direction
+        || st.engine.neutral_direction() != engine_neutral
+    {
+        st.engine.set_default_language(engine_language);
+        st.engine.set_default_direction(engine_direction);
+        st.engine.set_neutral_direction(engine_neutral);
+        st.needs_full_layout = true;
+        st.pending_full_render = true;
+    }
+}
+
 impl RichTextEditorBody {
     /// The width and height of the text laid out at `proposal`'s width, for
-    /// `fit_width`: the widest line, with [`FIT_SLACK`] and the caret's room,
-    /// never wider than the proposal.
+    /// `fit_width`: its natural width (see `RichTextEngine::measure`), with
+    /// [`FIT_SLACK`] and the caret's room, never wider than the proposal. A
+    /// text with no finite natural width (a table with column proportions,
+    /// offered no width) takes the width it would take without `fit_width`.
     fn fitted_extent(&self, proposal: SizeProposal, ctx: &LayoutContext) -> Size {
-        let st = self.state.borrow();
+        let mut st = self.state.borrow_mut();
+        sync_paragraph_defaults(&mut st, ctx.content_language(), ctx.layout_direction);
         let flow = st.flow_snapshot();
         let measured = st.engine.measure(
             &flow,
@@ -143,6 +178,9 @@ impl RichTextEditorBody {
         let mut width = measured.width + FIT_SLACK + caret;
         if let Some(offered) = proposal.width {
             width = width.min(offered.max(0.0));
+        }
+        if !width.is_finite() {
+            width = proposal.width.unwrap_or(GREEDY_WIDTH).max(0.0);
         }
         Size::new(width, measured.height)
     }
@@ -278,13 +316,18 @@ impl Widget for RichTextEditorBody {
         }
         // An editor as wide as its text is measured again whenever the text
         // changes: an edit that leaves the height alone still moves the width.
+        // So does a change of its size or typography, which edits nothing.
         if self.fit_width {
-            let version = self.state.borrow().document_version.clone();
-            version.bind_to(
-                ctx.self_id(),
-                ctx.binding_registry(),
-                teksilo_core::binding::BindingLevel::Relayout,
-            );
+            let st = self.state.borrow();
+            let versions = [st.document_version.clone(), st.typesetting_version.clone()];
+            drop(st);
+            for version in versions {
+                version.bind_to(
+                    ctx.self_id(),
+                    ctx.binding_registry(),
+                    teksilo_core::binding::BindingLevel::Relayout,
+                );
+            }
         }
 
         Vec::new()
@@ -298,7 +341,7 @@ impl Widget for RichTextEditorBody {
         let fitted = self.fit_width.then(|| self.fitted_extent(proposal, ctx));
         let w = match fitted {
             Some(extent) => extent.width,
-            None => proposal.width.unwrap_or(200.0).max(0.0),
+            None => proposal.width.unwrap_or(GREEDY_WIDTH).max(0.0),
         };
 
         // Greedy mode (default, behaviour unchanged): both knobs
@@ -564,29 +607,7 @@ impl Widget for RichTextEditorBody {
             }
         }
 
-        // The language and direction of every paragraph that states none: the
-        // editor's base direction, the content language declared around it,
-        // and for a paragraph with no strongly directional character, that
-        // language's direction or the window's. Baked at layout, so a change
-        // forces a relayout and a render this frame. Nothing reaches the
-        // document.
-        {
-            use crate::text_base_direction::{neutral_direction, to_engine};
-            let language = ctx.content_language.as_ref();
-            let engine_language = language.map(|tag| tag.as_str());
-            let engine_direction = st.base_direction.get().for_engine();
-            let engine_neutral = to_engine(neutral_direction(language, ctx.layout_direction));
-            if st.engine.default_language() != engine_language
-                || st.engine.default_direction() != engine_direction
-                || st.engine.neutral_direction() != engine_neutral
-            {
-                st.engine.set_default_language(engine_language);
-                st.engine.set_default_direction(engine_direction);
-                st.engine.set_neutral_direction(engine_neutral);
-                st.needs_full_layout = true;
-                st.pending_full_render = true;
-            }
-        }
+        sync_paragraph_defaults(&mut st, ctx.content_language.as_ref(), ctx.layout_direction);
 
         // Idempotent echo — `place_children` already adopted these exact bounds
         // during layout, so this is normally a no-op. It stays so that any path

@@ -305,3 +305,249 @@ fn a_bubble_under_a_cap_wraps_at_the_cap() {
     let long = in_a_bubble(LONG);
     assert!(long > 250.0 && long <= 300.0, "{long}");
 }
+
+/// Without `min_lines` / `max_lines` the height is the proposal's, and the
+/// width still follows the text.
+#[test]
+fn a_greedy_viewer_fits_its_width_too() {
+    let mut tree = app_tree();
+    let id = in_a_row(&mut tree, viewer("Hi"), 400.0);
+    let width = tree.bounds(id).width;
+    let label = label_width("Hi");
+    assert!(
+        (width - (label + SLACK)).abs() < 0.01,
+        "\"Hi\" is {label} wide, the viewer {width}"
+    );
+}
+
+fn markdown(text: &str) -> TextDocument {
+    let doc = TextDocument::new();
+    doc.set_markdown(text).unwrap().wait().unwrap();
+    doc
+}
+
+/// A paragraph whose first line is indented by `indent` pixels.
+fn indented(text: &str, indent: i32) -> TextDocument {
+    let doc = doc_with(text);
+    let cursor = doc.cursor();
+    cursor.set_position(0, MoveMode::MoveAnchor);
+    cursor
+        .set_block_format(&BlockFormat {
+            text_indent: Some(indent),
+            ..BlockFormat::default()
+        })
+        .unwrap();
+    doc
+}
+
+/// The height of the text of `doc` laid out in a column far wider than it,
+/// where no line wraps.
+fn unwrapped_height(doc: TextDocument) -> f32 {
+    let mut tree = app_tree();
+    let editor = RichTextEditor::read_only(doc)
+        .text_style(TextStyleRole::Body)
+        .min_lines(1);
+    let handle = editor.handle();
+    in_a_column(&mut tree, editor, 2000.0);
+    text_height(&handle)
+}
+
+/// A fitted body viewer over `doc` beside a spacer, which measures it with no
+/// width: its width and the height of its text as laid out at that width.
+fn fitted_in_a_row(doc: TextDocument) -> (f32, f32) {
+    let mut tree = app_tree();
+    let editor = RichTextEditor::read_only(doc)
+        .text_style(TextStyleRole::Body)
+        .fit_width(true)
+        .min_lines(1);
+    let handle = editor.handle();
+    let id = in_a_row(&mut tree, editor, 1000.0);
+    (tree.bounds(id).width, text_height(&handle))
+}
+
+/// What the bridge gives a blockquote that names none of its own: a 16 px
+/// left margin, a 3 px border and 8 px of padding, the last two taken off
+/// both sides.
+const QUOTE_CHROME: f32 = 16.0 + 2.0 * (3.0 + 8.0);
+
+/// A quote is as wide as its text and its own margin, border and padding,
+/// and laid out at that width keeps its text on one line.
+#[test]
+fn a_quote_is_as_wide_as_its_text_and_its_frame() {
+    let (width, height) = fitted_in_a_row(markdown("> Hi there\n"));
+    assert!(width.is_finite(), "a quote has a natural width: {width}");
+    let expected = label_width("Hi there") + QUOTE_CHROME + SLACK;
+    assert!(
+        (width - expected).abs() < 0.01,
+        "the quote is {width} wide, its text and frame {expected}"
+    );
+    assert_eq!(
+        height,
+        unwrapped_height(markdown("> Hi there\n")),
+        "one line"
+    );
+}
+
+#[test]
+fn a_nested_quote_counts_both_frames() {
+    let (width, height) = fitted_in_a_row(markdown("> > Hi there\n"));
+    let expected = label_width("Hi there") + 2.0 * QUOTE_CHROME + SLACK;
+    assert!(
+        (width - expected).abs() < 0.01,
+        "the nested quote is {width} wide, its text and frames {expected}"
+    );
+    assert_eq!(
+        height,
+        unwrapped_height(markdown("> > Hi there\n")),
+        "one line"
+    );
+}
+
+/// A table's columns share the width it is given, so it has none of its own:
+/// offered a width, the editor takes it; offered none, the table is laid out
+/// as text-typeset lays it out then, and the width is finite.
+#[test]
+fn a_table_takes_the_offered_width_and_stays_finite_unbounded() {
+    let with_table = || {
+        let doc = doc_with("Hi");
+        let cursor = doc.cursor();
+        cursor.set_position(2, MoveMode::MoveAnchor);
+        cursor.insert_table(2, 2).unwrap();
+        doc
+    };
+    let mut tree = app_tree();
+    let id = in_a_column(
+        &mut tree,
+        RichTextEditor::read_only(with_table())
+            .text_style(TextStyleRole::Body)
+            .fit_width(true)
+            .min_lines(1),
+        300.0,
+    );
+    assert_eq!(tree.bounds(id).width, 300.0);
+
+    let (width, _) = fitted_in_a_row(with_table());
+    assert!(
+        width.is_finite() && width < 1000.0,
+        "offered no width, a table still has a finite one: {width}"
+    );
+}
+
+/// The first line of a paragraph is broken against the width less its
+/// indent, so the indent is part of the width it needs.
+#[test]
+fn a_first_line_indent_is_counted() {
+    let (width, height) = fitted_in_a_row(indented("Hi there", 20));
+    let expected = label_width("Hi there") + 20.0 + SLACK;
+    assert!(
+        (width - expected).abs() < 0.01,
+        "the paragraph is {width} wide, its text and indent {expected}"
+    );
+    assert_eq!(
+        height,
+        unwrapped_height(indented("Hi there", 20)),
+        "one line"
+    );
+}
+
+/// A hanging (negative) indent gives the first line more room than the rest:
+/// it needs less, and laid out at what it asks for nothing wraps.
+#[test]
+fn a_hanging_indent_does_not_wrap_the_first_line() {
+    let (width, height) = fitted_in_a_row(indented("Hi there", -10));
+    assert!(width.is_finite() && width > 0.0, "{width}");
+    assert_eq!(
+        height,
+        unwrapped_height(indented("Hi there", -10)),
+        "one line"
+    );
+}
+
+/// A list item's text starts after its marker's indent, which it needs too.
+#[test]
+fn a_list_item_counts_its_indent() {
+    let (width, height) = fitted_in_a_row(markdown("- Hi there\n"));
+    let text = label_width("Hi there");
+    assert!(
+        width > text + SLACK + 1.0,
+        "the item is {width} wide, its text alone {text}"
+    );
+    assert_eq!(
+        height,
+        unwrapped_height(markdown("- Hi there\n")),
+        "one line"
+    );
+}
+
+/// Measured unbounded, then given that width back by a stack, pass after
+/// pass: the width and the lines stay.
+fn assert_stable(doc: TextDocument) {
+    let mut tree = app_tree();
+    let editor = RichTextEditor::read_only(doc)
+        .text_style(TextStyleRole::Body)
+        .fit_width(true)
+        .min_lines(1);
+    let handle = editor.handle();
+    let id = tree.add(editor);
+    let row = tree.add(HStack::new().child(id).child(Spacer::new()));
+    tree.add(VStack::new().child(row));
+    settle(&mut tree, 1000.0);
+    let width = tree.bounds(id).width;
+    let height = text_height(&handle);
+    assert!(width.is_finite());
+    for _ in 0..5 {
+        settle(&mut tree, 1000.0);
+        assert_eq!(tree.bounds(id).width, width);
+        assert_eq!(text_height(&handle), height);
+    }
+}
+
+#[test]
+fn a_quote_keeps_its_width_pass_after_pass() {
+    assert_stable(markdown("> Are you there?\n"));
+}
+
+#[test]
+fn an_indented_paragraph_keeps_its_width_pass_after_pass() {
+    assert_stable(indented("Are you there?", 20));
+}
+
+/// A larger text size edits nothing, and still moves the width.
+#[test]
+fn a_new_font_size_scale_is_measured_again() {
+    let text = "Are you there?";
+    let mut tree = app_tree();
+    let editor = viewer(text);
+    let handle = editor.handle();
+    let id = in_a_row(&mut tree, editor, 1000.0);
+    let before = tree.bounds(id).width;
+
+    handle.set_font_size_scale(1.5);
+    settle(&mut tree, 1000.0);
+    let after = tree.bounds(id).width;
+
+    let mut fresh = app_tree();
+    let editor = viewer(text).font_size_scale(1.5);
+    let fresh_handle = editor.handle();
+    let fresh_id = in_a_row(&mut fresh, editor, 1000.0);
+    assert!(after > before * 1.4, "{before} then {after}");
+    assert_eq!(after, fresh.bounds(fresh_id).width);
+    assert_eq!(text_height(&handle), text_height(&fresh_handle), "one line");
+}
+
+/// The first measurement comes before the first paint, which is where the
+/// language and the directions used to reach the engine.
+#[test]
+fn the_first_measurement_knows_the_base_direction() {
+    let mut tree = app_tree();
+    let editor =
+        viewer("Hi").base_direction(crate::text_base_direction::TextBaseDirection::RightToLeft);
+    let handle = editor.handle();
+    let id = tree.add(editor);
+    tree.add(HStack::new().child(id).child(Spacer::new()));
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    assert_eq!(
+        handle.state.borrow().engine.default_direction(),
+        teksilo_text::TextDirection::RightToLeft
+    );
+}
