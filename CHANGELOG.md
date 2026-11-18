@@ -25,6 +25,13 @@ by crate for clarity, not because crates version independently.
   `on_external_with_ctx` as an `InstanceMessage`. The election is a socket in
   the runtime directory on Linux and macOS and a named pipe private to the
   user on Windows; either way only the same user's processes can take part.
+- **`TerminationWatch`** keeps `SIGTERM` and `SIGHUP` from ending the process
+  outside the event loop. Installed at the top of `main` and given to the
+  builder with `TeksiloAppBuilder::termination_watch`, it makes a signal that
+  arrives before the loop quit the application as the loop starts
+  (`QuitSource::Signal`), and only remembers one that arrives after it
+  (`signalled()`, `signals_received()`), so a backend's shutdown can finish.
+  On Windows it is inert.
 - **`ctx.open_uri(uri)` and `ctx.open_path(path)`** open a link or a file with
   the desktop's handler (`xdg-open`, `open`, `ShellExecuteW`), never through a
   shell. `javascript:`, `vbscript:`, `data:` and `file:` URIs are refused. An
