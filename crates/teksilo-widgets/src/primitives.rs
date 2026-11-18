@@ -51,7 +51,7 @@ pub use fixed_size::FixedSize;
 pub use form_layout::FormLayout;
 pub use grid::{Grid, TrackSize};
 pub use hstack::HStack;
-pub use icon_widget::IconWidget;
+pub use icon_widget::{IconThemeService, IconWidget};
 pub use image_mask::ImageMaskShape;
 pub use image_widget::{ImageFit, ImageWidget};
 pub use live_image::{LiveImage, LiveImageHandle, LiveImageSizing};

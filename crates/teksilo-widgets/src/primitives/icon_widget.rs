@@ -11,6 +11,11 @@
 //! `IconMode::FullColor` preserves original pixel colors and is appropriate
 //! for emoji-style graphics or brand logos.
 //!
+//! [`IconWidget::themed`] takes the icon from the desktop's icon theme by its
+//! freedesktop name (Linux and BSD desktops), through the application's
+//! [`IconThemeService`], with an embedded [`fallback`](IconWidget::fallback)
+//! for a name the theme lacks.
+//!
 //! For arbitrary-aspect-ratio photos or artwork see
 //! [`ImageWidget`](super::image_widget::ImageWidget).
 //!
@@ -30,6 +35,12 @@
 //!     .follow_text_scale(false);
 //! ```
 
+mod theme_service;
+#[cfg(test)]
+mod themed_tests;
+
+pub use theme_service::IconThemeService;
+
 use std::sync::Arc;
 
 use teksilo_canvas::svg::{SvgDrawOp, SvgIcon};
@@ -43,6 +54,8 @@ use teksilo_core::color_prop::ColorProp;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{LayoutContext, PaintContext, Widget};
 use teksilo_tokens::{Color, Easing, TextRole};
+
+use theme_service::{ThemedImage, ThemedPicture};
 
 /// Whether an icon is rendered as a theme-tinted mask or in its original colors.
 ///
@@ -154,6 +167,16 @@ pub struct IconWidget {
     /// [`follow_text_scale`](Self::follow_text_scale); used by `SeverityBadge`
     /// so status glyphs track the text they sit beside.
     follow_text_scale: bool,
+    /// Set by [`themed`](Self::themed): the name looked up in the desktop's
+    /// icon theme at each build, whose result replaces `source`.
+    themed: Option<ThemedIcon>,
+}
+
+/// What [`IconWidget::themed`] asks for.
+struct ThemedIcon {
+    name: String,
+    /// Drawn when the theme has no such icon.
+    fallback: Option<Box<IconWidget>>,
 }
 
 // Auto-generate unique names from data pointer for embedded resources.
@@ -180,6 +203,37 @@ fn prepare_pixels(icon: &RasterIcon, mode: IconMode) -> Arc<[u8]> {
     }
 }
 
+/// The size of a [`IconWidget::themed`] icon until `icon_size` sets one:
+/// the size of a small toolbar or menu icon.
+const THEMED_DEFAULT_SIZE: f32 = 16.0;
+
+/// The source, design size and mode for a themed icon's picture: a
+/// symbolic icon is tinted, a full-colour one keeps its colours.
+fn themed_source(picture: ThemedPicture) -> (IconSource, f32, IconMode) {
+    let mode = if picture.symbolic {
+        IconMode::Tintable
+    } else {
+        IconMode::FullColor
+    };
+    match picture.image {
+        ThemedImage::Svg(icon) => {
+            let design_size = icon.width().max(icon.height());
+            (IconSource::Svg(icon), design_size, mode)
+        }
+        ThemedImage::Raster(icon) => {
+            let design_size = icon.width().max(icon.height()) as f32;
+            let base_name = format!("_icon_raster_{}", icon.texture_key());
+            let source = IconSource::Raster {
+                name: mode_qualified(&base_name, mode),
+                upload_pixels: prepare_pixels(&icon, mode),
+                base_name,
+                icon,
+            };
+            (source, design_size, mode)
+        }
+    }
+}
+
 impl IconWidget {
     /// Create an icon from a custom path. The path should be defined
     /// in coordinates matching the given size (e.g., 0..24 for size=24).
@@ -191,6 +245,7 @@ impl IconWidget {
             color: ColorProp::TextRole(TextRole::Primary),
             mode: IconMode::Tintable,
             follow_text_scale: false,
+            themed: None,
         }
     }
 
@@ -297,6 +352,7 @@ impl IconWidget {
             color: ColorProp::TextRole(TextRole::Primary),
             mode: IconMode::Tintable,
             follow_text_scale: false,
+            themed: None,
         }
     }
 
@@ -321,6 +377,7 @@ impl IconWidget {
                     color: ColorProp::TextRole(TextRole::Primary),
                     mode,
                     follow_text_scale: false,
+                    themed: None,
                 }
             }
             Err(_e) => {
@@ -359,6 +416,7 @@ impl IconWidget {
                 color: ColorProp::TextRole(TextRole::Primary),
                 mode,
                 follow_text_scale: false,
+                themed: None,
             };
         }
         // Fall back to static
@@ -378,6 +436,7 @@ impl IconWidget {
                     color: ColorProp::TextRole(TextRole::Primary),
                     mode,
                     follow_text_scale: false,
+                    themed: None,
                 }
             }
             Err(_e) => {
@@ -413,6 +472,7 @@ impl IconWidget {
             color: ColorProp::TextRole(TextRole::Primary),
             mode,
             follow_text_scale: false,
+            themed: None,
         }
     }
 
@@ -445,6 +505,85 @@ impl IconWidget {
             color: ColorProp::TextRole(TextRole::Primary),
             mode,
             follow_text_scale: false,
+            themed: None,
+        }
+    }
+
+    /// The icon `name` from the desktop's icon theme, at 16 logical pixels
+    /// until [`icon_size`](Self::icon_size) says otherwise.
+    ///
+    /// Names follow the freedesktop Icon Naming Specification
+    /// (`document-send`, `go-down`, `face-smile`); a name ending in
+    /// `-symbolic` asks for the theme's single-colour variant, and gets the
+    /// full-colour icon when the theme has none. Icon themes exist on Linux
+    /// and BSD desktops only.
+    ///
+    /// The icon is looked up at each build through the application's
+    /// [`IconThemeService`], with the Icon Naming Specification's generic
+    /// fallback (`document-send-mail` finds `document-send`). The file found
+    /// decides the mode: a `-symbolic` icon is tinted with the widget's
+    /// colour like an embedded icon, a full-colour one keeps its colours
+    /// ([`IconMode::FullColor`]). When the name is missing, or there is no
+    /// icon theme, the [`fallback`](Self::fallback) is drawn, and without
+    /// one nothing is, in the same space.
+    pub fn themed(name: impl Into<String>) -> Self {
+        let mut icon = Self::from_path(Path::new(), THEMED_DEFAULT_SIZE);
+        icon.themed = Some(ThemedIcon {
+            name: name.into(),
+            fallback: None,
+        });
+        icon
+    }
+
+    /// What a [`themed`](Self::themed) icon draws when the desktop's theme
+    /// has no such icon: typically an embedded one
+    /// (`IconWidget::from_svg_icon(res!(...))`). Its picture and mode are
+    /// used; the size, colour and text scaling stay this widget's. Ignored
+    /// on an icon that is not themed.
+    pub fn fallback(mut self, fallback: IconWidget) -> Self {
+        if let Some(themed) = &mut self.themed {
+            themed.fallback = Some(Box::new(fallback));
+        }
+        self
+    }
+
+    /// Replace the source of a [`themed`](Self::themed) icon with what the
+    /// application's icon theme has for it, else its fallback's, else
+    /// nothing. Binds the service's reloads and the window's device scale,
+    /// so either rebuilds it.
+    fn resolve_themed(&mut self, ctx: &mut teksilo_core::build_context::BuildContext) {
+        let Some(themed) = &self.themed else {
+            return;
+        };
+        let device_scale = ctx.device_scale_signal();
+        let service = ctx.app_state::<IconThemeService>();
+        let picture = service.and_then(|service| {
+            let size = self.display_size.round().max(1.0) as u32;
+            let scale = device_scale.get().ceil().max(1.0) as u32;
+            service.picture(&themed.name, size, scale)
+        });
+        let generation = service.map(IconThemeService::generation);
+        let (source, design_size, mode) = match picture {
+            Some(picture) => themed_source(picture),
+            None => match &themed.fallback {
+                Some(fallback) => (fallback.source.clone(), fallback.design_size, fallback.mode),
+                None => (
+                    IconSource::Path(Path::new()),
+                    self.display_size,
+                    IconMode::Tintable,
+                ),
+            },
+        };
+        self.source = source;
+        self.design_size = design_size;
+        self.mode = mode;
+
+        let self_id = ctx.self_id();
+        let registry = ctx.binding_registry();
+        let rebuild = teksilo_core::binding::BindingLevel::Rebuild;
+        device_scale.bind_to(self_id, registry, rebuild);
+        if let Some(generation) = generation {
+            generation.bind_to(self_id, registry, rebuild);
         }
     }
 
@@ -644,6 +783,8 @@ impl Widget for IconWidget {
         &mut self,
         ctx: &mut teksilo_core::build_context::BuildContext,
     ) -> Vec<teksilo_core::widget_id::WidgetId> {
+        self.resolve_themed(ctx);
+
         // Register color binding
         {
             let self_id = ctx.self_id();

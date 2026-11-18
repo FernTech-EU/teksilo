@@ -113,6 +113,30 @@ IconWidget::from_raster(logo, 32.0).mode(IconMode::FullColor)
 
 In full-color mode, the icon's RGB is rendered directly; the widget color only controls opacity.
 
+## Icons from the desktop's theme
+
+On Linux and BSD desktops an application can show the desktop's own icons (Breeze, Adwaita, Papirus, whatever the user picked) by their freedesktop name, as GTK and Qt applications do. Names follow the freedesktop Icon Naming Specification: `document-send`, `go-down`, `view-refresh`, `face-smile`.
+
+```rust
+let send = teksilo::res!("resources/icons/send.svg");
+
+Button::new(lit!("Send"))
+    .icon(
+        IconWidget::themed("document-send-symbolic")
+            .fallback(IconWidget::from_svg_icon(send)),
+        IconLocation::Leading,
+    )
+```
+
+- **Symbolic or full color.** A name ending in `-symbolic` asks for the theme's single-color glyph, which is tinted with the widget's color like an embedded icon. Without the suffix, or when the theme has no symbolic variant, the full-color icon is drawn in its own colors. The file found decides, not `.mode(...)`.
+- **The fallback** is drawn when the theme has no such icon, and on macOS and Windows, which have no icon themes. Without a fallback nothing is drawn, and the icon keeps its size in the layout.
+- **Size.** A themed icon is 16 dp until `icon_size(...)` says otherwise (a `Button` sets its own icon size). The size and the window's scale pick the best file the theme has for it.
+- **Lookup.** The theme is the desktop's (`kdeglobals [Icons] Theme` on KDE Plasma, the portal's `org.gnome.desktop.interface icon-theme` elsewhere), searched as the XDG Icon Theme Specification describes: the theme, the themes it inherits from, `hicolor`, then `/usr/share/pixmaps`. A name the themes lack is tried again without its last dash-separated part (`document-send-mail` finds `document-send`).
+- **Cost.** Nothing is read until the first themed icon is built. Each icon is then read and decoded once, on the UI thread (a few kilobytes), and kept by the application's `IconThemeService`.
+- **Theme changes.** While the application's theme follows the OS (`ThemeMode::Native` or `FollowSystem`), each appearance change the desktop announces reloads the icon theme and rebuilds every themed icon. On KDE Plasma that includes a new icon theme (it is written to `kdeglobals`); on GNOME a new icon theme alone is not heard, and is seen at the next start or the next change of colors.
+
+`TeksiloAppBuilder::run` registers an `IconThemeService` reading the desktop. Register your own with `.app_state(IconThemeService::with_source(...))` to use a fixed theme or a test fixture; a headless app has none unless you register one, so it draws the fallbacks. The lookup itself is `teksilo_platform::icon_theme` (`IconTheme::load`, `IconTheme::lookup`, `current_icon_theme_name`) for code that wants the file paths.
+
 ## Raster images and GPU memory
 
 A window uploads each raster it draws to a GPU texture, with a mip chain. How long the texture stays depends on how the widget got its pixels.

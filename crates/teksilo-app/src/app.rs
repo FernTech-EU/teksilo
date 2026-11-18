@@ -7421,6 +7421,11 @@ impl TeksiloAppBuilder {
         self.app_state_registry
             .entry(std::any::TypeId::of::<teksilo_widgets::menu::ApplicationMenu>())
             .or_insert_with(|| Box::new(teksilo_widgets::menu::ApplicationMenu::new()));
+        // The desktop's icon theme for `IconWidget::themed`, read on first
+        // use; an application that registered its own keeps it.
+        self.app_state_registry
+            .entry(std::any::TypeId::of::<teksilo_widgets::IconThemeService>())
+            .or_insert_with(|| Box::new(teksilo_widgets::IconThemeService::new()));
 
         // Auto-install a system clipboard handle so `RichTextEditor::editor`
         // (and any future clipboard-aware widget) can reach it via

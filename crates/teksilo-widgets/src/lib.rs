@@ -239,8 +239,8 @@ pub use primitives::live_image::{
 pub use primitives::text_input_field::{InputPurpose, ValidationFeedback, ValidationOutcome};
 pub use primitives::{
     AspectRatio, Center, ColumnFlow, DeadZone, Divider, Expand, FixedSize, FormLayout, Grid,
-    HStack, IconWidget, ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize, Padding,
-    RectWidget, Shrinkable, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
+    HStack, IconThemeService, IconWidget, ImageFit, ImageWidget, MasonryLayout, MaxSize, MinSize,
+    Padding, RectWidget, Shrinkable, Spacer, Switcher, TextWidget, TrackSize, VStack, Wrap, ZStack,
 };
 pub use primitives::{TextFieldHandle, TextInputField};
 #[cfg(feature = "telemetry")]

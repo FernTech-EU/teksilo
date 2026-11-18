@@ -1705,9 +1705,10 @@ impl WindowManager {
     /// Answer `payload` when it is an
     /// [`OsThemeChanged`](teksilo_platform::os_theme::OsThemeChanged): read
     /// the desktop again and give each window the theme it now resolves to
-    /// ([`reapply_os_theme_from`](Self::reapply_os_theme_from)), and refresh
+    /// ([`reapply_os_theme_from`](Self::reapply_os_theme_from)), refresh
     /// the accessibility preferences, among them reduced motion from KDE's
-    /// animation speed. `Ok` with whether anything changed, so the caller
+    /// animation speed, and reload the icon theme
+    /// ([`IconThemeService::reload`](teksilo_widgets::IconThemeService::reload)). `Ok` with whether anything changed, so the caller
     /// redraws; any other payload is handed back.
     pub(crate) fn route_os_theme_payload(
         &mut self,
@@ -1724,6 +1725,13 @@ impl WindowManager {
         queries: OsQueries,
     ) -> Result<bool, Box<dyn std::any::Any + Send>> {
         payload.downcast::<teksilo_platform::os_theme::OsThemeChanged>()?;
+        if let Some(icons) = self
+            .app_context_template
+            .as_ref()
+            .and_then(|t| t.app_state::<teksilo_widgets::IconThemeService>())
+        {
+            icons.reload();
+        }
         let themed = self.reapply_os_theme_from(queries);
         let preferences = self.refresh_accessibility_preferences_from(queries.accessibility);
         Ok(themed || preferences)
