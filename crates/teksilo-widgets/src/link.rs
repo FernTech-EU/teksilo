@@ -128,6 +128,9 @@ impl Link {
     }
 
     /// Set a URL for the link (informational — not automatically opened).
+    /// To open it, call
+    /// [`ctx.open_uri`](teksilo_platform::open_uri::EventContextOpenUriExt::open_uri)
+    /// from [`on_activate_fn`](Self::on_activate_fn).
     pub fn url(mut self, url: impl Into<String>) -> Self {
         self.url = Some(url.into());
         self

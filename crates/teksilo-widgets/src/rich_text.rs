@@ -2294,6 +2294,10 @@ impl RichTextEditor {
     /// editor is mounted: the link nodes' Click is decided by the
     /// accessibility walk.
     ///
+    /// To open the href with the desktop's handler, call
+    /// [`ctx.open_uri`](teksilo_platform::open_uri::EventContextOpenUriExt::open_uri)
+    /// from the callback.
+    ///
     /// The callback replaces any prior link-click callback on this
     /// builder chain. To stop observing, reconstruct the editor
     /// without the setter.

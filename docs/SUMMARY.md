@@ -58,6 +58,7 @@
 - [Native menus](native-menu.md)
 - [WebView](web-view.md)
 - [Drag & drop](drag-and-drop.md)
+- [Opening links and files](opening-links.md)
 - [Multi-window](multi-window.md)
 - [Title bar](title-bar.md)
 

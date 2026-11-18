@@ -18,6 +18,7 @@ pub(crate) mod linux_helpers;
 pub(crate) mod linux_portal;
 #[cfg(feature = "native-menu")]
 pub mod native_menu;
+pub mod open_uri;
 #[doc(hidden)]
 pub mod os_quit;
 pub mod os_theme;
@@ -54,6 +55,7 @@ pub use file_dialog::{
     EventContextFileDialogExt, FileDialogBackend, FileDialogEventPayload, FileDialogHandle,
     FileDialogRequest, FileDialogResult, FileFilter, MemoryFileDialog, RequestId,
 };
+pub use open_uri::{EventContextOpenUriExt, OpenTarget, OpenUriError, OpenUriHandle};
 pub use pen::{PenBatching, PenButtons, PenCaps, PenPacket, PenSource, create_pen_source};
 pub use pointer_backend::{
     BackendCaps, BackendEvent, InputSample, PlatformKind, PointerBackend, SoftKeyboardSupport,

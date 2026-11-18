@@ -299,6 +299,10 @@ pub mod prelude {
         EventContextFileDialogExt, FileDialogHandle, FileDialogRequest, FileDialogResult,
     };
 
+    // Opening a link or a file with the desktop's handler: `ctx.open_uri(...)`
+    // and `ctx.open_path(...)`. No feature: it needs no dependency.
+    pub use teksilo_platform::open_uri::{EventContextOpenUriExt, OpenUriError, OpenUriHandle};
+
     // Optional async executor: the install hook, the `ctx.spawn_local(...)`
     // extension trait, and the `spawn_blocking` offload helper.
     #[cfg(feature = "async")]
