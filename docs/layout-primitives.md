@@ -208,6 +208,22 @@ overflowing symmetrically around the center, and wrapping text reports its
 real wrapped height. `Expand`'s `.align_child(...)` mode measures its child
 the same way.
 
+`Center` (like `VStack::alignment`) places the whole text block: the lines of a
+wrapped `TextWidget` inside it stay flush with each other. To centre each line,
+align the text itself with `TextWidget::text_align(TextAlign::Center)`
+(`Leading`, the default, and `Trailing` follow the layout direction). It places
+every line within the width the widget is given and does not change the size
+the widget reports, so it combines with `Center`:
+
+```rust
+Center::new().child(
+    VStack::new()
+        .alignment(HAlignment::Center)
+        .child(TextWidget::new(tr!(no_account_title())))
+        .child(TextWidget::new(tr!(no_account_hint())).text_align(TextAlign::Center)),
+)
+```
+
 ### 3.4 `Shrinkable`: opt a child into compression
 
 [crates/teksilo-widgets/src/primitives/shrinkable.rs](../crates/teksilo-widgets/src/primitives/shrinkable.rs)
@@ -611,6 +627,7 @@ Note: `Divider` is a *visual* separator, not a draggable splitter, for drag-to-r
 | Equal split (1:1, 1:2, …) | `Expand::flex(n)` pairs in a stack |
 | One panel takes the rest | `Expand::new().child(panel)` |
 | Center one child | `Center::new().child(w)` |
+| Center each line of a wrapped text | `TextWidget::text_align(TextAlign::Center)` |
 | Force a minimum touch area | `MinSize::new(min.width, min.height)` with `min = density_min_size(base, TargetAxes::BOTH, tokens)`, the floor is the density's, not the call site's (§4.2) |
 | Cap reading width | `MaxSize::width(640.0)` |
 | Dialog with a fixed width | `FixedSize::new().width(w)` |

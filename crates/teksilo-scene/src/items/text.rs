@@ -85,21 +85,14 @@ use crate::item::{AppearanceWrite, SceneItem, SceneItemA11yContext, SceneItemPai
 use crate::items::{AccessSubtreeMode, ItemA11yOverrides};
 use teksilo_i18n::LocalizedString;
 
-/// Horizontal alignment of a [`TextItem`] within its `local_bounds`.
+/// Horizontal alignment of a [`TextItem`] within its `local_bounds`, the one
+/// a `TextWidget`'s lines take too.
 ///
 /// Alignment shifts the text's draw origin by the leftover width
 /// (`bounds.width − measured_width`); it needs a text backend to measure, so a
 /// mock/headless canvas with no backend renders leading-aligned regardless.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum TextAlign {
-    /// Left edge in LTR (the default).
-    #[default]
-    Leading,
-    /// Centred within the bounds.
-    Center,
-    /// Right edge in LTR.
-    Trailing,
-}
+/// A scene item has no layout direction: `Leading` is its left edge.
+pub use teksilo_canvas::TextAlign;
 
 /// Text source for [`TextItem`]: either a static string or a live
 /// `Signal<String>`. Signal-bound text refreshes on each paint and

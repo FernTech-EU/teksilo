@@ -165,7 +165,9 @@ pub mod prelude {
     pub use teksilo_canvas::{Point, Rect, Size, SizeProposal, Vec2};
 
     // Canvas and rendering
-    pub use teksilo_canvas::{Canvas, EllipsisMode, Paint, Path, RenderFrame, TextOverflow};
+    pub use teksilo_canvas::{
+        Canvas, EllipsisMode, Paint, Path, RenderFrame, TextAlign, TextOverflow,
+    };
 
     // Live pictures: what a producer thread needs to feed a `LiveImage`.
     pub use teksilo_canvas::PixelRect;

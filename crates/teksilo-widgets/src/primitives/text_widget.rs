@@ -72,7 +72,9 @@ use teksilo_canvas::text_backend::{
     CharGeom, HitTarget, LineEnd, LineTruncation, TextDirection, TextGeometry, TextLayout,
     TextLayoutRequest, TextLine, TextLineSegment,
 };
-use teksilo_canvas::{Canvas, EllipsisMode, Point, Rect, Size, SizeProposal, TextOverflow};
+use teksilo_canvas::{
+    Canvas, EllipsisMode, Point, Rect, Size, SizeProposal, TextAlign, TextOverflow,
+};
 
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::accessibility::text_runs::{
@@ -107,6 +109,9 @@ pub struct TextWidget {
     /// a rebuild.
     style: TextStyleProp,
     overflow: TextOverflow,
+    /// Where each line sits across the widget's width. See
+    /// [`Self::text_align`].
+    align: TextAlign,
     /// Whether single-line / ellipsis text reports a shrink weight so an
     /// over-constrained stack truncates it (down to [`Self::min_shrink_width`]) rather
     /// than overflowing. Default `true`. Ignored in `Wrap` mode (wrap text is
@@ -172,6 +177,7 @@ impl TextWidget {
             color: ColorProp::TextRole(TextRole::Primary),
             style: TextStyleProp::default(),
             overflow: TextOverflow::default(),
+            align: TextAlign::Leading,
             shrink: true,
             min_shrink_width: None,
             max_lines: None,
@@ -224,6 +230,22 @@ impl TextWidget {
     /// with a trailing "…" instead of wrapping onto multiple lines.
     pub fn single_line(self) -> Self {
         self.overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing))
+    }
+
+    /// Place each line of the text across the widget's width:
+    /// [`Leading`](TextAlign::Leading) (the default), [`Center`](TextAlign::Center)
+    /// or [`Trailing`](TextAlign::Trailing).
+    ///
+    /// Every line of a wrapped text is placed on its own, so a centred
+    /// sentence on two lines has both lines centred, and a single line
+    /// narrower than the widget is placed the same way. Leading and trailing
+    /// follow the layout direction: in a right-to-left layout `Leading` is
+    /// the right edge. The widget's measured size does not change: a wrapped
+    /// text is as wide as its widest line, and its lines are placed within
+    /// whatever width it is given.
+    pub fn text_align(mut self, align: TextAlign) -> Self {
+        self.align = align;
+        self
     }
 
     /// Override the compression floor for single-line / ellipsis text — the
@@ -318,6 +340,12 @@ impl TextWidget {
     pub fn a11y_hidden(mut self) -> Self {
         self.a11y_hidden = true;
         self
+    }
+
+    /// Whether [`Self::text_align`] moves any line from where the backend
+    /// lays it out, which is against the left edge.
+    fn moves_lines(&self, right_to_left: bool) -> bool {
+        self.align != TextAlign::Leading || right_to_left
     }
 
     /// A handle onto what this label last measured.
@@ -472,6 +500,56 @@ fn remap_ellipsized(source: &str, display: &TextGeometry, cut: &Ellipsized) -> T
         source_len: source.len(),
         rendered_text: None,
         links: Vec::new(),
+    }
+}
+
+/// How far each line of `layout` moves along x for `align` to place it in a
+/// box `width` wide, indexed like the lines of the layout's geometry.
+fn line_offsets(
+    layout: &TextLayout,
+    width: f32,
+    align: TextAlign,
+    right_to_left: bool,
+) -> Vec<f32> {
+    let lines = layout
+        .geometry
+        .as_deref()
+        .map(|g| g.lines.as_slice())
+        .unwrap_or(&[]);
+    // A single line is as wide as the layout, which counts a trailing
+    // ellipsis its geometry's box may leave out.
+    if lines.len() <= 1 {
+        let x = lines.first().map_or(0.0, |line| line.rect[0]);
+        return vec![align.offset(width, layout.width, right_to_left) - x];
+    }
+    lines
+        .iter()
+        .map(|line| align.offset(width, line.rect[2], right_to_left) - line.rect[0])
+        .collect()
+}
+
+/// `geometry` with each line moved along x by its entry in `offsets`, so the
+/// text runs describe the lines where they are drawn.
+fn shift_lines(geometry: &TextGeometry, offsets: &[f32]) -> TextGeometry {
+    let mut shifted = geometry.clone();
+    for (line, dx) in shifted.lines.iter_mut().zip(offsets) {
+        line.rect[0] += dx;
+        line.caret_x += dx;
+        for segment in &mut line.segments {
+            segment.rect[0] += dx;
+        }
+        if let Some(truncation) = &mut line.truncation {
+            truncation.ellipsis_x += dx;
+        }
+    }
+    shifted
+}
+
+/// Move a markup layout's spans with their lines, so a tap finds a link
+/// where it is drawn.
+fn shift_spans(layout: &mut TextLayout, offsets: &[f32]) {
+    for span in &mut layout.spans {
+        span.rect[0] += offsets.get(span.line_index).copied().unwrap_or(0.0);
     }
 }
 
@@ -968,8 +1046,14 @@ impl Widget for TextWidget {
             }
         };
 
-        let Some(layout) = layout else { return };
-        let geometry = remapped.or_else(|| layout.geometry.clone());
+        let Some(mut layout) = layout else { return };
+        let mut geometry = remapped.or_else(|| layout.geometry.clone());
+        let right_to_left = base_direction == teksilo_core::accesskit::TextDirection::RightToLeft;
+        if self.moves_lines(right_to_left) {
+            let offsets = line_offsets(&layout, bounds.width, self.align, right_to_left);
+            geometry = geometry.map(|g| Rc::new(shift_lines(&g, &offsets)));
+            shift_spans(&mut layout, &offsets);
+        }
         if self.markup {
             // Hit-testing reads the spans the label was actually placed
             // at, so a tap lands on the right link before the first paint.
@@ -988,6 +1072,8 @@ impl Widget for TextWidget {
         let language = ctx.content_language.as_ref().map(|tag| tag.as_str());
         let color = self.color.resolve(ctx.theme, ctx.effective_enabled);
         let style = self.style.resolve(&ctx.theme.typography);
+        let right_to_left =
+            ctx.layout_direction == teksilo_core::environment::LayoutDirection::RightToLeft;
 
         // Markup path: re-measure through the markup pipeline (the
         // backend's cache makes this a no-op after the size pass) and
@@ -1020,15 +1106,84 @@ impl Widget for TextWidget {
                 }
             };
             let link_color = ctx.theme.colors.text_link;
-            canvas.draw_text_layout_markup(
-                &layout,
-                teksilo_canvas::Point::new(bounds.x, bounds.y),
-                color,
-                link_color,
-            );
+            let mut layout = layout;
+            if self.moves_lines(right_to_left) {
+                let offsets = line_offsets(&layout, bounds.width, self.align, right_to_left);
+                canvas.draw_text_layout_with_line_offsets(
+                    &layout,
+                    Point::new(bounds.x, bounds.y),
+                    color,
+                    link_color,
+                    &offsets,
+                );
+                shift_spans(&mut layout, &offsets);
+            } else {
+                canvas.draw_text_layout_markup(
+                    &layout,
+                    teksilo_canvas::Point::new(bounds.x, bounds.y),
+                    color,
+                    link_color,
+                );
+            }
             // Keep the cached layout in sync so tap hit-testing sees
             // the same rects that were painted.
             *self.last_layout.borrow_mut() = Some(layout);
+            return;
+        }
+
+        // Lines placed by alignment: lay the text out as the plain draws
+        // below do, then draw each line where it goes.
+        if self.moves_lines(right_to_left)
+            && let Some(backend_rc) = canvas.text_backend().cloned()
+        {
+            let max_width = bounds.width + 0.5;
+            let layout = {
+                let mut backend = backend_rc.borrow_mut();
+                match self.overflow {
+                    TextOverflow::Wrap => backend.layout_in_language(
+                        TextLayoutRequest::Paragraph {
+                            text: &text,
+                            max_width: max_width.max(0.0),
+                            max_lines: self.max_lines,
+                        },
+                        &style,
+                        language,
+                    ),
+                    TextOverflow::Ellipsis(EllipsisMode::Trailing) => backend.layout_in_language(
+                        TextLayoutRequest::SingleLine {
+                            text: &text,
+                            max_width: Some(max_width),
+                        },
+                        &style,
+                        language,
+                    ),
+                    TextOverflow::Ellipsis(mode) => {
+                        let truncated = teksilo_canvas::ellipsis::ellipsize(
+                            &text,
+                            &style,
+                            bounds.width,
+                            mode,
+                            &mut *backend,
+                        );
+                        backend.layout_in_language(
+                            TextLayoutRequest::SingleLine {
+                                text: &truncated,
+                                max_width: Some(max_width),
+                            },
+                            &style,
+                            language,
+                        )
+                    }
+                }
+            };
+            let offsets = line_offsets(&layout, bounds.width, self.align, right_to_left);
+            canvas.draw_text_layout_with_line_offsets(
+                &layout,
+                Point::new(bounds.x, bounds.y),
+                color,
+                color,
+                &offsets,
+            );
             return;
         }
 
@@ -1491,5 +1646,232 @@ mod tests {
         let b =
             TextWidget::new(lit!("hi")).overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing));
         assert_eq!(a.overflow, b.overflow);
+    }
+
+    // ── Line alignment ──────────────────────────────────────────────
+
+    /// Wraps at 200 dp into "A longer sentence that " (23 characters,
+    /// 184 dp with its trailing space) and "wraps on two lines" (18
+    /// characters, 144 dp).
+    const SENTENCE: &str = "A longer sentence that wraps on two lines";
+
+    /// The left and right edges of each line of glyphs drawn inside the
+    /// bounds of `id`, top to bottom.
+    fn drawn_lines(tree: &mut WidgetTree, id: WidgetId) -> Vec<(f32, f32)> {
+        let area = tree.bounds(id);
+        let frame = tree.render();
+        let mut lines: Vec<(f32, f32, f32)> = Vec::new();
+        for glyph in &frame.glyphs {
+            let [x, y, w, h] = glyph.screen;
+            if !area.contains(Point::new(x + w * 0.5, y + h * 0.5)) {
+                continue;
+            }
+            match lines.iter_mut().find(|line| line.0 == y) {
+                Some(line) => {
+                    line.1 = line.1.min(x);
+                    line.2 = line.2.max(x + w);
+                }
+                None => lines.push((y, x, x + w)),
+            }
+        }
+        lines.sort_by(|a, b| a.0.total_cmp(&b.0));
+        lines
+            .into_iter()
+            .map(|(_, left, right)| (left, right))
+            .collect()
+    }
+
+    /// `text` in a box 200 dp wide.
+    fn in_a_200_box(tree: &mut WidgetTree, text: TextWidget) -> WidgetId {
+        let id = tree.add(text);
+        tree.add(crate::primitives::FixedSize::new().width(200.0).child(id));
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+        assert_eq!(tree.bounds(id).width, 200.0, "precondition: the box");
+        id
+    }
+
+    fn assert_close(actual: &[(f32, f32)], expected: &[(f32, f32)]) {
+        assert_eq!(actual.len(), expected.len(), "{actual:?}");
+        for (a, e) in actual.iter().zip(expected) {
+            assert!(
+                (a.0 - e.0).abs() < 0.01 && (a.1 - e.1).abs() < 0.01,
+                "{actual:?} != {expected:?}"
+            );
+        }
+    }
+
+    use teksilo_core::widget_id::WidgetId;
+
+    /// The issue's reproduction: a title and a wrapped sentence centred in
+    /// a 200 dp column. `Center` and the stack's alignment centre the
+    /// block; `text_align` centres each line of it, so both lines of the
+    /// sentence are centred on the column, not only the longer one.
+    #[test]
+    fn each_line_of_a_centred_wrapped_text_is_centred() {
+        use crate::primitives::{Center, VStack};
+        let mut tree = tree_with_mock_backend();
+        let sentence = tree.add(TextWidget::new(lit!(SENTENCE)).text_align(TextAlign::Center));
+        tree.add(
+            Center::new().child(
+                VStack::new()
+                    .alignment(teksilo_tokens::HAlignment::Center)
+                    .child(TextWidget::new(lit!("A short title")))
+                    .child(sentence),
+            ),
+        );
+        tree.layout(SizeProposal::exact(200.0, 300.0));
+        assert_eq!(
+            tree.bounds(sentence).width,
+            184.0,
+            "the text still reports its widest line"
+        );
+        let lines = drawn_lines(&mut tree, sentence);
+        assert_close(&lines, &[(8.0, 192.0), (28.0, 172.0)]);
+    }
+
+    /// Lines are placed within the width given, wider than the text.
+    #[test]
+    fn trailing_lines_end_at_the_boxes_right_edge() {
+        let mut tree = tree_with_mock_backend();
+        let id = in_a_200_box(
+            &mut tree,
+            TextWidget::new(lit!(SENTENCE)).text_align(TextAlign::Trailing),
+        );
+        let lines = drawn_lines(&mut tree, id);
+        assert_close(&lines, &[(16.0, 200.0), (56.0, 200.0)]);
+    }
+
+    /// The default is unchanged in a left-to-right layout, and puts the
+    /// lines against the right edge in a right-to-left one.
+    #[test]
+    fn leading_lines_follow_the_layout_direction() {
+        let mut tree = tree_with_mock_backend();
+        let id = in_a_200_box(&mut tree, TextWidget::new(lit!(SENTENCE)));
+        let lines = drawn_lines(&mut tree, id);
+        assert_close(&lines, &[(0.0, 184.0), (0.0, 144.0)]);
+
+        let mut tree = tree_with_mock_backend();
+        tree.set_layout_direction(teksilo_core::environment::LayoutDirection::RightToLeft);
+        let id = in_a_200_box(&mut tree, TextWidget::new(lit!(SENTENCE)));
+        let lines = drawn_lines(&mut tree, id);
+        assert_close(&lines, &[(16.0, 200.0), (56.0, 200.0)]);
+    }
+
+    /// A single line narrower than its box is placed the same way, the
+    /// elided kind too.
+    #[test]
+    fn a_single_line_is_placed_in_its_box() {
+        let mut tree = tree_with_mock_backend();
+        let id = in_a_200_box(
+            &mut tree,
+            TextWidget::new(lit!("Hello"))
+                .single_line()
+                .text_align(TextAlign::Center),
+        );
+        let lines = drawn_lines(&mut tree, id);
+        assert_close(&lines, &[(80.0, 120.0)]);
+    }
+
+    /// The text runs a reader reviews are where the lines are drawn.
+    #[test]
+    fn text_runs_follow_the_aligned_lines() {
+        use teksilo_core::accesskit::Role;
+        let mut tree = tree_with_mock_backend();
+        let id = in_a_200_box(
+            &mut tree,
+            TextWidget::new(lit!(SENTENCE)).text_align(TextAlign::Center),
+        );
+        let lines = drawn_lines(&mut tree, id);
+        assert_close(&lines, &[(8.0, 192.0), (28.0, 172.0)]);
+        let update = tree.sync_accessibility();
+        let mut runs: Vec<(f64, f64)> = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| node.role() == Role::TextRun)
+            .filter_map(|(_, node)| node.bounds().map(|b| (b.x0, b.x1)))
+            .collect();
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let runs: Vec<(f32, f32)> = runs
+            .into_iter()
+            .map(|(x0, x1)| (x0 as f32, x1 as f32))
+            .collect();
+        assert_close(&runs, &[(8.0, 192.0), (28.0, 172.0)]);
+    }
+
+    /// The mock, with a span for each link of a single-line markup layout,
+    /// which the mock leaves out and a tap on a link needs.
+    struct LinkSpans(MockTextBackend);
+
+    impl teksilo_canvas::TextBackend for LinkSpans {
+        fn layout_single_line(
+            &mut self,
+            text: &str,
+            style: &teksilo_tokens::TextStyle,
+            max_width: Option<f32>,
+        ) -> TextLayout {
+            self.0.layout_single_line(text, style, max_width)
+        }
+
+        fn layout_single_line_markup(
+            &mut self,
+            source: &str,
+            style: &teksilo_tokens::TextStyle,
+            max_width: Option<f32>,
+        ) -> TextLayout {
+            let mut layout = self.0.layout_single_line_markup(source, style, max_width);
+            let geometry = layout.geometry.clone().expect("the mock reports geometry");
+            let rendered = geometry.rendered_text.as_deref().unwrap_or(source);
+            for link in &geometry.links {
+                let range = link.rendered_byte_range.clone();
+                let start = rendered[..range.start].chars().count() as f32 * 8.0;
+                let width = rendered[range.clone()].chars().count() as f32 * 8.0;
+                layout.spans.push(teksilo_canvas::TextLayoutSpan {
+                    kind: teksilo_canvas::TextSpanKind::Link {
+                        url: link.url.clone(),
+                    },
+                    line_index: 0,
+                    rect: [start, 0.0, width, 16.0],
+                    byte_range: range,
+                });
+            }
+            layout
+        }
+
+        fn ensure_glyphs(&mut self, layout: &TextLayout) -> Vec<teksilo_canvas::GlyphQuad> {
+            self.0.ensure_glyphs(layout)
+        }
+    }
+
+    /// A tap finds a link where its line was moved to, and the link is
+    /// drawn in the link colour there.
+    #[test]
+    fn a_link_is_tapped_where_its_line_is_drawn() {
+        let tapped = Rc::new(RefCell::new(Vec::<String>::new()));
+        let mut tree = WidgetTree::new()
+            .with_text_backend(Rc::new(RefCell::new(LinkSpans(MockTextBackend::new()))));
+        let id = in_a_200_box(
+            &mut tree,
+            TextWidget::new(lit!("[Help](help)"))
+                .single_line()
+                .text_align(TextAlign::Center)
+                .on_link_click({
+                    let tapped = tapped.clone();
+                    move |url, _| tapped.borrow_mut().push(url.to_string())
+                }),
+        );
+        let lines = drawn_lines(&mut tree, id);
+        assert_close(&lines, &[(84.0, 116.0)]);
+        let link = tree.theme().colors.text_link.to_array();
+        assert!(
+            tree.render().glyphs.iter().all(|g| g.color == link),
+            "drawn in the link colour"
+        );
+        tree.tap_with(teksilo_tokens::PointerKind::Mouse, Point::new(10.0, 8.0));
+        assert!(
+            tapped.borrow().is_empty(),
+            "nothing is drawn at the left edge"
+        );
+        tree.tap_with(teksilo_tokens::PointerKind::Mouse, Point::new(100.0, 8.0));
+        assert_eq!(*tapped.borrow(), ["help"]);
     }
 }

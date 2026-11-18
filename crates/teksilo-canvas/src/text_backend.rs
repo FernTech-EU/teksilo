@@ -38,6 +38,38 @@ pub enum EllipsisMode {
     Leading,
 }
 
+/// Where a line of text sits across the width it is given.
+///
+/// [`TextWidget::text_align`](../teksilo_widgets/primitives/struct.TextWidget.html#method.text_align)
+/// places each line of a label by it, and `teksilo-scene`'s `TextItem` its
+/// one line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextAlign {
+    /// Against the edge lines start from: the left one in a left-to-right
+    /// layout, the right one in a right-to-left layout (the default).
+    #[default]
+    Leading,
+    /// Centred.
+    Center,
+    /// Against the edge lines end at: the right one in a left-to-right
+    /// layout, the left one in a right-to-left layout.
+    Trailing,
+}
+
+impl TextAlign {
+    /// The x, from the left edge of a box `available` wide, at which a line
+    /// `width` wide starts. A line wider than the box starts at its left
+    /// edge whatever the alignment.
+    pub fn offset(self, available: f32, width: f32, right_to_left: bool) -> f32 {
+        let extra = (available - width).max(0.0);
+        match (self, right_to_left) {
+            (TextAlign::Leading, false) | (TextAlign::Trailing, true) => 0.0,
+            (TextAlign::Center, _) => extra * 0.5,
+            (TextAlign::Leading, true) | (TextAlign::Trailing, false) => extra,
+        }
+    }
+}
+
 /// Reading direction of a [`TextLineSegment`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextDirection {

@@ -596,6 +596,72 @@ impl Canvas {
         true
     }
 
+    /// Draw a pre-measured text layout with each of its lines moved along x
+    /// by its entry in `line_offsets`, indexed like the lines of
+    /// `layout.geometry` (a layout with no geometry is one line). A line
+    /// with no entry stays where the layout put it.
+    ///
+    /// Glyphs are given to the line whose box holds their vertical centre.
+    /// Link spans of a markup layout are drawn in `link_color`, the rest in
+    /// `text_color`, as [`draw_text_layout_markup`](Self::draw_text_layout_markup)
+    /// does. Returns `false` when there is no backend or the layout's glyphs
+    /// are no longer cached, as [`draw_text_layout`](Self::draw_text_layout)
+    /// does.
+    pub fn draw_text_layout_with_line_offsets(
+        &mut self,
+        layout: &crate::text_backend::TextLayout,
+        position: Point,
+        text_color: Color,
+        link_color: Color,
+        line_offsets: &[f32],
+    ) -> bool {
+        let Some(backend) = self.text_backend.as_ref() else {
+            return false;
+        };
+        let mut backend = backend.borrow_mut();
+        debug_warn_raster_scale_mismatch("draw_text_layout_with_line_offsets", layout, &*backend);
+        let glyphs = backend.ensure_glyphs(layout);
+        if glyphs.is_empty() {
+            return false;
+        }
+        self.frame.layout_keys.push(layout.layout_key);
+
+        let lines = layout
+            .geometry
+            .as_deref()
+            .map(|g| g.lines.as_slice())
+            .unwrap_or(&[]);
+        let text_rgba = text_color.to_array();
+        let link_rgba = link_color.to_array();
+        for glyph in &glyphs {
+            let gx = glyph.screen[0] + glyph.screen[2] * 0.5;
+            let gy = glyph.screen[1] + glyph.screen[3] * 0.5;
+            // Lines are stacked top to bottom: the first whose bottom is
+            // below the centre, else the last.
+            let line = lines
+                .iter()
+                .position(|l| gy < l.rect[1] + l.rect[3])
+                .unwrap_or(lines.len().saturating_sub(1));
+            let dx = line_offsets.get(line).copied().unwrap_or(0.0);
+            let is_link = layout.spans.iter().any(|sp| {
+                let [sx, sy, sw, sh] = sp.rect;
+                gx >= sx
+                    && gx < sx + sw
+                    && gy >= sy
+                    && gy < sy + sh
+                    && matches!(sp.kind, crate::text_backend::TextSpanKind::Link { .. })
+            });
+            let mut offset_glyph = *glyph;
+            offset_glyph.screen[0] += position.x + dx;
+            offset_glyph.screen[1] += position.y;
+            offset_glyph.color = if is_link { link_rgba } else { text_rgba };
+            let idx = self.frame.glyphs.len();
+            self.frame.glyphs.push(offset_glyph);
+            self.frame.draw_order.push(DrawCommand::Glyph(idx));
+        }
+        true
+    }
+
     // --- Shadows ---
 
     /// Draw a shadow behind a rounded rectangle.
