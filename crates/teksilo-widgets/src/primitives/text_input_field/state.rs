@@ -29,6 +29,7 @@ use crate::EditSource;
 use crate::common::composition::Composition;
 use crate::common::document_offsets::DocumentUtf16;
 use crate::common::editor_runtime::{CaretBlink, Debounce};
+use crate::common::notices::{Notice, NoticeSource, Notices};
 use crate::common::pending_arrivals::PendingArrivals;
 use crate::rich_text::image_cache::ImageCache;
 
@@ -228,6 +229,10 @@ pub(crate) struct TextInputState {
     /// and [`apply_pending_chars`](Self::apply_pending_chars), neither of
     /// which reports zero characters.
     pub on_text_inserted: Option<TextInserted>,
+    /// The reports for [`Self::on_text_inserted`] not delivered yet: queued
+    /// here under the borrow, run by
+    /// [`notices::deliver`](crate::common::notices::deliver) once it is released.
+    pub notices: Notices,
     /// Whether the application lets the system's Writing Tools act on the
     /// field. Read through [`writing_tools_allowed`](Self::writing_tools_allowed),
     /// which also answers for a secure field.
@@ -395,6 +400,26 @@ pub(crate) struct TextInputConfig {
     pub focus_signal: Signal<bool>,
 }
 
+impl NoticeSource for TextInputState {
+    const WIDGET: &'static str = "TextInputField";
+
+    fn notices(&self) -> &Notices {
+        &self.notices
+    }
+
+    fn frame_request(&self) -> Option<&Rc<Cell<bool>>> {
+        self.frame_request.as_ref()
+    }
+
+    fn on_text_inserted(&self) -> Option<Rc<dyn Fn(EditSource, usize)>> {
+        self.on_text_inserted.clone()
+    }
+
+    fn on_change(&self) -> Option<Rc<dyn Fn()>> {
+        None
+    }
+}
+
 impl TextInputState {
     pub fn new(config: TextInputConfig) -> SharedState {
         let TextInputConfig {
@@ -489,6 +514,7 @@ impl TextInputState {
             on_submit,
             on_access_set_value,
             on_text_inserted,
+            notices: Notices::default(),
             writing_tools,
             on_blur,
             on_commit,
@@ -539,12 +565,8 @@ impl TextInputState {
             self.cursor.insert_text(&batch).is_ok()
         });
         self.pending_text_changed = true;
-        let callback = self.on_text_inserted.as_ref();
-        self.pending_arrivals.flush(|source, chars| {
-            if let Some(callback) = callback {
-                callback(source, chars);
-            }
-        });
+        let mut arrivals = std::mem::take(&mut self.pending_arrivals);
+        arrivals.flush(|source, chars| self.queue_inserted(source, chars));
     }
 
     /// Tell the application that `chars` characters just landed through
@@ -557,8 +579,17 @@ impl TextInputState {
         if chars == 0 || self.input_system.batch.defer_arrival(source, chars) {
             return;
         }
-        if let Some(callback) = self.on_text_inserted.as_ref() {
-            callback(source, chars);
+        self.queue_inserted(source, chars);
+    }
+
+    /// Queue an arrival for the application's callback, delivered once the
+    /// state is no longer borrowed (see [`crate::common::notices`]).
+    fn queue_inserted(&self, source: EditSource, chars: usize) {
+        if self.on_text_inserted.is_some() {
+            self.notices.push(
+                Notice::TextInserted(source, chars),
+                self.frame_request.as_ref(),
+            );
         }
     }
 

@@ -3460,3 +3460,34 @@ fn move_focus_shift_tab_leaves_and_closes_an_open_completion() {
     );
     assert_eq!(text_of(&st), "pre");
 }
+
+/// `on_change` runs with the editor free, so it can read the editor through
+/// its handle.
+#[test]
+fn on_change_reads_the_editor_through_its_handle() {
+    let doc = TextDocument::new();
+    doc.set_plain_text("ab").unwrap();
+    let editor = super::CodeEditor::new(doc.clone());
+    let handle = editor.handle();
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let editor = editor.on_change({
+        let seen = seen.clone();
+        move || seen.borrow_mut().push(handle.cursor_position())
+    });
+    let mut tree = WidgetTree::new().with_theme(teksilo_core::presets::intui::light());
+    let root = tree.add(editor);
+    tree.layout(SizeProposal::exact(400.0, 300.0));
+    let _ = tree.render();
+    let focus = tree
+        .first_focusable_descendant(root)
+        .expect("the editor is focusable");
+    tree.focus(focus);
+    tree.type_text(focus, "c");
+    for _ in 0..3 {
+        tree.request_frame();
+        tree.tick_animations(std::time::Duration::from_millis(16));
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+    }
+    assert_eq!(doc.to_plain_text().unwrap(), "cab");
+    assert_eq!(*seen.borrow(), vec![1]);
+}

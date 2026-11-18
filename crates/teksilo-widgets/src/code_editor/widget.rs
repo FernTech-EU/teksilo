@@ -345,6 +345,10 @@ impl CodeEditor {
     }
 
     /// A callback fired once per drain batch that contained a real content edit.
+    ///
+    /// It runs once the frame or key that drained the edit has finished with
+    /// the editor, so it may use the editor's [`CodeEditorHandle`]. An edit it
+    /// makes is drained, and reported to it, on the next frame.
     pub fn on_change(self, callback: impl Fn() + 'static) -> Self {
         self.state.borrow_mut().on_change = Some(Rc::new(callback));
         self
@@ -580,6 +584,8 @@ impl Widget for CodeEditor {
                 if more && let Some(handle) = &st.frame_request {
                     handle.set(true);
                 }
+                drop(st);
+                crate::common::notices::deliver(&state);
             });
         }
 
@@ -694,6 +700,7 @@ impl Widget for CodeEditor {
                 let touch = self.touch.clone();
                 move |event, ctx| {
                     let response = super::keyboard::handle_key(&state, event, ctx);
+                    crate::common::notices::deliver(&state);
                     // Text the input system committed (an accent chosen from
                     // the press-and-hold popup, an emoji, dictation) is
                     // typing as far as completion goes: an open popup

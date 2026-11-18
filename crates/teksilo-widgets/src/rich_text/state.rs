@@ -50,6 +50,7 @@ use super::policy::{CaretPolicy, PolicyBundle};
 use crate::common::composition::Composition;
 use crate::common::document_offsets::DocumentUtf16;
 use crate::common::editor_runtime::{CaretBlink, Debounce};
+use crate::common::notices::{Notice, NoticeSource, Notices};
 use crate::common::pending_arrivals::PendingArrivals;
 
 pub(crate) type SharedState = Rc<RefCell<EditorState>>;
@@ -123,7 +124,11 @@ pub(crate) struct EditorState {
     pub on_text_inserted: Option<Rc<dyn Fn(crate::EditSource, usize)>>,
     // NOTE: `report_inserted` below is the only correct way to fire it. Calling
     // the callback directly from an insertion site would fire it for an empty
-    // string, which is not text arriving.
+    // string, which is not text arriving, and with this state borrowed.
+    /// The reports for [`Self::on_text_inserted`] and [`Self::on_change`] not
+    /// delivered yet: queued here under the borrow, run by
+    /// [`notices::deliver`](crate::common::notices::deliver) once it is released.
+    pub notices: Notices,
     /// Whether the system's Writing Tools may read and replace this editor's
     /// text. Set via
     /// [`RichTextEditor::writing_tools`](super::RichTextEditor::writing_tools);
@@ -882,6 +887,26 @@ pub struct SelectedImageRect {
     pub offset: usize,
 }
 
+impl NoticeSource for EditorState {
+    const WIDGET: &'static str = "RichTextEditor";
+
+    fn notices(&self) -> &Notices {
+        &self.notices
+    }
+
+    fn frame_request(&self) -> Option<&Rc<std::cell::Cell<bool>>> {
+        self.frame_request.as_ref()
+    }
+
+    fn on_text_inserted(&self) -> Option<Rc<dyn Fn(crate::EditSource, usize)>> {
+        self.on_text_inserted.clone()
+    }
+
+    fn on_change(&self) -> Option<Rc<dyn Fn()>> {
+        self.on_change.clone()
+    }
+}
+
 impl EditorState {
     /// Tell whoever is listening that `text` just arrived through `source`.
     ///
@@ -911,20 +936,28 @@ impl EditorState {
         if chars == 0 || self.input_system.batch.defer_arrival(source, chars) {
             return;
         }
-        if let Some(callback) = self.on_text_inserted.as_ref() {
-            callback(source, chars);
+        self.queue_notice(Notice::TextInserted(source, chars));
+    }
+
+    /// Queue a report for the application's callbacks, if it installed the one
+    /// it is for, and ask for a frame, whose tick delivers whatever the code
+    /// that queued it did not.
+    fn queue_notice(&self, notice: Notice) {
+        let wanted = match notice {
+            Notice::TextInserted(..) => self.on_text_inserted.is_some(),
+            Notice::Changed => self.on_change.is_some(),
+        };
+        if !wanted {
+            return;
         }
+        self.notices.push(notice, self.frame_request.as_ref());
     }
 
     /// Report every route's share of the pending batch, which the caller has
     /// just inserted. See [`Self::pending_arrivals`].
     pub fn report_pending_arrivals(&mut self) {
-        let callback = self.on_text_inserted.as_ref();
-        self.pending_arrivals.flush(|source, chars| {
-            if let Some(callback) = callback {
-                callback(source, chars);
-            }
-        });
+        let mut arrivals = std::mem::take(&mut self.pending_arrivals);
+        arrivals.flush(|source, chars| self.queue_notice(Notice::TextInserted(source, chars)));
     }
 
     /// Whether the system's Writing Tools may act on this editor now: read its
@@ -1093,6 +1126,7 @@ impl EditorState {
             frame_wake_at: None,
             pending_chars: String::new(),
             pending_arrivals: PendingArrivals::default(),
+            notices: Notices::default(),
             composition: Composition::default(),
             input_system,
             last_chase_pos: None,
@@ -1742,9 +1776,8 @@ impl EditorState {
         if (saw_content_change || saw_format_change)
             && !saw_reset_or_load
             && !self.composition.is_live(&self.document)
-            && let Some(cb) = self.on_change.clone()
         {
-            cb();
+            self.queue_notice(Notice::Changed);
         }
 
         // Drop the cached flow snapshot and synthetic-id lookup

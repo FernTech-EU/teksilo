@@ -41,6 +41,7 @@ pub(crate) mod item_focus;
 pub(crate) mod list_nav;
 #[cfg(test)]
 pub(crate) mod locale_switch_test;
+pub(crate) mod notices;
 pub mod ordered_move;
 pub(crate) mod pending_arrivals;
 pub(crate) mod range_nav;

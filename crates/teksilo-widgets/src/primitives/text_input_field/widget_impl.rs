@@ -682,6 +682,8 @@ impl Widget for TextInputField {
                         handle.set(true);
                     }
                 }
+                // After the bound text took the edit, so a callback reads it.
+                crate::common::notices::deliver(&state);
             });
         }
 
@@ -784,6 +786,7 @@ impl Widget for TextInputField {
                     // method commits it later, here or in the field focused
                     // next.
                     keyboard::finish_composition(&state_for_focus, ctx);
+                    crate::common::notices::deliver(&state_for_focus);
                 }
                 interaction_for_focus.set(if gained {
                     InteractionState::Focused
@@ -920,6 +923,7 @@ impl Widget for TextInputField {
                 let state = self.state().clone();
                 move |ctx| {
                     keyboard::finish_composition(&state, ctx);
+                    crate::common::notices::deliver(&state);
                     let commit = state.borrow().on_commit.clone();
                     if let Some(commit) = commit {
                         commit(ctx);
@@ -931,7 +935,10 @@ impl Widget for TextInputField {
                 }
             })
             .on_pointer_event(move |event, ctx| {
-                mouse::handle_pointer_event(&state_for_pointer, &touch_for_pointer, event, ctx)
+                let response =
+                    mouse::handle_pointer_event(&state_for_pointer, &touch_for_pointer, event, ctx);
+                crate::common::notices::deliver(&state_for_pointer);
+                response
             })
             // A hold selects the word under the finger. Attaching this
             // **withdraws** the tree-owned long-press route (`touch_route`
@@ -944,6 +951,7 @@ impl Widget for TextInputField {
             })
             .on_key(move |event, ctx| {
                 let response = keyboard::handle_key(&state_for_key, event, ctx);
+                crate::common::notices::deliver(&state_for_key);
                 // A keystroke moves the caret and edits the text, neither of
                 // which the controller made — so the handles it published are
                 // pointing at where the text used to be. `refresh` is a no-op
@@ -967,6 +975,7 @@ impl Widget for TextInputField {
             })
             .on_access_action_request(move |action, _target_node, data, ctx| {
                 let response = handle_access_action(&state_for_access, action, data, ctx);
+                crate::common::notices::deliver(&state_for_access);
                 touch_for_access.refresh(ctx, touch::ToolbarIntent::Keep);
                 response
             })
@@ -1014,6 +1023,7 @@ impl Widget for TextInputField {
                         surfaces.empty_history_passes_on(),
                         ctx,
                     );
+                    crate::common::notices::deliver(&state);
                     if ran {
                         // As after a key: the handles the controller published
                         // point at where the text used to be.

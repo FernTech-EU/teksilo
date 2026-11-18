@@ -32,6 +32,7 @@ use teksilo_tokens::OverscrollStyle;
 use super::config::CodeConfig;
 use crate::common::composition::Composition;
 use crate::common::editor_runtime::{CaretBlink, CaretPolicy, Debounce, PolicyBundle};
+use crate::common::notices::{Notice, NoticeSource, Notices};
 use crate::rich_text::image_cache::ImageCache;
 
 pub(crate) type SharedState = Rc<RefCell<CodeEditorState>>;
@@ -116,6 +117,10 @@ pub(crate) struct CodeEditorState {
     pub line_count: Signal<usize>,
     /// Fires once per drain batch that contained a genuine content edit.
     pub on_change: Option<Rc<dyn Fn()>>,
+    /// The reports for [`Self::on_change`] not delivered yet: queued here
+    /// under the borrow, run by
+    /// [`notices::deliver`](crate::common::notices::deliver) once it is released.
+    pub notices: Notices,
 
     // --- Scroll ------------------------------------------------------------
     // Not a ScrollArea: the editor drives its own overlay bars, because wrap
@@ -303,6 +308,26 @@ pub struct SyntheticElementRef {
     pub text: String,
 }
 
+impl NoticeSource for CodeEditorState {
+    const WIDGET: &'static str = "CodeEditor";
+
+    fn notices(&self) -> &Notices {
+        &self.notices
+    }
+
+    fn frame_request(&self) -> Option<&Rc<std::cell::Cell<bool>>> {
+        self.frame_request.as_ref()
+    }
+
+    fn on_text_inserted(&self) -> Option<Rc<dyn Fn(crate::EditSource, usize)>> {
+        None
+    }
+
+    fn on_change(&self) -> Option<Rc<dyn Fn()>> {
+        self.on_change.clone()
+    }
+}
+
 impl CodeEditorState {
     /// Whether Tab (`shift == false`) or Shift+Tab indents or dedents here
     /// rather than moving focus. The keys and the accessibility description
@@ -375,6 +400,7 @@ impl CodeEditorState {
             bracket_match: Signal::new(None),
             line_count: Signal::new(initial_lines),
             on_change: None,
+            notices: Notices::default(),
             scroll_x: Signal::new(0.0),
             scroll_y: Signal::new(0.0),
             max_scroll_x: Signal::new(0.0),
@@ -806,8 +832,9 @@ impl CodeEditorState {
         // by the time observers run.
         self.document_version.set(self.document_version.get() + 1);
 
-        if saw_content_change && let Some(cb) = self.on_change.clone() {
-            cb();
+        if saw_content_change && self.on_change.is_some() {
+            self.notices
+                .push(Notice::Changed, self.frame_request.as_ref());
         }
 
         (true, single_pos)

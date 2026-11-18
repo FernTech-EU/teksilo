@@ -29,6 +29,7 @@ use super::state::EditorState;
 use super::{EditorHandle, clipboard, sync_cursor_signals};
 use crate::EditSource;
 use crate::common::input_editor::{self, Writing};
+use crate::common::notices;
 
 /// The channel an input-system commit is reported under.
 pub(crate) fn source_of(origin: ImeOrigin) -> EditSource {
@@ -69,6 +70,7 @@ impl EditorHandle {
             result
         };
         self.cursor_moved();
+        notices::deliver(&self.state);
         Ok(result)
     }
 
@@ -203,5 +205,6 @@ impl TextInputEditor for EditorHandle {
         if deferred.cursor_moved {
             sync_cursor_signals(&self.state);
         }
+        notices::deliver(&self.state);
     }
 }

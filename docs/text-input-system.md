@@ -186,8 +186,19 @@ a finished composition, dictation, Writing Tools, a paste and an assistive
 technology's `SetValue` or `ReplaceSelectedText`. It does not fire for the
 application writing the bound `Signal<String>`, nor for undo or redo, nor for
 an intermediate composition state. Emoji and other insertions report as
-`EditSource::Ime`. The callback runs while the field is mid-edit, so it counts
-characters rather than reading the field back.
+`EditSource::Ime`.
+
+The callback runs once the field has finished with the event, frame or handle
+call that inserted the text, so it can read the field through its handle and
+edit it: a chat composer replacing `:)` with an emoji does it here (a
+`TextInputField` by writing its bound `Signal<String>`, a `RichTextEditor`
+with `EditorHandle::replace_range`). The bound signal itself catches up at the
+frame, so read the text from the handle. Text the callback's own edit inserts
+through a handle is reported to it again after it returns, in order, never from
+inside it, so the edit has to depend on what it reads: one made on every report
+never ends, and after 256 reports in a row a debug build panics to say so.
+`RichTextEditor::on_change` and `CodeEditor::on_change` run with the editor
+free in the same way.
 
 `cargo run -p rich-text-editor` shows a count per source.
 

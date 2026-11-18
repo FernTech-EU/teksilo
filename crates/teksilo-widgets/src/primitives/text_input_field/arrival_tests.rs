@@ -449,3 +449,60 @@ fn a_password_field_keeps_writing_tools_out() {
         "a secure field, whatever is set"
     );
 }
+
+/// `on_text_inserted` runs with the field free: it reads the field through
+/// its handle and sees the text the insertion made, in the bound signal too.
+#[test]
+fn on_text_inserted_reads_the_field_through_its_handle() {
+    let signal = Signal::new("ab".to_string());
+    let arrivals = Arrivals::default();
+    let field = TextInputField::new(signal.clone());
+    let handle = field.handle();
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let field = field.on_text_inserted({
+        let seen = seen.clone();
+        let signal = signal.clone();
+        move |_, _| seen.borrow_mut().push((handle.text(), signal.get()))
+    });
+    let mut f = Field::mount(field, signal, arrivals);
+    f.caret_at(2);
+    f.type_text("c");
+    assert_eq!(*seen.borrow(), vec![("abc".to_owned(), "abc".to_owned())]);
+
+    // A paste is reported from its action, before the frame: the handle
+    // already has it.
+    seen.borrow_mut().clear();
+    f.clipboard.set_text("d").unwrap();
+    f.tree.press_key(Key::V, Modifiers::COMMAND);
+    assert_eq!(seen.borrow()[0].0, "abcd");
+}
+
+/// The emoticon case on a single-line field: the callback reads the text
+/// through the handle and rewrites the bound text, which the field takes back.
+#[test]
+fn on_text_inserted_rewrites_the_bound_text() {
+    let signal = Signal::new("hi ".to_string());
+    let arrivals = Arrivals::default();
+    let field = TextInputField::new(signal.clone());
+    let handle = field.handle();
+    let field = field.on_text_inserted({
+        let signal = signal.clone();
+        let seen = arrivals.0.clone();
+        move |source, chars| {
+            seen.borrow_mut().push((source, chars));
+            let text = handle.text();
+            if text.ends_with(":) ") {
+                signal.set(text.replace(":) ", "\u{1F642} "));
+            }
+        }
+    });
+    let mut f = Field::mount(field, signal.clone(), arrivals);
+    f.caret_at(3);
+    f.type_text(":)");
+    f.type_text(" ");
+    assert_eq!(signal.get(), "hi \u{1F642} ");
+    assert_eq!(
+        f.arrivals.seen(),
+        vec![(EditSource::Keyboard, 2), (EditSource::Keyboard, 1)]
+    );
+}

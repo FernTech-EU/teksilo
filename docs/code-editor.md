@@ -79,7 +79,7 @@ Shared by `CodeEditor` and `PlainTextEditor`:
 | `min_lines` / `max_lines` | Switch from greedy to intrinsic sizing, grow with content up to `max_lines`, then scroll (the composer pattern). |
 | `font_family` / `font_size_scale` / `follow_text_scale` | Typography. `follow_text_scale` (default on) grows text with the global accessibility scale; `font_size_scale` is a per-editor logical multiplier. |
 | `background` | `Color`, a theme role, or a `Signal`. |
-| `on_change(Fn)` | Fired once per drain batch that contained a real edit. |
+| `on_change(Fn)` | Fired once per drain batch that contained a real edit, with the editor free: it may use the editor's handle. |
 | `context_menu(factory)` / `default_context_menu(bool)` | Replace or suppress the built-in right-click menu, see [The right-click menu](#the-right-click-menu). |
 
 `CodeEditor`-only:

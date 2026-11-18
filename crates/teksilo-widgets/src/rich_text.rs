@@ -101,6 +101,8 @@ mod a11y_walk_cost;
 #[cfg(test)]
 mod base_direction_tests;
 #[cfg(test)]
+mod callback_reentry_tests;
+#[cfg(test)]
 mod composition_tests;
 #[cfg(test)]
 mod cursor_signal_tests;
@@ -178,6 +180,7 @@ use teksilo_text::{
 use self::paint::{PaintParams, paint_frame};
 use self::state::{EditorState, SharedState};
 use crate::EditSource;
+use crate::common::notices;
 use crate::common::scroll::OverscrollBehavior;
 use crate::scroll_bar::{ScrollBar, ScrollBarOrientation, ScrollBarVariant};
 use crate::styles::RecipeRichTextEditorStyle;
@@ -917,10 +920,12 @@ impl RichTextEditor {
     /// `set_djot` / `set_markdown` / `set_html` load or a document reset, and
     /// *not* while an IME composition (CJK/Kana candidate preview, dead-key
     /// accent) is still in progress — only the settled result of a commit
-    /// fires it. The callback runs on the UI thread during the editor's frame
-    /// drain, so it may touch `Signal`s directly — e.g. flip a "dirty" flag or
-    /// kick a debounced autosave. Replaces any prior change callback on this
-    /// editor.
+    /// fires it. The callback runs on the UI thread, once the frame that
+    /// drained the edits has finished with the editor, so it may touch
+    /// `Signal`s directly (flip a "dirty" flag, kick a debounced autosave) and
+    /// use the editor's [`EditorHandle`], as
+    /// [`on_text_inserted`](Self::on_text_inserted) says. Replaces any prior
+    /// change callback on this editor.
     ///
     /// For a reactive change *token* (which also bumps on loads/format-only
     /// changes, and on intermediate IME composition steps), observe
@@ -964,6 +969,16 @@ impl RichTextEditor {
     /// those is text arriving.
     ///
     /// Replaces any prior callback on this editor. Runs on the UI thread.
+    ///
+    /// **The editor is free while it runs.** It is called once the editor has
+    /// finished with the event, frame or handle call that inserted the text,
+    /// so it may read the editor through an [`EditorHandle`] (capture a
+    /// [`WeakEditorHandle`]) and edit it: replace an emoticon just typed, say.
+    /// Text its own edit inserts is reported to it again, after it returns and
+    /// in the order the edits were made, never from inside it. So the edit
+    /// must depend on what it reads (the emoticon is gone the second time);
+    /// one made unconditionally on every report never ends, and after 256
+    /// reports in a row a debug build panics to say so.
     pub fn on_text_inserted(self, f: impl Fn(EditSource, usize) + 'static) -> Self {
         self.state.borrow_mut().on_text_inserted = Some(Rc::new(f));
         self
@@ -1139,6 +1154,7 @@ impl RichTextEditor {
             st.select_all_level = 0;
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Clear any current selection.
@@ -1152,6 +1168,7 @@ impl RichTextEditor {
             st.select_all_level = 0;
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     // --- Cursor mirror API -------------------------------------------------
@@ -1234,9 +1251,9 @@ impl RichTextEditor {
     /// whether the [`command_filter`](Self::command_filter) accepts
     /// [`EditCommandKind::InsertLineBreak`].
     ///
-    /// Safe to ask from `on_change`, `on_text_inserted` or a signal observer,
-    /// which can run while the editor is busy with its own state: it answers
-    /// `true` then, the answer a menu row had before the question.
+    /// Safe to ask from a signal observer, which can run while the editor is
+    /// busy with its own state: it answers `true` then, the answer a menu row
+    /// had before the question.
     pub fn can_insert_line_break(&self) -> bool {
         self.state
             .try_borrow()
@@ -1276,6 +1293,7 @@ impl RichTextEditor {
             st.cursor.select(SelectionType::WordUnderCursor);
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Select the paragraph / block under the widget's caret.
@@ -1287,6 +1305,7 @@ impl RichTextEditor {
             st.cursor.select(SelectionType::LineUnderCursor);
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Move the caret to an absolute character position. Collapses any
@@ -1307,6 +1326,7 @@ impl RichTextEditor {
             st.cursor_affinity = teksilo_text::CursorAffinity::Downstream;
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     // --- Search / find-banner support (B3) --------------------------------
@@ -1341,6 +1361,7 @@ impl RichTextEditor {
             st.cursor_affinity = teksilo_text::CursorAffinity::Downstream;
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Scroll the character range `[start, end)` into view within the enclosing scroll area.
@@ -2079,6 +2100,7 @@ impl RichTextEditor {
             clipboard::cut(&mut st, ctx);
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Paste from the system clipboard. Prefers an in-process fragment
@@ -2090,6 +2112,7 @@ impl RichTextEditor {
             clipboard::paste(&mut st, ctx);
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Paste plain text only, stripping any rich payload.
@@ -2099,6 +2122,7 @@ impl RichTextEditor {
             clipboard::paste_unformatted(&mut st, ctx);
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Whether a paste would insert anything — `true` iff the system
@@ -2687,6 +2711,7 @@ impl EditorHandle {
             st.cursor_affinity = teksilo_text::CursorAffinity::Downstream;
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Replace the character range `[start, end)` with `text`, leaving the caret
@@ -2739,6 +2764,7 @@ impl EditorHandle {
             st.report_inserted(source, text);
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Insert plain text at the caret, replacing any selection. The
@@ -2851,9 +2877,9 @@ impl EditorHandle {
     /// whether the [`command_filter`](Self::command_filter) accepts
     /// [`EditCommandKind::InsertLineBreak`].
     ///
-    /// Safe to ask from `on_change`, `on_text_inserted` or a signal observer,
-    /// which can run while the editor is busy with its own state: it answers
-    /// `true` then, the answer a menu row had before the question.
+    /// Safe to ask from a signal observer, which can run while the editor is
+    /// busy with its own state: it answers `true` then, the answer a menu row
+    /// had before the question.
     pub fn can_insert_line_break(&self) -> bool {
         self.state
             .try_borrow()
@@ -3785,6 +3811,7 @@ impl EditorHandle {
             clipboard::cut(&mut st, ctx);
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Paste from the system clipboard. Prefers an in-process fragment
@@ -3795,6 +3822,7 @@ impl EditorHandle {
             clipboard::paste(&mut st, ctx);
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Paste plain text only, stripping any rich payload. See
@@ -3805,6 +3833,7 @@ impl EditorHandle {
             clipboard::paste_unformatted(&mut st, ctx);
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Whether a paste would insert anything — `true` iff the system
@@ -3832,6 +3861,7 @@ impl EditorHandle {
             st.select_all_level = 0;
         }
         sync_cursor_signals(&self.state);
+        notices::deliver(&self.state);
     }
 
     /// Delete the current selection. No-op when nothing is selected.
@@ -4096,6 +4126,7 @@ impl Widget for RichTextEditor {
                     handle.set(true);
                 }
                 drop(st);
+                notices::deliver(&state);
             });
         }
 
@@ -4234,6 +4265,7 @@ impl Widget for RichTextEditor {
                     if let Some(drag) = payload.get_typed::<EditorTextDrag>() {
                         let same_editor = state.borrow().self_id == Some(drag.source);
                         let moved = self::mouse::apply_text_drop(&state, drag, same_editor);
+                        notices::deliver(&state);
                         if moved {
                             sync_cursor_signals(&state);
                             state.borrow_mut().pending_text_changed = true;
@@ -4271,6 +4303,7 @@ impl Widget for RichTextEditor {
                         // Another program's lines: each `\n` a paragraph.
                         self::clipboard::insert_plain_text(&st, text);
                     }
+                    notices::deliver(&state);
                     sync_cursor_signals(&state);
                     state.borrow_mut().pending_text_changed = true;
                     ctx.request_frame();
@@ -4323,6 +4356,7 @@ impl Widget for RichTextEditor {
                         st.last_ime_area = None;
                         st.last_chase_pos = None;
                     }
+                    notices::deliver(&state);
                     ctx.request_frame();
                 }
             })
@@ -4334,7 +4368,10 @@ impl Widget for RichTextEditor {
             // the next key would bring it back at the caret.
             .on_commit_edit({
                 let state = self.state.clone();
-                move |ctx| self::keyboard::finish_composition(&state, ctx)
+                move |ctx| {
+                    self::keyboard::finish_composition(&state, ctx);
+                    notices::deliver(&state);
+                }
             })
             .on_pointer_event({
                 let state = self.state.clone();
@@ -4342,7 +4379,10 @@ impl Widget for RichTextEditor {
                 let v_sb = self.v_scrollbar_bounds.clone();
                 let h_sb = self.h_scrollbar_bounds.clone();
                 move |event, ctx| {
-                    self::mouse::handle_pointer_event(&state, &touch, &v_sb, &h_sb, event, ctx)
+                    let response =
+                        self::mouse::handle_pointer_event(&state, &touch, &v_sb, &h_sb, event, ctx);
+                    notices::deliver(&state);
+                    response
                 }
             })
             // A hold selects the word under the finger. Attaching this
@@ -4363,6 +4403,7 @@ impl Widget for RichTextEditor {
                 let touch = self.touch.clone();
                 move |event, ctx| {
                     let response = self::keyboard::handle_key(&state, event, ctx);
+                    notices::deliver(&state);
                     // A keystroke moves the caret and edits the text, neither of
                     // which the controller made — so the handles it published
                     // are pointing at where the text used to be. `refresh` is a
@@ -4399,6 +4440,7 @@ impl Widget for RichTextEditor {
                 move |action, target_node, data, ctx| {
                     let response =
                         handle_access_action_request(&state, action, target_node, data, ctx);
+                    notices::deliver(&state);
                     // An assistive client's `SetTextSelection` / `SetValue` /
                     // `ReplaceSelectedText` moves the selection without going
                     // through the controller, so raised handles would be left
@@ -4468,6 +4510,7 @@ impl Widget for RichTextEditor {
                         surfaces.empty_history_passes_on(),
                         ctx,
                     );
+                    notices::deliver(&state);
                     if ran {
                         // As after a key: the published handles point at
                         // where the text used to be.
@@ -4499,6 +4542,7 @@ impl Widget for RichTextEditor {
             let touch = self.touch.clone();
             crate::common::standard_edit::register_command_action(ctx, command.id(), move |ctx| {
                 let ran = self::keyboard::run_format_shortcut(&state, command, ctx);
+                notices::deliver(&state);
                 if ran {
                     touch.refresh(ctx, touch_mount::ToolbarIntent::Hide);
                 }

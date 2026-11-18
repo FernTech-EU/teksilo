@@ -515,8 +515,15 @@ impl TextInputField {
     /// It does **not** fire when the application writes the bound
     /// `Signal<String>`, nor for undo or redo: none of those is text arriving.
     ///
-    /// The field is mid-edit while the callback runs, so it counts rather than
-    /// reads the field back. Replaces any prior callback on this field.
+    /// The field is free while the callback runs: it is called once the field
+    /// has finished with the event, frame or handle call that inserted the
+    /// text, so it may read the field through its [`TextFieldHandle`]
+    /// ([`text`](TextFieldHandle::text) holds the new text; the bound signal
+    /// catches up at the frame) and write the bound signal, which reports
+    /// nothing. Text it inserts through the handle (a paste) is reported to it
+    /// again after it returns, never from inside it.
+    ///
+    /// Replaces any prior callback on this field.
     pub fn on_text_inserted(mut self, f: impl Fn(EditSource, usize) + 'static) -> Self {
         self.on_text_inserted = Some(Rc::new(f));
         self
@@ -1881,10 +1888,11 @@ impl TextFieldHandle {
     }
 
     fn with<R>(&self, f: impl FnOnce(&mut TextInputState) -> R) -> Option<R> {
-        let slot = self.slot.borrow();
-        let state = slot.as_ref()?;
-        let mut st = state.borrow_mut();
-        Some(f(&mut st))
+        let state = self.slot.borrow().as_ref()?.clone();
+        let result = f(&mut state.borrow_mut());
+        // A paste or a select-all through the handle may have reported text.
+        crate::common::notices::deliver(&state);
+        Some(result)
     }
 
     /// The field's current text.
