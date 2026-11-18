@@ -58,9 +58,11 @@ pub struct QuadVertex {
     /// Per-vertex bitfield. Bit 0 ([`QUAD_FLAG_COLOR_GLYPH`]) selects the
     /// color emoji path in the fragment shader.
     pub flags: u32,
-    /// Padding so the struct stride stays a multiple of 8 bytes, matching
-    /// wgpu's vertex buffer layout expectations.
-    pub _pad: u32,
+    /// The glyph-edge correction for a monochrome glyph, as
+    /// [`TextContrast`](crate::text_contrast::TextContrast) packs it; `0`
+    /// for anything else (images, path masks, colour glyphs), which the
+    /// shader blends as is. The renderer fills it in, not the constructors.
+    pub text_params: u32,
 }
 
 /// Off-diagonal tolerance below which a transform counts as axis-aligned
@@ -141,7 +143,7 @@ pub(crate) fn live_quad_verts(
         tex_coord: uv[i],
         color,
         flags,
-        _pad: 0,
+        text_params: 0,
     })
 }
 
@@ -233,28 +235,28 @@ impl QuadVertex {
                 tex_coord: [u0, v0],
                 color,
                 flags,
-                _pad: 0,
+                text_params: 0,
             },
             QuadVertex {
                 position: positions[1],
                 tex_coord: [u1, v0],
                 color,
                 flags,
-                _pad: 0,
+                text_params: 0,
             },
             QuadVertex {
                 position: positions[2],
                 tex_coord: [u1, v1],
                 color,
                 flags,
-                _pad: 0,
+                text_params: 0,
             },
             QuadVertex {
                 position: positions[3],
                 tex_coord: [u0, v1],
                 color,
                 flags,
-                _pad: 0,
+                text_params: 0,
             },
         ]
     }

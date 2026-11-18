@@ -82,6 +82,15 @@ by crate for clarity, not because crates version independently.
 - **In a right-to-left layout a label's lines sit against its right edge**
   when the label is wider than they are; they were flush left.
 
+#### Rendering
+
+- **Text is as dark as in other applications.** Glyph edges were blended in
+  linear light, which drew dark text on a light page about a quarter lighter
+  than a browser draws it, and light text on a dark page heavier. They are now
+  blended as Chromium blends them. `Renderer::set_text_contrast` takes a
+  `TextContrast` to adjust it, and `TextContrast::OFF` restores the previous
+  rendering.
+
 ### Fixed
 
 #### Core

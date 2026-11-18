@@ -15,6 +15,7 @@ use crate::image_manager::ImageManager;
 use crate::live_texture::WgpuBackend;
 use crate::path_atlas::PathAtlas;
 use crate::stream_buffer::StreamBuffers;
+use crate::text_contrast::TextContrast;
 use crate::vertex::{AnimQuadVertex, QuadVertex, RectVertex, SdfVertex, ShadowVertex};
 
 /// How many animated-quad slots the uniform buffer holds. Must match
@@ -36,6 +37,8 @@ pub struct Renderer {
     rect_pipeline: wgpu::RenderPipeline,
     sdf_pipeline: wgpu::RenderPipeline,
     quad_pipeline: wgpu::RenderPipeline,
+    /// How monochrome glyph edges are blended (see [`TextContrast`]).
+    text_contrast: TextContrast,
     shadow_pipeline: wgpu::RenderPipeline,
     /// Gradient-filled path pipeline (Tier 3) — draws `PathEntry`s whose
     /// `paint_data` is a gradient variant. Solid-filled paths keep using
@@ -270,6 +273,7 @@ impl Renderer {
             rect_pipeline,
             sdf_pipeline,
             quad_pipeline,
+            text_contrast: TextContrast::DEFAULT,
             path_gradient_pipeline,
             shadow_pipeline,
             anim_proc_pipeline,
@@ -294,6 +298,17 @@ impl Renderer {
             live_timings: crate::live_timings::LiveTimingRings::new(),
             last_submission: None,
         }
+    }
+
+    /// How monochrome glyph edges are blended from the next frame on
+    /// ([`TextContrast::DEFAULT`] until this is called).
+    pub fn set_text_contrast(&mut self, text_contrast: TextContrast) {
+        self.text_contrast = text_contrast;
+    }
+
+    /// The glyph-edge correction in use.
+    pub fn text_contrast(&self) -> TextContrast {
+        self.text_contrast
     }
 
     /// Upload atlas texture data from the text backend.
@@ -838,6 +853,7 @@ impl Renderer {
             let mut rect_batch: Vec<RectVertex> = Vec::new();
             let mut sdf_batch: Vec<SdfVertex> = Vec::new();
             let mut quad_batch: Vec<QuadVertex> = Vec::new();
+            let text_params = self.text_contrast.packed();
             let mut shadow_batch: Vec<ShadowVertex> = Vec::new();
             let mut anim_proc_batch: Vec<AnimQuadVertex> = Vec::new();
             let mut path_gradient_batch: Vec<crate::vertex::PathGradientVertex> = Vec::new();
@@ -1309,6 +1325,9 @@ impl Renderer {
                                         atlas.height,
                                         &current_transform,
                                     );
+                                    // A colour glyph is a picture: only a
+                                    // coverage mask has an edge to correct.
+                                    let text_params = if glyph.is_color { 0 } else { text_params };
                                     for v in &verts {
                                         quad_batch.push(QuadVertex {
                                             position: pixel_to_ndc(
@@ -1322,6 +1341,7 @@ impl Renderer {
                                                 v.color[2],
                                                 v.color[3] * current_opacity,
                                             ],
+                                            text_params,
                                             ..*v
                                         });
                                     }
@@ -2311,28 +2331,28 @@ impl Renderer {
                 tex_coord: [0.0, 0.0],
                 color,
                 flags,
-                _pad: 0,
+                text_params: 0,
             },
             QuadVertex {
                 position: [sx + sw, sy],
                 tex_coord: [1.0, 0.0],
                 color,
                 flags,
-                _pad: 0,
+                text_params: 0,
             },
             QuadVertex {
                 position: [sx + sw, sy + sh],
                 tex_coord: [1.0, 1.0],
                 color,
                 flags,
-                _pad: 0,
+                text_params: 0,
             },
             QuadVertex {
                 position: [sx, sy + sh],
                 tex_coord: [0.0, 1.0],
                 color,
                 flags,
-                _pad: 0,
+                text_params: 0,
             },
         ];
 
@@ -2520,28 +2540,28 @@ fn path_quad_verts(
             tex_coord: uvs[0],
             color,
             flags: 0,
-            _pad: 0,
+            text_params: 0,
         },
         QuadVertex {
             position: positions[1],
             tex_coord: uvs[1],
             color,
             flags: 0,
-            _pad: 0,
+            text_params: 0,
         },
         QuadVertex {
             position: positions[2],
             tex_coord: uvs[2],
             color,
             flags: 0,
-            _pad: 0,
+            text_params: 0,
         },
         QuadVertex {
             position: positions[3],
             tex_coord: uvs[3],
             color,
             flags: 0,
-            _pad: 0,
+            text_params: 0,
         },
     ]
 }
@@ -2788,28 +2808,28 @@ fn composite_blur_quad(
             tex_coord: [0.0, 0.0],
             color,
             flags,
-            _pad: 0,
+            text_params: 0,
         },
         QuadVertex {
             position: p_tr,
             tex_coord: [u_max, 0.0],
             color,
             flags,
-            _pad: 0,
+            text_params: 0,
         },
         QuadVertex {
             position: p_br,
             tex_coord: [u_max, v_max],
             color,
             flags,
-            _pad: 0,
+            text_params: 0,
         },
         QuadVertex {
             position: p_bl,
             tex_coord: [0.0, v_max],
             color,
             flags,
-            _pad: 0,
+            text_params: 0,
         },
     ];
 
@@ -3074,6 +3094,11 @@ fn create_quad_pipeline(
                         offset: 32,
                         shader_location: 3,
                         format: wgpu::VertexFormat::Uint32, // flags (bit 0 = color glyph)
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 36,
+                        shader_location: 4,
+                        format: wgpu::VertexFormat::Uint32, // text_params
                     },
                 ],
             })],
@@ -3888,6 +3913,83 @@ mod tests {
             "expected glyph pixel to be visible over shape, got {:?}",
             blue_only
         );
+    }
+
+    #[test]
+    fn glyph_edges_are_blended_as_text_contrast_says() {
+        // The shader's `text_coverage` against its CPU twin: a 32-step
+        // coverage ramp drawn as one glyph, black on white and white on
+        // black, with the correction off and on.
+        use crate::text_contrast::TextContrast;
+
+        let Some((mut renderer, device, queue)) = pollster::block_on(
+            crate::test_support::require_test_renderer("teksilo_render_text_contrast_device"),
+        ) else {
+            return;
+        };
+
+        const W: u32 = 32;
+        let mut atlas = vec![0u8; (W * 4) as usize];
+        for x in 0..W as usize {
+            let coverage = (x * 255 / (W as usize - 1)) as u8;
+            atlas[x * 4..x * 4 + 4].copy_from_slice(&[255, 255, 255, coverage]);
+        }
+        renderer.upload_atlas(W, 1, &atlas);
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("text_contrast_target"),
+            size: wgpu::Extent3d {
+                width: W,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        let encode = |x: f32| {
+            let x = x.clamp(0.0, 1.0);
+            let e = if x <= 0.003_130_8 {
+                x * 12.92
+            } else {
+                1.055 * x.powf(1.0 / 2.4) - 0.055
+            };
+            (e * 255.0).round() as i32
+        };
+
+        for contrast in [TextContrast::OFF, TextContrast::DEFAULT] {
+            renderer.set_text_contrast(contrast);
+            for (text, page) in [(0.0_f32, 1.0_f32), (1.0, 0.0)] {
+                let mut frame = RenderFrame::new();
+                frame.glyphs.push(GlyphQuad {
+                    screen: [0.0, 0.0, W as f32, 1.0],
+                    atlas: [0.0, 0.0, W as f32, 1.0],
+                    color: [text, text, text, 1.0],
+                    is_color: false,
+                });
+                frame.draw_order.push(DrawCommand::Glyph(0));
+                renderer.render(&frame, &view, 1.0, W, 1, [page, page, page, 1.0]);
+                let pixels =
+                    crate::test_support::read_texture_rgba(&device, &queue, &texture, W, 1);
+                for x in 0..W as usize {
+                    let raw = (x * 255 / (W as usize - 1)) as f32 / 255.0;
+                    let a = contrast.corrected_coverage(raw, [text; 3]);
+                    // Text and page are 0 or 1, the same linear and encoded.
+                    let expected = encode(page + (text - page) * a);
+                    let got = pixels[x * 4] as i32;
+                    assert!(
+                        (got - expected).abs() <= 2,
+                        "{contrast:?}, text {text} on {page}, coverage {raw}: \
+                         shader wrote {got}, the CPU model says {expected}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

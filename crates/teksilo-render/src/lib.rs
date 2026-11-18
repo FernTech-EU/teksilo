@@ -16,6 +16,7 @@ pub mod path_atlas;
 pub mod renderer;
 pub mod stream_buffer;
 pub mod test_support;
+pub mod text_contrast;
 pub mod vertex;
 
 pub use device_health::DeviceHealth;
@@ -27,4 +28,5 @@ pub use live_timings::{LiveImageTimings, Percentiles};
 pub use path_atlas::PathAtlas;
 pub use renderer::Renderer;
 pub use teksilo_canvas::live_image::LiveTextureStats;
+pub use text_contrast::TextContrast;
 pub use vertex::{QuadVertex, RectVertex, SdfVertex, ShadowVertex};
