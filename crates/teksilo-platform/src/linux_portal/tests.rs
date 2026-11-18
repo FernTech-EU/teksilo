@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use zbus::zvariant::Value;
 
-use super::{QuietList, decode_bool, decode_rgb, decode_u32, read_reply_value};
+use super::{QuietList, decode_bool, decode_rgb, decode_string, decode_u32, read_reply_value};
 
 fn rgb(r: f64, g: f64, b: f64) -> Value<'static> {
     Value::from((r, g, b))
@@ -83,6 +83,19 @@ fn an_accent_colour_of_another_shape_is_unknown() {
     assert_eq!(decode_rgb(&Value::F64(0.5)), None);
     assert_eq!(decode_rgb(&Value::U32(1)), None);
     assert_eq!(decode_rgb(&Value::from(vec![0.5, 0.5, 0.5])), None);
+}
+
+#[test]
+fn a_string_setting_decodes_and_nothing_else_does() {
+    assert_eq!(
+        decode_string(&Value::from("Adwaita")),
+        Some("Adwaita".to_owned())
+    );
+    assert_eq!(decode_string(&Value::U32(1)), None);
+    assert_eq!(
+        decode_string(&Value::Value(Box::new(Value::from("Adwaita")))),
+        None
+    );
 }
 
 #[test]

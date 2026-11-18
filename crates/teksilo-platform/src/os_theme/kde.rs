@@ -118,6 +118,25 @@ pub(crate) fn kde_prefers_reduced_motion(
     Some(desktop.prefers_reduced_motion())
 }
 
+/// The icon theme the KDE desktop uses, `kdeglobals [Icons] Theme` (j.5):
+/// `breeze` when the key is absent or empty, `None` when no file of the
+/// `kdeglobals` cascade can be read.
+pub(crate) fn kde_icon_theme(
+    locations: &KdeConfigLocations,
+    var: EnvVar<'_>,
+    read: impl Fn(&Path) -> Option<Vec<u8>>,
+) -> Option<String> {
+    let kdeglobals = read_cascade(&locations.kdeglobals_cascade(), &read);
+    if kdeglobals.is_empty() {
+        return None;
+    }
+    let theme = KConfig::cascade(&kdeglobals)
+        .read_string(&["Icons"], "Theme", &locations.expansion_env(var))
+        .map(|theme| theme.trim().to_owned())
+        .filter(|theme| !theme.is_empty());
+    Some(theme.unwrap_or_else(|| "breeze".to_owned()))
+}
+
 /// `desktop` with the light or dark preference of the desktop portal
 /// (`org.freedesktop.appearance color-scheme`), `portal`: `None` when the
 /// portal does not answer.
@@ -752,5 +771,34 @@ mod tests {
         let var = kde_env();
         let desktop = discover(&with("0"), &var).unwrap();
         assert!(desktop.prefers_reduced_motion());
+    }
+
+    // ---- Icon theme ------------------------------------------------------
+
+    #[test]
+    fn the_icon_theme_is_the_icons_group_s_with_breeze_by_default() {
+        let icon_theme = |tree: &Tree| {
+            let var = kde_env();
+            kde_icon_theme(&KdeConfigLocations::from_env(&var), &var, tree.read())
+        };
+        let with = |text: &str| Tree::default().file(USER_KDEGLOBALS, text);
+        assert_eq!(
+            icon_theme(&with("[Icons]\nTheme=Papirus-Dark\n")).as_deref(),
+            Some("Papirus-Dark")
+        );
+        assert_eq!(
+            icon_theme(&with("[Icons]\nTheme=\n")).as_deref(),
+            Some("breeze")
+        );
+        assert_eq!(
+            icon_theme(&with("[KDE]\nwidgetStyle=Breeze\n")).as_deref(),
+            Some("breeze")
+        );
+        // The user's file wins over the system layer.
+        let layered = Tree::default()
+            .file(ETC_KDEGLOBALS, "[Icons]\nTheme=breeze-dark\n")
+            .file(USER_KDEGLOBALS, "[Icons]\nTheme=Adwaita\n");
+        assert_eq!(icon_theme(&layered).as_deref(), Some("Adwaita"));
+        assert_eq!(icon_theme(&Tree::default()), None);
     }
 }

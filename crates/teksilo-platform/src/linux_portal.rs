@@ -14,8 +14,9 @@
 //! by every later one. A connection that breaks is dropped and made again on
 //! the next read.
 //!
-//! The decoding is pure ([`decode_u32`], [`decode_rgb`], [`decode_bool`],
-//! [`read_reply_value`]) so its rules are tested without a bus.
+//! The decoding is pure ([`decode_u32`], [`decode_rgb`], [`decode_string`],
+//! [`decode_bool`], [`read_reply_value`]) so its rules are tested without a
+//! bus.
 
 use std::future::{Future, poll_fn};
 use std::pin::pin;
@@ -72,6 +73,12 @@ pub(crate) fn read_portal_rgb(namespace: &str, key: &str) -> Option<(f64, f64, f
     SESSION.read_portal_rgb(namespace, key)
 }
 
+/// A string setting of the portal (`icon-theme` in
+/// `org.gnome.desktop.interface`).
+pub(crate) fn read_portal_string(namespace: &str, key: &str) -> Option<String> {
+    SESSION.read_portal_string(namespace, key)
+}
+
 /// A boolean property read with `org.freedesktop.DBus.Properties.Get`.
 pub(crate) fn read_bool_property(
     service: &str,
@@ -105,6 +112,14 @@ pub(crate) fn decode_rgb(value: &Value<'_>) -> Option<(f64, f64, f64)> {
     };
     let in_range = |c: f64| (0.0..=1.0).contains(&c);
     (in_range(*r) && in_range(*g) && in_range(*b)).then_some((*r, *g, *b))
+}
+
+/// An `s` value.
+pub(crate) fn decode_string(value: &Value<'_>) -> Option<String> {
+    match value {
+        Value::Str(v) => Some(v.to_string()),
+        _ => None,
+    }
 }
 
 /// A `b` value.
@@ -210,6 +225,10 @@ impl Bus {
 
     pub(crate) fn read_portal_rgb(&self, namespace: &str, key: &str) -> Option<(f64, f64, f64)> {
         self.read_setting(namespace, key, decode_rgb)
+    }
+
+    pub(crate) fn read_portal_string(&self, namespace: &str, key: &str) -> Option<String> {
+        self.read_setting(namespace, key, decode_string)
     }
 
     pub(crate) fn read_bool_property(
