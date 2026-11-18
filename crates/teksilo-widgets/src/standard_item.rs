@@ -104,7 +104,9 @@ use teksilo_tokens::{HAlignment, RevealPolicy, TextRole, TextStyleRole, VAlignme
 
 use crate::button::InteractionState;
 use crate::checkbox::Checkbox;
-use crate::primitives::{FixedSize, HStack, Shrinkable, Spacer, TextWidget, TwistArrow, VStack};
+use crate::primitives::{
+    Expand, FixedSize, HStack, Shrinkable, Spacer, TextWidget, TwistArrow, VStack,
+};
 
 // ---------------------------------------------------------------------------
 // CheckboxKind — two-state vs tri-state, last-call-wins on the builder.
@@ -148,6 +150,9 @@ pub struct StandardListItem {
     label_overflow: Option<TextOverflow>,
     /// Drawn in place of the label's text, when a row's label is not plain text.
     label_slot: Option<Box<dyn Widget>>,
+    /// Whether the label column takes the row's free width. See
+    /// [`Self::label_fills_width`].
+    label_fills_width: bool,
     /// Per-call subtitle overflow override. `None` ⇒ the `TextWidget` default
     /// (`TextOverflow::Wrap`).
     subtitle_overflow: Option<TextOverflow>,
@@ -198,6 +203,7 @@ impl StandardListItem {
             subtitle_color: None,
             label_overflow: None,
             label_slot: None,
+            label_fills_width: false,
             subtitle_overflow: None,
             interaction: Signal::new(InteractionState::Idle),
             reveal: None,
@@ -427,6 +433,19 @@ impl StandardListItem {
     /// [`label_overflow`](Self::label_overflow) do not reach it: it draws itself.
     pub fn label_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.label_slot = Some(Box::new(widget));
+        self
+    }
+
+    /// Let the label column take the row's free width, up to the trailing
+    /// slot, instead of leaving it to a spacer. Default `false`: the column
+    /// is as wide as its wider line and the rest of the row is empty.
+    ///
+    /// With it on, a [`label_slot`](Self::label_slot) (a name beside a time,
+    /// say) and the subtitle row, with its
+    /// [`subtitle_trailing_slot`](Self::subtitle_trailing_slot), end at the
+    /// row's end, and a plain label is elided only when it does not fit.
+    pub fn label_fills_width(mut self, fills: bool) -> Self {
+        self.label_fills_width = fills;
         self
     }
 
@@ -668,7 +687,12 @@ impl StandardListItem {
                 let id = ctx.add_boxed(w);
                 sub_row = sub_row.child(id);
             }
-            let sub_row_id = ctx.add(sub_row);
+            let mut sub_row_id = ctx.add(sub_row);
+            let mut label_id = label_id;
+            if self.label_fills_width {
+                sub_row_id = ctx.add(Expand::horizontal().child(sub_row_id));
+                label_id = ctx.add(Expand::horizontal().child(label_id));
+            }
 
             ctx.add(
                 VStack::new()
@@ -737,7 +761,12 @@ impl StandardListItem {
             let id = ctx.add_boxed(w);
             row = row.child(id);
         }
-        row = row.child(label_column_id).child(ctx.add(Spacer::new()));
+        if self.label_fills_width {
+            let column = ctx.add(Expand::horizontal().child(label_column_id));
+            row = row.child(column);
+        } else {
+            row = row.child(label_column_id).child(ctx.add(Spacer::new()));
+        }
         if let Some(w) = self.trailing_slot.take() {
             let id = ctx.add_boxed(w);
             row = row.child(id);
@@ -1007,6 +1036,12 @@ impl StandardTreeItem {
     /// text, keeping the label as the row's accessible name.
     pub fn label_slot(mut self, widget: impl Widget + 'static) -> Self {
         self.inner = self.inner.label_slot(widget);
+        self
+    }
+
+    /// See [`StandardListItem::label_fills_width`].
+    pub fn label_fills_width(mut self, fills: bool) -> Self {
+        self.inner = self.inner.label_fills_width(fills);
         self
     }
 
@@ -1983,6 +2018,156 @@ mod tests {
             Some("she walked across the ice"),
             "the name comes from the label, not from what was drawn instead of it"
         );
+    }
+
+    fn mock_tree() -> WidgetTree {
+        WidgetTree::new()
+            .with_theme(theme())
+            .with_text_backend(Rc::new(std::cell::RefCell::new(
+                teksilo_canvas::MockTextBackend::new(),
+            )))
+    }
+
+    /// Bounds of every text widget under `root`, in tree (pre-)order.
+    fn texts(tree: &WidgetTree, root: WidgetId) -> Vec<teksilo_canvas::Rect> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            if tree
+                .widget_type_name(id)
+                .is_some_and(|n| n.ends_with("TextWidget"))
+            {
+                out.push(tree.bounds(id));
+            }
+            stack.extend(tree.children(id).into_iter().rev());
+        }
+        out
+    }
+
+    fn name_and_time() -> HStack {
+        HStack::new()
+            .child(Expand::horizontal().child(TextWidget::new(lit!("Alice Martin"))))
+            .child(TextWidget::new(lit!("9:44 AM")))
+    }
+
+    fn reproduction(fills: bool) -> StandardListItem {
+        StandardListItem::new(lit!("Alice Martin"))
+            .subtitle(lit!("typing..."))
+            .label_slot(name_and_time())
+            .label_fills_width(fills)
+    }
+
+    #[test]
+    fn default_label_column_keeps_its_natural_width() {
+        let mut tree = mock_tree();
+        let id = tree.add(reproduction(false));
+        tree.layout(SizeProposal::exact(280.0, 100.0));
+        let t = texts(&tree, id);
+        let (name, time) = (t[0], t[1]);
+        assert!(
+            name.width < 40.0,
+            "the name is squeezed to what the subtitle leaves, got {}",
+            name.width
+        );
+        assert!(
+            time.x + time.width < 280.0 - 40.0,
+            "free space after the time"
+        );
+    }
+
+    #[test]
+    fn label_fills_width_gives_the_name_the_free_width_and_the_time_the_row_end() {
+        let mut tree = mock_tree();
+        let id = tree.add(reproduction(true));
+        tree.layout(SizeProposal::exact(280.0, 100.0));
+        let row = tree.bounds(id);
+        let t = texts(&tree, id);
+        let (name, time) = (t[0], t[1]);
+        assert!(
+            name.width > 90.0,
+            "name should be whole, got {}",
+            name.width
+        );
+        let row_end = row.x + row.width;
+        assert!(
+            row_end - (time.x + time.width) < 16.0,
+            "time ends {} but the row ends {row_end}",
+            time.x + time.width
+        );
+    }
+
+    #[test]
+    fn subtitle_trailing_slot_ends_where_the_label_row_ends() {
+        let mut tree = mock_tree();
+        let id =
+            tree.add(reproduction(true).subtitle_trailing_slot(TextWidget::new(lit!("12 unread"))));
+        tree.layout(SizeProposal::exact(280.0, 100.0));
+        let t = texts(&tree, id);
+        let (time, badge) = (t[1], t[3]);
+        let time_end = time.x + time.width;
+        let badge_end = badge.x + badge.width;
+        assert!(
+            (time_end - badge_end).abs() < 0.5,
+            "{time_end} vs {badge_end}"
+        );
+    }
+
+    #[test]
+    fn label_fills_width_elides_a_plain_label_only_when_it_does_not_fit() {
+        let item = |fills| {
+            StandardListItem::new(lit!("Short"))
+                .label_overflow(TextOverflow::Ellipsis(
+                    teksilo_canvas::EllipsisMode::Trailing,
+                ))
+                .trailing_slot(TextWidget::new(lit!("9:44 AM")))
+                .label_fills_width(fills)
+        };
+        let mut tree = mock_tree();
+        let short = tree.add(item(true));
+        tree.layout(SizeProposal::exact(280.0, 100.0));
+        let natural = texts(&tree, short)[0].width;
+        assert!(
+            natural > 20.0,
+            "a short label keeps its whole text, got {natural}"
+        );
+
+        let mut tree = mock_tree();
+        let id = tree.add(
+            StandardListItem::new(lit!(
+                "A very long conversation name that cannot possibly fit in the row"
+            ))
+            .label_overflow(TextOverflow::Ellipsis(
+                teksilo_canvas::EllipsisMode::Trailing,
+            ))
+            .trailing_slot(TextWidget::new(lit!("9:44 AM")))
+            .label_fills_width(true),
+        );
+        tree.layout(SizeProposal::exact(280.0, 100.0));
+        let row = tree.bounds(id);
+        let t = texts(&tree, id);
+        let (label, time) = (t[0], t[1]);
+        assert!(
+            label.width > 100.0,
+            "the long label takes what is free: {}",
+            label.width
+        );
+        assert!(
+            (row.x + row.width - (time.x + time.width)) < 16.0,
+            "trailing slot stays at the row end"
+        );
+    }
+
+    #[test]
+    fn tree_item_forwards_label_fills_width() {
+        let mut tree = mock_tree();
+        let id = tree.add(
+            StandardTreeItem::new(lit!("Alice Martin"))
+                .subtitle(lit!("typing..."))
+                .label_slot(name_and_time())
+                .label_fills_width(true),
+        );
+        tree.layout(SizeProposal::exact(280.0, 100.0));
+        assert!(texts(&tree, id)[0].width > 90.0);
     }
 
     #[test]
