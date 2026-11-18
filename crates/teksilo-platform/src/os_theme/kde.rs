@@ -31,14 +31,18 @@
 //! - the fonts, `[KDE] AnimationDurationFactor` and `[KDE] widgetStyle`
 //!   (j.1, j.2, j.4), and the `breezerc` cascade (j.6).
 //!
+//! The light or dark preference of the desktop portal then decides between
+//! that scheme and stock Breeze ([`follow_portal`]).
+//!
 //! `forceFontDPI` is not read: no Plasma 6.8 component reads it (j.3).
 
 use std::path::Path;
 
 use teksilo_kde_scheme::{
-    ConfigLayerPath, KConfig, KdeConfigLocations, KdeDesktop, KdeDesktopLayers,
+    ConfigLayerPath, KConfig, KdeColorScheme, KdeConfigLocations, KdeDesktop, KdeDesktopLayers,
+    SchemeOrigin,
 };
-use teksilo_tokens::OsThemeColors;
+use teksilo_tokens::{ColorSchemePreference, OsThemeColors};
 
 use super::NativeDesktop;
 
@@ -112,6 +116,49 @@ pub(crate) fn kde_prefers_reduced_motion(
         &locations.expansion_env(var),
     );
     Some(desktop.prefers_reduced_motion())
+}
+
+/// `desktop` with the light or dark preference of the desktop portal
+/// (`org.freedesktop.appearance color-scheme`), `portal`: `None` when the
+/// portal does not answer.
+///
+/// A portal that states a preference decides: when the scheme read from the
+/// configuration files is not dark (as [`KdeColorScheme::is_dark`] judges
+/// it) where the portal says dark, or the other way round, the scheme is
+/// replaced by stock Breeze Dark or Breeze Light, with the user's accent
+/// ([`KdeDesktop::user_accent`]) applied to it when there is one, and its
+/// origin becomes [`SchemeOrigin::BuiltIn`]. The fonts, the animation speed,
+/// the widget style and the Breeze settings are kept. A scheme that agrees
+/// with the portal, a portal stating no preference and a portal that does
+/// not answer leave `desktop` as it is.
+///
+/// The portal is what KDE reports to every application, and it reads the
+/// user's own files; the cascade read here can miss them (a profile or a
+/// sandbox whose `$XDG_CONFIG_HOME` has no `kdeglobals` still reads the
+/// system layers).
+pub(crate) fn follow_portal(
+    mut desktop: KdeDesktop,
+    portal: Option<ColorSchemePreference>,
+) -> KdeDesktop {
+    let dark = match portal {
+        Some(ColorSchemePreference::Dark) => true,
+        Some(ColorSchemePreference::Light) => false,
+        Some(ColorSchemePreference::NoPreference) | None => return desktop,
+    };
+    if desktop.scheme.is_dark() == dark {
+        return desktop;
+    }
+    let stock = if dark {
+        KdeColorScheme::breeze_dark()
+    } else {
+        KdeColorScheme::breeze_light()
+    };
+    desktop.scheme = match desktop.user_accent {
+        Some(accent) => stock.with_accent(accent),
+        None => stock,
+    };
+    desktop.scheme_origin = SchemeOrigin::BuiltIn;
+    desktop
 }
 
 /// The native desktop of a KDE session.
@@ -546,6 +593,104 @@ mod tests {
         let native = native_desktop(None, portal);
         assert_eq!(native.kde, None);
         assert_eq!(native.os, portal());
+    }
+
+    // ---- The portal's light or dark preference -------------------------
+
+    /// The reported case: the user's `$XDG_CONFIG_HOME` has no `kdeglobals`,
+    /// so only the system layer is read, and it names Breeze Light.
+    fn system_layer_only() -> Tree {
+        Tree::default()
+            .file(
+                ETC_KDEGLOBALS,
+                "[General]\nColorScheme=BreezeLight\n\
+                 fixed=Hack,11,-1,5,400,0,0,0,0,0,0,0,0,0,0,1\n\
+                 [KDE]\nAnimationDurationFactor=0.5\nwidgetStyle=Breeze\n",
+            )
+            .file("/etc/xdg/breezerc", "[Style]\nMenuOpacity=80\n")
+            .file(LIGHT_FILE, &light_text())
+            .file(DARK_FILE, &dark_text())
+    }
+
+    #[test]
+    fn a_portal_saying_dark_wins_over_a_light_scheme() {
+        let read = discover(&system_layer_only(), &kde_env()).unwrap();
+        assert!(!read.scheme.is_dark());
+
+        let desktop = follow_portal(read.clone(), Some(ColorSchemePreference::Dark));
+        assert_eq!(desktop.scheme, KdeColorScheme::breeze_dark());
+        assert_eq!(desktop.scheme_origin, SchemeOrigin::BuiltIn);
+        // Everything but the colours is still the desktop's.
+        assert_eq!(desktop.fonts, read.fonts);
+        assert_eq!(desktop.fonts.fixed.point_size, Some(11.0));
+        assert_eq!(desktop.animation_duration_factor, Some(0.5));
+        assert_eq!(desktop.widget_style.as_deref(), Some("Breeze"));
+        assert_eq!(desktop.breeze, read.breeze);
+        assert_eq!(desktop.breeze.menu_opacity, 80);
+
+        let native = native_desktop(Some(desktop), || {
+            panic!("the portal fallback is not asked when kdeglobals can be read")
+        });
+        assert_eq!(native.os, KdeColorScheme::breeze_dark().os_theme_colors());
+        assert_eq!(native.os.color_scheme, ColorSchemePreference::Dark);
+    }
+
+    #[test]
+    fn a_portal_saying_light_wins_over_a_dark_scheme() {
+        let tree = Tree::default()
+            .file(USER_KDEGLOBALS, "[General]\nColorScheme=BreezeDark\n")
+            .file(DARK_FILE, &dark_text());
+        let read = discover(&tree, &kde_env()).unwrap();
+        assert!(read.scheme.is_dark());
+        let desktop = follow_portal(read, Some(ColorSchemePreference::Light));
+        assert_eq!(desktop.scheme, KdeColorScheme::breeze_light());
+        assert_eq!(desktop.scheme_origin, SchemeOrigin::BuiltIn);
+    }
+
+    #[test]
+    fn a_scheme_that_agrees_with_the_portal_is_kept() {
+        // A dark scheme of the user's own, not Breeze Dark.
+        let mine = dark_text().replace("BackgroundNormal=32,35,38", "BackgroundNormal=10,20,30");
+        let tree = Tree::default().file(USER_KDEGLOBALS, &mine);
+        let read = discover(&tree, &kde_env()).unwrap();
+        assert!(read.scheme.is_dark());
+        assert_eq!(
+            follow_portal(read.clone(), Some(ColorSchemePreference::Dark)),
+            read
+        );
+
+        let light = discover(&system_layer_only(), &kde_env()).unwrap();
+        assert_eq!(
+            follow_portal(light.clone(), Some(ColorSchemePreference::Light)),
+            light
+        );
+    }
+
+    #[test]
+    fn a_portal_with_no_preference_or_no_answer_changes_nothing() {
+        let read = discover(&system_layer_only(), &kde_env()).unwrap();
+        assert_eq!(
+            follow_portal(read.clone(), Some(ColorSchemePreference::NoPreference)),
+            read
+        );
+        assert_eq!(follow_portal(read.clone(), None), read);
+    }
+
+    #[test]
+    fn the_users_accent_is_applied_to_the_stock_scheme() {
+        let accent = KdeColor::rgb8(233, 61, 0);
+        let read = discover(&accent_tree("AccentColor=233,61,0"), &kde_env()).unwrap();
+        assert!(!read.scheme.is_dark());
+        let desktop = follow_portal(read, Some(ColorSchemePreference::Dark));
+        assert_eq!(desktop.user_accent, Some(accent));
+        assert_eq!(
+            desktop.scheme,
+            KdeColorScheme::breeze_dark().with_accent(accent)
+        );
+        assert_eq!(
+            desktop.scheme.os_theme_colors().focus,
+            Some(accent.to_color())
+        );
     }
 
     // ---- Dark detection --------------------------------------------------

@@ -63,6 +63,20 @@ background's grey value), the rule KDE reports to applications. On a session
 whose `kdeglobals` cannot be read at all, the report falls back to the
 desktop portal's preference and accent and there is no `kde` value.
 
+The desktop portal (`org.freedesktop.appearance color-scheme`) is asked too,
+and when it states a preference, dark or light, that preference decides. It is
+what KDE reports to every application, and it reads the user's own files,
+which the cascade read here can miss: a test profile or a sandbox whose
+`$XDG_CONFIG_HOME` has no `kdeglobals` still reads the system layers. When the
+scheme read is as dark or as light as the portal says, it is used as it is.
+When it is not, the scheme becomes stock Breeze Dark or Breeze Light, with the
+`[General] AccentColor` the files name applied to it, and `scheme_origin` is
+`BuiltIn`; the fonts, the animation speed, the widget style and the `breezerc`
+settings are still the files'. A portal that states no preference, or does not
+answer, changes nothing. A live change of the portal's preference is followed:
+its `SettingChanged` makes the window manager read the desktop again (see
+below).
+
 An animation speed of 0 (`AnimationDurationFactor`) also turns on the
 reduced-motion preference. `forceFontDPI` is not read: no current Plasma
 component honours it.

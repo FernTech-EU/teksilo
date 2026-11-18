@@ -25,7 +25,10 @@ pub enum SchemeOrigin {
     SchemeFile,
     /// Neither: `kdeglobals` has no colours and no scheme file was found,
     /// so the built-in Breeze Light scheme was used, with the user's accent
-    /// applied to it when there is one.
+    /// applied to it when there is one. Also the origin of a stock Breeze
+    /// scheme, Light or Dark, that a reader put in place of the one read:
+    /// `teksilo-platform` does so when the desktop portal's light or dark
+    /// preference disagrees with the scheme.
     BuiltIn,
 }
 

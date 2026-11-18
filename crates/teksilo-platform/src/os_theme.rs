@@ -10,7 +10,9 @@
 //! On a KDE Plasma session ([`teksilo_kde_scheme::is_kde_session`]) the
 //! colours are KDE's own: the `kdeglobals` cascade, with its system layers
 //! and `kdedefaults`, and the colour scheme in effect with the user's
-//! accent, read through `teksilo-kde-scheme`. [`query_native_desktop`]
+//! accent, read through `teksilo-kde-scheme`, unless the desktop portal's
+//! light or dark preference disagrees with that scheme, in which case it
+//! is stock Breeze of the portal's preference. [`query_native_desktop`]
 //! also hands over the KDE desktop's settings (fonts, animation speed,
 //! widget style, Breeze style settings) as a [`KdeDesktop`].
 //!
@@ -68,7 +70,11 @@ pub fn query_color_scheme() -> ColorSchemePreference {
 /// ([`KdeColorScheme::os_theme_colors`](teksilo_kde_scheme::KdeColorScheme::os_theme_colors)),
 /// accent and light or dark preference included; only when no
 /// `kdeglobals` file can be read does the report fall back to the desktop
-/// portal's preference and accent colour, with no [`KdeDesktop`]. Elsewhere
+/// portal's preference and accent colour, with no [`KdeDesktop`]. When the
+/// portal states a light or dark preference the scheme read does not share
+/// (its `kdeglobals` cascade missed the user's own file, say), the portal
+/// decides: the scheme becomes stock Breeze Dark or Breeze Light with the
+/// user's accent, and the desktop's other settings are kept. Elsewhere
 /// the report is the one [`query_os_theme_colors`] has always given.
 pub fn query_native_desktop() -> NativeDesktop {
     platform::query_native_desktop()
@@ -90,18 +96,24 @@ mod platform {
     use crate::linux_portal::{read_portal_rgb, read_portal_u32};
     use teksilo_kde_scheme::KdeConfigLocations;
 
-    pub(super) fn query_color_scheme() -> ColorSchemePreference {
+    /// The desktop portal's light or dark preference
+    /// (`org.freedesktop.appearance color-scheme`), `None` when the portal
+    /// does not answer.
+    fn portal_color_scheme() -> Option<ColorSchemePreference> {
         // XDG portal: 0 = no preference, 1 = dark, 2 = light.
         // Works on GNOME and on KDE Plasma 5.27+ (with the
         // `xdg-desktop-portal-kde` package installed). On older or
-        // headless KDE setups the portal call returns None and we
-        // fall through.
-        if let Some(v) = read_portal_u32("org.freedesktop.appearance", "color-scheme") {
-            return match v {
-                1 => ColorSchemePreference::Dark,
-                2 => ColorSchemePreference::Light,
-                _ => ColorSchemePreference::NoPreference,
-            };
+        // headless KDE setups the portal call returns None.
+        read_portal_u32("org.freedesktop.appearance", "color-scheme").map(|v| match v {
+            1 => ColorSchemePreference::Dark,
+            2 => ColorSchemePreference::Light,
+            _ => ColorSchemePreference::NoPreference,
+        })
+    }
+
+    pub(super) fn query_color_scheme() -> ColorSchemePreference {
+        if let Some(preference) = portal_color_scheme() {
+            return preference;
         }
 
         // Desktop-specific fallback. Picks the right config source
@@ -149,7 +161,8 @@ mod platform {
         match detect_desktop() {
             Desktop::Kde => {
                 let locations = KdeConfigLocations::from_env(kde::process_env);
-                let desktop = kde::discover_kde(&locations, &kde::process_env, kde::read_file);
+                let desktop = kde::discover_kde(&locations, &kde::process_env, kde::read_file)
+                    .map(|desktop| kde::follow_portal(desktop, portal_color_scheme()));
                 kde::native_desktop(desktop, || {
                     let mut colors = OsThemeColors::new(query_color_scheme());
                     colors.accent = portal_accent();
