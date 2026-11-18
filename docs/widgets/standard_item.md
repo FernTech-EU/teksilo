@@ -47,6 +47,7 @@ Canonical row layout for `ListView` / `TreeView` delegates.
 | `Self` | [`interaction_signal(signal: Signal<InteractionState>)`](#standardlistitem-interaction_signal) |
 | `Self` | [`reveal_signal(signal: Signal<bool>)`](#standardlistitem-reveal_signal) |
 | `Self` | [`label_slot(widget: impl Widget + 'static)`](#standardlistitem-label_slot) |
+| `Self` | [`label_fills_width(fills: bool)`](#standardlistitem-label_fills_width) |
 | `Self` | [`label_overflow(overflow: TextOverflow)`](#standardlistitem-label_overflow) |
 | `Self` | [`subtitle_overflow(overflow: TextOverflow)`](#standardlistitem-subtitle_overflow) |
 | `Self` | [`tooltip(text: impl Into<LocalizedString>)`](#standardlistitem-tooltip) |
@@ -64,6 +65,7 @@ Canonical row layout for `ListView` / `TreeView` delegates.
 | `Self` | [`interaction_signal(signal: Signal<InteractionState>)`](#standardtreeitem-interaction_signal) |
 | `Self` | [`reveal_signal(signal: Signal<bool>)`](#standardtreeitem-reveal_signal) |
 | `Self` | [`label_slot(widget: impl Widget + 'static)`](#standardtreeitem-label_slot) |
+| `Self` | [`label_fills_width(fills: bool)`](#standardtreeitem-label_fills_width) |
 | `Self` | [`subtitle(text: impl Into<LocalizedString>)`](#standardtreeitem-subtitle) |
 | `Self` | [`leading_slot(widget: impl Widget + 'static)`](#standardtreeitem-leading_slot) |
 | `Self` | [`leading_slot_boxed(widget: Box<dyn Widget>)`](#standardtreeitem-leading_slot_boxed) |
@@ -428,6 +430,19 @@ row's spacing and its place beside the leading and trailing slots.
 `label_style`, `label_color` and
 `label_overflow` do not reach it: it draws itself.
 
+<a id="standardlistitem-label_fills_width"></a>
+
+#### `pub fn label_fills_width(mut self, fills: bool) -> Self`
+
+Let the label column take the row's free width, up to the trailing
+slot, instead of leaving it to a spacer. Default `false`: the column
+is as wide as its wider line and the rest of the row is empty.
+
+With it on, a `label_slot` (a name beside a time,
+say) and the subtitle row, with its
+`subtitle_trailing_slot`, end at the
+row's end, and a plain label is elided only when it does not fit.
+
 <a id="standardlistitem-label_overflow"></a>
 
 #### `pub fn label_overflow(mut self, overflow: TextOverflow) -> Self`
@@ -534,6 +549,12 @@ controls should be reachable, answered per density.
 
 See `StandardListItem::label_slot`: draw this instead of the label's
 text, keeping the label as the row's accessible name.
+
+<a id="standardtreeitem-label_fills_width"></a>
+
+#### `pub fn label_fills_width(mut self, fills: bool) -> Self`
+
+See `StandardListItem::label_fills_width`.
 
 <a id="standardtreeitem-subtitle"></a>
 

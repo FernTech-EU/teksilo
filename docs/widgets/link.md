@@ -131,6 +131,9 @@ Closure invoked on activation.
 #### `pub fn url(mut self, url: impl Into<String>) -> Self`
 
 Set a URL for the link (informational — not automatically opened).
+To open it, call
+`ctx.open_uri`
+from `on_activate_fn`.
 
 <a id="link-tooltip"></a>
 

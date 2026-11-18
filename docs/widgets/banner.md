@@ -21,6 +21,7 @@ Banner — persistent inline status strip (info / success / warning / error).
 | | **Builder methods** |
 | `Self` | [`style(style: impl teksilo_core::styles::BannerStyle)`](#banner-style) |
 | `Self` | [`description(text: impl Into<LocalizedString>)`](#banner-description) |
+| `Self` | [`title_single_line(single_line: bool)`](#banner-title_single_line) |
 | `Self` | [`action(widget: impl Widget + 'static)`](#banner-action) |
 | `Self` | [`on_dismiss(f: impl Fn(&mut EventContext) + 'static)`](#banner-on_dismiss) |
 
@@ -102,6 +103,14 @@ Construct an error-severity banner.
 #### `pub fn description(mut self, text: impl Into<LocalizedString>) -> Self`
 
 Optional secondary line of text rendered below the title.
+
+<a id="banner-title_single_line"></a>
+
+#### `pub fn title_single_line(mut self, single_line: bool) -> Self`
+
+Keep the title on one line, elided at its end when it does not fit.
+By default a title wraps, so a sentence stays readable in a narrow
+banner and the banner grows taller instead.
 
 <a id="banner-action"></a>
 

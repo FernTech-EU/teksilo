@@ -33,6 +33,7 @@ ListView — a virtualized, scrollable list backed by a reactive data model.
 | `Self` | [`item_height(height: f32)`](#listview-item_height) |
 | `Self` | [`item_height_fn(f: impl Fn(usize) -> f32 + 'static)`](#listview-item_height_fn) |
 | `Self` | [`auto_item_height(estimated: f32)`](#listview-auto_item_height) |
+| `Self` | [`keep_position_on_insert(keep: bool)`](#listview-keep_position_on_insert) |
 | `Self` | [`spacing(spacing: f32)`](#listview-spacing) |
 | `Self` | [`sections<P: SectionProvider>(provider: P)`](#listview-sections) |
 | `Self` | [`section_header_delegate(f: impl Fn(usize, &str) -> Box<dyn Widget> + 'static)`](#listview-section_header_delegate) |
@@ -362,6 +363,41 @@ list's content width (height-for-width), unrealized rows assume
 stationary as estimates are corrected. `estimated` should be a
 typical row height — a wrong estimate only costs realization
 churn while measurements settle, never incorrect layout.
+
+<a id="listview-keep_position_on_insert"></a>
+
+#### `pub fn keep_position_on_insert(mut self, keep: bool) -> Self`
+
+Keep the reader's place when rows are inserted or removed above it
+(default `false`).
+
+With it on, the row at the top of the viewport (the first one at
+least partly visible) keeps its position on screen across every
+model change that says which rows it touched: rows inserted at or
+before its index, removed before it, or moved across it shift the
+scroll offset by their height, in the same layout pass that shows
+them. A change after that row moves nothing, as without the option.
+This is a chat history loading older messages at index 0, or the
+browser's `overflow-anchor`.
+
+- With `item_height` or
+  `item_height_fn` the shift is exact at once.
+- With `auto_item_height` an inserted row
+  counts at the estimate until it is measured, and the measurement
+  then corrects the offset as it does for any row above the viewport.
+  The rows already there keep their measured heights at their new
+  indices, so the reader's row does not move while they settle.
+- When the reader's row is itself removed, the first row after the
+  removed ones takes its place; when it is itself moved, the view
+  does not follow it.
+- A change that only says the whole list may differ
+  (`DataChange::Reset`, from `ListModel::replace_all` or `clear`)
+  carries no rows to anchor on and leaves the offset alone. Use
+  `ListModel::reconcile_by_key`, which reports the rows it inserts,
+  removes and moves, or `ListModel::insert`.
+
+A `ListViewHandle` reveal pending at the same time still wins: it is
+applied after the shift, in the same pass.
 
 <a id="listview-spacing"></a>
 

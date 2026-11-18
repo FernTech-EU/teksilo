@@ -20,6 +20,7 @@ TextWidget — a leaf widget that renders a localized text string.
 | `Self` | [`style(style: impl Into<TextStyleProp>)`](#textwidget-style) |
 | `Self` | [`overflow(overflow: TextOverflow)`](#textwidget-overflow) |
 | `Self` | [`single_line()`](#textwidget-single_line) |
+| `Self` | [`text_align(align: TextAlign)`](#textwidget-text_align) |
 | `Self` | [`min_shrink_width(min: f32)`](#textwidget-min_shrink_width) |
 | `Self` | [`no_shrink()`](#textwidget-no_shrink) |
 | `Self` | [`max_lines(n: usize)`](#textwidget-max_lines) |
@@ -168,6 +169,22 @@ Shorthand for `.overflow(TextOverflow::Ellipsis(EllipsisMode::Trailing))`.
 Use this on labels inside single-line containers (buttons, menu items,
 tab headers, badges, status bar cells, etc.) so long text truncates
 with a trailing "…" instead of wrapping onto multiple lines.
+
+<a id="textwidget-text_align"></a>
+
+#### `pub fn text_align(mut self, align: TextAlign) -> Self`
+
+Place each line of the text across the widget's width:
+`Leading` (the default), `Center`
+or `Trailing`.
+
+Every line of a wrapped text is placed on its own, so a centred
+sentence on two lines has both lines centred, and a single line
+narrower than the widget is placed the same way. Leading and trailing
+follow the layout direction: in a right-to-left layout `Leading` is
+the right edge. The widget's measured size does not change: a wrapped
+text is as wide as its widest line, and its lines are placed within
+whatever width it is given.
 
 <a id="textwidget-min_shrink_width"></a>
 

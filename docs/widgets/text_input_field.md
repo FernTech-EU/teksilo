@@ -351,8 +351,15 @@ Fires for text arriving through:
 It does **not** fire when the application writes the bound
 `Signal<String>`, nor for undo or redo: none of those is text arriving.
 
-The field is mid-edit while the callback runs, so it counts rather than
-reads the field back. Replaces any prior callback on this field.
+The field is free while the callback runs: it is called once the field
+has finished with the event, frame or handle call that inserted the
+text, so it may read the field through its `TextFieldHandle`
+(`text` holds the new text; the bound signal
+catches up at the frame) and write the bound signal, which reports
+nothing. Text it inserts through the handle (a paste) is reported to it
+again after it returns, never from inside it.
+
+Replaces any prior callback on this field.
 
 <a id="textinputfield-writing_tools"></a>
 

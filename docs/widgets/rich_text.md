@@ -59,7 +59,9 @@ Rich text editor and viewer widget.
 | `Self` | [`overscroll_behavior(behavior: OverscrollBehavior)`](#richtexteditor-overscroll_behavior) |
 | `Self` | [`min_lines(n: u32)`](#richtexteditor-min_lines) |
 | `Self` | [`max_lines(n: u32)`](#richtexteditor-max_lines) |
+| `Self` | [`fit_width(fit: bool)`](#richtexteditor-fit_width) |
 | `Self` | [`follow_text_scale(follow: bool)`](#richtexteditor-follow_text_scale) |
+| `Self` | [`text_style(style: impl Into<TextStyleProp>)`](#richtexteditor-text_style) |
 | `Self` | [`font_size_scale(scale: f32)`](#richtexteditor-font_size_scale) |
 | `Self` | [`context_menu(factory: impl Fn( teksilo_canvas::Point, &mut teksilo_core::widget::EventContext, ) -> Option<Box<dyn teksilo_core::widget::Widget>> + 'static)`](#richtexteditor-context_menu) |
 | `Self` | [`default_context_menu(enabled: bool)`](#richtexteditor-default_context_menu) |
@@ -605,7 +607,8 @@ explicit override. Applied before the first layout. These are display
 defaults — they never mutate the bound document (no undo entry, no
 `modified`); use `set_typography_defaults`
 or `EditorHandle::set_typography_defaults` to change them after mount.
-Preferred text size is `font_size_scale`.
+The size of unformatted text is `text_style`'s;
+`font_size_scale` multiplies every size.
 
 <a id="richtexteditor-background"></a>
 
@@ -864,6 +867,51 @@ See `min_lines` for the intrinsic-mode
 switch and the parent-proposal interaction. `max_lines`
 measures the visible text area, not the outer widget.
 
+<a id="richtexteditor-fit_width"></a>
+
+#### `pub fn fit_width(mut self, fit: bool) -> Self`
+
+Be as wide as the text rather than the width offered. Off by default:
+the editor takes the proposal's width.
+
+On, the reported width is the widest line of the text laid out at the
+proposed width, never more than that width, as a
+`TextWidget` reports its own: in an `HStack`
+beside a `Spacer`, a viewer of "Hi" is two letters wide. Offered no
+width (a stack measuring its child), it is the natural width of the
+longest paragraph on one line. Half a pixel of slack is added, as a
+label adds it, so that laid out at the width it asked for the text
+breaks its lines exactly where it did when measured; a stack that
+measures it, then offers it that width back, gets the same width
+again. An editor that shows a caret also keeps room for it, so an empty
+one is still a few pixels wide; it is measured again at each edit, and
+when its size or typography changes
+(`set_font_size_scale`,
+`set_typography_defaults`).
+
+A paragraph counts its margins, its list indent and the first-line
+indent of its first line; a blockquote (or any other frame) the natural
+width of what it holds plus its own margin, border and padding. A
+table has no width of its own, its columns sharing whatever it is
+given, so an editor holding one takes the width offered; offered none,
+each column is 200 px wide, as text-typeset lays a table out then, and
+a table that names column proportions makes the editor as wide as it
+would be without `fit_width`. Justified lines fill the width they are
+offered, so a justified paragraph that wraps takes it too.
+
+Paragraph alignment (centre, end, a right-to-left paragraph) places
+the lines within the fitted width. The height is unchanged:
+`min_lines` / `max_lines` still
+make it intrinsic, measured at the width offered, which wraps the same
+lines; without them the editor still takes the proposal's height.
+
+Rigid when fitting (`flex = 0`, no shrink), like a wrapping label: a
+long text wraps at the width the parent offers, so give it that width
+(a column, a `MaxSize` capping a chat bubble) rather than an `HStack`
+slot, which measures its children unbounded. Each measurement lays the
+whole text out once more, so it suits short texts: messages, captions,
+a composer.
+
 <a id="richtexteditor-follow_text_scale"></a>
 
 #### `pub fn follow_text_scale(self, follow: bool) -> Self`
@@ -878,6 +926,46 @@ point size regardless of the reader's UI accessibility setting.
 Composed with `font_size_scale`:  
 `engine.font_scale = (follow ? text_scale : 1.0) × font_size_scale`.
 
+<a id="richtexteditor-text_style"></a>
+
+#### `pub fn text_style(mut self, style: impl Into<TextStyleProp>) -> Self`
+
+The size and family of the text the document leaves unformatted, from
+a text style of the theme.
+
+Without it, such text is shaped in the typesetter's default face at its
+default size: 14 px of the bundled Inter (`EmbeddedInterRegistrar`), or
+whatever the application's `FontRegistrar` gives its default face,
+whatever the theme's typography says. That is right for a document
+editor, whose text sizes belong to the document, and it is the default
+of `editor` and `read_only` alike.
+An editor that is part of the interface (a chat composer, a message
+bubble, a help pane) passes `TextStyleRole::Body`
+here, and its text then matches a `TextWidget`
+of that role: same face, same size, same line height.
+
+Accepts a `TextStyleRole`, resolved
+against the theme's typography and again when the theme changes, or a
+fixed `TextStyle`. What it sets:
+
+- the **size** of every run whose format names no size, and through it
+  the size of headings, which are a ratio of it. A run whose format
+  names a size keeps that size;
+- the **family** of every run whose format names none, after the family
+  of `typography_defaults`, which wins;
+- the **line height** of such text, which is the font's at that family
+  and size, as in a label: the style's `line_height` multiplier is not
+  applied (block formats and `typography_defaults` space lines), and
+  `min_lines` / `max_lines` count
+  lines of that height.
+
+The weight stays the document's (bold text stays bold), and the style's
+`letter_spacing` is not applied. Nothing is written to the document.
+
+The global text scale multiplies the style's size once, as it multiplies
+every size in the editor (see `follow_text_scale`),
+and so does `font_size_scale`.
+
 <a id="richtexteditor-font_size_scale"></a>
 
 #### `pub fn font_size_scale(self, scale: f32) -> Self`
@@ -885,7 +973,9 @@ Composed with `font_size_scale`:
 Per-editor logical font-size multiplier (`1.0` = 100 %). Applied
 *before* shaping (same channel as accessibility text scale), so text
 grows, re-wraps, and stays sharp — the knob for a "Text size"
-preference. Composed as
+preference. It multiplies every size, the 14 px default (see
+`text_style`) and the sizes the document names.
+Composed as
 `(follow_text_scale ? ctx.text_scale : 1.0) × font_size_scale`.
 Clamped to `[0.1, 10.0]`. Use `set_font_size_scale`
 after mount.
@@ -950,10 +1040,12 @@ edits** (typing, paste, cut, delete) — and *not* on a programmatic
 `set_djot` / `set_markdown` / `set_html` load or a document reset, and
 *not* while an IME composition (CJK/Kana candidate preview, dead-key
 accent) is still in progress — only the settled result of a commit
-fires it. The callback runs on the UI thread during the editor's frame
-drain, so it may touch `Signal`s directly — e.g. flip a "dirty" flag or
-kick a debounced autosave. Replaces any prior change callback on this
-editor.
+fires it. The callback runs on the UI thread, once the frame that
+drained the edits has finished with the editor, so it may touch
+`Signal`s directly (flip a "dirty" flag, kick a debounced autosave) and
+use the editor's `EditorHandle`, as
+`on_text_inserted` says. Replaces any prior
+change callback on this editor.
 
 For a reactive change *token* (which also bumps on loads/format-only
 changes, and on intermediate IME composition steps), observe
@@ -997,6 +1089,16 @@ It does **not** fire for a programmatic `set_djot` / `set_markdown` /
 those is text arriving.
 
 Replaces any prior callback on this editor. Runs on the UI thread.
+
+**The editor is free while it runs.** It is called once the editor has
+finished with the event, frame or handle call that inserted the text,
+so it may read the editor through an `EditorHandle` (capture a
+`WeakEditorHandle`) and edit it: replace an emoticon just typed, say.
+Text its own edit inserts is reported to it again, after it returns and
+in the order the edits were made, never from inside it. So the edit
+must depend on what it reads (the emoticon is gone the second time);
+one made unconditionally on every report never ends, and after 256
+reports in a row a debug build panics to say so.
 
 <a id="richtexteditor-writing_tools"></a>
 
@@ -1220,9 +1322,9 @@ which Shift+Enter also obeys. A host that honours the filter also asks
 whether the `command_filter` accepts
 `EditCommandKind::InsertLineBreak`.
 
-Safe to ask from `on_change`, `on_text_inserted` or a signal observer,
-which can run while the editor is busy with its own state: it answers
-`true` then, the answer a menu row had before the question.
+Safe to ask from a signal observer, which can run while the editor is
+busy with its own state: it answers `true` then, the answer a menu row
+had before the question.
 
 <a id="richtexteditor-insert_image"></a>
 
@@ -2047,6 +2149,10 @@ text, and the menu has no "Open Link" row. Set it once, before the
 editor is mounted: the link nodes' Click is decided by the
 accessibility walk.
 
+To open the href with the desktop's handler, call
+`ctx.open_uri`
+from the callback.
+
 The callback replaces any prior link-click callback on this
 builder chain. To stop observing, reconstruct the editor
 without the setter.
@@ -2391,9 +2497,9 @@ which Shift+Enter also obeys. A host that honours the filter also asks
 whether the `command_filter` accepts
 `EditCommandKind::InsertLineBreak`.
 
-Safe to ask from `on_change`, `on_text_inserted` or a signal observer,
-which can run while the editor is busy with its own state: it answers
-`true` then, the answer a menu row had before the question.
+Safe to ask from a signal observer, which can run while the editor is
+busy with its own state: it answers `true` then, the answer a menu row
+had before the question.
 
 <a id="editorhandle-insert_paragraph"></a>
 

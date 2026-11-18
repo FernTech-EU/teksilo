@@ -302,6 +302,10 @@ shows another view's composition.
 
 A callback fired once per drain batch that contained a real content edit.
 
+It runs once the frame or key that drained the edit has finished with
+the editor, so it may use the editor's `CodeEditorHandle`. An edit it
+makes is drained, and reported to it, on the next frame.
+
 <a id="codeeditor-background"></a>
 
 #### `pub fn background(self, color: impl Into<teksilo_core::color_prop::ColorProp>) -> Self`
