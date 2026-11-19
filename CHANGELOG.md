@@ -26,7 +26,14 @@ by crate for clarity, not because crates version independently.
   font settings or GNOME's (under manual font rendering), natural elsewhere,
   and a change on the desktop is followed while the application runs; a
   `Signal` lets an application's own preference decide. Zoomed text stays
-  natural. Needs text-typeset 3.4.0.
+  natural. `EffectiveGlyphRendering`, in app state, says which rendering is
+  in effect.
+- **Settings keys for how text is drawn.** With a settings bundle, and no
+  value given to the builder, `TEXT_CONTRAST_KEY` (`Standard`, `Stronger`,
+  `Strongest`: `TextContrastLevel`) and `GLYPH_RENDERING_KEY` decide the
+  text contrast and the glyph rendering, followed live: a control bound to
+  `ctx.settings().signal_for(&KEY)` changes every window. `TextContrast`
+  gains the `STRONGER` and `STRONGEST` presets.
 - **Single instance (feature `single-instance`).**
   `teksilo::app::single_instance::acquire` elects one running instance per
   user, and `TeksiloAppBuilder::single_instance` hands it to the application.

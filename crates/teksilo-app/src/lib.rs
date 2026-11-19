@@ -34,7 +34,10 @@ pub use app_event_observers::AppEventObservers;
 #[cfg(feature = "automation")]
 pub use automation_bridge::TeksiloAppBuilderAutomationExt;
 pub use default_post_root::DefaultPostRoot;
-pub use glyph_rendering::GlyphRenderingPreference;
+pub use glyph_rendering::{
+    EffectiveGlyphRendering, GLYPH_RENDERING_KEY, GlyphRenderingPreference, TEXT_CONTRAST_KEY,
+    TextContrastLevel,
+};
 pub use native_theme::{NativeThemeFactory, NativeThemeRequest, resolve_native_theme};
 pub use teksilo_render::TextContrast;
 pub use teksilo_text::GlyphRendering;

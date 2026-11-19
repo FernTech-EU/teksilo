@@ -5832,6 +5832,14 @@ impl ApplicationHandler<AppEvent> for TeksiloAppHandler {
         // The application menu as the application tree declared it, from the
         // first turn on, in the native menu bar too.
         self.wm.sync_application_menu();
+        // How text is drawn, when a signal it is bound to changed outside a
+        // window event (an async task, a timer): `post_event` syncs it too,
+        // but only runs after an event or when turn work is owed.
+        let contrast = self.wm.sync_text_contrast();
+        let glyphs = self.wm.sync_glyph_rendering();
+        if contrast || glyphs {
+            self.wm.request_redraw_all();
+        }
         // Once per event-loop turn, which is what the shim's own contract
         // asks for. A digitizer reads on its own thread and buffers; this is
         // the only place that asks it what it saw.
@@ -6114,8 +6122,12 @@ pub struct TeksiloAppBuilder {
     /// at `run`.
     native_theme: Option<crate::native_theme::NativeThemeFactory>,
     pen_batching: teksilo_platform::PenBatching,
-    text_contrast: Prop<teksilo_render::TextContrast>,
-    glyph_rendering: Prop<crate::GlyphRenderingPreference>,
+    /// `None`: the settings key, when a settings bundle is installed, else
+    /// the default (see [`text_contrast`](Self::text_contrast)).
+    text_contrast: Option<Prop<teksilo_render::TextContrast>>,
+    /// `None`: the settings key, when a settings bundle is installed, else
+    /// the default (see [`glyph_rendering`](Self::glyph_rendering)).
+    glyph_rendering: Option<Prop<crate::GlyphRenderingPreference>>,
     typesetter: Option<SharedTypesetter>,
     font_registrars: Vec<Box<dyn teksilo_text::FontRegistrar>>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
@@ -6201,8 +6213,8 @@ impl TeksiloAppBuilder {
             theme_mode: ThemeMode::Manual,
             native_theme: None,
             pen_batching: teksilo_platform::PenBatching::default(),
-            text_contrast: Prop::Static(teksilo_render::TextContrast::DEFAULT),
-            glyph_rendering: Prop::Static(crate::GlyphRenderingPreference::FollowDesktop),
+            text_contrast: None,
+            glyph_rendering: None,
             typesetter: None,
             font_registrars: Vec::new(),
             app_event_handler: None,
@@ -6673,7 +6685,7 @@ impl TeksiloAppBuilder {
         mut self,
         text_contrast: impl Into<Prop<teksilo_render::TextContrast>>,
     ) -> Self {
-        self.text_contrast = text_contrast.into();
+        self.text_contrast = Some(text_contrast.into());
         self
     }
 
@@ -6703,7 +6715,7 @@ impl TeksiloAppBuilder {
         mut self,
         preference: impl Into<Prop<crate::GlyphRenderingPreference>>,
     ) -> Self {
-        self.glyph_rendering = preference.into();
+        self.glyph_rendering = Some(preference.into());
         self
     }
 
@@ -7595,10 +7607,36 @@ impl TeksiloAppBuilder {
             Some(adapter) => TreeAppContext::with_source_and_poster(adapter, poster.clone()),
             None => TreeAppContext::empty(),
         };
+        // The glyph rendering in effect, for the application to read.
+        let effective_glyph_rendering = crate::EffectiveGlyphRendering::new();
+        self.app_state_registry.insert(
+            std::any::TypeId::of::<crate::EffectiveGlyphRendering>(),
+            Box::new(effective_glyph_rendering.clone()),
+        );
         let app_context_template = Some(std::rc::Rc::new(
             base.with_app_state(self.app_state_registry)
                 .with_poster(poster),
         ));
+        // What the builder does not set, the user's persisted choice decides
+        // when the application keeps settings, followed live; else the
+        // defaults.
+        let settings_store = app_context_template
+            .as_ref()
+            .and_then(|t| t.app_state::<teksilo_settings::SettingsStore>());
+        let text_contrast = self.text_contrast.unwrap_or_else(|| match settings_store {
+            Some(store) => Prop::Bound(
+                store
+                    .signal_for(&crate::TEXT_CONTRAST_KEY)
+                    .map(|level| level.contrast()),
+            ),
+            None => Prop::Static(teksilo_render::TextContrast::DEFAULT),
+        });
+        let glyph_rendering = self
+            .glyph_rendering
+            .unwrap_or_else(|| match settings_store {
+                Some(store) => Prop::Bound(store.signal_for(&crate::GLYPH_RENDERING_KEY)),
+                None => Prop::Static(crate::GlyphRenderingPreference::FollowDesktop),
+            });
 
         for on_ready in self.on_ready {
             on_ready(proxy.clone());
@@ -7621,8 +7659,10 @@ impl TeksiloAppBuilder {
         // rather than threaded through `TeksiloAppHandler::new`'s already long
         // parameter list.
         app.wm.set_pen_batching(self.pen_batching);
-        app.wm.set_text_contrast(self.text_contrast);
-        app.wm.set_glyph_rendering(self.glyph_rendering);
+        app.wm.set_text_contrast(text_contrast);
+        app.wm
+            .set_effective_glyph_rendering(effective_glyph_rendering);
+        app.wm.set_glyph_rendering(glyph_rendering);
         app.wm.set_native_theme(self.native_theme);
         app.wm.set_records_announcements(self.records_announcements);
         app.wm.set_app_quit_guard(self.quit_guard);

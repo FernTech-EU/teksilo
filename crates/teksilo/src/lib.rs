@@ -216,9 +216,10 @@ pub mod prelude {
 
     // App
     pub use teksilo_app::{
-        GlyphRendering, GlyphRenderingPreference, NativeThemeFactory, NativeThemeRequest,
-        QuitPolicy, TeksiloAppBuilder, TerminationSignalKind, TerminationWatch, TextContrast,
-        ThemeMode, resolve_native_theme,
+        EffectiveGlyphRendering, GLYPH_RENDERING_KEY, GlyphRendering, GlyphRenderingPreference,
+        NativeThemeFactory, NativeThemeRequest, QuitPolicy, TEXT_CONTRAST_KEY, TeksiloAppBuilder,
+        TerminationSignalKind, TerminationWatch, TextContrast, TextContrastLevel, ThemeMode,
+        resolve_native_theme,
     };
 
     // Settings (persistence layer)

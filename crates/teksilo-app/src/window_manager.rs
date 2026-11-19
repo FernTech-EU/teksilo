@@ -27,7 +27,7 @@ use teksilo_platform::font_hinting::DesktopFontHinting;
 use teksilo_render::TextContrast;
 use teksilo_text::GlyphRendering;
 
-use crate::glyph_rendering::GlyphRenderingPreference;
+use crate::glyph_rendering::{EffectiveGlyphRendering, GlyphRenderingPreference};
 #[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::WindowLevel;
@@ -928,6 +928,9 @@ pub struct WindowManager {
     desktop_font_hinting: Option<Option<DesktopFontHinting>>,
     /// The rendering the shared typesetter was last given.
     applied_glyph_rendering: GlyphRendering,
+    /// Where [`applied_glyph_rendering`](Self::applied_glyph_rendering) is
+    /// published for the application (in app state under `run`).
+    effective_glyph_rendering: EffectiveGlyphRendering,
     /// The app's own [`ThemeMode::Native`] theme, asked before the default
     /// (IntUI coloured by the desktop). See
     /// [`TeksiloAppBuilder::native_theme`](crate::TeksiloAppBuilder::native_theme).
@@ -1167,6 +1170,7 @@ impl WindowManager {
             seen_glyph_preference: GlyphRenderingPreference::FollowDesktop,
             desktop_font_hinting: None,
             applied_glyph_rendering: GlyphRendering::Natural,
+            effective_glyph_rendering: EffectiveGlyphRendering::new(),
             native_theme: None,
             os_theme: None,
             records_announcements: false,
@@ -1258,6 +1262,13 @@ impl WindowManager {
         true
     }
 
+    /// Publish the rendering in effect through `effective` (the handle `run`
+    /// registers in app state), from now on.
+    pub(crate) fn set_effective_glyph_rendering(&mut self, effective: EffectiveGlyphRendering) {
+        effective.set(self.applied_glyph_rendering);
+        self.effective_glyph_rendering = effective;
+    }
+
     /// How every window fits glyphs to the pixel grid: a fixed preference,
     /// or a signal followed from then on. Applied at once.
     pub(crate) fn set_glyph_rendering(&mut self, preference: Prop<GlyphRenderingPreference>) {
@@ -1293,6 +1304,7 @@ impl WindowManager {
             return false;
         }
         self.applied_glyph_rendering = wanted;
+        self.effective_glyph_rendering.set(wanted);
         if let Some(typesetter) = &self.typesetter {
             typesetter.set_glyph_rendering(wanted);
         }
@@ -7583,6 +7595,8 @@ mod os_theme_tests {
         let typesetter = SharedTypesetter::new_with_default_font();
         wm.typesetter = Some(typesetter.clone());
         assert_eq!(wm.applied_glyph_rendering(), GlyphRendering::Natural);
+        let effective = crate::EffectiveGlyphRendering::new();
+        wm.set_effective_glyph_rendering(effective.clone());
 
         // The default follows the desktop: full hinting is crisp.
         let preference = Signal::new(GlyphRenderingPreference::FollowDesktop);
@@ -7619,6 +7633,10 @@ mod os_theme_tests {
                 .expect("an OS theme change")
         );
         assert_eq!(typesetter.glyph_rendering(), GlyphRendering::Natural);
+        assert_eq!(effective.get(), GlyphRendering::Natural, "published");
+        preference.set(GlyphRenderingPreference::Crisp);
+        assert!(wm.sync_glyph_rendering_from(slight));
+        assert_eq!(effective.get(), GlyphRendering::Crisp, "published");
     }
 }
 

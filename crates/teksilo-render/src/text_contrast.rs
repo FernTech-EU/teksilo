@@ -54,6 +54,20 @@ impl TextContrast {
         contrast: 0.2,
     };
 
+    /// Heavier edges on dark text than [`DEFAULT`](Self::DEFAULT): the
+    /// blend of sRGB-encoded values, plus half the contrast term.
+    pub const STRONGER: Self = Self {
+        gamma: 1.0,
+        contrast: 0.5,
+    };
+
+    /// The heaviest edges this type offers: the blend of sRGB-encoded
+    /// values, plus the full contrast term.
+    pub const STRONGEST: Self = Self {
+        gamma: 1.0,
+        contrast: 1.0,
+    };
+
     /// Whether this value changes anything.
     pub fn is_off(self) -> bool {
         self.gamma <= 0.0

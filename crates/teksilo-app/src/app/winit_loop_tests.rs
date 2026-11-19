@@ -46,6 +46,8 @@
 //! - **(as)** the builder's text contrast reaches a window's renderer as it
 //!   is created (`WindowManager::create_window`), and a change to the signal
 //!   reaches it at the end of the turn (`WindowManager::sync_text_contrast`);
+//! - **(at)** with a settings bundle and no builder value, `GLYPH_RENDERING_KEY`
+//!   decides the glyph rendering live, and `EffectiveGlyphRendering` reports it;
 //! - **(b)** the modal-blocked guard both swallows input and still delivers
 //!   `Resized`, and a click on the blocked window, or its taking the focus,
 //!   brings back a minimised modal child, and a raise it is owed is paid
@@ -1392,6 +1394,32 @@ fn the_real_callbacks_route_input_and_supply_the_platform_facts() {
             "a change to the signal reaches the open window in one turn"
         );
         contrast.set(STRONGER_TEXT);
+        app.about_to_wait(event_loop);
+
+        // -- (at) with settings and no builder value, the persisted key
+        // decides the glyph rendering, followed live, and the rendering in
+        // effect is published in app state
+        let template = app.wm.app_context_template().expect("the template");
+        let store = template
+            .app_state::<teksilo_settings::SettingsStore>()
+            .expect("the test installs a settings bundle");
+        let effective = template
+            .app_state::<crate::EffectiveGlyphRendering>()
+            .expect("run registers it")
+            .clone();
+        let key = store.signal_for(&crate::GLYPH_RENDERING_KEY);
+        let before = key.get();
+        key.set(crate::GlyphRenderingPreference::Crisp);
+        app.about_to_wait(event_loop);
+        assert_eq!(
+            effective.get(),
+            teksilo_text::GlyphRendering::Crisp,
+            "the stored choice reaches the typesetter in one turn"
+        );
+        key.set(crate::GlyphRenderingPreference::Natural);
+        app.about_to_wait(event_loop);
+        assert_eq!(effective.get(), teksilo_text::GlyphRendering::Natural);
+        key.set(before);
         app.about_to_wait(event_loop);
 
         // -- (g) a window awaiting its redraw does not hold the loop awake
