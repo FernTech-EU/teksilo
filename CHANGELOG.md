@@ -23,8 +23,8 @@ by crate for clarity, not because crates version independently.
   FreeType's full hinting draw them, with sharper stems at 100 % and lines
   1 to 5 % wider. By default (`GlyphRenderingPreference::FollowDesktop`)
   text is crisp where the user chose medium or full hinting in KDE Plasma's
-  font settings or GNOME's (under manual font rendering), natural elsewhere,
-  and a change on the desktop is followed while the application runs; a
+  font settings or GNOME Tweaks, natural elsewhere, and a change on the
+  desktop is followed while the application runs; a
   `Signal` lets an application's own preference decide. Zoomed text stays
   natural. `EffectiveGlyphRendering`, in app state, says which rendering is
   in effect.

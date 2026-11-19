@@ -54,7 +54,7 @@ fn of_gnomes_interface_settings_only_the_font_ones_matter() {
         )
     };
     assert!(gnome("font-hinting"));
-    assert!(gnome("font-rendering"));
+    assert!(!gnome("font-rendering"), "Tweaks never sets it; not read");
     assert!(!gnome("gtk-theme"));
     assert!(!gnome("clock-format"));
 }

@@ -6697,8 +6697,8 @@ impl TeksiloAppBuilder {
     ///
     /// The default, [`FollowDesktop`](crate::GlyphRenderingPreference::FollowDesktop),
     /// is crisp where the user asked the desktop for medium or full hinting
-    /// (KDE Plasma's font settings, GNOME's font hinting under manual font
-    /// rendering) and natural elsewhere, and follows a change made while the
+    /// (KDE Plasma's font settings, GNOME's font hinting as GNOME Tweaks
+    /// sets it) and natural elsewhere, and follows a change made while the
     /// application runs. Pass a [`Signal`](teksilo_core::signal::Signal) to
     /// let a preference of the application's own override it at run time:
     /// every window is laid out and drawn again at the end of the turn that

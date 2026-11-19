@@ -5,10 +5,12 @@
 //!
 //! On Linux the user picks a hinting style for every application, and where
 //! it is kept depends on the desktop. GNOME keeps
-//! `org.gnome.desktop.interface font-hinting`, which GTK follows only while
-//! `font-rendering` is `manual` (GNOME 47 and later; under `automatic`, the
-//! default, GTK chooses by itself); GNOME 50's Settings offers no control for
-//! either, GNOME Tweaks does. Everywhere else the answer is fontconfig's, as
+//! `org.gnome.desktop.interface font-hinting`, which GNOME Tweaks sets (GNOME
+//! 50's Settings has no control for it) and which GTK 3, Chromium and the
+//! Xft resources follow. Tweaks leaves GNOME 47's `font-rendering` at
+//! `automatic`, under which GTK 4 chooses by itself, and offers no control
+//! for it, so it is not read: the hinting a user picks is what they asked
+//! for. Everywhere else the answer is fontconfig's, as
 //! Qt, GTK 3 and Chromium read it: KDE Plasma's font settings write the
 //! user's `fonts.conf` (`kdeglobals [General] XftHintStyle` lags one Apply
 //! behind it, and the portal mirrors that stale value, so neither is read).
@@ -73,27 +75,8 @@ pub fn fontconfig_font_hinting(output: &str) -> Option<DesktopFontHinting> {
     }
 }
 
-/// GNOME's two keys, as read: `font-rendering` (absent before GNOME 47) and
-/// `font-hinting`. The hinting applies unless rendering is `automatic`.
-pub fn gnome_font_hinting(
-    font_rendering: Option<&str>,
-    font_hinting: Option<&str>,
-) -> Option<DesktopFontHinting> {
-    let automatic = font_rendering
-        .map(|r| {
-            r.trim()
-                .trim_matches('\'')
-                .eq_ignore_ascii_case("automatic")
-        })
-        .unwrap_or(false);
-    if automatic {
-        return None;
-    }
-    font_hinting.and_then(DesktopFontHinting::parse)
-}
-
 /// The hinting style the desktop asks for, `None` when it states none (no
-/// setting, an automatic choice, a desktop without one, Windows, macOS).
+/// setting, a desktop without one, Windows, macOS).
 ///
 /// On Linux this makes blocking D-Bus calls (the settings portal, bounded at
 /// half a second each) on GNOME and runs `fc-match` elsewhere: call it at
@@ -104,16 +87,15 @@ pub fn query_desktop_font_hinting() -> Option<DesktopFontHinting> {
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use super::{DesktopFontHinting, fontconfig_font_hinting, gnome_font_hinting};
+    use super::{DesktopFontHinting, fontconfig_font_hinting};
     use crate::linux_helpers::{Desktop, detect_desktop};
     use crate::linux_portal::read_portal_string;
 
     pub(super) fn query() -> Option<DesktopFontHinting> {
         match detect_desktop() {
-            Desktop::Gnome => gnome_font_hinting(
-                read_portal_string("org.gnome.desktop.interface", "font-rendering").as_deref(),
-                read_portal_string("org.gnome.desktop.interface", "font-hinting").as_deref(),
-            ),
+            Desktop::Gnome => read_portal_string("org.gnome.desktop.interface", "font-hinting")
+                .as_deref()
+                .and_then(DesktopFontHinting::parse),
             _ => fontconfig(),
         }
     }
@@ -198,20 +180,5 @@ mod tests {
         assert!(DesktopFontHinting::Medium.fits_both_axes());
         assert!(!DesktopFontHinting::Slight.fits_both_axes());
         assert!(!DesktopFontHinting::None.fits_both_axes());
-    }
-
-    #[test]
-    fn gnome_hinting_applies_only_under_manual_rendering() {
-        assert_eq!(gnome_font_hinting(Some("automatic"), Some("full")), None);
-        assert_eq!(
-            gnome_font_hinting(Some("manual"), Some("full")),
-            Some(DesktopFontHinting::Full)
-        );
-        // Before GNOME 47 there is no font-rendering key: hinting applies.
-        assert_eq!(
-            gnome_font_hinting(None, Some("slight")),
-            Some(DesktopFontHinting::Slight)
-        );
-        assert_eq!(gnome_font_hinting(Some("manual"), None), None);
     }
 }

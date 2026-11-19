@@ -14,7 +14,7 @@
 //!   `org.freedesktop.appearance` namespace (colour scheme, accent colour,
 //!   contrast, reduced motion) or of an `org.kde.kdeglobals.<Group>`
 //!   namespace (KDE's palette, font and widget style), and GNOME's
-//!   `org.gnome.desktop.interface` `font-hinting` and `font-rendering`; any
+//!   `org.gnome.desktop.interface` `font-hinting`; any
 //!   other setting is not heard;
 //! - KDE's `org.kde.KGlobalSettings.notifyChange` on `/KGlobalSettings`;
 //! - KDE's `org.kde.kconfig.notify.ConfigChanged` on `/kdeglobals` and on
@@ -219,11 +219,10 @@ fn signal_matters(
 /// animation speed or the font hinting: every key of
 /// `org.freedesktop.appearance` and of the `org.kde.kdeglobals.<Group>`
 /// namespaces KDE's portal serves `kdeglobals` under, and GNOME's
-/// `font-hinting` and `font-rendering` (see [`crate::font_hinting`]).
+/// `font-hinting` (see [`crate::font_hinting`]).
 fn portal_setting_matters(namespace: &str, key: &str) -> bool {
     namespace == "org.freedesktop.appearance"
-        || (namespace == "org.gnome.desktop.interface"
-            && matches!(key, "font-hinting" | "font-rendering"))
+        || (namespace == "org.gnome.desktop.interface" && key == "font-hinting")
         || namespace
             .strip_prefix("org.kde.kdeglobals.")
             .is_some_and(|group| !group.is_empty())

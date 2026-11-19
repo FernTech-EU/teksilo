@@ -115,7 +115,7 @@ impl EffectiveGlyphRendering {
 pub enum GlyphRenderingPreference {
     /// What the desktop asks of every application: crisp where the user
     /// chose medium or full hinting (KDE Plasma's font settings; GNOME's
-    /// font hinting under manual font rendering), natural elsewhere and on
+    /// font hinting, set with GNOME Tweaks), natural elsewhere and on
     /// Windows and macOS. A change on the desktop is followed while the
     /// application runs.
     #[default]
