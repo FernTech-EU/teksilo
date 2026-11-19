@@ -3,12 +3,17 @@
 
 //! The font hinting the desktop asks applications for.
 //!
-//! On Linux the user picks a hinting style for every application: KDE
-//! Plasma's font settings write `kdeglobals [General] XftHintStyle`, and
-//! GNOME keeps `org.gnome.desktop.interface font-hinting`, which applies
-//! only while `font-rendering` is `manual` (GNOME 47 and later; under
-//! `automatic`, the default, GTK chooses by itself). Windows and macOS have
-//! no such setting, so [`query_desktop_font_hinting`] answers `None` there.
+//! On Linux the user picks a hinting style for every application, and where
+//! it is kept depends on the desktop. GNOME keeps
+//! `org.gnome.desktop.interface font-hinting`, which GTK follows only while
+//! `font-rendering` is `manual` (GNOME 47 and later; under `automatic`, the
+//! default, GTK chooses by itself); GNOME 50's Settings offers no control for
+//! either, GNOME Tweaks does. Everywhere else the answer is fontconfig's, as
+//! Qt, GTK 3 and Chromium read it: KDE Plasma's font settings write the
+//! user's `fonts.conf` (`kdeglobals [General] XftHintStyle` lags one Apply
+//! behind it, and the portal mirrors that stale value, so neither is read).
+//! Windows and macOS have no such setting, so [`query_desktop_font_hinting`]
+//! answers `None` there.
 //!
 //! What a style means for drawing is the caller's to decide: `teksilo-app`
 //! draws text crisp (fitted to the pixel grid on both axes) for
@@ -51,6 +56,23 @@ impl DesktopFontHinting {
     }
 }
 
+/// fontconfig's answer, as `fc-match -f "%{hinting}|%{hintstyle}"` prints
+/// it (`True|1`): its hint style, [`DesktopFontHinting::None`] when hinting
+/// is off, `None` when the output is not that.
+pub fn fontconfig_font_hinting(output: &str) -> Option<DesktopFontHinting> {
+    let (hinting, style) = output.trim().split_once('|')?;
+    if hinting.trim().eq_ignore_ascii_case("false") {
+        return Some(DesktopFontHinting::None);
+    }
+    match style.trim() {
+        "0" => Some(DesktopFontHinting::None),
+        "1" => Some(DesktopFontHinting::Slight),
+        "2" => Some(DesktopFontHinting::Medium),
+        "3" => Some(DesktopFontHinting::Full),
+        _ => None,
+    }
+}
+
 /// GNOME's two keys, as read: `font-rendering` (absent before GNOME 47) and
 /// `font-hinting`. The hinting applies unless rendering is `automatic`.
 pub fn gnome_font_hinting(
@@ -73,35 +95,40 @@ pub fn gnome_font_hinting(
 /// The hinting style the desktop asks for, `None` when it states none (no
 /// setting, an automatic choice, a desktop without one, Windows, macOS).
 ///
-/// On Linux this reads files and makes blocking D-Bus calls (the settings
-/// portal, bounded at half a second each): call it at startup and when the
-/// desktop reports a change, not every frame.
+/// On Linux this makes blocking D-Bus calls (the settings portal, bounded at
+/// half a second each) on GNOME and runs `fc-match` elsewhere: call it at
+/// startup and when the desktop reports a change, not every frame.
 pub fn query_desktop_font_hinting() -> Option<DesktopFontHinting> {
     platform::query()
 }
 
 #[cfg(target_os = "linux")]
 mod platform {
-    use teksilo_kde_scheme::KdeConfigLocations;
-
-    use super::{DesktopFontHinting, gnome_font_hinting};
+    use super::{DesktopFontHinting, fontconfig_font_hinting, gnome_font_hinting};
     use crate::linux_helpers::{Desktop, detect_desktop};
     use crate::linux_portal::read_portal_string;
-    use crate::os_theme::kde;
 
     pub(super) fn query() -> Option<DesktopFontHinting> {
         match detect_desktop() {
-            Desktop::Kde => {
-                let locations = KdeConfigLocations::from_env(kde::process_env);
-                kde::kde_font_hinting(&locations, &kde::process_env, kde::read_file)
-                    .as_deref()
-                    .and_then(DesktopFontHinting::parse)
-            }
-            _ => gnome_font_hinting(
+            Desktop::Gnome => gnome_font_hinting(
                 read_portal_string("org.gnome.desktop.interface", "font-rendering").as_deref(),
                 read_portal_string("org.gnome.desktop.interface", "font-hinting").as_deref(),
             ),
+            _ => fontconfig(),
         }
+    }
+
+    /// fontconfig's hint style for the default sans-serif face, which it
+    /// reads from the user's `fonts.conf` and the system's on each run.
+    fn fontconfig() -> Option<DesktopFontHinting> {
+        let output = std::process::Command::new("fc-match")
+            .args(["-f", "%{hinting}|%{hintstyle}", "sans-serif"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        fontconfig_font_hinting(&String::from_utf8_lossy(&output.stdout))
     }
 }
 
@@ -140,6 +167,29 @@ mod tests {
         );
         assert_eq!(DesktopFontHinting::parse("hintdefault"), None);
         assert_eq!(DesktopFontHinting::parse(""), None);
+    }
+
+    #[test]
+    fn fontconfig_output_reads_as_its_hint_style() {
+        assert_eq!(
+            fontconfig_font_hinting("True|1"),
+            Some(DesktopFontHinting::Slight)
+        );
+        assert_eq!(
+            fontconfig_font_hinting("True|3\n"),
+            Some(DesktopFontHinting::Full)
+        );
+        assert_eq!(
+            fontconfig_font_hinting("True|2"),
+            Some(DesktopFontHinting::Medium)
+        );
+        assert_eq!(
+            fontconfig_font_hinting("False|3"),
+            Some(DesktopFontHinting::None),
+            "hinting off wins over the style"
+        );
+        assert_eq!(fontconfig_font_hinting("True|"), None);
+        assert_eq!(fontconfig_font_hinting(""), None);
     }
 
     #[test]

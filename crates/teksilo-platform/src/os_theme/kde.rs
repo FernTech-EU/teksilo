@@ -137,21 +137,6 @@ pub(crate) fn kde_icon_theme(
     Some(theme.unwrap_or_else(|| "breeze".to_owned()))
 }
 
-/// `kdeglobals [General] XftHintStyle` as stored (`hintfull`, …), which
-/// Plasma's font settings write; `None` when absent, empty, or when no file
-/// of the `kdeglobals` cascade can be read.
-pub(crate) fn kde_font_hinting(
-    locations: &KdeConfigLocations,
-    var: EnvVar<'_>,
-    read: impl Fn(&Path) -> Option<Vec<u8>>,
-) -> Option<String> {
-    let kdeglobals = read_cascade(&locations.kdeglobals_cascade(), &read);
-    KConfig::cascade(&kdeglobals)
-        .read_string(&["General"], "XftHintStyle", &locations.expansion_env(var))
-        .map(|style| style.trim().to_owned())
-        .filter(|style| !style.is_empty())
-}
-
 /// `desktop` with the light or dark preference of the desktop portal
 /// (`org.freedesktop.appearance color-scheme`), `portal`: `None` when the
 /// portal does not answer.
