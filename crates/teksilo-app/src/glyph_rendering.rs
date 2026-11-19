@@ -51,6 +51,11 @@ pub enum TextContrastLevel {
 }
 
 impl TextContrastLevel {
+    /// Every level, weakest first: the options a picker offers.
+    pub fn all() -> &'static [Self] {
+        &[Self::Standard, Self::Stronger, Self::Strongest]
+    }
+
     /// The contrast this level names.
     pub fn contrast(self) -> TextContrast {
         match self {
@@ -122,6 +127,11 @@ pub enum GlyphRenderingPreference {
 }
 
 impl GlyphRenderingPreference {
+    /// Every preference, the desktop's first: the options a picker offers.
+    pub fn all() -> &'static [Self] {
+        &[Self::FollowDesktop, Self::Natural, Self::Crisp]
+    }
+
     /// The rendering this preference gives on a desktop asking for
     /// `desktop` (`None`: it asks for nothing).
     pub fn resolve(self, desktop: Option<DesktopFontHinting>) -> GlyphRendering {
@@ -212,6 +222,33 @@ mod tests {
         assert_eq!(
             store.signal_for(&GLYPH_RENDERING_KEY).get(),
             GlyphRenderingPreference::Crisp
+        );
+    }
+
+    #[test]
+    fn all_lists_every_variant_once() {
+        // A variant added to either enum without being listed here is caught
+        // by the matches below, which name every variant.
+        for level in TextContrastLevel::all() {
+            match level {
+                TextContrastLevel::Standard
+                | TextContrastLevel::Stronger
+                | TextContrastLevel::Strongest => {}
+            }
+        }
+        assert_eq!(TextContrastLevel::all().len(), 3);
+        assert_eq!(TextContrastLevel::all()[0], TextContrastLevel::default());
+        for preference in GlyphRenderingPreference::all() {
+            match preference {
+                GlyphRenderingPreference::FollowDesktop
+                | GlyphRenderingPreference::Natural
+                | GlyphRenderingPreference::Crisp => {}
+            }
+        }
+        assert_eq!(GlyphRenderingPreference::all().len(), 3);
+        assert_eq!(
+            GlyphRenderingPreference::all()[0],
+            GlyphRenderingPreference::default()
         );
     }
 

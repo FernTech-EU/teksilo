@@ -33,7 +33,8 @@ by crate for clarity, not because crates version independently.
   `Strongest`: `TextContrastLevel`) and `GLYPH_RENDERING_KEY` decide the
   text contrast and the glyph rendering, followed live: a control bound to
   `ctx.settings().signal_for(&KEY)` changes every window. `TextContrast`
-  gains the `STRONGER` and `STRONGEST` presets.
+  gains the `STRONGER` and `STRONGEST` presets, and both enums an `all()`
+  listing their options for a picker.
 - **Single instance (feature `single-instance`).**
   `teksilo::app::single_instance::acquire` elects one running instance per
   user, and `TeksiloAppBuilder::single_instance` hands it to the application.
