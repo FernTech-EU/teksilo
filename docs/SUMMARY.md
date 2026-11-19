@@ -334,7 +334,7 @@
 - [SceneViewState](scene/state.md)
 - [ShapeGeometry](scene/shape.md)
 - [SpatialIndex](scene/index_.md)
-- [TextAlign](scene/text.md)
+- [TextItem](scene/text.md)
 - [TransformSession](scene/transform_session.md)
 - [TxnId](scene/journal.md)
 - [WetLayer](scene/paint_node.md)

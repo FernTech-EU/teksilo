@@ -18,6 +18,10 @@ OS-correct path resolution for application config and data directories.
 | | **Methods** |
 | `&Path` | [`config_dir()`](#apppaths-config_dir) |
 | `&Path` | [`data_dir()`](#apppaths-data_dir) |
+| `&Path` | [`state_dir()`](#apppaths-state_dir) |
+| `&Path` | [`cache_dir()`](#apppaths-cache_dir) |
+| `io::Result<&Path>` | [`create_state_dir()`](#apppaths-create_state_dir) |
+| `io::Result<&Path>` | [`create_cache_dir()`](#apppaths-create_cache_dir) |
 | `PathBuf` | [`config_file(name: &str)`](#apppaths-config_file) |
 | `PathBuf` | [`data_file(name: &str)`](#apppaths-data_file) |
 | `Option<&Path>` | [`runtime_dir()`](#apppaths-runtime_dir) |
@@ -35,6 +39,15 @@ settings files live. In production, `AppPaths::new` asks the OS, through
 | Linux and other Unix | `$XDG_CONFIG_HOME/<app>`, by default `~/.config/<app>` | `$XDG_DATA_HOME/<app>`, by default `~/.local/share/<app>` |
 | Windows | `%APPDATA%\<Organization>\<Application>\config` | `%APPDATA%\<Organization>\<Application>\data` |
 | macOS | `~/Library/Application Support/<bundle id>/config` | `~/Library/Application Support/<bundle id>/data` |
+
+`AppPaths::state_dir` (logs, history) and `AppPaths::cache_dir`
+(what can be rebuilt) complete the set:
+
+| Platform | State directory | Cache directory |
+|---|---|---|
+| Linux and other Unix | `$XDG_STATE_HOME/<app>`, by default `~/.local/state/<app>` | `$XDG_CACHE_HOME/<app>`, by default `~/.cache/<app>` |
+| Windows | the data directory (the platform has no state directory) | `%LOCALAPPDATA%\<Organization>\<Application>\cache` |
+| macOS | the data directory (the platform has no state directory) | `~/Library/Caches/<bundle id>` |
 
 `<app>` is the application's name in lower case, and the bundle id is
 `<qualifier>.<organization in lower case>.<Application>`, spaces made
@@ -88,8 +101,8 @@ assert_eq!(paths.config_file("settings"), tmp.path().join("settings.toml"));
 
 **Import:** `use teksilo::prelude::AppPaths;` — in `teksilo::prelude::*`.
 
-Resolved OS-correct application directories (config, data, and the
-runtime directory for sockets and locks).
+Resolved OS-correct application directories (config, data, state, cache,
+and the runtime directory for sockets and locks).
 
 Construct with `AppPaths::new` for production code, or
 `AppPaths::for_testing` in tests and headless CI environments.
@@ -126,7 +139,8 @@ with an in-process directory.
 
 Construct an `AppPaths` rooted at an arbitrary directory. Used by
 tests so that no test ever touches the user's real config tree.
-`config_dir`, `data_dir` and `runtime_dir` all resolve to `root`.
+Every directory (config, data, state, cache and runtime) resolves to
+`root`.
 
 <a id="apppaths-from_dirs"></a>
 
@@ -134,7 +148,9 @@ tests so that no test ever touches the user's real config tree.
 
 Construct from explicit config and data directories. Useful when
 an application wants to override one or both (e.g. portable mode).
-It has no `runtime_dir`.
+It has no `runtime_dir`; its
+`state_dir` is `data_dir` and its
+`cache_dir` is `data_dir/cache`.
 
 <a id="apppaths-config_dir"></a>
 
@@ -149,6 +165,40 @@ where it is on each platform.
 
 The platform-correct data directory. Used for caches and
 per-window state — anything larger than a configuration file.
+
+<a id="apppaths-state_dir"></a>
+
+#### `pub fn state_dir(&self) -> &Path`
+
+The platform-correct state directory, for what an application keeps
+between runs but would not back up or carry to another machine: log
+files, history. The module documentation says where it is on each
+platform; where the platform has no state directory (Windows, macOS)
+it is `data_dir`. It is not created here:
+`create_state_dir` does that.
+
+<a id="apppaths-cache_dir"></a>
+
+#### `pub fn cache_dir(&self) -> &Path`
+
+The platform-correct cache directory, for what can be rebuilt and may
+be deleted at any time. The module documentation says where it is on
+each platform. It is not created here:
+`create_cache_dir` does that.
+
+<a id="apppaths-create_state_dir"></a>
+
+#### `pub fn create_state_dir(&self) -> io::Result<&Path>`
+
+Create `state_dir` and its parents if they do not
+exist, and return it.
+
+<a id="apppaths-create_cache_dir"></a>
+
+#### `pub fn create_cache_dir(&self) -> io::Result<&Path>`
+
+Create `cache_dir` and its parents if they do not
+exist, and return it.
 
 <a id="apppaths-config_file"></a>
 

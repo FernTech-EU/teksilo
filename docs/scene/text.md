@@ -1,16 +1,9 @@
 <!-- SPDX-License-Identifier: MPL-2.0 -->
 <!-- SPDX-FileCopyrightText: 2026 FernTech -->
 
-# TextAlign
+# TextItem
 
 `TextItem` — text in a local-coord rectangle, with alignment + rotation.
-
-## Public types
-
-| Kind | Name |
-| ---: | :--- |
-| `enum` | [`TextAlign`](#textalign) — Horizontal alignment of a `TextItem` within its `local_bounds` |
-| `struct` | [`TextItem`](#textitem) — Text in a local-coord rectangle, with optional alignment and rotation |
 
 ## Public functions
 
@@ -95,28 +88,6 @@ model.add_item(item, Point::new(40.0, 40.0));
 ## API reference
 
 📖 [Full rustdoc API for this module](https://docs.rs/teksilo-scene/latest/teksilo_scene/index.html)
-
-<a id="textalign"></a>
-
-## `pub enum TextAlign`
-
-**Import:** `use teksilo_scene::TextAlign;` — add `teksilo-scene` to `[dependencies]`: teksilo does not re-export it.
-
-Horizontal alignment of a `TextItem` within its `local_bounds`.
-
-Alignment shifts the text's draw origin by the leftover width
-(`bounds.width − measured_width`); it needs a text backend to measure, so a
-mock/headless canvas with no backend renders leading-aligned regardless.
-
-```rust
-pub enum TextAlign { /* variants */ }
-```
-
-### Variants
-
-- **`Leading`** — Left edge in LTR (the default).
-- **`Center`** — Centred within the bounds.
-- **`Trailing`** — Right edge in LTR.
 
 <a id="textitem"></a>
 

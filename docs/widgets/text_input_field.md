@@ -287,7 +287,8 @@ inserts, deletes, paste, undo/redo, and cut are all no-ops.
 
 Hard cap on document length in `char`s (grapheme count is
 approximated — each `char` counts as one unit, matching
-`String::chars().count()`).
+`String::chars().count()`). Characters typed in the current frame
+and not inserted yet count too.
 
 <a id="textinputfield-on_submit_fn"></a>
 
@@ -296,6 +297,9 @@ approximated — each `char` counts as one unit, matching
 Closure fired on `Enter`. Unlike `on_blur_fn`, this does
 not move focus — the field stays focused and the caret
 stays where it was.
+
+The bound `Signal<String>` holds every character typed before the
+`Enter` when it runs, those typed in the same frame included.
 
 <a id="textinputfield-on_access_set_value"></a>
 
@@ -803,7 +807,8 @@ Is the widget built and still alive?
 
 #### `pub fn text(&self) -> String`
 
-The field's current text.
+The field's current text, the characters typed in this frame
+included.
 
 <a id="textfieldhandle-has_selection"></a>
 

@@ -11,7 +11,7 @@ Every public type in `teksilo-scene`, grouped by category. Each page links to it
 - [ImageItem](image.md) — `ImageItem` — a raster image at a local-coord rectangle
 - [PathItem](path.md) — `PathItem` — vector path with optional fill and stroke
 - [RectItem](rect.md) — `RectItem` — filled / stroked rectangle in local item coords
-- [TextAlign](text.md) — `TextItem` — text in a local-coord rectangle, with alignment + rotation
+- [TextItem](text.md) — `TextItem` — text in a local-coord rectangle, with alignment + rotation
 
 ## Scene
 
