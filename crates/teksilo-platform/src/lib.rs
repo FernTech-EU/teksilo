@@ -11,6 +11,7 @@ pub mod event_translation;
 pub mod external_dnd;
 #[cfg(feature = "file-dialog")]
 pub mod file_dialog;
+pub mod font_hinting;
 pub mod icon_theme;
 pub mod key_report;
 #[cfg(target_os = "linux")]

@@ -21,8 +21,14 @@ const MS: Duration = Duration::from_millis(1);
 
 #[test]
 fn a_portal_setting_matters_by_its_namespace() {
-    let portal =
-        |namespace| signal_matters(PORTAL_SETTINGS, SETTING_CHANGED, PORTAL_PATH, namespace);
+    let portal = |namespace: Option<&str>| {
+        signal_matters(
+            PORTAL_SETTINGS,
+            SETTING_CHANGED,
+            PORTAL_PATH,
+            namespace.map(|n| (n, "color-scheme")),
+        )
+    };
     assert!(portal(Some("org.freedesktop.appearance")));
     assert!(portal(Some("org.kde.kdeglobals.General")));
     assert!(portal(Some("org.kde.kdeglobals.KDE")));
@@ -35,6 +41,22 @@ fn a_portal_setting_matters_by_its_namespace() {
     assert!(!portal(Some("org.kde.kdeglobals")));
     assert!(!portal(Some("org.freedesktop.appearance.extra")));
     assert!(!portal(None));
+}
+
+#[test]
+fn of_gnomes_interface_settings_only_the_font_ones_matter() {
+    let gnome = |key| {
+        signal_matters(
+            PORTAL_SETTINGS,
+            SETTING_CHANGED,
+            PORTAL_PATH,
+            Some(("org.gnome.desktop.interface", key)),
+        )
+    };
+    assert!(gnome("font-hinting"));
+    assert!(gnome("font-rendering"));
+    assert!(!gnome("gtk-theme"));
+    assert!(!gnome("clock-format"));
 }
 
 #[test]
@@ -87,7 +109,7 @@ fn the_kde_signals_matter_on_their_paths_only() {
         "org.example.Other",
         SETTING_CHANGED,
         PORTAL_PATH,
-        Some("org.freedesktop.appearance")
+        Some(("org.freedesktop.appearance", "color-scheme"))
     ));
 }
 
@@ -95,7 +117,12 @@ fn the_kde_signals_matter_on_their_paths_only() {
 fn every_listened_signal_matters() {
     for (interface, member, path) in LISTENED {
         assert!(
-            signal_matters(interface, member, path, Some("org.freedesktop.appearance")),
+            signal_matters(
+                interface,
+                member,
+                path,
+                Some(("org.freedesktop.appearance", "color-scheme"))
+            ),
             "{interface}.{member} on {path}"
         );
     }
@@ -763,6 +790,10 @@ mod real_bus {
             (
                 "kdeglobals General ColorScheme",
                 Box::new(portal("org.kde.kdeglobals.General", "ColorScheme")),
+            ),
+            (
+                "gnome font-hinting",
+                Box::new(portal("org.gnome.desktop.interface", "font-hinting")),
             ),
             ("notifyChange", Box::new(notify_change)),
             (

@@ -88,6 +88,9 @@ pub(crate) struct OsQueries {
     /// The accessibility preferences, among them reduced motion, read again
     /// whenever the desktop's appearance is heard to change.
     pub(crate) accessibility: fn() -> teksilo_platform::AccessibilityPreferences,
+    /// The desktop's font hinting, read again with the rest, for
+    /// [`GlyphRenderingPreference::FollowDesktop`](crate::GlyphRenderingPreference::FollowDesktop).
+    pub(crate) font_hinting: fn() -> Option<teksilo_platform::font_hinting::DesktopFontHinting>,
 }
 
 impl OsQueries {
@@ -100,6 +103,7 @@ impl OsQueries {
         native_desktop: teksilo_platform::os_theme::query_native_desktop,
         color_scheme: teksilo_platform::os_theme::query_color_scheme,
         accessibility: teksilo_platform::AccessibilityPreferences::query,
+        font_hinting: teksilo_platform::font_hinting::query_desktop_font_hinting,
     };
 
     /// Whether [`ThemeMode::FollowSystem`](crate::ThemeMode::FollowSystem)

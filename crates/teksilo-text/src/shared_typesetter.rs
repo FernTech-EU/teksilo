@@ -61,6 +61,21 @@ impl SharedTypesetter {
     pub fn set_default_language(&self, language: Option<&str>) {
         self.inner.borrow_mut().set_default_language(language);
     }
+
+    /// Set how glyphs are fitted to the pixel grid: natural (exact spacing,
+    /// fractional positions) or crisp (whole pixels, hinted on both axes,
+    /// advances in whole pixels). A change marks the text laid out so far
+    /// for layout again; the widget trees must be laid out again too
+    /// (`WidgetTree::text_metrics_changed`). `teksilo-app` keeps it on what
+    /// the application asks for, or on what the desktop asks for.
+    pub fn set_glyph_rendering(&self, rendering: text_typeset::GlyphRendering) {
+        self.inner.borrow_mut().set_glyph_rendering(rendering);
+    }
+
+    /// How glyphs are fitted to the pixel grid.
+    pub fn glyph_rendering(&self) -> text_typeset::GlyphRendering {
+        self.inner.borrow().service().glyph_rendering()
+    }
 }
 
 impl Default for SharedTypesetter {

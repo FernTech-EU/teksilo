@@ -2914,6 +2914,19 @@ impl WidgetTree {
         self.a11y_dirty = true;
     }
 
+    /// Lay out and paint every widget again because the metrics text is
+    /// measured with changed outside the tree: the text backend now fits
+    /// glyphs to the pixel grid differently (crisp or natural), which moves
+    /// every advance. Focus, scroll offsets and widget state are kept; no
+    /// widget is rebuilt.
+    pub fn text_metrics_changed(&mut self) {
+        self.arena.mark_all_dirty();
+        self.invalidate_all_paints();
+        // Text that re-measures may re-wrap: the accessibility tree's text
+        // runs and bounds follow.
+        self.a11y_dirty = true;
+    }
+
     /// The current user-controlled text-scale factor (`1.0` = 100 %).
     pub fn user_text_scale(&self) -> f32 {
         self.user_text_scale
@@ -6539,6 +6552,20 @@ mod text_scale_tests {
         tree.set_accessibility_preferences(false, false, 2.0);
         assert!((tree.effective_text_scale() - 3.0).abs() < 0.01);
         assert!((tree.text_scale_signal().get() - 3.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn text_metrics_changed_lays_out_and_paints_everything_again() {
+        let mut tree = WidgetTree::new();
+        let id = tree.add(crate::test_widgets::FillWidget::new());
+        tree.layout(SizeProposal::exact(100.0, 50.0));
+        let _ = tree.render();
+        assert!(!tree.arena.any_needs_layout(), "laid out");
+        tree.text_metrics_changed();
+        assert!(tree.arena.any_needs_layout());
+        let node = tree.arena.get(id).expect("the node");
+        assert!(node.dirty.needs_paint);
+        assert!(node.cached_paint.is_none());
     }
 
     #[test]

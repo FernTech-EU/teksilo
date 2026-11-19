@@ -114,7 +114,7 @@ impl ChangeSource for BusSource {
 
 /// Whether `message` is a signal the watch acts on
 /// ([`signal_matters`]), reading a portal
-/// `SettingChanged`'s namespace from its body.
+/// `SettingChanged`'s namespace and key from its body.
 fn message_matters(message: &Message) -> bool {
     let header = message.header();
     let (Some(interface), Some(member), Some(path)) =
@@ -122,12 +122,12 @@ fn message_matters(message: &Message) -> bool {
     else {
         return false;
     };
-    let namespace = if interface.as_str() == PORTAL_SETTINGS {
+    let setting = if interface.as_str() == PORTAL_SETTINGS {
         message
             .body()
             .deserialize::<(String, String, OwnedValue)>()
             .ok()
-            .map(|(namespace, _, _)| namespace)
+            .map(|(namespace, key, _)| (namespace, key))
     } else {
         None
     };
@@ -135,7 +135,9 @@ fn message_matters(message: &Message) -> bool {
         interface.as_str(),
         member.as_str(),
         path.as_str(),
-        namespace.as_deref(),
+        setting
+            .as_ref()
+            .map(|(namespace, key)| (namespace.as_str(), key.as_str())),
     )
 }
 

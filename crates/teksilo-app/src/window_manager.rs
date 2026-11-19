@@ -23,7 +23,11 @@ use teksilo_platform::AccessibilityPreferences;
 use teksilo_platform::PlatformWindow;
 use teksilo_platform::create_title_bar_host;
 use teksilo_platform::event_translation::TranslationState;
+use teksilo_platform::font_hinting::DesktopFontHinting;
 use teksilo_render::TextContrast;
+use teksilo_text::GlyphRendering;
+
+use crate::glyph_rendering::GlyphRenderingPreference;
 #[allow(unused_imports)]
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::WindowLevel;
@@ -912,6 +916,18 @@ pub struct WindowManager {
     /// The value of [`text_contrast`](Self::text_contrast) the renderers
     /// were last given, so a turn can tell a change from a repeat.
     applied_text_contrast: TextContrast,
+    /// How the application asks glyphs to be fitted to the pixel grid. See
+    /// [`TeksiloAppBuilder::glyph_rendering`](crate::TeksiloAppBuilder::glyph_rendering).
+    glyph_rendering: Prop<GlyphRenderingPreference>,
+    /// The preference [`sync_glyph_rendering`](Self::sync_glyph_rendering)
+    /// last saw, so a change starts or stops the desktop watch.
+    seen_glyph_preference: GlyphRenderingPreference,
+    /// The desktop's font hinting, read when the preference first follows
+    /// the desktop and again each time the desktop is heard to change;
+    /// `None` inside until then.
+    desktop_font_hinting: Option<Option<DesktopFontHinting>>,
+    /// The rendering the shared typesetter was last given.
+    applied_glyph_rendering: GlyphRendering,
     /// The app's own [`ThemeMode::Native`] theme, asked before the default
     /// (IntUI coloured by the desktop). See
     /// [`TeksiloAppBuilder::native_theme`](crate::TeksiloAppBuilder::native_theme).
@@ -1147,6 +1163,10 @@ impl WindowManager {
             pen_batching: teksilo_platform::PenBatching::default(),
             text_contrast: Prop::Static(TextContrast::DEFAULT),
             applied_text_contrast: TextContrast::DEFAULT,
+            glyph_rendering: Prop::Static(GlyphRenderingPreference::FollowDesktop),
+            seen_glyph_preference: GlyphRenderingPreference::FollowDesktop,
+            desktop_font_hinting: None,
+            applied_glyph_rendering: GlyphRendering::Natural,
             native_theme: None,
             os_theme: None,
             records_announcements: false,
@@ -1236,6 +1256,59 @@ impl WindowManager {
                 .set_text_contrast(wanted);
         }
         true
+    }
+
+    /// How every window fits glyphs to the pixel grid: a fixed preference,
+    /// or a signal followed from then on. Applied at once.
+    pub(crate) fn set_glyph_rendering(&mut self, preference: Prop<GlyphRenderingPreference>) {
+        self.glyph_rendering = preference;
+        self.sync_glyph_rendering();
+    }
+
+    /// Give the shared typesetter the rendering the application's preference
+    /// resolves to now, reading the desktop's font hinting the first time the
+    /// preference follows it, and lay out every tree again when it changed.
+    /// Returns whether it did, in which case every window has to be drawn
+    /// again. A change of preference also starts or stops the desktop watch
+    /// ([`sync_os_theme_watch`](Self::sync_os_theme_watch)).
+    pub(crate) fn sync_glyph_rendering(&mut self) -> bool {
+        self.sync_glyph_rendering_from(OsQueries::PLATFORM.font_hinting)
+    }
+
+    /// [`sync_glyph_rendering`](Self::sync_glyph_rendering), reading the
+    /// desktop's font hinting through `query`.
+    fn sync_glyph_rendering_from(&mut self, query: fn() -> Option<DesktopFontHinting>) -> bool {
+        let preference = self.glyph_rendering.get();
+        if preference != self.seen_glyph_preference {
+            self.seen_glyph_preference = preference;
+            self.sync_os_theme_watch();
+        }
+        if preference == GlyphRenderingPreference::FollowDesktop
+            && self.desktop_font_hinting.is_none()
+        {
+            self.desktop_font_hinting = Some(query());
+        }
+        let wanted = preference.resolve(self.desktop_font_hinting.flatten());
+        if wanted == self.applied_glyph_rendering {
+            return false;
+        }
+        self.applied_glyph_rendering = wanted;
+        if let Some(typesetter) = &self.typesetter {
+            typesetter.set_glyph_rendering(wanted);
+        }
+        for managed in self.windows.values_mut() {
+            managed.tree.text_metrics_changed();
+        }
+        if let Some(tree) = &mut self.app_tree {
+            tree.text_metrics_changed();
+        }
+        true
+    }
+
+    /// The rendering the shared typesetter was last given.
+    #[cfg(test)]
+    pub(crate) fn applied_glyph_rendering(&self) -> GlyphRendering {
+        self.applied_glyph_rendering
     }
 
     /// The text contrast the renderers were last given.
@@ -1733,7 +1806,10 @@ impl WindowManager {
     /// [`route_os_theme_payload`](Self::route_os_theme_payload). A no-op
     /// before the event proxy is installed, and while already in step.
     pub(crate) fn sync_os_theme_watch(&mut self) {
-        if self.theme_mode == ThemeMode::Manual {
+        // Glyph rendering that follows the desktop hears its font hinting
+        // change through the same watch.
+        let follows_desktop = self.seen_glyph_preference == GlyphRenderingPreference::FollowDesktop;
+        if self.theme_mode == ThemeMode::Manual && !follows_desktop {
             self.os_theme_watch = None;
             return;
         }
@@ -1775,7 +1851,12 @@ impl WindowManager {
         }
         let themed = self.reapply_os_theme_from(queries);
         let preferences = self.refresh_accessibility_preferences_from(queries.accessibility);
-        Ok(themed || preferences)
+        // Read the font hinting again, if anything follows it.
+        if self.seen_glyph_preference == GlyphRenderingPreference::FollowDesktop {
+            self.desktop_font_hinting = Some((queries.font_hinting)());
+        }
+        let glyphs = self.sync_glyph_rendering_from(queries.font_hinting);
+        Ok(themed || preferences || glyphs)
     }
 
     /// Read the desktop again through `queries` and give each window the
@@ -7009,6 +7090,7 @@ mod os_theme_tests {
             native_desktop,
             color_scheme,
             accessibility: AccessibilityPreferences::default,
+            font_hinting: || None,
         }
     }
 
@@ -7353,8 +7435,38 @@ mod os_theme_tests {
         WATCHES_ALIVE.with(|alive| alive.set(0));
         let mut wm = manager(ThemeMode::Manual, TargetDensity::Compact);
         wm.start_os_theme_watch = start_fake_watch;
+        // Glyph rendering fixed by the application, so only the theme mode
+        // decides the watch (see the glyph rendering test below).
+        wm.seen_glyph_preference = crate::GlyphRenderingPreference::Natural;
         wm.set_theme_mode(mode);
         wm
+    }
+
+    #[test]
+    fn glyph_rendering_that_follows_the_desktop_keeps_the_watch_under_manual() {
+        use teksilo_core::signal::Signal;
+
+        use crate::GlyphRenderingPreference;
+
+        fn slight() -> Option<teksilo_platform::font_hinting::DesktopFontHinting> {
+            Some(teksilo_platform::font_hinting::DesktopFontHinting::Slight)
+        }
+        let mut wm = watching_manager(ThemeMode::Manual);
+        assert!(wm.os_theme_watch.is_none(), "a fixed choice needs no watch");
+
+        let preference = Signal::new(GlyphRenderingPreference::FollowDesktop);
+        wm.glyph_rendering = preference.clone().into();
+        wm.sync_glyph_rendering_from(slight);
+        assert!(
+            wm.os_theme_watch.is_some(),
+            "following the desktop hears it"
+        );
+        assert_eq!(watches(), (1, 1));
+
+        preference.set(GlyphRenderingPreference::Crisp);
+        wm.sync_glyph_rendering_from(slight);
+        assert!(wm.os_theme_watch.is_none(), "a fixed choice again: stopped");
+        assert_eq!(watches(), (1, 0));
     }
 
     fn watches() -> (usize, usize) {
@@ -7446,6 +7558,67 @@ mod os_theme_tests {
             !wm.route_os_theme_payload_from(changed(), slowed)
                 .expect("taken")
         );
+    }
+
+    /// Glyph rendering follows the desktop's font hinting by default, an
+    /// application's signal overrides it, and a desktop change heard through
+    /// the watch is followed: each change reaches the shared typesetter and
+    /// asks for a redraw once.
+    #[test]
+    fn glyph_rendering_follows_the_desktop_unless_the_app_says_otherwise() {
+        use teksilo_core::signal::Signal;
+        use teksilo_platform::font_hinting::DesktopFontHinting;
+        use teksilo_text::{GlyphRendering, SharedTypesetter};
+
+        use crate::GlyphRenderingPreference;
+
+        fn full() -> Option<DesktopFontHinting> {
+            Some(DesktopFontHinting::Full)
+        }
+        fn slight() -> Option<DesktopFontHinting> {
+            Some(DesktopFontHinting::Slight)
+        }
+
+        let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
+        let typesetter = SharedTypesetter::new_with_default_font();
+        wm.typesetter = Some(typesetter.clone());
+        assert_eq!(wm.applied_glyph_rendering(), GlyphRendering::Natural);
+
+        // The default follows the desktop: full hinting is crisp.
+        let preference = Signal::new(GlyphRenderingPreference::FollowDesktop);
+        wm.glyph_rendering = preference.clone().into();
+        assert!(
+            wm.sync_glyph_rendering_from(full),
+            "the first reading applies"
+        );
+        assert_eq!(wm.applied_glyph_rendering(), GlyphRendering::Crisp);
+        assert_eq!(typesetter.glyph_rendering(), GlyphRendering::Crisp);
+        assert!(
+            !wm.sync_glyph_rendering_from(slight),
+            "read once, not every turn"
+        );
+
+        // The application's own choice wins.
+        preference.set(GlyphRenderingPreference::Natural);
+        assert!(wm.sync_glyph_rendering_from(full));
+        assert_eq!(typesetter.glyph_rendering(), GlyphRendering::Natural);
+        assert!(!wm.sync_glyph_rendering_from(full), "once");
+
+        // Back to following, then the desktop changes to slight hinting.
+        preference.set(GlyphRenderingPreference::FollowDesktop);
+        assert!(wm.sync_glyph_rendering_from(full));
+        assert_eq!(typesetter.glyph_rendering(), GlyphRendering::Crisp);
+        let queries = OsQueries {
+            font_hinting: slight,
+            ..queries(silent_desktop, says_nothing)
+        };
+        let changed: Box<dyn std::any::Any + Send> =
+            Box::new(teksilo_platform::os_theme::OsThemeChanged);
+        assert!(
+            wm.route_os_theme_payload_from(changed, queries)
+                .expect("an OS theme change")
+        );
+        assert_eq!(typesetter.glyph_rendering(), GlyphRendering::Natural);
     }
 }
 

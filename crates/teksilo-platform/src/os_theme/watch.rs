@@ -13,8 +13,9 @@
 //!   on `/org/freedesktop/portal/desktop`, for a setting of the
 //!   `org.freedesktop.appearance` namespace (colour scheme, accent colour,
 //!   contrast, reduced motion) or of an `org.kde.kdeglobals.<Group>`
-//!   namespace (KDE's palette, font and widget style); a setting of any
-//!   other namespace is not heard;
+//!   namespace (KDE's palette, font and widget style), and GNOME's
+//!   `org.gnome.desktop.interface` `font-hinting` and `font-rendering`; any
+//!   other setting is not heard;
 //! - KDE's `org.kde.KGlobalSettings.notifyChange` on `/KGlobalSettings`;
 //! - KDE's `org.kde.kconfig.notify.ConfigChanged` on `/kdeglobals` and on
 //!   `/breezerc`, sent when either file is written.
@@ -195,12 +196,18 @@ impl OsThemeWatch {
 // ── Signals ─────────────────────────────────────────────────────────────────
 
 /// Whether a signal with this interface, member and object path is one the
-/// watch acts on. `namespace` is the first argument of a portal
-/// `SettingChanged`, `None` when it could not be read.
-fn signal_matters(interface: &str, member: &str, path: &str, namespace: Option<&str>) -> bool {
+/// watch acts on. `setting` is the namespace and key of a portal
+/// `SettingChanged` (its first two arguments), `None` when they could not be
+/// read.
+fn signal_matters(
+    interface: &str,
+    member: &str,
+    path: &str,
+    setting: Option<(&str, &str)>,
+) -> bool {
     match (interface, member, path) {
         (PORTAL_SETTINGS, SETTING_CHANGED, PORTAL_PATH) => {
-            namespace.is_some_and(portal_namespace_matters)
+            setting.is_some_and(|(namespace, key)| portal_setting_matters(namespace, key))
         }
         (GLOBAL_SETTINGS, NOTIFY_CHANGE, GLOBAL_SETTINGS_PATH) => true,
         (KCONFIG_NOTIFY, CONFIG_CHANGED, KDEGLOBALS_PATH | BREEZERC_PATH) => true,
@@ -208,12 +215,15 @@ fn signal_matters(interface: &str, member: &str, path: &str, namespace: Option<&
     }
 }
 
-/// Whether a portal setting of `namespace` can change the theme or the
-/// animation speed: `org.freedesktop.appearance`, and the
-/// `org.kde.kdeglobals.<Group>` namespaces KDE's portal serves `kdeglobals`
-/// under.
-fn portal_namespace_matters(namespace: &str) -> bool {
+/// Whether the portal setting `key` of `namespace` can change the theme, the
+/// animation speed or the font hinting: every key of
+/// `org.freedesktop.appearance` and of the `org.kde.kdeglobals.<Group>`
+/// namespaces KDE's portal serves `kdeglobals` under, and GNOME's
+/// `font-hinting` and `font-rendering` (see [`crate::font_hinting`]).
+fn portal_setting_matters(namespace: &str, key: &str) -> bool {
     namespace == "org.freedesktop.appearance"
+        || (namespace == "org.gnome.desktop.interface"
+            && matches!(key, "font-hinting" | "font-rendering"))
         || namespace
             .strip_prefix("org.kde.kdeglobals.")
             .is_some_and(|group| !group.is_empty())

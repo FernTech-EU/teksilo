@@ -2362,6 +2362,9 @@ impl TeksiloAppHandler {
         // A text contrast bound to a signal a handler has just set: nothing
         // in any tree changed, so only this says the windows need drawing.
         redraw_all |= self.wm.sync_text_contrast();
+        // A glyph rendering bound to a signal a handler has just set: the
+        // trees are marked for layout, and the windows must be drawn again.
+        redraw_all |= self.wm.sync_glyph_rendering();
         if redraw_all {
             if let Some(trace) = &mut self.idle_trace {
                 trace.note_request_redraw_all();
@@ -6112,6 +6115,7 @@ pub struct TeksiloAppBuilder {
     native_theme: Option<crate::native_theme::NativeThemeFactory>,
     pen_batching: teksilo_platform::PenBatching,
     text_contrast: Prop<teksilo_render::TextContrast>,
+    glyph_rendering: Prop<crate::GlyphRenderingPreference>,
     typesetter: Option<SharedTypesetter>,
     font_registrars: Vec<Box<dyn teksilo_text::FontRegistrar>>,
     app_event_handler: Option<Box<dyn FnMut(&AppEvent)>>,
@@ -6198,6 +6202,7 @@ impl TeksiloAppBuilder {
             native_theme: None,
             pen_batching: teksilo_platform::PenBatching::default(),
             text_contrast: Prop::Static(teksilo_render::TextContrast::DEFAULT),
+            glyph_rendering: Prop::Static(crate::GlyphRenderingPreference::FollowDesktop),
             typesetter: None,
             font_registrars: Vec::new(),
             app_event_handler: None,
@@ -6669,6 +6674,36 @@ impl TeksiloAppBuilder {
         text_contrast: impl Into<Prop<teksilo_render::TextContrast>>,
     ) -> Self {
         self.text_contrast = text_contrast.into();
+        self
+    }
+
+    /// How text is fitted to the pixel grid, in every window: natural (the
+    /// font's exact spacing, as browsers and macOS draw it) or crisp (glyphs
+    /// on whole pixels, hinted on both axes, laid out with whole-pixel
+    /// widths, as Windows' classic rendering and FreeType's full hinting
+    /// draw it). See [`GlyphRenderingPreference`](crate::GlyphRenderingPreference).
+    ///
+    /// The default, [`FollowDesktop`](crate::GlyphRenderingPreference::FollowDesktop),
+    /// is crisp where the user asked the desktop for medium or full hinting
+    /// (KDE Plasma's font settings, GNOME's font hinting under manual font
+    /// rendering) and natural elsewhere, and follows a change made while the
+    /// application runs. Pass a [`Signal`](teksilo_core::signal::Signal) to
+    /// let a preference of the application's own override it at run time:
+    /// every window is laid out and drawn again at the end of the turn that
+    /// set it.
+    ///
+    /// ```ignore
+    /// let rendering = Signal::new(GlyphRenderingPreference::FollowDesktop);
+    /// TeksiloAppBuilder::new()
+    ///     .glyph_rendering(rendering.clone())
+    ///     .app_state(rendering) // for the preference dialog to set
+    ///     .run();
+    /// ```
+    pub fn glyph_rendering(
+        mut self,
+        preference: impl Into<Prop<crate::GlyphRenderingPreference>>,
+    ) -> Self {
+        self.glyph_rendering = preference.into();
         self
     }
 
@@ -7587,6 +7622,7 @@ impl TeksiloAppBuilder {
         // parameter list.
         app.wm.set_pen_batching(self.pen_batching);
         app.wm.set_text_contrast(self.text_contrast);
+        app.wm.set_glyph_rendering(self.glyph_rendering);
         app.wm.set_native_theme(self.native_theme);
         app.wm.set_records_announcements(self.records_announcements);
         app.wm.set_app_quit_guard(self.quit_guard);

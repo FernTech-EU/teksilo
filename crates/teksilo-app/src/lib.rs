@@ -9,6 +9,7 @@ pub(crate) mod application_menu;
 pub mod automation_bridge;
 pub(crate) mod cross_window;
 pub mod default_post_root;
+pub(crate) mod glyph_rendering;
 pub(crate) mod input_loop;
 pub(crate) mod input_routing;
 pub(crate) mod intent_routing;
@@ -33,8 +34,10 @@ pub use app_event_observers::AppEventObservers;
 #[cfg(feature = "automation")]
 pub use automation_bridge::TeksiloAppBuilderAutomationExt;
 pub use default_post_root::DefaultPostRoot;
+pub use glyph_rendering::GlyphRenderingPreference;
 pub use native_theme::{NativeThemeFactory, NativeThemeRequest, resolve_native_theme};
 pub use teksilo_render::TextContrast;
+pub use teksilo_text::GlyphRendering;
 pub use termination_watch::{TerminationSignalKind, TerminationWatch};
 pub use window_config::{
     ModalConfig, PostRootBuilder, RootBuilder, TeksiloWindowId, WindowConfig,

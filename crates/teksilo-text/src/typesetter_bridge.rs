@@ -394,6 +394,18 @@ impl TypesetterBridge {
         }
     }
 
+    /// Set how glyphs are fitted to the pixel grid (see
+    /// [`GlyphRendering`](text_typeset::GlyphRendering)). A change drops the
+    /// label layouts cached here and marks every rich-text layout of the
+    /// service stale, as the advances text is laid out with change with it.
+    pub fn set_glyph_rendering(&mut self, rendering: text_typeset::GlyphRendering) {
+        let generation = self.service.scale_generation();
+        self.service.set_glyph_rendering(rendering);
+        if self.service.scale_generation() != generation {
+            self.clear_layout_caches();
+        }
+    }
+
     /// Get atlas information for GPU upload.
     ///
     /// Only advances the glyph cache generation and runs eviction
