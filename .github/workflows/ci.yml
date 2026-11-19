@@ -306,7 +306,10 @@ jobs:
           - name: mac
             os: macos-latest
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # The macOS job took 57 min 43 s for v0.27.0 and was cut at 60 min for
+    # v0.28.0, in its last step, once the single-instance lint and tests
+    # were added.
+    timeout-minutes: 90
     env:
       # WARP on Windows, Metal on macOS. A GPU test fails if neither opens,
       # instead of returning early and counting as a pass.
