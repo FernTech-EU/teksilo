@@ -274,7 +274,13 @@ jobs:
           Xvfb :99 -screen 0 1280x1024x24 &
           for _ in $(seq 1 50); do xdpyinfo -display :99 >/dev/null 2>&1 && break; sleep 0.2; done
           openbox &
-          sleep 1
+          # Wait until openbox has claimed the screen: a fixed `sleep 1` lost
+          # the race on a slow runner (the v0.28.0 tag run), and every EWMH
+          # assertion then failed with no window manager.
+          for _ in $(seq 1 100); do
+            xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 'window id' && break
+            sleep 0.1
+          done
           xprop -root _NET_SUPPORTING_WM_CHECK
           # WAYLAND_DISPLAY must be empty so Teksilo's window-system detection
           # (which mirrors winit's precedence) resolves to X11.
