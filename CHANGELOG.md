@@ -13,6 +13,8 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-21
+
 ### Fixed
 
 #### Widgets
@@ -7914,7 +7916,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.28.1...HEAD
+[0.28.1]: https://github.com/FernTech-EU/teksilo/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/FernTech-EU/teksilo/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/FernTech-EU/teksilo/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/FernTech-EU/teksilo/compare/v0.25.0...v0.26.0
