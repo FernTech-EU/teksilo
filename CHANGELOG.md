@@ -13,6 +13,19 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Widgets
+
+- **An inline image no longer runs past its line.** In a rich text editor or
+  a text view, a picture wider than its paragraph's measure is laid out and
+  drawn at that measure, its height in proportion, so the line, the
+  selection, the caret, the hit test and the resize grip all use the size
+  that is drawn. The measure is the paragraph's own: a list item, a
+  quotation or a table cell is narrower. The size the document stores is
+  unchanged, so a wider window shows the picture larger again
+  (text-typeset 3.4.1).
+
 ## [0.28.0] - 2026-11-19
 
 ### Added
