@@ -13,6 +13,42 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Widgets
+
+- **A rich text editor can fade everything but the sentence or paragraph the
+  caret is in (`RichTextEditor::set_caret_dim`, `EditorHandle::set_caret_dim`).**
+  The writing-comfort "focus" effect of iA Writer and Ulysses: a
+  `caret_dim::CaretDim` names the unit kept at full strength (the same
+  `CaretHighlightScope` the caret band uses, so the two combine), how much of
+  the rest remains, and the text's language for the sentence scope. The rest
+  of the text is mixed toward the page it sits on (the editor's background,
+  else the theme's `Content` surface) in sRGB, so one strength looks the same
+  on a light and a dark theme, and the writer's own colours stay recognisable;
+  inline images and colour emoji fade by opacity, and list markers,
+  underlines and spell-check squiggles fade with their text, while
+  backgrounds (the caret band among them), the caret and the selection keep
+  their strength. Like the band it shows only while the editor has focus and
+  no selection is up; editors that share a `CaretDimPage` (a manuscript shown
+  as a stream of scenes, a synopsis above its text) fade whole while another
+  of them is being written in. Unlike
+  the band it never touches the document: it is drawn by the editor's own
+  typesetter (text-typeset's `DimOutside`), so two views of one document each
+  fade around their own caret, and a caret move redraws only the block the
+  bright range moved in, with no relayout. In an empty paragraph everything
+  else fades.
+
+### Fixed
+
+#### Widgets
+
+- **The caret band steps aside for a cell selection made from the caret.**
+  Shift+Right at the end of a table cell selects cells without moving the
+  caret, so the editor saw no selection and the band stayed on under the
+  selected cells. It now goes away for a cell selection as it does for a text
+  selection.
+
 ## [0.28.1] - 2026-11-21
 
 ### Fixed

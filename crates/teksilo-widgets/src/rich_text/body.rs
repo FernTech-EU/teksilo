@@ -290,6 +290,17 @@ impl Widget for RichTextEditorBody {
             );
         }
 
+        // A view-only change to how the text is drawn (the caret fade) edits
+        // nothing and moves nothing, so none of the signals above notices it.
+        {
+            let version = self.state.borrow().paint_version.clone();
+            version.bind_to(
+                ctx.self_id(),
+                ctx.binding_registry(),
+                teksilo_core::binding::BindingLevel::RepaintOnly,
+            );
+        }
+
         // The description says how to leave the editor, which depends on the
         // command filter and the Tab key mode. Neither changes the document,
         // so a change of either is told to the walk through its own signal.
@@ -689,6 +700,33 @@ impl Widget for RichTextEditorBody {
         };
         let cursor_display = st.cursor_display(caret_on_now);
         st.engine.set_cursor(&cursor_display);
+
+        // The fade around the caret, resolved from the live caret every paint (cached unless
+        // the caret, the text, focus or the selection changed). The typesetter compares it with
+        // what its cached quads were built with, so whichever render path is chosen below
+        // redraws exactly what moved. Off while unfocused or selecting: see `caret_dim`.
+        //
+        // Faded toward the page the text sits on, resolved like the text colour above, so a
+        // theme switch reaches it too: the editor's own background when the app set an opaque
+        // one, else the `Content` surface every editor style paints by default. Mixing toward
+        // that colour, rather than lowering alpha, is what makes one strength look the same on
+        // a light and a dark page (see `DimOutside`).
+        let dim = st.caret_dim.as_ref().and_then(|resolver| {
+            resolver.range(
+                st.cursor.position(),
+                st.has_focus,
+                // A cell selection made from a collapsed caret (Shift+Right at a cell's end)
+                // leaves the caret where it was, so `has_selection` alone misses it.
+                st.cursor.has_selection() || st.cursor.is_cell_selection(),
+            )
+        });
+        let page = st
+            .background_prop
+            .as_ref()
+            .map(|prop| prop.resolve(ctx.theme, true).to_array())
+            .filter(|color| color[3] >= 1.0)
+            .unwrap_or_else(|| ctx.theme.colors.surface_content.to_array());
+        st.engine.set_dim_outside(dim.map(|d| d.toward(page)));
 
         // Forward the widget's scroll state to the typesetter so
         // viewport culling knows where the visible window is. text-

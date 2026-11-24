@@ -29,9 +29,9 @@ pub use typography_defaults::EditorTypographyDefaults;
 
 pub use text_typeset::{
     BlockVisualInfo, CharacterGeometry, CursorAffinity, CursorDisplay,
-    DecorationKind as TypesetterDecorationKind, DecorationRect, FontFaceId, FontFamilyInfo,
-    GlyphQuad as TypesetterGlyphQuad, HitRegion, HitTestResult, ImageQuad, RelayoutError,
-    RenderFrame, TableVisualInfo, TextDirection, TextFontService, WritingSystem,
+    DecorationKind as TypesetterDecorationKind, DecorationRect, DimOutside, FontFaceId,
+    FontFamilyInfo, GlyphQuad as TypesetterGlyphQuad, HitRegion, HitTestResult, ImageQuad,
+    RelayoutError, RenderFrame, TableVisualInfo, TextDirection, TextFontService, WritingSystem,
     WritingSystemIndexBuilder, WritingSystemSet, resolve_paragraph_direction,
 };
 

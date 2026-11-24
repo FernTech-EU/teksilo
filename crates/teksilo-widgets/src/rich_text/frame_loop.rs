@@ -63,8 +63,10 @@ pub(crate) fn catch_up_layout(state: &mut EditorState) -> bool {
     if state.caret_highlight.is_some() {
         // A selection suppresses the band as surely as losing focus does: it already says where
         // the writer is, more precisely, and the band would otherwise chase the selection's
-        // moving end from sentence to sentence underneath it.
-        let active = state.has_focus && !state.cursor.has_selection();
+        // moving end from sentence to sentence underneath it. A cell selection counts too, even
+        // one made from a collapsed caret (Shift+Right at a cell's end), which does not move it.
+        let active =
+            state.has_focus && !(state.cursor.has_selection() || state.cursor.is_cell_selection());
         let caret = state.cursor.position();
         let band = state.caret_highlight.as_ref().expect("checked above");
         let mut changed = false;

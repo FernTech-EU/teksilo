@@ -790,6 +790,21 @@ impl RichTextEngine {
         self.flow.set_cursor(cursor);
     }
 
+    /// Keep one range of the text at full strength and fade the rest, or
+    /// `None` to draw everything normally. A property of this view only.
+    ///
+    /// Cheap to call on every paint: nothing is relaid out, and the
+    /// incremental render paths redraw exactly what a changed range touches.
+    /// See [`text_typeset::DimOutside`].
+    pub fn set_dim_outside(&mut self, dim: Option<text_typeset::DimOutside>) {
+        self.flow.set_dim_outside(dim);
+    }
+
+    /// The range currently kept bright, if any.
+    pub fn dim_outside(&self) -> Option<text_typeset::DimOutside> {
+        self.flow.dim_outside()
+    }
+
     /// Show several carets at once (multi-caret editing).
     ///
     /// Replaces the whole cursor set, so pass every caret each time — a lone

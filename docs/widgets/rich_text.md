@@ -187,6 +187,8 @@ Rich text editor and viewer widget.
 | `policy::CommandFilter` | [`command_filter()`](#richtexteditor-command_filter) |
 |  | [`set_caret_highlight(highlight: Option<caret_highlight::CaretHighlight>)`](#richtexteditor-set_caret_highlight) |
 | `Option<caret_highlight::CaretHighlight>` | [`get_caret_highlight()`](#richtexteditor-get_caret_highlight) |
+|  | [`set_caret_dim(dim: Option<caret_dim::CaretDim>)`](#richtexteditor-set_caret_dim) |
+| `Option<caret_dim::CaretDim>` | [`get_caret_dim()`](#richtexteditor-get_caret_dim) |
 | `Option<teksilo_canvas::Rect>` | [`caret_window_rect()`](#richtexteditor-caret_window_rect) |
 | `Signal<u64>` | [`format_version()`](#richtexteditor-format_version) |
 | `Signal<u64>` | [`document_loaded_count()`](#richtexteditor-document_loaded_count) |
@@ -244,6 +246,8 @@ Rich text editor and viewer widget.
 |  | [`set_tab_key(tab_key: TabKey)`](#editorhandle-set_tab_key) |
 |  | [`set_caret_highlight(highlight: Option<caret_highlight::CaretHighlight>)`](#editorhandle-set_caret_highlight) |
 | `Option<caret_highlight::CaretHighlight>` | [`get_caret_highlight()`](#editorhandle-get_caret_highlight) |
+|  | [`set_caret_dim(dim: Option<caret_dim::CaretDim>)`](#editorhandle-set_caret_dim) |
+| `Option<caret_dim::CaretDim>` | [`get_caret_dim()`](#editorhandle-get_caret_dim) |
 | `Option<teksilo_canvas::Rect>` | [`caret_window_rect()`](#editorhandle-caret_window_rect) |
 |  | [`apply_text_format(fmt: TextFormat)`](#editorhandle-apply_text_format) |
 |  | [`toggle_bold()`](#editorhandle-toggle_bold) |
@@ -2090,6 +2094,23 @@ or it will force a reshape on every caret move.
 
 What this editor's caret band is currently configured to draw.
 
+<a id="richtexteditor-set_caret_dim"></a>
+
+#### `pub fn set_caret_dim(&self, dim: Option<caret_dim::CaretDim>)`
+
+Fade every part of the text but the sentence, or paragraph, the caret is in.
+
+`None` (the default) fades nothing. The fade belongs to this editor alone: it is drawn by
+this view's typesetter and never written to the document, so another view of the same
+text is untouched. Like the caret band it shows only while this editor has focus and no
+selection is up.
+
+<a id="richtexteditor-get_caret_dim"></a>
+
+#### `pub fn get_caret_dim(&self) -> Option<caret_dim::CaretDim>`
+
+What this editor is currently configured to fade.
+
 <a id="richtexteditor-caret_window_rect"></a>
 
 #### `pub fn caret_window_rect(&self) -> Option<teksilo_canvas::Rect>`
@@ -2839,6 +2860,20 @@ settings or theme effect after the editor is mounted.
 #### `pub fn get_caret_highlight(&self) -> Option<caret_highlight::CaretHighlight>`
 
 What this editor's caret band is currently configured to draw.
+
+<a id="editorhandle-set_caret_dim"></a>
+
+#### `pub fn set_caret_dim(&self, dim: Option<caret_dim::CaretDim>)`
+
+Fade every part of the text but the caret's sentence or paragraph: the `EditorHandle`
+counterpart of `RichTextEditor::set_caret_dim`, for hosts that re-push it from a
+settings effect after the editor is mounted.
+
+<a id="editorhandle-get_caret_dim"></a>
+
+#### `pub fn get_caret_dim(&self) -> Option<caret_dim::CaretDim>`
+
+What this editor is currently configured to fade.
 
 <a id="editorhandle-caret_window_rect"></a>
 

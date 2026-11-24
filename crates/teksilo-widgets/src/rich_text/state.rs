@@ -24,6 +24,7 @@ use teksilo_text::text_document::{
 use teksilo_text::{CursorAffinity, RichTextEngine, WrapMode};
 use teksilo_tokens::OverscrollStyle;
 
+use super::caret_dim::CaretDimResolver;
 use super::caret_highlight::CaretHighlightSession;
 
 /// One annotation (a comment thread) covering `[start, end)` of the document, in
@@ -257,6 +258,9 @@ pub(crate) struct EditorState {
     /// computes it. Tracked here so a change is noticed without the focus or selection paths
     /// having to know the band exists.
     pub caret_highlight_active: bool,
+    /// This view's fade around the caret, when the host asked for one. `None`, the default,
+    /// costs nothing. Per view only: it never touches the document. See `caret_dim`.
+    pub caret_dim: Option<CaretDimResolver>,
 
     // Wrap mode as configured by the builder.
     pub wrap_mode: WrapMode,
@@ -653,6 +657,14 @@ pub(crate) struct EditorState {
     /// width and `document_version`, which means the document changed, stays.
     pub typesetting_version: Signal<u64>,
 
+    /// Bumped by every change to how this view **draws** the text that neither
+    /// edits the document nor moves its layout: today, the caret fade (see
+    /// [`bump_paint`](Self::bump_paint)). The body binds it at `RepaintOnly`.
+    /// Without it such a change would wait for an unrelated repaint, since the
+    /// signals the body already watches (the document, the caret, the scroll)
+    /// all stay put.
+    pub paint_version: Signal<u64>,
+
     /// Whether the caret was last placed by the **pointer**. While set, the
     /// typewriter pin stands down and the click position becomes the new
     /// resting place; the next keystroke clears it and pinning resumes.
@@ -1015,6 +1027,13 @@ impl EditorState {
         self.typesetting_version.set(v.wrapping_add(1));
     }
 
+    /// Ask for a repaint of this view after a change only its paint pass
+    /// reads (see [`paint_version`](Self::paint_version)).
+    pub(crate) fn bump_paint(&self) {
+        let v = self.paint_version.get();
+        self.paint_version.set(v.wrapping_add(1));
+    }
+
     pub fn new(
         document: TextDocument,
         engine: RichTextEngine,
@@ -1089,6 +1108,7 @@ impl EditorState {
             pending_recolor_range: None,
             caret_highlight: None,
             caret_highlight_active: false,
+            caret_dim: None,
             wrap_mode,
             show_highlights: true,
             show_transient_edits: false,
@@ -1149,6 +1169,7 @@ impl EditorState {
             tab_key: crate::common::editor_runtime::TabKey::Edit,
             a11y_policy_version: Signal::new(0),
             typesetting_version: Signal::new(0),
+            paint_version: Signal::new(0),
             mouse_anchored: false,
             last_ime_area: None,
             // `Debounce::new` starts already-expired so the first tick

@@ -68,6 +68,7 @@
 //! surface's own boundary. See `docs/kinetic-scrolling.md` §10.1.
 
 mod body;
+pub mod caret_dim;
 pub mod caret_highlight;
 mod clipboard;
 mod context_menu;
@@ -2360,6 +2361,21 @@ impl RichTextEditor {
             .and_then(|s| s.config())
     }
 
+    /// Fade every part of the text but the sentence, or paragraph, the caret is in.
+    ///
+    /// `None` (the default) fades nothing. The fade belongs to this editor alone: it is drawn by
+    /// this view's typesetter and never written to the document, so another view of the same
+    /// text is untouched. Like the caret band it shows only while this editor has focus and no
+    /// selection is up.
+    pub fn set_caret_dim(&self, dim: Option<caret_dim::CaretDim>) {
+        set_caret_dim(&self.state, dim);
+    }
+
+    /// What this editor is currently configured to fade.
+    pub fn get_caret_dim(&self) -> Option<caret_dim::CaretDim> {
+        self.state.borrow().caret_dim.as_ref().map(|r| r.config())
+    }
+
     /// The caret's rectangle in **absolute window (tree) coordinates**, or
     /// `None` when the editor is unfocused or has not been laid out yet.
     ///
@@ -3393,6 +3409,18 @@ impl EditorHandle {
             .and_then(|s| s.config())
     }
 
+    /// Fade every part of the text but the caret's sentence or paragraph: the [`EditorHandle`]
+    /// counterpart of [`RichTextEditor::set_caret_dim`], for hosts that re-push it from a
+    /// settings effect after the editor is mounted.
+    pub fn set_caret_dim(&self, dim: Option<caret_dim::CaretDim>) {
+        set_caret_dim(&self.state, dim);
+    }
+
+    /// What this editor is currently configured to fade.
+    pub fn get_caret_dim(&self) -> Option<caret_dim::CaretDim> {
+        self.state.borrow().caret_dim.as_ref().map(|r| r.config())
+    }
+
     /// The caret's rectangle in **absolute window (tree) coordinates** — the
     /// [`EditorHandle`] counterpart of [`RichTextEditor::caret_window_rect`].
     /// `None` when unfocused or not yet laid out.
@@ -4137,6 +4165,10 @@ impl Widget for RichTextEditor {
             let mut st = self.state.borrow_mut();
             st.frame_request = Some(ctx.frame_request_handle());
             st.frame_wake_at = Some(ctx.wake_at_handle());
+            // A fade pushed before the editor was mounted has had no flag to wake the tree with.
+            if let Some(resolver) = &st.caret_dim {
+                resolver.set_frame_request(st.frame_request.clone());
+            }
             // Remember this build's wrapper id — the `.focusable(true)` node — so a
             // held handle can request focus back onto the editor.
             st.self_id = Some(ctx.self_id());
@@ -4220,6 +4252,13 @@ impl Widget for RichTextEditor {
                     band.set_active(false);
                 }
                 st.caret_highlight_active = false;
+                // And leave the page of the fade around the caret, if this editor was the one
+                // being written in: a parked editor never paints, so it would never note the
+                // loss itself, and the rest of its page would stay faded with nobody writing.
+                // This wakes the members still on screen, not this one.
+                if let Some(resolver) = &st.caret_dim {
+                    resolver.note_focus(false);
+                }
                 // Do not re-arm frame_request here: a dormant editor has
                 // nothing to paint, and re-arming is exactly the leak
                 // this gate exists to stop.
@@ -4459,6 +4498,12 @@ impl Widget for RichTextEditor {
                     if gained && matches!(st.policy.caret_policy, CaretPolicy::Blinking) {
                         st.blink.restart();
                         st.caret_visible.set(true);
+                    }
+                    // Tell the page of the fade around the caret now, before anything paints:
+                    // see `caret_dim` for the frame where an editor above this one would
+                    // otherwise show plainly. Its watchers only touch other editors' signals.
+                    if let Some(resolver) = &st.caret_dim {
+                        resolver.note_focus(gained);
                     }
                     drop(st);
                     if ended_link_stop {
@@ -5099,6 +5144,41 @@ fn set_caret_highlight(state: &SharedState, highlight: Option<caret_highlight::C
     // Same poke `set_typography_defaults` / `set_font_size_scale` make, for the same reason:
     // these are the ctx-less setters a host calls from a settings or theme effect.
     st.content_dirty = true;
+    if let Some(handle) = &st.frame_request {
+        handle.set(true);
+    }
+}
+
+/// Set (or clear) an editor's fade around the caret. Shared by
+/// [`RichTextEditor::set_caret_dim`] and its [`EditorHandle`] mirror.
+///
+/// The resolver (and its document subscription) exists only while the fade is on, so an editor
+/// that never asks for one subscribes to nothing.
+fn set_caret_dim(state: &SharedState, dim: Option<caret_dim::CaretDim>) {
+    let mut st = state.borrow_mut();
+    match (&st.caret_dim, dim) {
+        (None, None) => return,
+        (None, Some(dim)) => {
+            st.caret_dim = Some(caret_dim::CaretDimResolver::new(
+                &st.document,
+                dim,
+                st.paint_version.clone(),
+                st.frame_request.clone(),
+            ));
+        }
+        (Some(_), None) => st.caret_dim = None,
+        // A host re-pushes the whole value whenever any of its inputs moves, so the same value
+        // arriving again is common (one effect per input, each firing on registration) and must
+        // not cost a repaint.
+        (Some(resolver), Some(dim)) if resolver.config() == dim => return,
+        (Some(resolver), Some(dim)) => resolver.set_config(dim),
+    }
+    // The range is resolved and handed to the typesetter in the paint pass, and nothing the
+    // body already watches changed (the fade writes nothing to the document), so ask for that
+    // paint explicitly. Without it an idle editor would stay configured but unfaded until some
+    // unrelated repaint, a caret blink for instance.
+    st.content_dirty = true;
+    st.bump_paint();
     if let Some(handle) = &st.frame_request {
         handle.set(true);
     }

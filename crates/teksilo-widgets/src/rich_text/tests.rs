@@ -11701,3 +11701,708 @@ fn the_rich_editors_hint_comes_before_a_described_by_text() {
         "{description:?}"
     );
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// The fade around the caret, through a mounted editor
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+mod caret_dim {
+    use super::caret_band::{Mounted, mounted};
+    use super::*;
+    use crate::rich_text::caret_dim::CaretDim;
+    use crate::rich_text::caret_highlight::CaretHighlightScope;
+    use teksilo_core::event::{Key, Modifiers};
+
+    const FADE: f32 = 0.4;
+
+    fn dim(scope: CaretHighlightScope) -> CaretDim {
+        CaretDim {
+            scope,
+            opacity: FADE,
+            content_locale: Some("en".into()),
+            page: None,
+        }
+    }
+
+    /// The colour a glyph faded to `opacity` is drawn in: the full colour mixed toward the page
+    /// (the theme's `Content` surface, which an editor with no background of its own sits on)
+    /// in sRGB, alpha kept.
+    fn faded(tree: &WidgetTree, full: [f32; 4], opacity: f32) -> [f32; 4] {
+        let page = tree.theme().colors.surface_content.to_array();
+        let mix = |ink: f32, paper: f32| ink * opacity + paper * (1.0 - opacity);
+        [
+            mix(full[0], page[0]),
+            mix(full[1], page[1]),
+            mix(full[2], page[2]),
+            full[3],
+        ]
+    }
+
+    fn same(a: [f32; 4], b: [f32; 4]) -> bool {
+        a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() < 1e-3)
+    }
+
+    /// How many painted glyphs are at full strength and how many are faded, relative to the
+    /// theme's own text colour (read off the frame before anything is faded).
+    fn split(tree: &mut WidgetTree, full: [f32; 4]) -> (usize, usize) {
+        let dim = faded(tree, full, FADE);
+        let frame = tree.render();
+        let bright = frame.glyphs.iter().filter(|g| same(g.color, full)).count();
+        let faded = frame.glyphs.iter().filter(|g| same(g.color, dim)).count();
+        assert_eq!(
+            bright + faded,
+            frame.glyphs.len(),
+            "every glyph is either bright or faded"
+        );
+        (bright, faded)
+    }
+
+    fn text_color(tree: &mut WidgetTree) -> [f32; 4] {
+        let frame = tree.render();
+        frame.glyphs.first().expect("glyphs painted").color
+    }
+
+    /// Spaces paint nothing, so the counts below are of visible characters.
+    fn ink(text: &str) -> usize {
+        text.chars().filter(|c| !c.is_whitespace()).count()
+    }
+
+    #[test]
+    fn nothing_fades_until_it_is_asked_for() {
+        let Mounted {
+            mut tree, state, ..
+        } = mounted("First paragraph.\nSecond one.");
+        let full = text_color(&mut tree);
+        assert_eq!(
+            split(&mut tree, full),
+            (ink("First paragraph.Second one."), 0)
+        );
+        assert!(
+            state.borrow().caret_dim.is_none(),
+            "and nothing is subscribed"
+        );
+    }
+
+    /// An editor given its own opaque background fades toward that colour, not the theme's
+    /// surface: the page the text actually sits on is what the faded ink must blend into.
+    #[test]
+    fn the_fade_mixes_toward_the_editors_own_background() {
+        let sepia = teksilo_tokens::Color::new(0.93, 0.87, 0.74, 1.0);
+        let doc = TextDocument::new();
+        doc.set_plain_text("First paragraph.\nSecond one.").unwrap();
+        let editor = RichTextEditor::editor(doc).background(sepia);
+        let handle = editor.handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(id);
+        tick_once(&mut tree);
+        let full = text_color(&mut tree);
+
+        handle.select_range(20, 20);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Paragraph)));
+        tick_once(&mut tree);
+        let page = sepia.to_array();
+        let mix = |ink: f32, paper: f32| ink * FADE + paper * (1.0 - FADE);
+        let want = [
+            mix(full[0], page[0]),
+            mix(full[1], page[1]),
+            mix(full[2], page[2]),
+            full[3],
+        ];
+        let frame = tree.render();
+        let toward_sepia = frame.glyphs.iter().filter(|g| same(g.color, want)).count();
+        assert_eq!(toward_sepia, ink("First paragraph."));
+    }
+
+    #[test]
+    fn the_caret_paragraph_stays_bright_and_the_rest_fades() {
+        let Mounted {
+            mut tree, handle, ..
+        } = mounted("First paragraph.\nSecond one.");
+        let full = text_color(&mut tree);
+        handle.select_range(20, 20);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Paragraph)));
+        tick_once(&mut tree);
+        assert_eq!(
+            split(&mut tree, full),
+            (ink("Second one."), ink("First paragraph."))
+        );
+    }
+
+    #[test]
+    fn the_sentence_scope_keeps_only_the_caret_sentence() {
+        let Mounted {
+            mut tree, handle, ..
+        } = mounted("One is first. Two is second.");
+        let full = text_color(&mut tree);
+        handle.select_range(16, 16);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Sentence)));
+        tick_once(&mut tree);
+        assert_eq!(
+            split(&mut tree, full),
+            (ink("Two is second."), ink("One is first."))
+        );
+    }
+
+    /// A caret move alone repaints through the cursor-only path, which reuses cached quads.
+    /// The fade must still follow.
+    #[test]
+    fn the_fade_follows_the_caret() {
+        let Mounted {
+            mut tree, handle, ..
+        } = mounted("One is first. Two is second.\nAnother paragraph.");
+        let full = text_color(&mut tree);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Sentence)));
+        handle.select_range(2, 2);
+        tick_once(&mut tree);
+        assert_eq!(split(&mut tree, full).0, ink("One is first."));
+
+        handle.select_range(16, 16);
+        tick_once(&mut tree);
+        assert_eq!(split(&mut tree, full).0, ink("Two is second."));
+
+        handle.select_range(35, 35);
+        tick_once(&mut tree);
+        assert_eq!(split(&mut tree, full).0, ink("Another paragraph."));
+    }
+
+    #[test]
+    fn typing_in_the_bright_paragraph_keeps_the_new_text_bright() {
+        let Mounted {
+            mut tree, handle, ..
+        } = mounted("Hello\nWorld");
+        let full = text_color(&mut tree);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Paragraph)));
+        handle.select_range(5, 5);
+        tick_once(&mut tree);
+        assert_eq!(split(&mut tree, full), (ink("Hello"), ink("World")));
+
+        press_char(&mut tree, 's');
+        tick_once(&mut tree);
+        assert_eq!(split(&mut tree, full), (ink("Hellos"), ink("World")));
+
+        press_key(
+            &mut tree,
+            teksilo_core::event::Key::Backspace,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        press_key(
+            &mut tree,
+            teksilo_core::event::Key::Backspace,
+            teksilo_core::event::Modifiers::NONE,
+        );
+        tick_once(&mut tree);
+        assert_eq!(split(&mut tree, full), (ink("Hell"), ink("World")));
+    }
+
+    /// An empty paragraph has nothing to keep bright, but the rest still fades: the writer is
+    /// starting a new paragraph and wants the old ones out of the way.
+    #[test]
+    fn an_empty_paragraph_fades_everything_else() {
+        let Mounted {
+            mut tree, handle, ..
+        } = mounted("Before.\n\nAfter.");
+        let full = text_color(&mut tree);
+        handle.select_range(8, 8);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Sentence)));
+        tick_once(&mut tree);
+        assert_eq!(split(&mut tree, full), (0, ink("Before.After.")));
+    }
+
+    #[test]
+    fn a_selection_lifts_the_fade() {
+        let Mounted {
+            mut tree, handle, ..
+        } = mounted("One is first. Two is second.");
+        let full = text_color(&mut tree);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Sentence)));
+        handle.select_range(16, 16);
+        tick_once(&mut tree);
+        assert!(split(&mut tree, full).1 > 0);
+
+        handle.select_range(0, 20);
+        tick_once(&mut tree);
+        assert_eq!(
+            split(&mut tree, full).1,
+            0,
+            "nothing fades under a selection"
+        );
+    }
+
+    #[test]
+    fn clearing_it_brings_everything_back() {
+        let Mounted {
+            mut tree, handle, ..
+        } = mounted("First.\nSecond.");
+        let full = text_color(&mut tree);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Paragraph)));
+        tick_once(&mut tree);
+        assert!(split(&mut tree, full).1 > 0);
+
+        handle.set_caret_dim(None);
+        tick_once(&mut tree);
+        assert_eq!(split(&mut tree, full).1, 0);
+        assert_eq!(handle.get_caret_dim(), None);
+    }
+
+    #[test]
+    fn a_new_strength_reaches_the_screen() {
+        let Mounted {
+            mut tree, handle, ..
+        } = mounted("First.\nSecond.");
+        let full = text_color(&mut tree);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Paragraph)));
+        tick_once(&mut tree);
+        let _ = tree.render();
+
+        handle.set_caret_dim(Some(CaretDim {
+            opacity: 0.2,
+            ..dim(CaretHighlightScope::Paragraph)
+        }));
+        tick_once(&mut tree);
+        let want = faded(&tree, full, 0.2);
+        let frame = tree.render();
+        assert!(
+            frame.glyphs.iter().any(|g| same(g.color, want)),
+            "the faded text took the new opacity"
+        );
+        assert_eq!(
+            handle.get_caret_dim().map(|d| d.opacity),
+            Some(0.2),
+            "and the editor reports it"
+        );
+    }
+
+    /// The fade belongs to the view: two panes over one document, only the focused one fades,
+    /// and nothing is written to the document they share.
+    #[test]
+    fn only_the_focused_pane_fades_and_the_document_is_untouched() {
+        use teksilo_text::text_document::{FlowElementSnapshot, HighlightMask};
+
+        let doc = TextDocument::new();
+        doc.set_plain_text("One is first. Two is second.").unwrap();
+        let left = RichTextEditor::editor(doc.clone());
+        let left_handle = left.handle();
+        let left_state = left.state_handle();
+        let right = RichTextEditor::editor(doc.clone());
+        let right_handle = right.handle();
+        let right_state = right.state_handle();
+
+        let mut tree = WidgetTree::new();
+        let left_id = tree.add(left);
+        let _right_id = tree.add(right);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+
+        left_handle.set_caret_dim(Some(dim(CaretHighlightScope::Sentence)));
+        right_handle.set_caret_dim(Some(dim(CaretHighlightScope::Sentence)));
+        tree.focus(left_id);
+        tick_once(&mut tree);
+        let _ = tree.render();
+
+        assert!(left_state.borrow().engine.dim_outside().is_some());
+        assert!(
+            right_state.borrow().engine.dim_outside().is_none(),
+            "the unfocused pane is being read, not written in"
+        );
+        match &doc.snapshot_flow_masked(&HighlightMask::all()).elements[0] {
+            FlowElementSnapshot::Block(b) => {
+                assert!(b.paint_highlights.is_empty(), "no highlight on the text")
+            }
+            _ => panic!("expected a block"),
+        }
+    }
+    /// An editor that is one part of a page (a stream row, a synopsis above its text) fades all
+    /// of its text while a sibling is being written in, list markers included; without the
+    /// option an unfocused editor shows its text plainly.
+    #[test]
+    fn an_unfocused_part_of_a_page_fades_whole_when_asked() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("One is first. Two is second.").unwrap();
+        let writing = RichTextEditor::editor(doc.clone());
+        let writing_handle = writing.handle();
+        let writing_state = writing.state_handle();
+        let sibling = RichTextEditor::editor(doc.clone());
+        let sibling_handle = sibling.handle();
+        let sibling_state = sibling.state_handle();
+
+        let mut tree = WidgetTree::new();
+        let writing_id = tree.add(writing);
+        let sibling_id = tree.add(sibling);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        writing_handle.set_caret_dim(Some(dim(CaretHighlightScope::Sentence)));
+        sibling_handle.set_caret_dim(Some(dim(CaretHighlightScope::Sentence)));
+        tree.focus(writing_id);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        assert!(
+            sibling_state.borrow().engine.dim_outside().is_none(),
+            "without the option an unfocused editor shows its text plainly"
+        );
+
+        let page = crate::rich_text::caret_dim::CaretDimPage::new();
+        writing_handle.set_caret_dim(Some(CaretDim {
+            page: Some(page.clone()),
+            ..dim(CaretHighlightScope::Sentence)
+        }));
+        sibling_handle.set_caret_dim(Some(CaretDim {
+            page: Some(page.clone()),
+            ..dim(CaretHighlightScope::Sentence)
+        }));
+        tick_once(&mut tree);
+        let _ = tree.render();
+        let faded = sibling_state
+            .borrow()
+            .engine
+            .dim_outside()
+            .expect("the sibling fades while another part of the page has the focus");
+        assert!(
+            faded.start > doc.character_count() && faded.end > doc.character_count(),
+            "nothing of it stays bright: {faded:?}"
+        );
+
+        // The writer moves to the other editor, which paints after it: the roles swap, with no
+        // push from the host, on the very first frame. The editor left behind paints first; it
+        // used to note its focus loss only then, while still recorded as the writer, and draw
+        // itself plainly for a whole frame (until the next caret blink).
+        tree.focus(sibling_id);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        let now_writing = sibling_state
+            .borrow()
+            .engine
+            .dim_outside()
+            .expect("the editor now written in fades around its caret");
+        assert!(now_writing.end <= doc.character_count(), "{now_writing:?}");
+        let left = writing_state
+            .borrow()
+            .engine
+            .dim_outside()
+            .expect("the editor left behind fades whole, from the first frame");
+        assert!(left.start > doc.character_count(), "{left:?}");
+
+        // And back up the page, also on the first frame.
+        tree.focus(writing_id);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        let back = writing_state
+            .borrow()
+            .engine
+            .dim_outside()
+            .expect("the editor written in again fades around its caret");
+        assert!(back.end <= doc.character_count(), "{back:?}");
+        let below = sibling_state
+            .borrow()
+            .engine
+            .dim_outside()
+            .expect("the editor below fades whole, from the first frame");
+        assert!(below.start > doc.character_count(), "{below:?}");
+    }
+
+    /// Two editors of one page, the first one mounted first.
+    struct Page {
+        tree: WidgetTree,
+        doc: TextDocument,
+        page: crate::rich_text::caret_dim::CaretDimPage,
+        ids: [teksilo_core::WidgetId; 2],
+        states: [crate::rich_text::state::SharedState; 2],
+    }
+
+    /// Mount two editors over one document, with the fade pushed to both as one page before
+    /// either is focused.
+    fn page_of_two(text: &str) -> Page {
+        let doc = TextDocument::new();
+        doc.set_plain_text(text).unwrap();
+        let page = crate::rich_text::caret_dim::CaretDimPage::new();
+        let mut tree = WidgetTree::new();
+        let mut make = || {
+            let editor = RichTextEditor::editor(doc.clone());
+            let handle = editor.handle();
+            let state = editor.state_handle();
+            handle.set_caret_dim(Some(CaretDim {
+                page: Some(page.clone()),
+                ..dim(CaretHighlightScope::Sentence)
+            }));
+            (tree.add(editor), state)
+        };
+        let (first, first_state) = make();
+        let (second, second_state) = make();
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        Page {
+            tree,
+            doc,
+            page,
+            ids: [first, second],
+            states: [first_state, second_state],
+        }
+    }
+
+    /// Whether the editor fades all of its text (another part of the page is being written in).
+    fn fades_whole(state: &crate::rich_text::state::SharedState, doc: &TextDocument) -> bool {
+        state
+            .borrow()
+            .engine
+            .dim_outside()
+            .is_some_and(|d| d.start > doc.character_count())
+    }
+
+    /// **Parking the editor being written in lifts the fade from the rest of its page.**
+    ///
+    /// A parked editor (a tab or pane put out of sight without being closed) never paints, so it
+    /// never notes there that it stopped being written in. The tree usually also tells it it
+    /// lost the focus, but not always (see the dormancy effect in `rich_text.rs`), so the
+    /// parking itself withdraws it from the page: otherwise every other part of the page stays
+    /// faded whole with nobody writing anywhere.
+    #[test]
+    fn parking_the_part_written_in_lifts_the_fade_from_the_rest_of_the_page() {
+        let Page {
+            mut tree,
+            doc,
+            ids,
+            states,
+            ..
+        } = page_of_two("One is first. Two is second.");
+        tree.focus(ids[1]);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        assert!(
+            fades_whole(&states[0], &doc),
+            "faded while the other part is written in"
+        );
+
+        tree.set_dormant(ids[1]);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert!(
+            tree.frame_requested(),
+            "the part still on screen asks for the frame that shows it plainly"
+        );
+        tick_once(&mut tree);
+        let _ = tree.render();
+        assert!(
+            states[0].borrow().engine.dim_outside().is_none(),
+            "nobody is writing on the page any more"
+        );
+    }
+
+    /// **Parking withdraws the editor from its page even when no focus loss arrives.**
+    ///
+    /// The case the dormancy effect exists for: the editor is told it is parked, and the focus
+    /// loss that would otherwise tell the page never comes. Emulated by flipping the editor's
+    /// activation signal alone, which runs that effect and leaves the tree's focus where it was.
+    #[test]
+    fn parking_without_a_focus_loss_still_withdraws_the_editor_from_its_page() {
+        let Page {
+            mut tree,
+            page,
+            ids,
+            ..
+        } = page_of_two("One is first. Two is second.");
+        tree.focus(ids[1]);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        assert!(page.is_written_in());
+
+        tree.activation_signal(ids[1]).set(false);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        assert_eq!(tree.focused(), Some(ids[1]), "no focus loss was delivered");
+        assert!(
+            !page.is_written_in(),
+            "the parked editor is no longer the page's writer"
+        );
+    }
+
+    /// **A part of the page painted before the one being written in is woken for the next
+    /// frame.**
+    ///
+    /// When the writer is only noted while painting (here the page arrives after the focus did,
+    /// so no focus change told it), a part of the page painted earlier in that frame drew itself
+    /// for a page nobody was writing in. Its repaint was requested, but a request made during a
+    /// paint is only read when a frame is laid out, and nothing asked for one: it stayed plain
+    /// until the next caret blink, or for good with a caret that does not blink.
+    #[test]
+    fn a_part_painted_before_the_writer_noted_it_is_woken_for_the_next_frame() {
+        let doc = TextDocument::new();
+        doc.set_plain_text("One is first. Two is second.").unwrap();
+        let earlier = RichTextEditor::editor(doc.clone());
+        let earlier_handle = earlier.handle();
+        let earlier_state = earlier.state_handle();
+        let writing = RichTextEditor::editor(doc.clone());
+        let writing_handle = writing.handle();
+        let mut tree = WidgetTree::new();
+        tree.add(earlier);
+        let writing_id = tree.add(writing);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(writing_id);
+        tick_once(&mut tree);
+        let _ = tree.render();
+
+        let page = crate::rich_text::caret_dim::CaretDimPage::new();
+        for handle in [&earlier_handle, &writing_handle] {
+            handle.set_caret_dim(Some(CaretDim {
+                page: Some(page.clone()),
+                ..dim(CaretHighlightScope::Sentence)
+            }));
+        }
+        tick_once(&mut tree);
+        assert!(
+            !tree.frame_requested(),
+            "nothing else asks for a frame, or the check below would prove nothing"
+        );
+        let _ = tree.render();
+        assert!(
+            tree.frame_requested(),
+            "the part painted before the writer noted itself asks for another frame"
+        );
+        tick_once(&mut tree);
+        let _ = tree.render();
+        assert!(
+            fades_whole(&earlier_state, &doc),
+            "{:?}",
+            earlier_state.borrow().engine.dim_outside()
+        );
+    }
+
+    /// **A cell selection lifts the fade, like any selection.**
+    ///
+    /// Shift+Right at the end of a cell selects cells without moving the caret, so the editor
+    /// held no text selection and the rest of the text kept fading under a selection the writer
+    /// could see. The caret band had the same gap.
+    #[test]
+    fn a_cell_selection_made_from_a_collapsed_caret_lifts_the_fade_and_the_band() {
+        let doc = TextDocument::new();
+        doc.set_markdown("Before.\n\n| alpha | beta |\n|---|---|\n| gamma | delta |\n\nAfter.")
+            .unwrap()
+            .wait()
+            .unwrap();
+        let editor = RichTextEditor::editor(doc.clone());
+        let handle = editor.handle();
+        let state = editor.state_handle();
+        let mut tree = WidgetTree::new();
+        let id = tree.add(editor);
+        tree.layout(SizeProposal::exact(400.0, 300.0));
+        tree.focus(id);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Paragraph)));
+        handle.set_caret_highlight(Some(super::caret_band::band(
+            CaretHighlightScope::Paragraph,
+        )));
+        let end_of_alpha = cell_text_position(&doc, "alpha") + "alpha".len();
+        handle.select_range(end_of_alpha, end_of_alpha);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        assert!(
+            state.borrow().engine.dim_outside().is_some(),
+            "fading while writing in the cell"
+        );
+        assert!(
+            !banded_cells(&doc).is_empty(),
+            "banded while writing in the cell"
+        );
+
+        tree.press_key(Key::ArrowRight, Modifiers::SHIFT);
+        tick_once(&mut tree);
+        let _ = tree.render();
+        {
+            let st = state.borrow();
+            assert!(
+                st.cursor.is_cell_selection() && !st.cursor.has_selection(),
+                "the case at hand: cells selected, the caret not moved"
+            );
+        }
+        assert!(
+            state.borrow().engine.dim_outside().is_none(),
+            "{:?}",
+            state.borrow().engine.dim_outside()
+        );
+        assert!(banded_cells(&doc).is_empty(), "{:?}", banded_cells(&doc));
+    }
+
+    /// The highlighted extents (the band's) in every table cell, as `(start, length)`.
+    fn banded_cells(doc: &TextDocument) -> Vec<(usize, usize)> {
+        use teksilo_text::text_document::{FlowElementSnapshot, HighlightMask};
+        doc.snapshot_flow_masked(&HighlightMask::all())
+            .elements
+            .iter()
+            .filter_map(|element| match element {
+                FlowElementSnapshot::Table(table) => Some(table),
+                _ => None,
+            })
+            .flat_map(|table| table.cells.iter())
+            .flat_map(|cell| cell.blocks.iter())
+            .flat_map(|block| block.paint_highlights.iter())
+            .filter(|span| span.background_color.is_some())
+            .map(|span| (span.start, span.length))
+            .collect()
+    }
+
+    /// The position of `needle`'s first character inside a table cell.
+    fn cell_text_position(doc: &TextDocument, needle: &str) -> usize {
+        doc.flow()
+            .into_iter()
+            .find_map(|element| match element {
+                teksilo_text::text_document::FlowElement::Table(table) => (0..table.rows())
+                    .find_map(|row| {
+                        (0..table.columns()).find_map(|col| {
+                            table.cell(row, col)?.blocks().into_iter().find_map(|b| {
+                                let i = b.text().find(needle)?;
+                                Some(b.position() + b.text()[..i].chars().count())
+                            })
+                        })
+                    }),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{needle:?} is in a cell"))
+    }
+
+    /// The host pushes the whole value from one effect per input, each firing on registration:
+    /// the same value arriving again must not ask for a repaint.
+    #[test]
+    fn pushing_the_same_fade_again_asks_for_no_repaint() {
+        let Mounted {
+            mut tree,
+            handle,
+            state,
+            ..
+        } = mounted("First.\nSecond.");
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Paragraph)));
+        tick_once(&mut tree);
+        let version = state.borrow().paint_version.get();
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Paragraph)));
+        assert_eq!(state.borrow().paint_version.get(), version);
+        handle.set_caret_dim(Some(dim(CaretHighlightScope::Sentence)));
+        assert_ne!(
+            state.borrow().paint_version.get(),
+            version,
+            "a real change does"
+        );
+    }
+
+    /// An input method holds the document's events back while it composes. An edit made then
+    /// can move a sentence boundary without moving the caret; the range must follow it anyway,
+    /// which the document's content revision (advanced at the edit, held or not) guarantees.
+    #[test]
+    fn an_edit_made_while_events_are_held_still_moves_the_range() {
+        use crate::rich_text::caret_dim::CaretDimResolver;
+        let doc = TextDocument::new();
+        doc.set_plain_text("One. Two.").unwrap();
+        let resolver = CaretDimResolver::new(
+            &doc,
+            dim(CaretHighlightScope::Sentence),
+            teksilo_core::Signal::new(0),
+            None,
+        );
+        let first = resolver
+            .range(0, true, false)
+            .expect("focused, no selection");
+        assert_eq!((first.start, first.end), (0, 4));
+
+        let hold = doc.hold_events();
+        doc.cursor_at(3).insert_text("s").unwrap();
+        let held = resolver.range(0, true, false).expect("still focused");
+        assert_eq!(
+            (held.start, held.end),
+            (0, 5),
+            "the sentence grew under a held edit and the caret did not move"
+        );
+        drop(hold);
+    }
+}

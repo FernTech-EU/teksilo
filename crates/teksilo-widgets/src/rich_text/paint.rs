@@ -201,7 +201,17 @@ fn paint_images(
             continue;
         }
         let rect = shifted_rect(img.screen, ox, oy);
+        // An image outside the text kept bright by a caret fade carries its own opacity: it has
+        // no colour to put an alpha in. Only that image is wrapped, so a document without the
+        // fade issues no opacity commands at all.
+        let faded = img.opacity < 1.0;
+        if faded {
+            canvas.set_opacity(img.opacity.max(0.0));
+        }
         canvas.draw_image(rect, img.name.clone());
+        if faded {
+            canvas.restore_opacity();
+        }
 
         // The selection highlight the typesetter drew for this image is
         // underneath the pixels just painted, so it is invisible. Put it back
@@ -637,6 +647,46 @@ mod image_paint_tests {
             .iter()
             .filter(|c| matches!(c, DrawCommand::Image(_)))
             .count()
+    }
+
+    /// A picture outside the text a caret fade keeps bright fades with it. It has no colour to
+    /// carry an alpha, so it is drawn inside an opacity group of its own, and only it: a bright
+    /// image, or a document with no fade at all, issues no opacity command.
+    #[test]
+    fn a_faded_image_is_drawn_inside_its_own_opacity_group() {
+        let doc = TextDocument::new();
+        doc.add_resource(ResourceType::Image, "photo.png", "image/png", &red_png())
+            .unwrap();
+        let mut cache = ImageCache::new();
+        let mut faded = quad("photo.png");
+        faded.opacity = 0.4;
+
+        let frame = run(&doc, &mut cache, &[quad("photo.png"), faded]);
+
+        let commands: Vec<&DrawCommand> = frame
+            .draw_order
+            .iter()
+            .filter(|c| {
+                matches!(
+                    c,
+                    DrawCommand::Image(_)
+                        | DrawCommand::SetOpacity(_)
+                        | DrawCommand::RestoreOpacity
+                )
+            })
+            .collect();
+        assert!(
+            matches!(
+                commands.as_slice(),
+                [
+                    DrawCommand::Image(_),
+                    DrawCommand::SetOpacity(o),
+                    DrawCommand::Image(_),
+                    DrawCommand::RestoreOpacity,
+                ] if (*o - 0.4).abs() < f32::EPSILON
+            ),
+            "the bright image draws plainly, the faded one inside its group: {commands:?}"
+        );
     }
 
     /// The regression this whole pass exists for. Emitting a draw command
