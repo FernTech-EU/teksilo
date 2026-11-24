@@ -223,6 +223,7 @@ Rich text editor and viewer widget.
 | `Option<Rect>` | [`offset_content_rect(offset: usize)`](#editorhandle-offset_content_rect) |
 | `Signal<u64>` | [`document_version()`](#editorhandle-document_version) |
 | `Option<f32>` | [`content_height()`](#editorhandle-content_height) |
+| `Option<f32>` | [`layout_width()`](#editorhandle-layout_width) |
 | `Option<usize>` | [`offset_at_point(window_point: Point)`](#editorhandle-offset_at_point) |
 |  | [`reposition_caret_for_context_menu(window_point: Point)`](#editorhandle-reposition_caret_for_context_menu) |
 | `bool` | [`reveal_range(ctx: &mut teksilo_core::widget::EventContext, start: usize, end: usize)`](#editorhandle-reveal_range) |
@@ -2651,6 +2652,25 @@ stale height.
 
 This is the *text's* height, not the widget's: an editor laid out taller
 than its content (a short scene in a tall pane) reports the text.
+
+<a id="editorhandle-layout_width"></a>
+
+#### `pub fn layout_width(&self) -> Option<f32>`
+
+The width the text was laid out at: the wrap width of the same layout
+`content_height` measures. `None` before the first full
+layout.
+
+The other half of what a layout depends on. Two layouts of one document at one
+height can still break their lines in different places, one paragraph gaining a
+line where another loses one, so a caller that keeps geometry derived from this
+editor (where each paragraph sits, as a fraction of the text) has to key it on
+the width as well as the height, or it keeps positions from a layout that is
+gone.
+
+The width the layout **was computed at**, not the width the editor was last
+placed at: between a resize and the re-wrap that follows it, this still names the
+old width, the one the current lines were broken at.
 
 <a id="editorhandle-offset_at_point"></a>
 
