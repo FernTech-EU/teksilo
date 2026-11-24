@@ -5060,6 +5060,71 @@ fn a_rewrap_in_paint_reaches_the_next_layout_without_any_input() {
     );
 }
 
+/// `layout_width` names the width the lines were broken at, and moves with the
+/// re-wrap, never ahead of it.
+///
+/// A caller that keeps geometry derived from the layout (where each paragraph sits,
+/// as a fraction of the text) keys it on this width and on `content_height`. That key
+/// is only sound if the two describe one layout. Placement hands the engine the new
+/// width a pass before `paint` re-wraps the text, so a width read off the engine in
+/// between would let such a caller file the old layout's positions under the new
+/// layout's key, and never look at them again.
+#[test]
+fn layout_width_follows_the_rewrap_not_the_resize() {
+    let doc = TextDocument::new();
+    doc.set_plain_text(&"The rain kept on for three days and then it stopped. ".repeat(40))
+        .unwrap();
+    let editor = RichTextEditor::editor(doc).min_lines(1);
+    let state = editor.state_handle();
+    let handle = editor.handle();
+    let mut tree = WidgetTree::new();
+    tree.add(editor);
+    assert_eq!(handle.layout_width(), None, "nothing is laid out yet");
+
+    tree.layout(SizeProposal::with_width(900.0));
+    let _ = tree.render();
+    let wide = handle
+        .layout_width()
+        .expect("the wide pass laid the text out");
+    let wide_height = handle
+        .content_height()
+        .expect("the wide pass laid the text out");
+    assert!(
+        wide > 600.0 && wide <= 900.0,
+        "the text wraps inside the 900 px editor, less its padding (got {wide:.1})"
+    );
+
+    // Placed narrower, not painted yet: the engine already holds the new width, and the
+    // lines are still the wide ones.
+    tree.layout(SizeProposal::with_width(250.0));
+    assert!(
+        state.borrow().needs_full_layout,
+        "fixture: the re-wrap waits for paint, as the test above records"
+    );
+    assert!(
+        state.borrow().engine.layout_width() < 250.0,
+        "fixture: placement has already moved the engine's own width"
+    );
+    assert_eq!(
+        (handle.layout_width(), handle.content_height()),
+        (Some(wide), Some(wide_height)),
+        "the width and the height still describe the wide layout"
+    );
+
+    let _ = tree.render();
+    let narrow = handle
+        .layout_width()
+        .expect("the narrow pass laid the text out");
+    assert!(
+        narrow < 250.0,
+        "after the re-wrap the width is the narrow one (got {narrow:.1})"
+    );
+    assert!(
+        handle.content_height().is_some_and(|h| h > wide_height),
+        "and the height is the narrow layout's"
+    );
+}
+
 // -----------------------------------------------------------------------------
 // Composing/leaf split + RichTextEditorStyle wiring.
 // -----------------------------------------------------------------------------

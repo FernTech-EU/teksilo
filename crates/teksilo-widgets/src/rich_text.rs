@@ -3144,6 +3144,29 @@ impl EditorHandle {
             .then(|| st.engine.content_height())
     }
 
+    /// The width the text was laid out at: the wrap width of the same layout
+    /// [`content_height`](Self::content_height) measures. `None` before the first full
+    /// layout.
+    ///
+    /// The other half of what a layout depends on. Two layouts of one document at one
+    /// height can still break their lines in different places, one paragraph gaining a
+    /// line where another loses one, so a caller that keeps geometry derived from this
+    /// editor (where each paragraph sits, as a fraction of the text) has to key it on
+    /// the width as well as the height, or it keeps positions from a layout that is
+    /// gone.
+    ///
+    /// The width the layout **was computed at**, not the width the editor was last
+    /// placed at: between a resize and the re-wrap that follows it, this still names the
+    /// old width, the one the current lines were broken at.
+    pub fn layout_width(&self) -> Option<f32> {
+        let st = self.state.borrow();
+        if st.engine.has_full_layout() {
+            st.laid_out_width.get()
+        } else {
+            None
+        }
+    }
+
     /// Hit-test a point — **in window coordinates**, as a
     /// [`context_menu`](RichTextEditor::context_menu) factory receives it — to a
     /// document character offset. `None` when the point resolves to no text

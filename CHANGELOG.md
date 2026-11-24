@@ -13,6 +13,19 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Added
+
+#### Widgets
+
+- **`EditorHandle::layout_width()` names the width a rich text editor's lines
+  were broken at**, beside `content_height()`, which measures the same layout.
+  A caller that keeps geometry derived from the layout (where each paragraph
+  sits, as a fraction of the text) needs both: two layouts of one document at
+  one height can still break their lines in different places when they were
+  laid out at different widths. It is the width the layout was computed at, not
+  the width the editor was last placed at, so between a resize and the re-wrap
+  that follows it, it still names the old one. `None` before the first layout.
+
 ## [0.29.0] - 2026-11-24
 
 ### Added

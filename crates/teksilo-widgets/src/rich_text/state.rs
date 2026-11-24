@@ -161,6 +161,16 @@ pub(crate) struct EditorState {
     /// jump in width (a window leaving fullscreen) left the editor, and
     /// everything measured against it, at the old height.
     pub laid_out_height: Signal<f32>,
+    /// The width the text was laid out at when [`laid_out_height`](Self::laid_out_height)
+    /// was last published: the wrap width of the layout the engine holds, `None` before
+    /// the first one.
+    ///
+    /// Recorded beside the height rather than read off the engine on demand, because the
+    /// engine's own width moves first. [`sync_viewport`](Self::sync_viewport) hands it
+    /// the new width at placement and the re-wrap runs later, in `paint` or the next
+    /// frame; asked in between, the engine names a width its lines were not broken at.
+    /// Written in the same call as the height, so the two always describe one layout.
+    pub laid_out_width: std::cell::Cell<Option<f32>>,
     pub viewport_ratio_x: Signal<f32>,
     pub viewport_ratio_y: Signal<f32>,
     /// This surface's pan physics: the range a finger's pan is clamped to and
@@ -1091,6 +1101,7 @@ impl EditorState {
             max_scroll_x: Signal::new(0.0),
             max_scroll_y: Signal::new(0.0),
             laid_out_height: Signal::new(0.0),
+            laid_out_width: std::cell::Cell::new(None),
             viewport_ratio_x: Signal::new(1.0),
             viewport_ratio_y: Signal::new(1.0),
             scroller: Rc::new(RefCell::new(KineticScroller::new(OverscrollStyle::Clamp))),
@@ -1249,6 +1260,7 @@ impl EditorState {
     /// the height did not move, so the binding only fires on a real change.
     pub fn publish_laid_out_height(&self) {
         if self.engine.has_full_layout() {
+            self.laid_out_width.set(Some(self.engine.layout_width()));
             self.laid_out_height
                 .set_if_changed(self.engine.content_height());
         }
