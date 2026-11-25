@@ -218,6 +218,26 @@ fn process_result<E: std::fmt::Display>(result: Result<i32, E>) -> Result<(), St
         Err(e) => Err(e.to_string()),
     }
 }
+/// Replace the contents of a file the user owns without a window in which it
+/// is empty.
+///
+/// `std::fs::write` truncates first, so a run interrupted mid-write left an
+/// `AGENTS.md` or a `Cargo.toml` empty. An existing file is replaced by a
+/// rename from a sibling temporary file carrying its permissions; a symlink is
+/// followed, so the file it points at is the one replaced. A new file has
+/// nothing to lose and is written directly.
+pub(crate) fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let Ok(target) = std::fs::canonicalize(path) else {
+        return std::fs::write(path, contents);
+    };
+    let parent = target.parent().unwrap_or(Path::new("."));
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+    std::io::Write::write_all(&mut tmp, contents)?;
+    tmp.as_file()
+        .set_permissions(std::fs::metadata(&target)?.permissions())?;
+    tmp.persist(&target).map_err(|e| e.error)?;
+    Ok(())
+}
 fn project(dir: &Path) -> Result<PathBuf, String> {
     setup::find_project_root(dir)
         .ok_or_else(|| "no Cargo.toml found\nhelp: run inside a Cargo project".into())

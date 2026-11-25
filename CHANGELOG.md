@@ -56,6 +56,16 @@ by crate for clarity, not because crates version independently.
 - **A second instance of an app with a persistent analytics queue no longer
   crashes**; it queues its events in memory.
 
+#### cargo-teksilo
+
+- **`cargo teksilo probe install` no longer deletes files outside
+  `scripts/teksilo_probe/`** when its manifest lists an absolute or `..` path.
+- **`cargo teksilo` no longer deletes text in `AGENTS.md` or
+  `.github/copilot-instructions.md` when the teksilo markers there are
+  unbalanced**: it reports the file as blocked and leaves it untouched.
+- **An interrupted `cargo teksilo` run no longer leaves `AGENTS.md`,
+  `Cargo.toml` or the probe manifest empty.**
+
 ## [0.29.1] - 2026-11-24
 
 ### Added

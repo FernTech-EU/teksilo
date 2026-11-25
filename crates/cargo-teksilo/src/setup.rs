@@ -176,6 +176,10 @@ pub fn region_block() -> String {
 /// `.github/copilot-instructions.md` belong to the project, not to this tool:
 /// a second run must be a byte-for-byte no-op, and a run after someone edits
 /// the rest of the file must leave their edit alone.
+///
+/// Only meaningful when [`markers_balanced`] holds: with a lone `BEGIN` or two
+/// regions it would pair the wrong markers, which is why [`apply`] and
+/// [`inspect`] check first.
 pub fn upsert_region(existing: &str, block: &str) -> String {
     if let Some(start) = existing.find(BEGIN)
         && let Some(end_offset) = existing[start..].find(END)
@@ -203,6 +207,23 @@ pub fn upsert_region(existing: &str, block: &str) -> String {
     out.push_str(block);
     out.push('\n');
     out
+}
+
+/// Whether `existing` holds no region, or exactly one `BEGIN` followed by
+/// exactly one `END`.
+///
+/// Anything else is a file someone edited by hand (a deleted `END`, a pasted
+/// second region), and replacing "the region" there could swallow their text
+/// up to some later marker.
+pub fn markers_balanced(existing: &str) -> bool {
+    match (
+        existing.matches(BEGIN).count(),
+        existing.matches(END).count(),
+    ) {
+        (0, 0) => true,
+        (1, 1) => existing.find(BEGIN) < existing.find(END),
+        _ => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +257,14 @@ pub enum SetupError {
          and re-run."
     )]
     NotUtf8(PathBuf),
+
+    #[error(
+        "{0} has unbalanced teksilo markers, so the teksilo section cannot be found \
+         without risking the text around it.\n\
+         help: leave exactly one `<!-- BEGIN teksilo -->` line followed by one \
+         `<!-- END teksilo -->` line (or neither), then re-run"
+    )]
+    UnbalancedMarkers(PathBuf),
 }
 
 /// How one agent's instructions are shaped on disk.
@@ -778,6 +807,9 @@ pub fn apply(target: &Target) -> Result<Outcome, SetupError> {
         }
         Form::Region => {
             let existing = read_shared(&target.path)?;
+            if !markers_balanced(&existing) {
+                return Err(SetupError::UnbalancedMarkers(target.path.clone()));
+            }
             let updated = upsert_region(&existing, &region_block());
             (write_if_changed(&target.path, &updated)?, 1)
         }
@@ -845,6 +877,9 @@ pub fn inspect(target: &Target) -> Presence {
                 Err(SetupError::NotUtf8(_)) => return Presence::Blocked("is not valid UTF-8"),
                 Err(_) => return Presence::Blocked("cannot be read"),
             };
+            if !markers_balanced(&existing) {
+                return Presence::Blocked("has unbalanced teksilo markers");
+            }
             // The marker, not the file, is the evidence: this file belongs to
             // the project and usually exists without us having written a word.
             if !existing.contains(BEGIN) {
@@ -976,7 +1011,7 @@ fn write_if_changed(path: &Path, content: &str) -> Result<Change, SetupError> {
     match std::fs::read(path) {
         Ok(current) if current == content.as_bytes() => Ok(Change::Unchanged),
         Ok(_) => {
-            std::fs::write(path, content)?;
+            crate::write_atomic(path, content.as_bytes())?;
             Ok(Change::Updated)
         }
         Err(_) => {
@@ -1511,6 +1546,33 @@ mod tests {
             original,
             "the project's own bytes must survive untouched"
         );
+    }
+
+    #[test]
+    fn a_shared_file_with_a_deleted_end_marker_is_blocked_not_rewritten() {
+        // With its END deleted, the first run appended a second region and the
+        // second replaced everything from the first BEGIN to that new END,
+        // taking the project's own notes with it.
+        let t = temp();
+        let path = t.path().join("AGENTS.md");
+        let original = format!("intro\n{BEGIN}\nbrief\nmy notes\n");
+        std::fs::write(&path, &original).unwrap();
+        let target = project_targets(t.path())
+            .into_iter()
+            .find(|t| t.form == Form::Region)
+            .unwrap();
+
+        for _ in 0..2 {
+            assert_eq!(
+                inspect(&target),
+                Presence::Blocked("has unbalanced teksilo markers")
+            );
+            assert!(matches!(
+                apply(&target),
+                Err(SetupError::UnbalancedMarkers(_))
+            ));
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
     }
 
     #[test]

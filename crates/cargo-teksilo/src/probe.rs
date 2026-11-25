@@ -235,7 +235,7 @@ pub fn record_provenance(project: &Path, version: &str) -> Result<(), ProbeError
         })?;
 
     meta["probe"] = toml_edit::value(version);
-    std::fs::write(&manifest_path, doc.to_string())?;
+    crate::write_atomic(&manifest_path, doc.to_string().as_bytes())?;
     Ok(())
 }
 
@@ -298,6 +298,12 @@ fn digest(bytes: &[u8]) -> String {
     format!("{hash:016x}")
 }
 
+/// The manifest's entries, keeping only paths that stay inside `dest`.
+///
+/// The manifest is a committed file anyone can edit, and a reinstall deletes
+/// every entry it no longer ships: an absolute path or a `..` would delete a
+/// file outside the generated tree (`Path::join` with an absolute path drops
+/// the base entirely). Such an entry is not ours, so it is ignored.
 fn read_manifest(dest: &Path) -> BTreeMap<String, String> {
     let Ok(text) = std::fs::read_to_string(dest.join(MANIFEST)) else {
         return BTreeMap::new();
@@ -306,6 +312,12 @@ fn read_manifest(dest: &Path) -> BTreeMap<String, String> {
         .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
         .filter_map(|line| line.split_once("  "))
         .map(|(h, f)| (f.trim().to_string(), h.trim().to_string()))
+        .filter(|(f, _)| {
+            !f.is_empty()
+                && Path::new(f)
+                    .components()
+                    .all(|c| matches!(c, std::path::Component::Normal(_)))
+        })
         .collect()
 }
 
@@ -318,7 +330,7 @@ fn write_manifest(dest: &Path, manifest: &BTreeMap<String, String>) -> Result<()
     for (file, hash) in manifest {
         out.push_str(&format!("{hash}  {file}\n"));
     }
-    std::fs::write(dest.join(MANIFEST), out)?;
+    crate::write_atomic(&dest.join(MANIFEST), out.as_bytes())?;
     Ok(())
 }
 
@@ -408,6 +420,30 @@ mod tests {
             materialise(p.path(), true).unwrap();
             assert_ne!(std::fs::read_to_string(file).unwrap(), "# user code\n");
         }
+    }
+
+    #[test]
+    fn a_manifest_entry_outside_the_tree_is_never_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let proj = root.path().join("proj");
+        std::fs::create_dir(&proj).unwrap();
+        std::fs::copy(project().path().join("Cargo.toml"), proj.join("Cargo.toml")).unwrap();
+        materialise(&proj, false).unwrap();
+
+        let absolute = root.path().join("authorized_keys");
+        let escaping = root.path().join("victim");
+        std::fs::write(&absolute, "keep").unwrap();
+        std::fs::write(&escaping, "keep").unwrap();
+        let manifest = proj.join(DEST).join(MANIFEST);
+        let mut text = std::fs::read_to_string(&manifest).unwrap();
+        let hash = digest(b"keep");
+        text.push_str(&format!("{hash}  {}\n", absolute.display()));
+        text.push_str(&format!("{hash}  ../../../victim\n"));
+        std::fs::write(&manifest, text).unwrap();
+
+        materialise(&proj, true).unwrap();
+        assert!(absolute.exists(), "an absolute manifest path was deleted");
+        assert!(escaping.exists(), "a `..` manifest path was deleted");
     }
 
     #[test]
