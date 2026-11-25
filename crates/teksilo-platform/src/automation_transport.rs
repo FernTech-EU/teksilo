@@ -232,6 +232,35 @@ mod tests {
         assert_eq!(&server.join().unwrap(), b"ping!");
     }
 
+    /// `--list` and `--attach` delete a descriptor whose probe says `Dead`,
+    /// so only a listener that is really gone may answer it.
+    #[cfg(unix)]
+    #[test]
+    fn a_probe_calls_dead_only_what_nothing_listens_on() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let at = |name: &str| {
+            let path = dir.path().join(name);
+            (
+                path.clone(),
+                Endpoint::unix(path.to_string_lossy().into_owned()),
+            )
+        };
+
+        let (live_path, live) = at("live");
+        let _listener = std::os::unix::net::UnixListener::bind(&live_path).expect("bind");
+        assert_eq!(probe(&live), Liveness::Live, "a bound listener is live");
+
+        // Dropping a Unix listener leaves its socket file behind, so a connect
+        // is refused: the corpse an app that died without unwinding leaves.
+        let (stale_path, stale) = at("stale");
+        drop(std::os::unix::net::UnixListener::bind(&stale_path).expect("bind"));
+        assert!(stale_path.exists(), "the socket file outlives its listener");
+        assert_eq!(probe(&stale), Liveness::Dead, "a refused connect is dead");
+
+        let (_, missing) = at("missing");
+        assert_eq!(probe(&missing), Liveness::Dead, "a missing socket is dead");
+    }
+
     /// A read deadline must fire as a typed timeout and leave the stream alive.
     #[test]
     fn read_timeout_is_reported_not_fatal() {

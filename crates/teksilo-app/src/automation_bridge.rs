@@ -125,9 +125,12 @@ pub(crate) fn clamp_live_settle(settle: &SettleSpec) -> SettleSpec {
 #[cfg(debug_assertions)]
 fn install(builder: TeksiloAppBuilder) -> TeksiloAppBuilder {
     // A pinned `TEKSILO_AUTOMATION_TOKEN` lets a test / harness know the token
-    // up-front; otherwise generate a fresh per-process one.
+    // up-front; otherwise generate a fresh per-process one. An empty pin would
+    // let an empty handshake line in, so it counts as no pin.
     let token = std::env::var("TEKSILO_AUTOMATION_TOKEN")
-        .unwrap_or_else(|_| uuid::Uuid::new_v4().to_string());
+        .ok()
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     // `pull_announcements` reads each window's announcement ring, which a
     // window records only when asked, from its first update, so the windows
     // are asked here, before any of them opens.
@@ -258,15 +261,7 @@ fn handle_connection(
     // Bound the handshake: a peer that connects but never sends the token must
     // not occupy the single connection slot forever.
     stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
-    // The transport deadline is per-`read` and the token is read a byte at a
-    // time, so the *handshake* also gets its own end-to-end deadline —
-    // otherwise a peer dripping a byte just under the per-read timeout holds
-    // the single slot for `MAX_TOKEN_LINE` × `HANDSHAKE_TIMEOUT`.
-    let offered = wire::read_token_by(
-        &mut stream,
-        Some(std::time::Instant::now() + HANDSHAKE_TIMEOUT),
-    )?;
-    if !wire::token_matches(token, &offered) {
+    if !authenticate(&mut stream, token)? {
         return Ok(()); // reject — bad/missing token
     }
     // Requests arrive sporadically over a long-lived connection, so clear the
@@ -316,6 +311,17 @@ fn handle_connection(
         write_reply(&mut stream, &reply)?;
     }
     Ok(())
+}
+
+/// Read the token line the peer offers and say whether it is `token`.
+#[cfg(debug_assertions)]
+fn authenticate(stream: &mut impl std::io::Read, token: &str) -> std::io::Result<bool> {
+    // The transport deadline is per-`read` and the token is read a byte at a
+    // time, so the *handshake* also gets its own end-to-end deadline:
+    // otherwise a peer dripping a byte just under the per-read timeout holds
+    // the single slot for `MAX_TOKEN_LINE` × `HANDSHAKE_TIMEOUT`.
+    let offered = wire::read_token_by(stream, Some(std::time::Instant::now() + HANDSHAKE_TIMEOUT))?;
+    Ok(wire::token_matches(token, &offered))
 }
 
 #[cfg(debug_assertions)]
@@ -400,6 +406,21 @@ mod tests {
                 .install_automation_bridge_in_debug()
                 .records_announcements()
         );
+    }
+
+    /// Only the exact token opens the bridge: every other request it serves
+    /// drives the live app.
+    #[test]
+    fn the_handshake_admits_only_the_exact_token() {
+        let token = "0f3c2a1e-token";
+        let offer = |line: &[u8]| {
+            authenticate(&mut std::io::Cursor::new(line.to_vec()), token).expect("handshake read")
+        };
+        assert!(offer(b"0f3c2a1e-token\n"), "the right token is accepted");
+        assert!(!offer(b"0f3c2a1e-tokem\n"), "a wrong token is rejected");
+        assert!(!offer(b"0f3c2a1e\n"), "a prefix of the token is rejected");
+        assert!(!offer(b"\n"), "an empty line is rejected");
+        assert!(!offer(b""), "a peer that says nothing is rejected");
     }
 
     #[test]

@@ -1031,7 +1031,7 @@ pub enum AutomationOp {
         bx1: f32,
         by1: f32,
         /// How many intermediate moves each finger makes. Default `8`; clamped
-        /// to at least 1.
+        /// to at least 1. More than 1000 is refused with `BAD_ARGUMENT`.
         #[serde(default = "default_pinch_steps")]
         steps: usize,
     },
@@ -1049,7 +1049,8 @@ pub enum AutomationOp {
         from_y: f32,
         to_x: f32,
         to_y: f32,
-        /// The flick's duration in simulated milliseconds.
+        /// The flick's duration in simulated milliseconds. More than 60000 is
+        /// refused with `BAD_ARGUMENT`.
         over_ms: u64,
     },
     /// Press at a point, hold for exactly the device's long-press threshold,

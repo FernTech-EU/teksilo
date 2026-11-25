@@ -3708,6 +3708,40 @@ fn a_touch_step_that_moves_a_finger_that_is_not_down_is_refused() {
 }
 
 #[test]
+fn an_unbounded_pinch_or_fling_is_refused_before_anything_is_dispatched() {
+    // `over_ms` this large used to make the fling's sample count 2^32, which
+    // truncated to a zero divisor and panicked on the app's main thread; a
+    // pinch this large tried to allocate a plan of `usize::MAX` steps.
+    let (mut tree, _id, log) = laid_out_probe(InputProbe::new("probe"));
+    for op in [
+        AutomationOp::Fling {
+            from_x: 10.0,
+            from_y: 10.0,
+            to_x: 20.0,
+            to_y: 20.0,
+            over_ms: u64::MAX,
+        },
+        AutomationOp::Pinch {
+            ax0: 10.0,
+            ay0: 10.0,
+            bx0: 20.0,
+            by0: 20.0,
+            ax1: 5.0,
+            ay1: 5.0,
+            bx1: 25.0,
+            by1: 25.0,
+            steps: usize::MAX,
+        },
+    ] {
+        match run(&mut tree, &op) {
+            AutomationReply::Err { code, .. } => assert_eq!(code, codes::BAD_ARGUMENT),
+            other => panic!("expected BAD_ARGUMENT for {op:?}, got {other:?}"),
+        }
+    }
+    assert!(log.get().is_empty(), "nothing dispatched: {:?}", log.get());
+}
+
+#[test]
 fn an_empty_touch_sequence_is_refused() {
     let (mut tree, _id, _log) = laid_out_probe(InputProbe::new("probe"));
     match run(

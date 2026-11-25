@@ -511,7 +511,9 @@ hands a *velocity* to the scroller, and a flick described by too few or
 too-far-apart samples yields no velocity at all and silently never flings. A
 `long_press` holds for exactly the device's own threshold, read off the active
 input profile, so the call means "hold long enough" without the script knowing
-the number.
+the number. Each sample is a dispatch on the app's main thread, so a `pinch`
+takes at most 1000 `steps` and a `fling` at most 60000 `over_ms`; a larger
+value is refused with `BAD_ARGUMENT` before anything is dispatched.
 
 **`query_pointers`** lists every live pointer, id, kind, primary flag, whether
 it is down, position, pressure/tilt, capture, and the same arbitration fields

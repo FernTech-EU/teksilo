@@ -84,6 +84,14 @@ by crate for clarity, not because crates version independently.
 - **A second instance of an app with a persistent analytics queue no longer
   crashes**; it queues its events in memory.
 
+#### Automation
+
+- **A `pinch` with a huge `steps` or a `fling` with a huge `over_ms` no longer
+  crashes or freezes the app being driven**: they are refused with
+  `BAD_ARGUMENT` (at most 1000 steps and 60000 ms).
+- **An empty `TEKSILO_AUTOMATION_TOKEN` no longer lets an empty handshake in**:
+  the bridge makes a random token instead.
+
 #### cargo-teksilo
 
 - **`cargo teksilo probe install` no longer deletes files outside

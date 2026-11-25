@@ -329,6 +329,12 @@ fn execute_op(
             // reference span is the distance between the two landings, so a
             // pinch whose second finger arrives after the first has moved
             // describes a different gesture entirely.
+            if *steps > MAX_PINCH_STEPS {
+                return AutomationReply::err(
+                    codes::BAD_ARGUMENT,
+                    format!("pinch takes at most {MAX_PINCH_STEPS} steps, got {steps}"),
+                );
+            }
             let steps = (*steps).max(1);
             let (a0, b0) = (Point::new(*ax0, *ay0), Point::new(*bx0, *by0));
             let (a1, b1) = (Point::new(*ax1, *ay1), Point::new(*bx1, *by1));
@@ -414,11 +420,20 @@ fn execute_op(
             // not a whole number of milliseconds, which is why this walks the
             // path itself instead of building `TouchStep`s (whose `advance_ms`
             // is milliseconds, as a wire field should be).
+            if *over_ms > MAX_FLING_MS {
+                return AutomationReply::err(
+                    codes::BAD_ARGUMENT,
+                    format!("fling takes at most {MAX_FLING_MS} ms, got {over_ms}"),
+                );
+            }
             let total = Duration::from_millis(*over_ms);
             let steps = (total.as_micros() as u64)
                 .div_ceil(FLING_SAMPLE_INTERVAL.as_micros() as u64)
                 .max(MIN_FLING_SAMPLES);
-            let per_step = total / steps as u32;
+            let Ok(steps) = u32::try_from(steps) else {
+                return AutomationReply::err(codes::BAD_ARGUMENT, "fling has too many samples");
+            };
+            let per_step = total / steps;
             freeze_clock(tree, ops);
             let id = mint_or_reuse(tree, teksilo_tokens::PointerKind::Touch, None);
             direct_dispatch(
@@ -1019,6 +1034,16 @@ const FLING_SAMPLE_INTERVAL: Duration = Duration::from_micros(16_667);
 /// minimum, below which it reports no velocity and the flick silently coasts
 /// nowhere.
 const MIN_FLING_SAMPLES: u64 = teksilo_core::kinetic::MIN_SAMPLE_SIZE as u64;
+
+/// The most intermediate moves a [`AutomationOp::Pinch`] may ask for. Each
+/// one is a dispatch per finger on the app's main thread, so a wire count with
+/// no ceiling allocates and freezes the UI far past any settle budget.
+const MAX_PINCH_STEPS: usize = 1000;
+
+/// The longest [`AutomationOp::Fling`], in simulated milliseconds: one minute,
+/// about 3600 samples. Longer is no flick, and each sample is a dispatch on the
+/// app's main thread.
+const MAX_FLING_MS: u64 = 60_000;
 
 /// Linear interpolation between two points, `t` in `0.0..=1.0`. Every
 /// multi-sample op walks its path with this, so a pinch and a fling place their
