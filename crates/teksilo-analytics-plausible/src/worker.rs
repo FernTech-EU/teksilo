@@ -73,6 +73,9 @@ fn worker_loop(
 ) {
     let agent = build_agent(config.request_timeout);
     let mut current_backoff = config.initial_backoff;
+    // Set by a `Retry`: the full-batch path below sends nothing before it,
+    // so an outage costs one request per backoff, not one per event.
+    let mut retry_at: Option<Instant> = None;
     let mut last_flush = Instant::now();
 
     loop {
@@ -89,7 +92,14 @@ fn worker_loop(
                 stats.queued.store(queue.len(), Ordering::Relaxed);
             }
             Ok(WorkerCommand::Flush(reply)) => {
-                let result = drain(&*queue, &agent, &config, &stats, &mut current_backoff);
+                let result = drain(
+                    &*queue,
+                    &agent,
+                    &config,
+                    &stats,
+                    &mut current_backoff,
+                    &mut retry_at,
+                );
                 let _ = reply.send(result);
                 last_flush = Instant::now();
             }
@@ -97,7 +107,7 @@ fn worker_loop(
                 queue.discard_all();
                 stats.queued.store(0, Ordering::Relaxed);
             }
-            Ok(WorkerCommand::Shutdown) => {
+            Ok(WorkerCommand::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 // `drain` takes at most `max_batch_size` events, so a single
                 // call is not a "final flush" for a queue bigger than one batch
                 // — with the in-memory queue the surplus would die with the
@@ -108,7 +118,14 @@ fn worker_loop(
                 // bounded by one extra request.
                 loop {
                     let before = queue.len();
-                    let _ = drain(&*queue, &agent, &config, &stats, &mut current_backoff);
+                    let _ = drain(
+                        &*queue,
+                        &agent,
+                        &config,
+                        &stats,
+                        &mut current_backoff,
+                        &mut retry_at,
+                    );
                     if queue.len() >= before {
                         break;
                     }
@@ -117,18 +134,29 @@ fn worker_loop(
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if !queue.is_empty() {
-                    let _ = drain(&*queue, &agent, &config, &stats, &mut current_backoff);
+                    let _ = drain(
+                        &*queue,
+                        &agent,
+                        &config,
+                        &stats,
+                        &mut current_backoff,
+                        &mut retry_at,
+                    );
                     last_flush = Instant::now();
                 }
             }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let _ = drain(&*queue, &agent, &config, &stats, &mut current_backoff);
-                break;
-            }
         }
 
-        if queue.len() >= config.max_batch_size {
-            let _ = drain(&*queue, &agent, &config, &stats, &mut current_backoff);
+        let backing_off = retry_at.is_some_and(|t| Instant::now() < t);
+        if queue.len() >= config.max_batch_size && !backing_off {
+            let _ = drain(
+                &*queue,
+                &agent,
+                &config,
+                &stats,
+                &mut current_backoff,
+                &mut retry_at,
+            );
             last_flush = Instant::now();
         }
     }
@@ -145,6 +173,7 @@ fn drain(
     config: &PlausibleConfig,
     stats: &WorkerStats,
     current_backoff: &mut Duration,
+    retry_at: &mut Option<Instant>,
 ) -> Result<(), String> {
     let mut last_error = None;
     let batch = queue.drain_batch(config.max_batch_size);
@@ -163,10 +192,12 @@ fn drain(
             SendOutcome::Accepted => {
                 stats.accepted.fetch_add(1, Ordering::Relaxed);
                 *current_backoff = config.initial_backoff;
+                *retry_at = None;
             }
             SendOutcome::Retry(why) => {
                 to_requeue.push(owned);
                 *current_backoff = next_backoff(*current_backoff, config.max_backoff);
+                *retry_at = Some(Instant::now() + *current_backoff);
                 last_error = Some(why);
                 hit_retry = true;
             }

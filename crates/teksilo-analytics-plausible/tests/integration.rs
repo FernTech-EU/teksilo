@@ -365,6 +365,40 @@ fn retries_5xx_then_succeeds() {
     assert!(server.state.captured_count() >= 3);
 }
 
+/// A worker backing off after a failed send does not send again when the
+/// next event arrives, even with a full batch queued.
+#[test]
+fn a_new_event_during_backoff_sends_nothing() {
+    let server = MockServer::start();
+    server.state.arm_failures(1000, 503);
+    let adapter = PlausibleAdapter::builder()
+        .endpoint(server.endpoint())
+        .domain("test.app")
+        .max_batch_size(1)
+        // Nothing is sent on a timer during the test, and the failed send
+        // backs off for the rest of it.
+        .flush_interval(Duration::from_secs(3600))
+        .initial_backoff(Duration::from_secs(3600))
+        .max_backoff(Duration::from_secs(3600))
+        .request_timeout(Duration::from_secs(2))
+        .build();
+
+    adapter.record(&make_event("intent.dispatched", &[]));
+    assert!(server.wait_for_captured(1, Duration::from_secs(5)));
+    adapter.record(&make_event("intent.dispatched", &[]));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while adapter.events_queued() < 2 {
+        assert!(Instant::now() < deadline, "the second event never queued");
+        thread::sleep(Duration::from_millis(10));
+    }
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        server.state.captured_count(),
+        1,
+        "an event during backoff sent a request"
+    );
+}
+
 #[test]
 fn shutdown_drains_pending_events() {
     let server = MockServer::start();
@@ -463,4 +497,28 @@ fn events_persist_across_process_restart() {
     assert!(names.contains(&"intent.dispatched".to_string()));
     assert!(names.contains(&"lifecycle.app_started".to_string()));
     assert!(names.contains(&"lifecycle.app_exited".to_string()));
+}
+
+/// A second instance of the app finds the queue file locked by the first.
+/// It must keep working on an in-memory queue rather than panic.
+#[test]
+fn a_locked_queue_file_falls_back_to_memory() {
+    let dir = tempfile::tempdir().unwrap();
+    let queue_path = dir.path().join("plausible-queue.redb");
+    let server = MockServer::start();
+    let build = || {
+        PlausibleAdapter::builder()
+            .endpoint(server.endpoint())
+            .domain("test.app")
+            .max_batch_size(1000)
+            .flush_interval(Duration::from_secs(60))
+            .persistent_queue_path(&queue_path)
+            .build()
+    };
+    let _first = build();
+    let second = build();
+
+    second.record(&make_event("intent.dispatched", &[]));
+    second.flush().unwrap();
+    assert!(server.wait_for_captured(1, Duration::from_secs(3)));
 }

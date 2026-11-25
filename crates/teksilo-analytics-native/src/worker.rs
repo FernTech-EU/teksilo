@@ -76,6 +76,10 @@ async fn worker_loop(
     let mut next_batch_id: u64 = 1;
     // Lazily-opened tonic channel. Re-established on transport error.
     let mut channel: Option<Channel> = None;
+    // Set by a failed send: the full-batch path sends nothing before it,
+    // so an outage costs one attempt per flush interval (the timer below
+    // still retries at that pace), not one per event.
+    let mut retry_at: Option<Instant> = None;
 
     loop {
         // Wait either for a command or for the flush interval to
@@ -92,15 +96,22 @@ async fn worker_loop(
             Ok(Some(WorkerCommand::Record(ev))) => {
                 queue.push(ev);
                 stats.queued.store(queue.len(), Ordering::Relaxed);
-                if queue.len() >= config.max_batch_size {
-                    let _ =
+                let backing_off = retry_at.is_some_and(|t| Instant::now() < t);
+                if queue.len() >= config.max_batch_size && !backing_off {
+                    let result =
                         drain_once(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
+                    retry_at = result
+                        .is_err()
+                        .then(|| Instant::now() + config.flush_interval);
                     last_flush = Instant::now();
                 }
             }
             Ok(Some(WorkerCommand::Flush(reply))) => {
                 let result =
                     drain_all(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
+                retry_at = result
+                    .is_err()
+                    .then(|| Instant::now() + config.flush_interval);
                 let _ = reply.send(result);
                 last_flush = Instant::now();
             }
@@ -114,8 +125,11 @@ async fn worker_loop(
             }
             Err(_elapsed) => {
                 if !queue.is_empty() {
-                    let _ =
+                    let result =
                         drain_once(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
+                    retry_at = result
+                        .is_err()
+                        .then(|| Instant::now() + config.flush_interval);
                     last_flush = Instant::now();
                 }
             }
@@ -372,9 +386,9 @@ fn tracing_log(msg: String) {
 // since fetch/erase are user-driven, low-frequency operations —
 // the cost of dialing the endpoint is dwarfed by the round-trip.
 
-use teksilo_core::telemetry::{RemoteEvent, RemoteValue};
 use std::collections::BTreeMap;
 use std::time::{Duration, UNIX_EPOCH};
+use teksilo_core::telemetry::{RemoteEvent, RemoteValue};
 
 use crate::config::TlsClientConfig;
 

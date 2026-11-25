@@ -9,9 +9,11 @@
 //! [`TelemetryMode`]. The mode is held in an `RwLock<TelemetryMode>`;
 //! `PrivacySettings` flips it via `set_active_mode`.
 //!
-//! Emission is gated by the [`ConsentStore`]'s `is_granted`. When
-//! consent is not granted, `record` short-circuits without touching
-//! the inner adapter.
+//! Emission is gated by the [`ConsentStore`]: `record` goes through only
+//! when consent is granted with the `anonymous_metrics` scope on, the
+//! scope that covers every [`Event`] category (usage counts, lifecycle,
+//! census). Otherwise it short-circuits without touching the recent log
+//! or the inner adapter. The other scopes have no event stream yet.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -132,7 +134,10 @@ impl DynamicReporter {
 
 impl UsageReporter for DynamicReporter {
     fn record(&self, event: &Event<'_>) {
-        if !self.consent.is_granted() {
+        // Granted consent is not enough: the user may have granted with
+        // every scope off, or with only a scope that sends no events.
+        let state = self.consent.state_signal().get();
+        if !state.scope().is_some_and(|s| s.anonymous_metrics) {
             return;
         }
         // Tee into the user-facing recent-log ring buffer first; the
@@ -333,6 +338,32 @@ mod tests {
         r.record(&e);
         let export = r.fetch_remote_data().unwrap();
         assert_eq!(export.events.len(), 1); // only the post-switch event
+    }
+
+    /// Granting and then turning every scope off leaves consent
+    /// `Granted(none)`; nothing may reach the adapter or the recent log.
+    #[test]
+    fn record_drops_when_granted_with_every_scope_off() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let consent = ConsentStore::open(&paths, Duration::ZERO, 1, "stub://").unwrap();
+        let stub = Rc::new(StubReporter::anonymous());
+        let recent_log = Arc::new(InMemoryEventQueue::with_capacity(64));
+        let r = DynamicReporter::new(
+            Some(stub.clone() as Rc<dyn UsageReporter>),
+            None,
+            TelemetryMode::Anonymous,
+            consent.clone(),
+            recent_log.clone(),
+        );
+        consent.grant(ConsentScope::all(), "stub://").unwrap();
+        consent.set_scope(|s| *s = ConsentScope::none()).unwrap();
+        assert!(consent.is_granted());
+
+        let (e, _) = make_event("intent.dispatched");
+        r.record(&e);
+        assert_eq!(stub.recorded_count(), 0, "no event may reach the adapter");
+        assert_eq!(recent_log.len(), 0, "a blocked event was never emitted");
     }
 
     #[test]

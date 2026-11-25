@@ -40,6 +40,22 @@ by crate for clarity, not because crates version independently.
 - **A window closed while maximized or full screen keeps its normal size and
   position**: un-maximizing it after a relaunch gives back the size it had.
 
+#### Telemetry
+
+- **No event is recorded or sent while the anonymous usage metrics scope is
+  off**, including after the user granted consent and then turned every scope
+  off, or turned on only crash reports or feature flags.
+- **"Reject all" and "Withdraw consent" drop the events already queued**,
+  including those saved for a later launch.
+- **The teksilo-collector adapter no longer freezes the app while the collector
+  is unreachable.**
+- **The OTLP adapter sends every queued event when the app exits**, not only
+  the first batch.
+- **During an outage, the analytics adapters wait for their retry delay**
+  instead of sending a request for every new event.
+- **A second instance of an app with a persistent analytics queue no longer
+  crashes**; it queues its events in memory.
+
 ## [0.29.1] - 2026-11-24
 
 ### Added

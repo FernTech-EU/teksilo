@@ -726,3 +726,88 @@ fn pseudonymous_event_carries_install_id_on_the_wire() {
     }
     let _ = captured;
 }
+
+// -------------------- an unreachable collector --------------------
+
+/// `record` runs on the UI thread. A collector that never answers holds
+/// the worker for a whole request timeout per attempt, so the command
+/// channel fills; `record` must drop the event rather than wait.
+#[test]
+fn record_returns_promptly_while_the_worker_is_stuck() {
+    // Connections land in the backlog and are never answered.
+    let silent = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", silent.local_addr().unwrap());
+
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let adapter = TeksiloAdapter::builder()
+            .endpoint(endpoint)
+            .product_id("test.app")
+            .max_batch_size(1)
+            .flush_interval(Duration::from_secs(3600))
+            .request_timeout(Duration::from_secs(3))
+            .build();
+        let start = Instant::now();
+        for _ in 0..1000 {
+            adapter.record(&make_event("evt.a", &[]));
+        }
+        done_tx.send(start.elapsed()).unwrap();
+    });
+
+    let elapsed = done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("record blocked behind a stuck worker");
+    assert!(
+        elapsed < Duration::from_secs(2),
+        "1000 records took {elapsed:?}"
+    );
+    drop(silent);
+}
+
+/// A worker whose last send failed does not try again when the next
+/// event arrives, even with a full batch queued: one attempt per flush
+/// interval during an outage, not one per event.
+#[test]
+fn a_new_event_after_a_failed_send_sends_nothing() {
+    // Accepts each connection and closes it at once, counting attempts.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let counter = attempts.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            counter.fetch_add(1, Ordering::SeqCst);
+            drop(stream);
+        }
+    });
+
+    let adapter = TeksiloAdapter::builder()
+        .endpoint(endpoint)
+        .product_id("test.app")
+        .max_batch_size(1)
+        .flush_interval(Duration::from_secs(3600))
+        .request_timeout(Duration::from_secs(2))
+        .build();
+
+    adapter.record(&make_event("evt.a", &[]));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while attempts.load(Ordering::SeqCst) == 0 {
+        assert!(Instant::now() < deadline, "the first send was never tried");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    let after_first = attempts.load(Ordering::SeqCst);
+
+    adapter.record(&make_event("evt.b", &[]));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while adapter.events_queued() < 2 {
+        assert!(Instant::now() < deadline, "the second event never queued");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        after_first,
+        "an event after a failed send tried again"
+    );
+}

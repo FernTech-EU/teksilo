@@ -37,7 +37,9 @@ use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use teksilo_core::telemetry::{ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter};
+use teksilo_core::telemetry::{
+    ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter,
+};
 use teksilo_telemetry::{EventQueue, InMemoryEventQueue, PersistentEventQueue};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
@@ -83,11 +85,23 @@ impl TeksiloAdapter {
     }
 
     fn send(&self, cmd: WorkerCommand) {
-        // `blocking_send` is the right call from a non-async caller
-        // (the Teksilo UI thread). Returns Err only if the worker
-        // has shut down — at which point dropping the command is
-        // the correct behavior.
-        let _ = self.worker_tx.blocking_send(cmd);
+        // Called on the Teksilo UI thread. An event is not worth blocking
+        // it for: while the collector is unreachable the worker spends a
+        // connect timeout per attempt and the channel fills, so a full
+        // channel drops the event and counts it. `Flush` and `Discard`
+        // wait for room: a flush reply is awaited anyway, and a lost
+        // discard would send data the user refused. Any send fails only
+        // once the worker has shut down, when dropping is correct.
+        match cmd {
+            WorkerCommand::Record(_) => {
+                if let Err(mpsc::error::TrySendError::Full(_)) = self.worker_tx.try_send(cmd) {
+                    self.stats.dropped.fetch_add(1, Ordering::Relaxed);
+                }
+            }
+            _ => {
+                let _ = self.worker_tx.blocking_send(cmd);
+            }
+        }
     }
 }
 
@@ -394,14 +408,25 @@ impl TeksiloAdapterBuilder {
 
         let queue: Arc<dyn EventQueue> = match (self.explicit_queue, self.queue_path) {
             (Some(q), _) => q,
-            (None, Some(path)) => Arc::new(
-                PersistentEventQueue::open_with(
-                    path,
-                    self.config.max_queue_size,
-                    Duration::from_secs(60 * 60 * 24 * 7),
-                )
-                .expect("TeksiloAdapterBuilder::persistent_queue_path: open redb"),
-            ),
+            (None, Some(path)) => match PersistentEventQueue::open_with(
+                &path,
+                self.config.max_queue_size,
+                Duration::from_secs(60 * 60 * 24 * 7),
+            ) {
+                Ok(q) => Arc::new(q),
+                // Another instance of the app may hold the file. Telemetry
+                // must not take the app down: queue in memory instead.
+                Err(e) => {
+                    eprintln!(
+                        "teksilo-analytics-native: could not open the event queue at {}, \
+                         queueing in memory instead: {e}",
+                        path.display()
+                    );
+                    Arc::new(InMemoryEventQueue::with_capacity(
+                        self.config.max_queue_size,
+                    ))
+                }
+            },
             (None, None) => Arc::new(InMemoryEventQueue::with_capacity(
                 self.config.max_queue_size,
             )),

@@ -456,11 +456,15 @@ fn build_accept_reject(telemetry: &OpenedTelemetry, endpoint: &str) -> HStack {
     let supported = telemetry.reporter.supported_scopes();
     let endpoint = endpoint.to_string();
     let consent_for_reject = telemetry.consent.clone();
+    let reporter_for_reject = telemetry.reporter.clone();
     let consent_for_accept = telemetry.consent.clone();
 
     let reject = Button::new(tr_widget!(privacy_btn_reject_all()))
         .variant(ButtonVariant::Plain)
         .on_activate_fn(move |_ctx| {
+            // Events queued before the refusal (a persistent queue keeps
+            // them across launches) must not go out after it.
+            let _ = reporter_for_reject.discard_pending();
             let _ = consent_for_reject.deny();
         });
     let accept = Button::new(tr_widget!(privacy_btn_accept_all()))
@@ -725,16 +729,19 @@ fn build_mode_switch(telemetry: &OpenedTelemetry) -> Panel {
 
 fn build_footer(telemetry: &OpenedTelemetry) -> HStack {
     let consent = telemetry.consent.clone();
+    let reporter = telemetry.reporter.clone();
     let withdraw = Button::new(tr_widget!(privacy_btn_withdraw()))
         .variant(ButtonVariant::Plain)
         .tooltip(tr_widget!(privacy_btn_withdraw_tooltip()))
         .on_activate_fn(move |ctx| {
             let consent = consent.clone();
+            let reporter = reporter.clone();
             MessageBox::question(tr_widget!(privacy_confirm_withdraw_title()))
                 .text(tr_widget!(privacy_confirm_withdraw_text()))
                 .buttons(MessageBoxButtons::OkCancel)
                 .on_result(move |result, _ctx| {
                     if matches!(result.button, StandardButton::Ok) {
+                        let _ = reporter.discard_pending();
                         let _ = consent.withdraw();
                     }
                 })
@@ -830,6 +837,20 @@ fn build_inspect_accordion(telemetry: &OpenedTelemetry, n: usize) -> Accordion {
 /// placeholder: no consent row, no `Toggle`.
 #[cfg(test)]
 pub(crate) fn tree_with_telemetry(dir: &std::path::Path) -> teksilo_core::widget_tree::WidgetTree {
+    tree_and_telemetry(dir).0
+}
+
+/// [`tree_with_telemetry`], also handing back the [`OpenedTelemetry`] the
+/// tree's app state holds (a clone sharing its consent and reporter) and the
+/// stub adapter behind it, whose `recorded` list is its outbound queue.
+#[cfg(test)]
+pub(crate) fn tree_and_telemetry(
+    dir: &std::path::Path,
+) -> (
+    teksilo_core::widget_tree::WidgetTree,
+    OpenedTelemetry,
+    std::rc::Rc<teksilo_telemetry::StubReporter>,
+) {
     use std::any::{Any, TypeId};
     use std::collections::HashMap;
     use std::rc::Rc;
@@ -839,11 +860,13 @@ pub(crate) fn tree_with_telemetry(dir: &std::path::Path) -> teksilo_core::widget
 
     let settings =
         SettingsStore::open_with_delay(dir.join("settings.toml"), Duration::ZERO).unwrap();
+    let stub = Rc::new(StubReporter::anonymous());
     let opened = TelemetryBundle::new(1)
-        .with_anonymous(Rc::new(StubReporter::anonymous()))
+        .with_anonymous(stub.clone())
         .with_debounce(Duration::ZERO)
         .open(&AppPaths::for_testing(dir), &settings)
         .unwrap();
+    let handle = opened.clone();
     let mut app_state: HashMap<TypeId, Box<dyn Any>> = HashMap::new();
     app_state.insert(TypeId::of::<OpenedTelemetry>(), Box::new(opened));
 
@@ -852,7 +875,7 @@ pub(crate) fn tree_with_telemetry(dir: &std::path::Path) -> teksilo_core::widget
     tree.set_app_context(Rc::new(
         teksilo_core::event_source::TreeAppContext::empty().with_app_state(app_state),
     ));
-    tree
+    (tree, handle, stub)
 }
 
 #[cfg(test)]
@@ -927,6 +950,48 @@ mod tests {
             "Paramètres de confidentialité et de télémétrie",
             "container name must re-resolve on locale change"
         );
+        clear();
+    }
+
+    /// "Reject all" drops what was queued before the refusal: with a
+    /// persistent queue, those events would otherwise go out on a later
+    /// launch even though the user said no.
+    #[test]
+    fn reject_all_discards_events_already_queued() {
+        clear();
+        let cfg = I18nConfig::test_only("en-US", &[]).framework_locales(crate::framework_locales());
+        install(I18nManager::from_config(&cfg));
+
+        let dir = tempfile::tempdir().unwrap();
+        let (mut tree, telemetry, stub) = tree_and_telemetry(dir.path());
+        telemetry
+            .consent
+            .grant(ConsentScope::all(), "stub://")
+            .unwrap();
+        let event = teksilo_core::telemetry::Event {
+            name: "intent.dispatched",
+            category: teksilo_core::telemetry::EventCategory::Intent,
+            timestamp: std::time::SystemTime::UNIX_EPOCH,
+            install_id: None,
+            session_id: "s",
+            schema_version: 1,
+            props: &[],
+        };
+        telemetry.reporter.record(&event);
+        assert_eq!(stub.recorded_count(), 1, "the event is queued");
+
+        tree.add(PrivacySettings::new());
+        tree.layout(SizeProposal::exact(800.0, 1200.0));
+        let reject = tree
+            .find_by_label("Reject all")
+            .expect("the consent row offers Reject all");
+        tree.click(reject);
+
+        assert!(matches!(
+            telemetry.consent.state_signal().get(),
+            ConsentState::Denied
+        ));
+        assert_eq!(stub.recorded_count(), 0, "the queued event is discarded");
         clear();
     }
 

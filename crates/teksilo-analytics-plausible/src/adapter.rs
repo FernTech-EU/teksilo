@@ -251,8 +251,9 @@ impl PlausibleAdapterBuilder {
     }
 
     /// Spawns the worker thread. Panics if the OS refuses to spawn
-    /// (out of resources) or if a `persistent_queue_path` was set
-    /// but the file can't be opened.
+    /// (out of resources). A `persistent_queue_path` that can't be
+    /// opened (another instance of the app holds it, say) is reported
+    /// on stderr and replaced by an in-memory queue of the same size.
     pub fn build(self) -> PlausibleAdapter {
         assert!(
             !self.config.domain.is_empty(),
@@ -264,18 +265,23 @@ impl PlausibleAdapterBuilder {
         );
         let queue: Arc<dyn EventQueue> = match (self.explicit_queue, self.queue_path) {
             (Some(q), _) => q,
-            (None, Some(path)) => {
-                let q = PersistentEventQueue::open_with(
-                    path,
-                    self.config.max_queue_size,
-                    Duration::from_secs(60 * 60 * 24 * 7),
-                )
-                .expect(
-                    "PlausibleAdapter::builder().persistent_queue_path(...): \
-                     could not open redb file",
-                );
-                Arc::new(q)
-            }
+            (None, Some(path)) => match PersistentEventQueue::open_with(
+                &path,
+                self.config.max_queue_size,
+                Duration::from_secs(60 * 60 * 24 * 7),
+            ) {
+                Ok(q) => Arc::new(q),
+                Err(e) => {
+                    eprintln!(
+                        "teksilo-analytics-plausible: could not open the event queue at {}, \
+                         queueing in memory instead: {e}",
+                        path.display()
+                    );
+                    Arc::new(InMemoryEventQueue::with_capacity(
+                        self.config.max_queue_size,
+                    ))
+                }
+            },
             (None, None) => Arc::new(InMemoryEventQueue::with_capacity(
                 self.config.max_queue_size,
             )),
