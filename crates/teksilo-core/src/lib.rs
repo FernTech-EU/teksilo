@@ -71,8 +71,6 @@ pub use animation::AnimationScheduler;
 pub use animation_builder::AnimationSpec;
 pub use announcer::Politeness;
 pub use app_event::AppEvent;
-#[allow(deprecated)]
-pub use app_event::RepaintWindowRequest;
 pub use arena::WidgetArena;
 pub use async_completion::{AsyncCompletionHandle, AsyncCompletionPayload};
 pub use binding::{BindingLevel, BindingRegistry};

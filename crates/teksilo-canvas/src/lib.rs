@@ -43,8 +43,6 @@ mod xml;
 
 pub use animated::AnimatedIcon;
 pub use canvas::Canvas;
-#[allow(deprecated)]
-pub use exif::Orientation;
 pub use geometry::{EdgeInsets, Point, Rect, Size, SizeProposal, Transform2D, Vec2};
 pub use image_geometry::{ImageFit, ImageGeometry, ImageOrientation, PixelRect};
 pub use paint::{

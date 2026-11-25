@@ -1454,8 +1454,7 @@ parser's result) uses a `RepaintTrigger`: attach it in `build()` with
 `ctx.attach_repaint_trigger(&trigger)`, store the change on the thread, then
 `trigger.request_repaint()` (or `request_relayout()`; `request_pull()` with
 `ctx.on_trigger_pull(..)` to take it in even while the widget is not shown). Only
-that widget repaints, and only its window wakes. `RepaintWindowRequest` is
-deprecated: it repainted every widget of the window.
+that widget repaints, and only its window wakes.
 
 ## Breaking changes 0.9 → 0.13
 

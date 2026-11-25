@@ -13,6 +13,17 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Removed
+
+- **`RepaintWindowRequest`** (teksilo-core), deprecated since 0.16.0, and its
+  routing in teksilo-app. Attach a `RepaintTrigger` with
+  `BuildContext::attach_repaint_trigger`: it repaints only the widgets it is
+  attached to and wakes only their window.
+- **`TableView::reorderable_rows`**, deprecated since 0.6.3: use
+  `TableView::reorderable`.
+- **`teksilo_canvas::Orientation`** (`exif::Orientation`), deprecated since
+  0.16.0: use `ImageOrientation`.
+
 ### Fixed
 
 #### Widgets

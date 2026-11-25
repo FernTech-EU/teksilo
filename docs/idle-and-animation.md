@@ -282,10 +282,7 @@ loop then decides. If a widget the window showed in its last frame has one
 pending, it draws a frame at once, which takes it in and repaints; otherwise it
 runs a frame that draws nothing, at most ten a second.
 
-The older `RepaintWindowRequest { window_id }`, posted through
-`AppEventPoster::post_external`, is deprecated: it repaints every widget of the
-window and redraws every window. `teksilo-terminal` uses the trigger; see
-[terminal.md](terminal.md).
+`teksilo-terminal` uses the trigger; see [terminal.md](terminal.md).
 
 ## Off-thread pixels: `LiveImage`
 

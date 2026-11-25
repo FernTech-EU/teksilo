@@ -569,11 +569,10 @@ teksilo-terminal        Embeddable terminal-emulator (`Terminal` / Console) widg
                      native subview). `TerminalController` (Weak handle, the ListModel pattern) drives
                      it from anywhere + exposes reactive `title/cwd/child_running/columns/rows/…`
                      signals; `ColorScheme` (16 ANSI + truecolor); Tier-3 `TerminalStyle`. Off by
-                     default (umbrella `terminal` feature). Introduced two reusable framework
-                     primitives: `WidgetBuilder::keyboard_capture(bool)` (a focused surface receives
-                     every KeyDown raw, bypassing shortcut resolution — so Ctrl+C reaches the child)
-                     and `RepaintWindowRequest { window_id }` (a thread-safe "repaint this window",
-                     now deprecated). Output now reaches it through a `RepaintTrigger` (teksilo-core):
+                     default (umbrella `terminal` feature). Introduced a reusable framework
+                     primitive, `WidgetBuilder::keyboard_capture(bool)` (a focused surface receives
+                     every KeyDown raw, bypassing shortcut resolution, so Ctrl+C reaches the child).
+                     Output reaches it through a `RepaintTrigger` (teksilo-core):
                      the PTY reader thread queues (bounded at 4 MiB) and requests a pull, and the
                      terminal's pull hook takes it in during the next layout, shown or not, so a
                      background terminal stays current and its window draws nothing for it. See

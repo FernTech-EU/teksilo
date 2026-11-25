@@ -991,14 +991,6 @@ impl<T: 'static> TableView<T> {
         self
     }
 
-    /// Renamed to [`reorderable`](Self::reorderable), matching `ListView`,
-    /// `GridView`, `TreeView` and `TreeTableView` — this was the only view in
-    /// the family spelling it differently.
-    #[deprecated(since = "0.6.3", note = "renamed to `reorderable`")]
-    pub fn reorderable_rows(self, enabled: bool) -> Self {
-        self.reorderable(enabled)
-    }
-
     /// Make rows **droppable outside this view** — on a
     /// [`DropTarget`](crate::DropTarget), another data view, or the OS.
     ///

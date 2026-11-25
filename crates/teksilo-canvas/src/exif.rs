@@ -21,10 +21,6 @@
 
 pub use crate::image_geometry::ImageOrientation;
 
-/// The orientation an EXIF block names.
-#[deprecated(since = "0.16.0", note = "renamed `ImageOrientation`")]
-pub type Orientation = ImageOrientation;
-
 /// Read the `Orientation` tag out of an EXIF block.
 ///
 /// `data` is the payload of a JPEG `APP1` segment, with or without the leading

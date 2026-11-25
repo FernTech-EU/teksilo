@@ -2461,9 +2461,8 @@ impl WidgetTree {
     }
 
     /// Mark every node paint-dirty (no relayout, no rebuild) so the next
-    /// render re-runs their `paint()`. What teksilo-app does on receiving the
-    /// deprecated [`RepaintWindowRequest`](crate::RepaintWindowRequest); a
-    /// widget whose content changes off the UI thread attaches a
+    /// render re-runs their `paint()`. A widget whose content changes off the
+    /// UI thread attaches a
     /// [`RepaintTrigger`](crate::RepaintTrigger) instead, which repaints that
     /// widget alone.
     pub fn mark_all_needs_paint_only(&mut self) {

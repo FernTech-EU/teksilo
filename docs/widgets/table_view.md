@@ -60,7 +60,6 @@
 | `Self` | [`on_cell_edit_dismissed(f: impl Fn(usize, &str, &mut teksilo_core::widget::EventContext) + 'static)`](#tableview-on_cell_edit_dismissed) |
 | `Self` | [`on_row_activate(f: impl Fn(usize, &mut teksilo_core::widget::EventContext) + 'static)`](#tableview-on_row_activate) |
 | `Self` | [`reorderable(enabled: bool)`](#tableview-reorderable) |
-| `Self` | [`reorderable_rows(enabled: bool)`](#tableview-reorderable_rows) |
 | `Self` | [`exportable(mode: DragTransferMode)`](#tableview-exportable) |
 | `Self` | [`export_external(f: impl Fn(&[T]) -> Vec<(String, Vec<u8>)> + 'static)`](#tableview-export_external) |
 | `Self` | [`export_os_handoff(handoff: teksilo_core::OsHandoff)`](#tableview-export_os_handoff) |
@@ -589,14 +588,6 @@ the drop is refused. A row may also be forbidden from dragging at
 all (the source's `drag` gate). Cross-table / external drops arrive
 at `accept_drop` as `DragSource::Foreign`; a bare `ListModel`
 rejects them, an external source decides.
-
-<a id="tableview-reorderable_rows"></a>
-
-#### `pub fn reorderable_rows(self, enabled: bool) -> Self`
-
-Renamed to `reorderable`, matching `ListView`,
-`GridView`, `TreeView` and `TreeTableView` — this was the only view in
-the family spelling it differently.
 
 <a id="tableview-exportable"></a>
 

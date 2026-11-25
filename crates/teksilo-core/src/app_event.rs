@@ -66,28 +66,6 @@ pub enum AppEvent {
     },
 }
 
-/// A thread-safe "please repaint this window now" request, posted as an
-/// [`AppEvent::External`] payload from a background thread via
-/// [`AppEventPoster::post_external`](crate::AppEventPoster::post_external).
-///
-/// teksilo-app routes it by marking **every** widget of the named window's
-/// tree paint-dirty
-/// ([`WidgetTree::mark_all_needs_paint_only`](crate::widget_tree::WidgetTree::mark_all_needs_paint_only))
-/// and redrawing **every** window. Attach a [`RepaintTrigger`](crate::RepaintTrigger)
-/// instead: it repaints only the widgets it is attached to and wakes only
-/// their window, needs no window id or poster, and can also relayout a widget
-/// or have it take content in when it is not shown. Removed at the next
-/// breaking release; it still works as before.
-#[deprecated(
-    since = "0.16.0",
-    note = "attach a `RepaintTrigger` with `BuildContext::attach_repaint_trigger`: it repaints only the attached widgets and redraws only their window"
-)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RepaintWindowRequest {
-    /// The window whose tree should be marked paint-dirty and redrawn.
-    pub window_id: crate::window::TeksiloWindowId,
-}
-
 impl std::fmt::Debug for AppEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
