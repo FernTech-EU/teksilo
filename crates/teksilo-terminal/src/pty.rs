@@ -9,8 +9,9 @@
 //! Neither direction can hold the UI thread. What the view writes (keys,
 //! paste, the terminal's replies to the child's queries) goes to a queue a
 //! writer thread drains, so a child that does not read its input stalls
-//! nothing; the queue holds [`INPUT_QUEUE_CAP`] at most, and what a child
-//! that never reads would push past it is dropped.
+//! nothing; the queue holds [`INPUT_QUEUE_CAP`] at most, and a write a child
+//! that never reads would push past it is dropped whole, so no key sequence,
+//! paste marker or character reaches the child cut in half.
 //!
 //! The engine going ends the reads and writes in flight. On Unix the reader
 //! and the writer each use a descriptor of their own on the PTY's master,
@@ -29,8 +30,9 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 
 use crate::engine::{PtyGeom, TerminalCommand, TerminalExit};
 
-/// The most input queued for the child before more is dropped.
-pub(crate) const INPUT_QUEUE_CAP: usize = 4 << 20;
+/// The most input queued for the child before more is dropped. A paste is
+/// cut to fit it (see [`encode_paste`](crate::input::encode_paste)).
+pub(crate) const INPUT_QUEUE_CAP: usize = crate::input::MAX_PASTE_BYTES;
 
 /// The UI-thread-owned half of a spawned PTY.
 pub(crate) struct Pty {
@@ -137,14 +139,19 @@ impl InputQueue {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Queue what fits under [`INPUT_QUEUE_CAP`]; nothing once closed.
+    /// Queue `bytes` whole if they fit under [`INPUT_QUEUE_CAP`], else drop
+    /// them whole: a write cut short could end inside an escape sequence, a
+    /// paste's end marker or a character. Nothing once closed.
     fn push(&self, bytes: &[u8]) {
         let mut state = self.lock();
         if state.closed {
             return;
         }
         let room = INPUT_QUEUE_CAP.saturating_sub(state.bytes.len());
-        state.bytes.extend(&bytes[..bytes.len().min(room)]);
+        if bytes.len() > room {
+            return;
+        }
+        state.bytes.extend(bytes);
         drop(state);
         self.ready.notify_one();
     }
@@ -528,18 +535,44 @@ mod tests {
     #[test]
     fn the_input_queue_holds_its_cap_at_most_and_nothing_once_closed() {
         let queue = InputQueue::new();
-        queue.push(&vec![b'x'; INPUT_QUEUE_CAP + 100]);
+        queue.push(&vec![b'x'; INPUT_QUEUE_CAP - 4]);
+        // A bracketed paste's end marker that does not fit is not cut: the
+        // queue is left as it was rather than ending in `ESC [ 2`.
+        queue.push(b"\x1b[201~");
         assert_eq!(
             queue.len(),
-            INPUT_QUEUE_CAP,
-            "what is past the cap is dropped"
+            INPUT_QUEUE_CAP - 4,
+            "a write that does not fit is dropped whole"
         );
+        queue.push(b"abcd");
+        assert_eq!(queue.len(), INPUT_QUEUE_CAP, "one that fits is queued");
         assert_eq!(queue.wait_take(10).map(|b| b.len()), Some(10));
         queue.close();
         assert_eq!(queue.len(), 0, "closing abandons what was left");
         queue.push(b"late");
         assert_eq!(queue.len(), 0);
         assert_eq!(queue.wait_take(10), None);
+    }
+
+    #[test]
+    fn an_oversized_bracketed_paste_is_cut_at_a_character_and_keeps_its_end_marker() {
+        // Three-byte characters, so the cut falls inside one unless it is
+        // moved back to a boundary.
+        let text = "€".repeat(INPUT_QUEUE_CAP / 3 + 100);
+        let mode = crate::engine::TermMode {
+            bracketed_paste: true,
+            ..Default::default()
+        };
+        let queue = InputQueue::new();
+        queue.push(&crate::input::encode_paste(&text, mode));
+        // Checked first: `wait_take` on an empty queue would wait forever.
+        assert!(queue.len() > 0, "the paste was queued, not dropped whole");
+        let sent = queue.wait_take(usize::MAX).expect("the paste was queued");
+        assert!(sent.len() <= INPUT_QUEUE_CAP);
+        assert!(sent.starts_with(b"\x1b[200~"), "the paste opens");
+        assert!(sent.ends_with(b"\x1b[201~"), "and is closed");
+        let body = &sent[6..sent.len() - 6];
+        assert!(std::str::from_utf8(body).is_ok(), "no character is cut");
     }
 
     #[test]

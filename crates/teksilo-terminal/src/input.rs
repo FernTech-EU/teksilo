@@ -343,8 +343,15 @@ fn names_key(typed: char, own: char) -> bool {
     typed == own || (own.is_ascii_alphabetic() && typed.eq_ignore_ascii_case(&own))
 }
 
+/// The most bytes one paste encodes to, markers included: the PTY's whole input
+/// queue. The queue drops a write that does not fit whole, so a longer paste
+/// is cut here, at a character, rather than lost or cut inside its end marker.
+pub(crate) const MAX_PASTE_BYTES: usize = 4 << 20;
+
 /// Wrap pasted text in bracketed-paste markers when the child enabled the mode
 /// (`ESC [ 200 ~` … `ESC [ 201 ~`); otherwise return the bytes unchanged.
+/// Text longer than [`MAX_PASTE_BYTES`] is cut at a character boundary so the
+/// encoded paste fits it.
 pub fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
     // Normalise every line break to CR (`\r`) — the same byte the Enter key
     // sends — so pasted lines are submitted/inserted consistently with typing.
@@ -352,17 +359,34 @@ pub fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
     // Ctrl+J.) The PTY's line discipline maps CR→NL for cooked-mode shells.
     let normalized: String = text.replace("\r\n", "\r").replace('\n', "\r");
     if mode.bracketed_paste {
-        let mut out = Vec::with_capacity(normalized.len() + 12);
+        let mut out = Vec::with_capacity(normalized.len().min(MAX_PASTE_BYTES) + 12);
         out.extend_from_slice(b"\x1b[200~");
         // Strip the paste-end marker if it somehow appears in the payload, so a
-        // malicious clipboard can't break out of bracketed paste.
-        let safe = normalized.replace("\x1b[201~", "");
-        out.extend_from_slice(safe.as_bytes());
+        // malicious clipboard can't break out of bracketed paste. Until none is
+        // left: one pass over "\x1b[20\x1b[201~1~" leaves a marker behind.
+        let mut safe = normalized;
+        while safe.contains("\x1b[201~") {
+            safe = safe.replace("\x1b[201~", "");
+        }
+        out.extend_from_slice(cut_at_char(&safe, MAX_PASTE_BYTES - 12).as_bytes());
         out.extend_from_slice(b"\x1b[201~");
         out
     } else {
-        normalized.into_bytes()
+        let end = cut_at_char(&normalized, MAX_PASTE_BYTES).len();
+        let mut bytes = normalized.into_bytes();
+        bytes.truncate(end);
+        bytes
     }
+}
+
+/// The longest prefix of `text` of at most `max` bytes that ends on a
+/// character boundary.
+fn cut_at_char(text: &str, max: usize) -> &str {
+    let mut end = max.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
 }
 
 #[cfg(test)]
@@ -515,5 +539,8 @@ mod tests {
         // A payload trying to smuggle the end marker is stripped.
         let attack = encode_paste("x\x1b[201~rm -rf", mode);
         assert_eq!(attack, b"\x1b[200~xrm -rf\x1b[201~");
+        // A marker nested in a marker comes back after one strip.
+        let nested = encode_paste("x\x1b[20\x1b[201~1~rm -rf", mode);
+        assert_eq!(nested, b"\x1b[200~xrm -rf\x1b[201~");
     }
 }

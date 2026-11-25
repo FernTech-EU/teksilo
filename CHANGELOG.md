@@ -48,6 +48,13 @@ by crate for clarity, not because crates version independently.
 - **A parent's checkbox in `TreeCheckedModel` follows its children when they
   are added, removed or moved in the tree.**
 
+#### Terminal
+
+- **The terminal no longer cuts its input in the middle of an escape sequence,
+  a bracketed-paste end marker or a character** when the child is not reading.
+  A paste larger than 4 MiB is shortened and still closed properly, and a
+  pasted end marker hidden inside another one is removed too.
+
 #### Settings and windows
 
 - **A settings file holding a plain value where the app stores nested
