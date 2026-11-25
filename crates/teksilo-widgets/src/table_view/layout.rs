@@ -239,23 +239,6 @@ impl ColumnSolver {
 
         widths
     }
-
-    /// Sum of resolved widths. Retained for pane partitioning — no production
-    /// caller today (`pane_widths` sums its own ranges), hence the
-    /// `allow(dead_code)`.
-    #[allow(dead_code)]
-    pub(crate) fn total_width(widths: &[f32]) -> f32 {
-        widths.iter().sum()
-    }
-
-    /// X-offset of column `i` relative to the pane's leading edge.
-    /// Retained for column-resize hit testing — no production caller today;
-    /// the header's grip works from its own cell bounds (`header.rs`,
-    /// `resize_grip`), hence the `allow(dead_code)`.
-    #[allow(dead_code)]
-    pub(crate) fn x_offset(widths: &[f32], i: usize) -> f32 {
-        widths.iter().take(i).sum()
-    }
 }
 
 fn clamp(value: f32, min: f32, max: Option<f32>) -> f32 {
@@ -578,16 +561,7 @@ mod tests {
             col("b", ColumnWidth::Fixed(120.0)),
         ];
         let widths = ColumnSolver::resolve(&cols, 400.0, 32.0, &HashMap::new());
-        assert_eq!(ColumnSolver::total_width(&widths), 200.0);
-    }
-
-    #[test]
-    fn x_offset_walks_widths() {
-        let widths = vec![80.0, 120.0, 60.0];
-        assert_eq!(ColumnSolver::x_offset(&widths, 0), 0.0);
-        assert_eq!(ColumnSolver::x_offset(&widths, 1), 80.0);
-        assert_eq!(ColumnSolver::x_offset(&widths, 2), 200.0);
-        assert_eq!(ColumnSolver::x_offset(&widths, 3), 260.0);
+        assert_eq!(widths.iter().sum::<f32>(), 200.0);
     }
 
     #[test]
@@ -676,7 +650,7 @@ mod tests {
         assert_eq!(widths[0], 100.0);
         assert_eq!(widths[1], 100.0);
         assert_eq!(widths[2], 200.0);
-        assert_eq!(ColumnSolver::total_width(&widths), 400.0);
+        assert_eq!(widths.iter().sum::<f32>(), 400.0);
     }
 
     #[test]

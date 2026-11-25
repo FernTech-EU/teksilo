@@ -17,7 +17,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use teksilo_canvas::{Canvas, Path, Point, Rect, Size, SizeProposal, TextBackend};
+use teksilo_canvas::{Canvas, Path, Point, Rect, SizeProposal, TextBackend};
 use teksilo_core::Theme;
 use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::binding::BindingLevel;
@@ -39,9 +39,10 @@ use teksilo_data::{ChartSelection, ChartSource, SeriesId, SeriesPattern, SeriesV
 use teksilo_tokens::{BorderRole, CornerRadius, TextRole, TextStyle, TextStyleRole};
 
 use crate::axis::AxisConfig;
+use crate::cartesian::{CartesianFrame, GeometryCache};
 use crate::hit::{self, MarkGeometry, MarkShape};
-use crate::layout::{LegendPosition, PlotGeometry, PlotGeometryParams, compute_plot_geometry};
-use crate::legend::{ChartLegend, legend_main_axis_size, orientation_for_position};
+use crate::layout::{LegendPosition, PlotGeometry};
+use crate::legend::{ChartLegend, orientation_for_position};
 use crate::palette::ChartPalette;
 use crate::pattern::{self, PatternPolicy};
 use crate::recipe_style::RecipeChartStyle;
@@ -58,19 +59,6 @@ pub enum BarOrientation {
 pub enum BarGrouping {
     Single,
     Grouped,
-}
-
-/// Cache key for the memoized [`PlotGeometry`] — a miss recomputes.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct GeometryKey {
-    bounds: Rect,
-    structure_version: u64,
-    /// The density the legend band was reserved at. An interactive legend's
-    /// rows are sized from `InputTokens::target_size`, and a density switch
-    /// changes neither the bounds nor the model version — so without this
-    /// the memoized geometry would keep the band the previous density
-    /// reserved.
-    density: teksilo_tokens::TargetDensity,
 }
 
 /// Text-measurement context stashed during `paint()` so `accessibility()`
@@ -123,7 +111,7 @@ pub struct BarChart<T: Clone + 'static> {
     /// a widget can read them — so `accessibility()`, which has no theme,
     /// reserves the same legend band `paint()` does.
     input: teksilo_tokens::InputTokens,
-    geometry_cache: Rc<RefCell<Option<(GeometryKey, PlotGeometry)>>>,
+    geometry_cache: GeometryCache,
     paint_snapshot: Rc<RefCell<Option<PaintSnapshot>>>,
     legend_id: Option<WidgetId>,
 }
@@ -523,12 +511,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
     }
 
     fn layout_response(&self, proposal: SizeProposal, ctx: &LayoutContext) -> LayoutResponse {
-        let ideal = Size::new(
-            proposal.width.unwrap_or(320.0),
-            proposal.height.unwrap_or(200.0),
-        );
-        let min = self.compute_intrinsic_min(ctx);
-        LayoutResponse::shrinkable(ideal, min, 1.0)
+        self.frame().layout_response(proposal, ctx)
     }
 
     fn place_children(
@@ -539,16 +522,7 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
         ctx: &LayoutContext,
     ) {
         self.bounds.set(bounds);
-        if let Some(legend_id) = self.legend_id {
-            let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
-            let geometry = self.ensure_geometry(bounds, ctx.text_backend, &label_style);
-            for child in children.iter_mut() {
-                if child.id == legend_id {
-                    child.origin = Point::new(geometry.legend.x, geometry.legend.y);
-                    child.size = Size::new(geometry.legend.width, geometry.legend.height);
-                }
-            }
-        }
+        self.frame().place_legend(bounds, children, ctx);
     }
 
     fn paint(&self, bounds: Rect, canvas: &mut Canvas, ctx: &PaintContext) {
@@ -833,110 +807,31 @@ impl<T: Clone + std::fmt::Display + 'static> Widget for BarChart<T> {
 }
 
 impl<T: Clone + std::fmt::Display + 'static> BarChart<T> {
-    /// Memoized [`PlotGeometry`] for `bounds` — recomputed only when
-    /// `bounds`, `model.structure_version()` or the target density changed
-    /// since the last call. Shared by `paint()` and `accessibility()` so a
-    /// mark's bounds never disagree between the visual tree and the AT
-    /// tree, even without an intervening paint.
+    /// The fields the plot layout shared with the other cartesian chart reads.
+    fn frame(&self) -> CartesianFrame<'_, T> {
+        CartesianFrame {
+            model: &self.model,
+            axis_x: &self.axis_x,
+            axis_y: &self.axis_y,
+            show_legend: self.show_legend,
+            legend_position: self.legend_position,
+            legend_interactive: self.legend_interactive,
+            legend_id: self.legend_id,
+            input: &self.input,
+            geometry_cache: &self.geometry_cache,
+            y_domain: y_domain_from_views,
+        }
+    }
+
+    /// Memoized [`PlotGeometry`] for `bounds`: see
+    /// [`CartesianFrame::ensure_geometry`].
     fn ensure_geometry(
         &self,
         bounds: Rect,
         backend: Option<&Rc<RefCell<dyn TextBackend>>>,
         label_style: &TextStyle,
     ) -> PlotGeometry {
-        let key = GeometryKey {
-            bounds,
-            structure_version: self.model.structure_version().get(),
-            density: self.input.density,
-        };
-        if let Some((cached_key, geometry)) = self.geometry_cache.borrow().as_ref()
-            && *cached_key == key
-        {
-            return geometry.clone();
-        }
-
-        let legend_orientation = orientation_for_position(self.legend_position);
-        let legend_size = if self.show_legend {
-            legend_main_axis_size(
-                backend,
-                &self.model,
-                label_style,
-                legend_orientation,
-                self.legend_interactive,
-                &self.input,
-            )
-        } else {
-            0.0
-        };
-        let y_domain = self
-            .model
-            .with_all_series(|views| y_domain_from_views(&self.axis_y, views));
-        // Gathered here as well as at paint time: the carve needs them to size a tilted
-        // label band, and the same first-visible-series rule must pick them both times.
-        let x_labels: Vec<String> = self.model.with_all_series(|views| {
-            let visible: Vec<&SeriesView<'_, T>> = views.iter().filter(|v| v.visible).collect();
-            if visible.is_empty() {
-                return Vec::new();
-            }
-            visible[0]
-                .points
-                .iter()
-                .map(|d| format!("{}", d.category))
-                .collect()
-        });
-        let geometry = compute_plot_geometry(&PlotGeometryParams {
-            bounds,
-            axis_x: &self.axis_x,
-            axis_y: &self.axis_y,
-            y_domain,
-            legend_size,
-            legend_position: if self.show_legend {
-                Some(self.legend_position)
-            } else {
-                None
-            },
-            text_backend: backend,
-            label_style,
-            x_labels: &x_labels,
-        });
-        *self.geometry_cache.borrow_mut() = Some((key, geometry.clone()));
-        geometry
-    }
-
-    /// Intrinsic compression floor — see [`crate::layout::compute_intrinsic_min`].
-    fn compute_intrinsic_min(&self, ctx: &LayoutContext) -> Size {
-        let plot_floor = Size::new(40.0, 40.0);
-        let label_style = TextStyleRole::Tiny.resolve(&ctx.theme.typography);
-        let legend_orientation = orientation_for_position(self.legend_position);
-        let legend_size = if self.show_legend {
-            legend_main_axis_size(
-                ctx.text_backend,
-                &self.model,
-                &label_style,
-                legend_orientation,
-                self.legend_interactive,
-                &ctx.theme.input,
-            )
-        } else {
-            0.0
-        };
-        let y_domain = self
-            .model
-            .with_all_series(|views| y_domain_from_views(&self.axis_y, views));
-        crate::layout::compute_intrinsic_min(
-            &self.axis_x,
-            &self.axis_y,
-            y_domain,
-            legend_size,
-            if self.show_legend {
-                Some(self.legend_position)
-            } else {
-                None
-            },
-            ctx.text_backend,
-            &label_style,
-            plot_floor,
-        )
+        self.frame().ensure_geometry(bounds, backend, label_style)
     }
 
     /// Compute every visible bar's geometry + identity. Pure — reads only

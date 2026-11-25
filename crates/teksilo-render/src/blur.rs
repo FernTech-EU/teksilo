@@ -243,12 +243,6 @@ impl BlurPool {
         }
     }
 
-    /// The format every pooled texture is created with.
-    #[allow(dead_code)]
-    pub(crate) fn format(&self) -> wgpu::TextureFormat {
-        self.format
-    }
-
     /// Begin a new frame: reset every texture's `in_use_this_frame`
     /// flag, drop textures that have been idle for too long.
     pub(crate) fn begin_frame(&mut self) {

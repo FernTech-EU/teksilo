@@ -196,13 +196,6 @@ impl RowMetrics {
         matches!(self.mode, RowMode::AutoMeasure { .. })
     }
 
-    /// Whether the arithmetic `Uniform` fast path is active (the other
-    /// modes are offset-table-backed).
-    #[allow(dead_code)]
-    pub(crate) fn is_uniform(&self) -> bool {
-        matches!(self.mode, RowMode::Uniform { .. })
-    }
-
     fn step(&self) -> f32 {
         match &self.mode {
             RowMode::Uniform {

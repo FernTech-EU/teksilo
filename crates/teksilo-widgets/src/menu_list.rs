@@ -1470,7 +1470,6 @@ mod tests {
     use std::cell::Cell as StdCell;
     use std::rc::Rc as StdRc;
     use teksilo_core::event::{Key, Modifiers};
-    use teksilo_core::signal::Signal;
 
     /// Build a menu list with an `on_activate_fn` for each entry that
     /// flips the matching slot in `fired`. Returns the list's
@@ -2052,13 +2051,6 @@ mod tests {
         tree.press_key(Key::O, Modifiers::NONE);
         tree.press_key(Key::Enter, Modifiers::NONE);
         assert_eq!(fired.get(), Some(1));
-    }
-
-    // Keeps the test module's `Signal` import referenced; nothing else in
-    // these tests names the type at module scope.
-    #[allow(dead_code)]
-    fn _ignore_unused() {
-        let _: Option<Signal<bool>> = None;
     }
 
     #[derive(Debug)]

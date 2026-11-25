@@ -19,7 +19,6 @@ categories = ["gui", "development-tools"]
 teksilo-core = { workspace = true }
 teksilo-tokens = { workspace = true }
 teksilo-canvas = { workspace = true }
-teksilo-data = { workspace = true }
 teksilo-app = { workspace = true }
 teksilo-i18n = { workspace = true }
 teksilo-widgets = { workspace = true }

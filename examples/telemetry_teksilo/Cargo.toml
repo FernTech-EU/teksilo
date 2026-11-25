@@ -12,7 +12,5 @@ publish = false
 teksilo = { workspace = true, features = [
     "automation","telemetry"] }
 teksilo-analytics-native = { workspace = true }
-teksilo-settings = { workspace = true }
 teksilo-telemetry = { workspace = true }
-teksilo-core = { workspace = true }
 uuid = { workspace = true }

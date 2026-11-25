@@ -1379,7 +1379,6 @@ version = "0.29.1"
 dependencies = [
  "clap",
  "serde",
- "serde_json",
  "serde_yaml",
 ]
 
@@ -11623,7 +11622,6 @@ dependencies = [
  "teksilo-inspector",
  "teksilo-macros",
  "teksilo-platform",
- "teksilo-render",
  "teksilo-resources",
  "teksilo-settings",
  "teksilo-terminal",
@@ -11745,7 +11743,6 @@ dependencies = [
  "teksilo",
  "teksilo-automation",
  "teksilo-canvas",
- "teksilo-core",
  "teksilo-platform",
  "teksilo-render",
  "tokio",
@@ -11986,7 +11983,6 @@ dependencies = [
  "teksilo-app",
  "teksilo-canvas",
  "teksilo-core",
- "teksilo-data",
  "teksilo-i18n",
  "teksilo-platform",
  "teksilo-preview",
@@ -12294,8 +12290,6 @@ version = "0.29.1"
 dependencies = [
  "teksilo",
  "teksilo-analytics-plausible",
- "teksilo-core",
- "teksilo-settings",
  "teksilo-telemetry",
 ]
 

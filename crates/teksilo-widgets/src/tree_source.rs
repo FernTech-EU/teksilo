@@ -21,15 +21,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use teksilo_core::drag_payload::DragPayload;
 use teksilo_core::signal::Signal;
 use teksilo_core::widget::{EventContext, Widget};
-use teksilo_data::{
-    DragEligibility, DragSource, DropCommit, DropPosition, DropQuery, DropResponse, RowState,
-    TreeDataSource,
-};
+use teksilo_data::{DragSource, DropCommit, DropPosition, TreeDataSource};
 
-use crate::data_views::{RowDragData, ViewId};
+use crate::list_source::DndLazy;
 
 /// Key-erased per-row flat metadata, derived from the source's `FlatEntry`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,160 +141,6 @@ fn root_indices<S: TreeDataSource>(source: &S, cache: &RootIndexCache) -> Rc<Vec
     flat
 }
 
-/// Erased DnD + lazy capability closures for a tree source. View-facing
-/// arguments are visible flat indices + the view's id; the closures resolve keys
-/// internally. Mirrors [`DndLazy`](crate::list_source::DndLazy) for trees, so the
-/// `Key` never escapes into `TreeView<T>`.
-pub(crate) struct TreeDndLazy {
-    /// Whether the row at `index` may begin a drag.
-    pub(crate) drag_fn: Rc<dyn Fn(usize) -> DragEligibility>,
-    /// `(payload, target_index, position, this_view_id) -> verdict`.
-    pub(crate) can_accept_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> DropResponse>,
-    /// `(payload, target_index, position, this_view_id) -> applied`.
-    pub(crate) accept_drop_fn: Rc<dyn Fn(&DragPayload, usize, DropPosition, ViewId) -> bool>,
-    /// Source-side completion: resolve stable node keys for these rows NOW
-    /// (drag-start) and return a thunk that removes them (a foreign move-out).
-    /// Resolving eagerly keeps a Move correct even when the tree's flat indices
-    /// reshuffle mid-drag (spring-load auto-expand), since the stable `NodeId`s
-    /// were already captured.
-    pub(crate) snapshot_out_fn: crate::data_views::SnapshotOutFn,
-    /// Resolve + stash the dragged rows' stable node keys for a **synthetic**
-    /// same-view payload built outside `RowExport::build_payload`. Pointer
-    /// drags stash through [`snapshot_out_fn`](Self::snapshot_out_fn) at
-    /// drag-start; the same-view accept path reads identity exclusively from
-    /// this stash — see [`can_accept_fn`](Self::can_accept_fn).
-    pub(crate) stash_drag_keys_fn: Rc<dyn Fn(&[usize])>,
-    /// Whether the row at `index` is loaded.
-    pub(crate) row_state_fn: Rc<dyn Fn(usize) -> RowState>,
-    /// Nudge the source to load a visible range.
-    pub(crate) request_window_fn: Rc<dyn Fn(std::ops::Range<usize>)>,
-    /// Whether more rows can be appended.
-    pub(crate) can_fetch_more_fn: Rc<dyn Fn() -> bool>,
-    /// Fetch the next page.
-    pub(crate) fetch_more_fn: Rc<dyn Fn()>,
-}
-
-impl TreeDndLazy {
-    fn from_source<T: 'static, S: TreeDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
-        // Stable node keys of the in-flight same-view drag, resolved from flat
-        // indices ONCE at payload construction (`snapshot_out_fn` for pointer
-        // drags, `stash_drag_keys_fn` for synthetic keyboard payloads). The
-        // accept path reads identity from here rather than re-resolving
-        // `RowDragData::rows` at hover/drop time: a tree's flat indices
-        // reshuffle mid-drag (the spring-load auto-expand is triggered by the
-        // very hover that precedes the drop), and whichever nodes slid into
-        // the stale slots must not stand in for the dragged ones.
-        let drag_keys: Rc<RefCell<Option<Vec<S::Key>>>> = Rc::new(RefCell::new(None));
-        let (keys_ca, keys_ad, keys_snap, keys_stash) = (
-            drag_keys.clone(),
-            drag_keys.clone(),
-            drag_keys.clone(),
-            drag_keys,
-        );
-        let (s1, s2, s3, s4, s5, s6, s7, s8, s9) = (
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s,
-        );
-        Self {
-            drag_fn: Rc::new(move |index| match s1.key_at(index) {
-                Some(k) => s1.drag(&k),
-                None => DragEligibility::NoDrag,
-            }),
-            can_accept_fn: Rc::new(move |payload, target_index, position, view_id| {
-                let Some(target_key) = s2.key_at(target_index) else {
-                    return DropResponse::Reject;
-                };
-                if let Some(rd) = payload.get_typed::<RowDragData<T>>()
-                    && rd.source == view_id
-                {
-                    let source_key = {
-                        let stash = keys_ca.borrow();
-                        let Some(keys) = stash.as_ref().filter(|k| !k.is_empty()) else {
-                            debug_assert!(false, "same-view drag without a drag-start key stash");
-                            return DropResponse::Reject;
-                        };
-                        // Own-row rejection by key, so it survives a mid-drag
-                        // reflow.
-                        if keys.contains(&target_key) {
-                            return DropResponse::Reject;
-                        }
-                        keys[0].clone()
-                    };
-                    return s2.can_accept(&DropQuery {
-                        source: DragSource::SameView { key: source_key },
-                        target: target_key,
-                        position,
-                    });
-                }
-                s2.can_accept(&DropQuery {
-                    source: DragSource::Foreign { payload },
-                    target: target_key,
-                    position,
-                })
-            }),
-            accept_drop_fn: Rc::new(move |payload, target_index, position, view_id| {
-                let Some(target_key) = s3.key_at(target_index) else {
-                    return false;
-                };
-                if let Some(rd) = payload.get_typed::<RowDragData<T>>()
-                    && rd.source == view_id
-                {
-                    // Consume the drag-start stash (a construction path that
-                    // forgot to stash then fails loudly on its next drop
-                    // instead of silently reusing a previous drag's keys).
-                    let taken = keys_ad.borrow_mut().take();
-                    let Some(keys) = taken.filter(|k| !k.is_empty()) else {
-                        debug_assert!(false, "same-view drop without a drag-start key stash");
-                        return false;
-                    };
-                    if keys.contains(&target_key) {
-                        return false;
-                    }
-                    // `reorder_within` drops descendants-of-selected and keeps
-                    // the remaining nodes contiguous (single- or multi-row).
-                    return s3.reorder_within(&keys, &target_key, position);
-                }
-                s3.accept_drop(DropCommit {
-                    source: DragSource::Foreign { payload },
-                    target: target_key,
-                    position,
-                })
-            }),
-            snapshot_out_fn: Rc::new(move |indices: &[usize]| {
-                // Resolves stable keys NOW: they feed both the same-view accept
-                // path (via the drag-key stash) and the returned removal thunk.
-                let mut pairs: Vec<(usize, S::Key)> = indices
-                    .iter()
-                    .filter_map(|&i| s4.key_at(i).map(|k| (i, k)))
-                    .collect();
-                *keys_snap.borrow_mut() = Some(pairs.iter().map(|(_, k)| k.clone()).collect());
-                pairs.sort_by_key(|&(i, _)| std::cmp::Reverse(i));
-                let s = s4.clone();
-                Box::new(move || {
-                    for (_, k) in &pairs {
-                        s.on_drag_out(k);
-                    }
-                }) as Box<dyn Fn()>
-            }),
-            stash_drag_keys_fn: Rc::new(move |indices: &[usize]| {
-                *keys_stash.borrow_mut() =
-                    Some(indices.iter().filter_map(|&i| s9.key_at(i)).collect());
-            }),
-            row_state_fn: Rc::new(move |index| s5.row_state(index)),
-            request_window_fn: Rc::new(move |range| s6.request_window(range)),
-            can_fetch_more_fn: Rc::new(move || s7.can_fetch_more()),
-            fetch_more_fn: Rc::new(move || s8.fetch_more()),
-        }
-    }
-}
-
 /// Erased tree backing consumed by `TreeView`. All accessors are keyed on the
 /// visible flat index; the `Key` type is captured at construction and never
 /// surfaces in `TreeView<T>`.
@@ -346,14 +188,14 @@ pub(crate) struct TreeSource<T: 'static> {
     anchor_fn: Rc<dyn Fn(usize) -> crate::data_views::RowAnchor>,
     version_fn: Rc<dyn Fn() -> Signal<u64>>,
     first_changed_fn: Rc<dyn Fn() -> Option<usize>>,
-    pub(crate) dnd: TreeDndLazy,
+    pub(crate) dnd: DndLazy,
 }
 
 impl<T: 'static> TreeSource<T> {
     /// Erase any concrete [`TreeDataSource`]. The built-in path passes a
     /// `Rc<TreeSlice<T>>`; an external source passes its own `Rc<S>`.
     pub(crate) fn from_data_source<S: TreeDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
-        let dnd = TreeDndLazy::from_source(s.clone());
+        let dnd = DndLazy::from_tree_source(s.clone());
         // Shared by `sibling_pos_fn`, `sibling_move_fn` and `reparent_fn` below — all
         // need "all visible roots, in order" and a version bump invalidates
         // them alike, so one scan per version serves every caller.
@@ -668,7 +510,8 @@ impl<T: 'static> TreeSource<T> {
 mod drag_identity_tests {
     use super::*;
     use std::cell::RefCell;
-    use teksilo_data::{TreeDataSlice, TreeRow};
+    use teksilo_core::drag_payload::DragPayload;
+    use teksilo_data::{DropResponse, TreeDataSlice, TreeRow};
 
     use crate::data_views::{RowDragData, ViewId, ViewKind};
 

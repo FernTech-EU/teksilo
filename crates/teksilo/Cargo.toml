@@ -197,7 +197,6 @@ teksilo-canvas = { workspace = true }
 teksilo-core = { workspace = true }
 teksilo-macros = { workspace = true }
 teksilo-data = { workspace = true }
-teksilo-render = { workspace = true }
 teksilo-platform = { workspace = true }
 teksilo-app = { workspace = true }
 teksilo-async = { workspace = true, optional = true }

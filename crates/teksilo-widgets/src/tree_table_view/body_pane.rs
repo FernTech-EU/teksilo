@@ -116,7 +116,7 @@ pub(crate) struct TreeBodyPane<T: 'static> {
     /// root (`TreeTableView::export`). At drag-start the pane hands
     /// `build_payload` the reader and the stable-`NodeId` removal thunk
     /// (see `on_drag` below), both taken off the erased source's own
-    /// closures — `TreeSource::read_item_fn` / `TreeDndLazy::snapshot_out_fn`.
+    /// closures: `TreeSource::read_item_fn` / `DndLazy::snapshot_out_fn`.
     pub(crate) export: crate::data_views::RowExport<T>,
 
     /// Optional row-activation callback (a click per `activate_on`, or

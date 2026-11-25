@@ -136,12 +136,6 @@ mod rich {
             }
         }
 
-        #[allow(dead_code)]
-        pub(crate) fn placeholder(mut self, text: impl Into<String>) -> Self {
-            self.placeholder = text.into();
-            self
-        }
-
         pub(crate) fn on_change(mut self, f: impl Fn(&str) + 'static) -> Self {
             self.on_change = Some(Rc::new(f));
             self

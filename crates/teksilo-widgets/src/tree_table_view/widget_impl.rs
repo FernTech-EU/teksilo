@@ -937,8 +937,8 @@ impl<T: 'static> Widget for TreeTableView<T> {
         // the next page as the viewport nears the end (append-only
         // sources). `TreeSource` already erases a `TreeDataSource`'s
         // `row_state`/`request_window`/`can_fetch_more`/`fetch_more`
-        // into `self.source.dnd` (mirrors `list_source::DndLazy` — see
-        // `TableView::build`); a fully-resident source's default (inert)
+        // into `self.source.dnd` (the `list_source::DndLazy` `TableView`
+        // also uses); a fully-resident source's default (inert)
         // impls leave this a no-op.
         let (vis_start, vis_end) = self.visible_range();
         (self.source.dnd.request_window_fn)(vis_start..vis_end);

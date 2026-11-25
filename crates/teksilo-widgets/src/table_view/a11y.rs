@@ -26,8 +26,6 @@ use teksilo_core::accessibility::AccessNodeBuilder;
 use teksilo_core::widget::{LayoutContext, Widget, WidgetPlacement};
 use teksilo_core::widget_id::WidgetId;
 
-use teksilo_data::SortDirection;
-
 /// A flag read at each accessibility walk rather than fixed at build, so the
 /// node that publishes it need not be rebuilt when it changes.
 #[derive(Clone)]
@@ -53,9 +51,8 @@ pub(crate) fn live_or(live: &Option<LiveFlag>, fixed: bool) -> bool {
     live.as_ref().map_or(fixed, LiveFlag::get)
 }
 
-/// Wrapper that announces a `Role::Cell`, `Role::GridCell` (a cell of a view
-/// with a selection) or `Role::RowHeader` with row/column indices and
-/// selection state.
+/// Wrapper that announces a `Role::Cell` or `Role::GridCell` (a cell of a view
+/// with a selection) with row/column indices and selection state.
 #[derive(Debug)]
 pub(crate) struct CellA11y {
     child: WidgetId,
@@ -65,9 +62,6 @@ pub(crate) struct CellA11y {
     /// When set, the selected state read at each accessibility walk instead
     /// of `selected`: a selection change no longer rebuilds the cell.
     live_selected: Option<LiveFlag>,
-    /// When true, emit `Role::RowHeader` instead of `Role::Cell` — used
-    /// when the table promotes a column to row-header status.
-    is_row_header: bool,
     /// Whether the cell carries a selection state a reader must hear: its
     /// own in a cell-selection mode, and in a row mode its row's (a
     /// `Role::Row` exposes none on Windows, so the cell the reader is on
@@ -81,8 +75,6 @@ pub(crate) struct CellA11y {
     /// The two map identically on macOS (`NSAccessibilityCellRole`) and
     /// AT-SPI (`TableCell`), so this costs nothing there.
     is_grid_cell: bool,
-    /// Optional name override (when the cell content isn't textual).
-    name: Option<String>,
     /// 1-based hierarchy level, mirrored from the row this cell belongs to.
     ///
     /// `None` on a flat table, and on every column of a tree table but the
@@ -113,9 +105,7 @@ impl CellA11y {
             col_index_1based,
             selected,
             live_selected: None,
-            is_row_header: false,
             is_grid_cell: false,
-            name: None,
             level_1based: None,
             expanded: None,
             column_span: None,
@@ -131,25 +121,10 @@ impl CellA11y {
     }
 
     /// Announce `Role::GridCell`: the cell carries a selection state a
-    /// reader must hear (see `is_grid_cell`). Named for the sibling
-    /// `with_role_row_header`, not `as_*`, which clippy reserves for
-    /// by-reference conversions.
+    /// reader must hear (see `is_grid_cell`). Named `with_*`, not `as_*`,
+    /// which clippy reserves for by-reference conversions.
     pub(crate) fn with_grid_cell_role(mut self, is_grid_cell: bool) -> Self {
         self.is_grid_cell = is_grid_cell;
-        self
-    }
-
-    /// Promote to `Role::RowHeader` (`row_header_column` support).
-    #[allow(dead_code)]
-    pub(crate) fn with_role_row_header(mut self, is_row_header: bool) -> Self {
-        self.is_row_header = is_row_header;
-        self
-    }
-
-    /// Override the cell's accessible name (`cell_label_fn`).
-    #[allow(dead_code)]
-    pub(crate) fn with_name(mut self, name: Option<String>) -> Self {
-        self.name = name;
         self
     }
 
@@ -263,16 +238,11 @@ impl Widget for CellA11y {
     }
 
     fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(if self.is_row_header {
-            teksilo_core::accesskit::Role::RowHeader
-        } else if self.is_grid_cell {
+        builder.set_role(if self.is_grid_cell {
             teksilo_core::accesskit::Role::GridCell
         } else {
             teksilo_core::accesskit::Role::Cell
         });
-        if let Some(ref name) = self.name {
-            builder.set_name(name.clone());
-        }
         builder.set_selected(live_or(&self.live_selected, self.selected));
         builder.set_row_index(self.row_index_1based);
         builder.set_column_index(self.col_index_1based);
@@ -542,76 +512,6 @@ impl Widget for TreeRowA11y {
                 teksilo_core::accessibility::SyntheticKind::TreeChildRows,
             )
         })
-    }
-
-    fn children(&self) -> Vec<WidgetId> {
-        vec![self.child]
-    }
-}
-
-/// Header column wrapper — `Role::ColumnHeader` with sort direction
-/// when this is the active sort column.
-#[derive(Debug)]
-#[allow(dead_code)]
-pub(crate) struct ColumnHeaderA11y {
-    child: WidgetId,
-    col_index_1based: usize,
-    name: String,
-    sort: Option<SortDirection>,
-}
-
-#[allow(dead_code)] // not wired: `HeaderCell` publishes its own node
-impl ColumnHeaderA11y {
-    pub(crate) fn new(
-        child: WidgetId,
-        col_index_1based: usize,
-        name: impl Into<String>,
-        sort: Option<SortDirection>,
-    ) -> Self {
-        Self {
-            child,
-            col_index_1based,
-            name: name.into(),
-            sort,
-        }
-    }
-}
-
-impl Widget for ColumnHeaderA11y {
-    fn layout_response(
-        &self,
-        proposal: SizeProposal,
-        ctx: &LayoutContext,
-    ) -> teksilo_core::widget::LayoutResponse {
-        ctx.child_size(self.child, proposal)
-            .unwrap_or_else(|| proposal.resolve(0.0, 0.0))
-            .into()
-    }
-
-    fn place_children(
-        &self,
-        bounds: Rect,
-        _proposal: SizeProposal,
-        children: &mut [WidgetPlacement],
-        _ctx: &LayoutContext,
-    ) {
-        for child in children.iter_mut() {
-            child.origin = bounds.origin();
-            child.size = bounds.size();
-        }
-    }
-
-    fn accessibility(&self, builder: &mut AccessNodeBuilder) {
-        builder.set_role(teksilo_core::accesskit::Role::ColumnHeader);
-        builder.set_name(self.name.clone());
-        builder.set_column_index(self.col_index_1based);
-        if let Some(dir) = self.sort {
-            let ak_dir = match dir {
-                SortDirection::Ascending => teksilo_core::accesskit::SortDirection::Ascending,
-                SortDirection::Descending => teksilo_core::accesskit::SortDirection::Descending,
-            };
-            builder.inner_mut().set_sort_direction(ak_dir);
-        }
     }
 
     fn children(&self) -> Vec<WidgetId> {

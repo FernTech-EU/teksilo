@@ -26,7 +26,6 @@ golden-tests = []
 # headless server needs to host a real widget tree and render it.
 teksilo-automation = { workspace = true }
 teksilo = { workspace = true }
-teksilo-core = { workspace = true }
 teksilo-canvas = { workspace = true }
 teksilo-render = { workspace = true }
 # The attach client opens the same per-OS endpoint the in-app bridge binds

@@ -24,6 +24,7 @@
 
 pub mod axis;
 pub mod bar_chart;
+mod cartesian;
 pub(crate) mod hit;
 pub mod layout;
 pub mod legend;

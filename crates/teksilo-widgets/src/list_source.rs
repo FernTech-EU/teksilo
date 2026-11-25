@@ -22,7 +22,7 @@ use teksilo_core::drag_payload::DragPayload;
 use teksilo_core::widget::Widget;
 use teksilo_data::{
     DataChange, DragEligibility, DragSource, DropCommit, DropPosition, DropQuery, DropResponse,
-    ListDataSource, ListModel, RowState,
+    ListDataSource, ListModel, RowState, TreeDataSource,
 };
 
 use crate::data_views::{RowDragData, ViewId};
@@ -65,24 +65,22 @@ pub(crate) struct DndLazy {
     pub(crate) fetch_more_fn: Rc<dyn Fn()>,
 }
 
-impl DndLazy {
-    /// Erase the DnD + lazy protocol of a concrete `ListDataSource`.
-    ///
-    /// `pub(crate)` so `TableView` can carry a `DndLazy` alongside its own
-    /// multi-cell read erasure (its `with_item_fn` is the side-effect form,
-    /// shaped differently from `ListSource`'s single-widget reader, so it
-    /// doesn't fold into a `ListSource` — but the DnD + lazy protocol is
-    /// identical and shared from here).
-    pub(crate) fn from_source<T: 'static, S: ListDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
+/// The one body behind [`DndLazy::from_source`] and
+/// [`DndLazy::from_tree_source`]: `ListDataSource` and `TreeDataSource` declare
+/// the same DnD + lazy methods under the same names, so the erasure is written
+/// once and expanded under each bound. `$T` is the item type, `$S` the source
+/// type parameter, `$s` the `Rc<$S>`.
+macro_rules! erase_dnd_lazy {
+    ($T:ident, $S:ident, $s:ident) => {{
         // Stable keys of the rows in the in-flight same-view drag, resolved
         // from flat indices ONCE at payload construction (`snapshot_out_fn`
         // for pointer drags, `stash_drag_keys_fn` for synthetic keyboard
         // payloads). The accept path reads identity from here rather than
         // re-resolving `RowDragData::rows` at hover/drop time: those indices
         // freeze at drag-start, and the source can reflow mid-drag (a
-        // spring-load auto-expand, a peer write) — whichever rows slid into
+        // spring-load auto-expand, a peer write): whichever rows slid into
         // the stale slots must not stand in for the dragged ones.
-        let drag_keys: Rc<RefCell<Option<Vec<S::Key>>>> = Rc::new(RefCell::new(None));
+        let drag_keys: Rc<RefCell<Option<Vec<$S::Key>>>> = Rc::new(RefCell::new(None));
         let (keys_ca, keys_ad, keys_snap, keys_stash) = (
             drag_keys.clone(),
             drag_keys.clone(),
@@ -90,17 +88,17 @@ impl DndLazy {
             drag_keys,
         );
         let (s1, s2, s3, s4, s5, s6, s7, s8, s9) = (
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s.clone(),
-            s,
+            $s.clone(),
+            $s.clone(),
+            $s.clone(),
+            $s.clone(),
+            $s.clone(),
+            $s.clone(),
+            $s.clone(),
+            $s.clone(),
+            $s,
         );
-        Self {
+        DndLazy {
             drag_fn: Rc::new(move |index| match s1.key_at(index) {
                 Some(k) => s1.drag(&k),
                 None => DragEligibility::NoDrag,
@@ -109,7 +107,7 @@ impl DndLazy {
                 let Some(target_key) = s2.key_at(target_index) else {
                     return DropResponse::Reject;
                 };
-                if let Some(rd) = payload.get_typed::<RowDragData<T>>()
+                if let Some(rd) = payload.get_typed::<RowDragData<$T>>()
                     && rd.source == view_id
                 {
                     let source_key = {
@@ -118,7 +116,7 @@ impl DndLazy {
                             debug_assert!(false, "same-view drag without a drag-start key stash");
                             return DropResponse::Reject;
                         };
-                        // Can't drop a selection onto one of its own rows —
+                        // Can't drop a selection onto one of its own rows,
                         // by key, so the check survives a mid-drag reflow.
                         if keys.contains(&target_key) {
                             return DropResponse::Reject;
@@ -144,7 +142,7 @@ impl DndLazy {
                 let Some(target_key) = s3.key_at(target_index) else {
                     return false;
                 };
-                if let Some(rd) = payload.get_typed::<RowDragData<T>>()
+                if let Some(rd) = payload.get_typed::<RowDragData<$T>>()
                     && rd.source == view_id
                 {
                     // Consume the drag-start stash (a construction path that
@@ -173,7 +171,7 @@ impl DndLazy {
                 // path (via the drag-key stash) and the returned removal thunk
                 // (descending index order so an index-keyed model stays valid
                 // during removal).
-                let mut pairs: Vec<(usize, S::Key)> = indices
+                let mut pairs: Vec<(usize, $S::Key)> = indices
                     .iter()
                     .filter_map(|&i| s4.key_at(i).map(|k| (i, k)))
                     .collect();
@@ -195,6 +193,30 @@ impl DndLazy {
             can_fetch_more_fn: Rc::new(move || s7.can_fetch_more()),
             fetch_more_fn: Rc::new(move || s8.fetch_more()),
         }
+    }};
+}
+
+impl DndLazy {
+    /// Erase the DnD + lazy protocol of a concrete `ListDataSource`.
+    ///
+    /// `pub(crate)` so `TableView` can carry a `DndLazy` alongside its own
+    /// multi-cell read erasure (its `with_item_fn` is the side-effect form,
+    /// shaped differently from `ListSource`'s single-widget reader, so it
+    /// doesn't fold into a `ListSource`, but the DnD + lazy protocol is
+    /// identical and shared from here).
+    pub(crate) fn from_source<T: 'static, S: ListDataSource<Item = T> + 'static>(s: Rc<S>) -> Self {
+        erase_dnd_lazy!(T, S, s)
+    }
+
+    /// Erase the DnD + lazy protocol of a concrete `TreeDataSource`. The view
+    /// passes visible flat indices; a tree's flat indices reshuffle mid-drag
+    /// (the spring-load auto-expand is triggered by the very hover that
+    /// precedes the drop), which the drag-start key stash already covers, and
+    /// the source's `reorder_within` also drops descendants of selected nodes.
+    pub(crate) fn from_tree_source<T: 'static, S: TreeDataSource<Item = T> + 'static>(
+        s: Rc<S>,
+    ) -> Self {
+        erase_dnd_lazy!(T, S, s)
     }
 
     /// A fully-inert bundle for sources with no real backing (e.g. `ComboBox`'s
@@ -622,8 +644,8 @@ mod anchor_tests {
     fn a_sort_filter_projection_anchor_survives_a_filter_change() {
         // The flat fragility in practice: a filter changes underneath handlers
         // that were built against the previous projection. `SortFilterListModel`
-        // keys rows by their SOURCE index, which reprojection does not renumber,
-        // so the anchor tracks its row to the new visible position.
+        // gives each source row a key of its own, which reprojection does not
+        // change, so the anchor tracks its row to the new visible position.
         let proj = Rc::new(
             SortFilterListModel::new(ListModel::from_vec(vec![10_i64, 20, 30])).with_predicate(
                 "v",
@@ -671,13 +693,13 @@ mod anchor_tests {
             ),
         );
         let keyed = KeyedSelectionModel::<usize>::new(SelectionMode::Multi);
-        keyed.select(2); // source index of value 30
+        keyed.select(2); // key of value 30 (keys start at the source indices)
 
         // Presence is resolvable now, which it was not before.
         assert_eq!(
             ListDataSource::key_at(proj.as_ref(), 2),
             Some(2),
-            "a visible row reports its source index"
+            "a visible row reports its own key"
         );
         assert!(keyed.is_selected(&2));
 
