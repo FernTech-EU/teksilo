@@ -804,6 +804,15 @@ fn start_platform_desktop_watch(proxy: Option<&AppEventProxy>) -> Option<Box<dyn
     Some(Box::new(watch))
 }
 
+/// Where [`WindowManager::async_completion_target`] sends a completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AsyncCompletionTarget {
+    /// The tree of this open window.
+    Window(winit::window::WindowId),
+    /// The application tree.
+    AppTree,
+}
+
 /// Manages multiple application windows.
 ///
 /// Each window owns its own `WidgetTree` and `PlatformWindow`. The manager
@@ -1790,6 +1799,31 @@ impl WindowManager {
     pub(crate) fn has_pending_application_menu_rows(&self) -> bool {
         self.application_menu()
             .is_some_and(|menu| menu.has_pending())
+    }
+
+    /// Where a `spawn_local_with` completion posted for `window_id` is
+    /// delivered, or `None`, with the completions pending for `window_id`
+    /// dropped, when it can be delivered nowhere: its window has closed (a
+    /// task can resolve after [`close_window`](Self::close_window) purged
+    /// it), or it was spawned from the application tree and the app has none.
+    ///
+    /// A completion spawned where the context has no window, the application
+    /// tree, carries the window id `0`, which no window of a running app has
+    /// (ids start at 1).
+    pub(crate) fn async_completion_target(
+        &self,
+        handle: &teksilo_core::AsyncCompletionHandle,
+        window_id: TeksiloWindowId,
+    ) -> Option<AsyncCompletionTarget> {
+        if let Some(winit_id) = self.teksilo_to_winit.get(&window_id) {
+            return Some(AsyncCompletionTarget::Window(*winit_id));
+        }
+        if window_id == TeksiloWindowId::new(0) && self.app_tree.is_some() {
+            return Some(AsyncCompletionTarget::AppTree);
+        }
+        // Nothing can ever take these: drop them and what they captured.
+        handle.purge_window(window_id);
+        None
     }
 
     /// The application tree, if one was installed.
@@ -7661,6 +7695,50 @@ mod app_tree_tests {
         let mut wm = WindowManager::new(teksilo_core::presets::intui::light());
         wm.install_app_tree(|tree| tree.add(Anchor));
         wm
+    }
+
+    /// A `spawn_local_with` completion from the application tree, where the
+    /// context has no window and so window id 0, is delivered there. Before,
+    /// the router found no window 0, dropped the payload and left the
+    /// callback in the registry for ever.
+    #[test]
+    fn a_windowless_async_completion_runs_in_the_application_tree() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+        use teksilo_core::AsyncCompletionHandle;
+
+        let mut wm = manager_with_app_tree();
+        let handle = AsyncCompletionHandle::new();
+        let no_window = TeksiloWindowId::new(0);
+        let ran = Rc::new(Cell::new(false));
+        let flag = ran.clone();
+        let id = handle.register(no_window, Box::new(move |_ctx| flag.set(true)));
+
+        assert_eq!(
+            wm.async_completion_target(&handle, no_window),
+            Some(AsyncCompletionTarget::AppTree)
+        );
+        let mut tree = wm.take_app_tree().expect("installed");
+        tree.run_with_event_context(&mut teksilo_core::NoopWindowOps, |ctx| {
+            handle.deliver(id, no_window, ctx)
+        });
+        wm.reinsert_app_tree(tree);
+        assert!(ran.get());
+        assert_eq!(handle.pending_len(), 0);
+    }
+
+    /// A task that resolves after its window closed registers its completion
+    /// after `close_window` purged the window's entries: routing it drops it
+    /// rather than leaving it, and what it captured, in the registry.
+    #[test]
+    fn an_async_completion_for_a_closed_window_is_dropped() {
+        let wm = manager_with_app_tree();
+        let handle = teksilo_core::AsyncCompletionHandle::new();
+        let closed = TeksiloWindowId::new(5);
+        handle.register(closed, Box::new(|_ctx| {}));
+
+        assert_eq!(wm.async_completion_target(&handle, closed), None);
+        assert_eq!(handle.pending_len(), 0, "nothing left behind");
     }
 
     #[test]

@@ -98,7 +98,9 @@ component/state handles, set them on resume.
 When the *result* needs an ambient op that requires an `EventContext`
 (`open_window`, `send_intent`, `set_theme`, …), use `spawn_local_with`. The
 future body runs handle-only; the result is delivered to a callback with a
-**fresh `EventContext`** bound to the originating window's tree:
+**fresh `EventContext`** bound to the originating window's tree (or, for a
+task spawned from the application tree, to the application tree). If that
+window closed before the task finished, the result is dropped:
 
 ```rust
 ctx.spawn_local_with(
@@ -203,7 +205,8 @@ rt.completions().drain_into(&mut app.tree);     // run the callback with a fresh
 `AsyncCompletionHandle::drain_into` delivers every completion that is ready,
 each through `run_with_event_context` with a no-op window sink, and returns how
 many ran. A context with no window binds `spawn_local_with` to window `0`
-instead of panicking, which is the id `HeadlessApp` gives its stub window. A
+instead of panicking, which is the id `HeadlessApp` gives its stub window; in a
+running app the same id means the application tree, where the callback runs. A
 future that awaits `spawn_blocking` needs several ticks while the worker
 finishes; loop on `tick` until `pending_len()` is non-zero, then drain.
 

@@ -62,6 +62,12 @@ by crate for clarity, not because crates version independently.
 - **A window closed while maximized or full screen keeps its normal size and
   position**: un-maximizing it after a relaunch gives back the size it had.
 
+#### Async
+
+- **A `spawn_local_with` started from the application tree runs its callback
+  there** instead of never running it, and a completion whose window closed
+  before its task finished is dropped instead of staying in memory.
+
 #### Telemetry
 
 - **No event is recorded or sent while the anonymous usage metrics scope is

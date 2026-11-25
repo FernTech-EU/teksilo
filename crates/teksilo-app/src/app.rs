@@ -3597,26 +3597,19 @@ impl TeksiloAppHandler {
     /// Uses only teksilo-core types ([`AsyncCompletionHandle`](teksilo_core::AsyncCompletionHandle)),
     /// so `teksilo-async` (which depends on `teksilo-app`) never has to be a
     /// dependency here — the same take/run-with-context/reinsert pattern as
-    /// the file-dialog path. On any miss (window gone, runtime not installed,
-    /// already-purged completion) the result is dropped silently.
+    /// the file-dialog path. A completion spawned in the application tree
+    /// (no window) is delivered there. One whose window has closed, or that
+    /// has nowhere to run, is dropped from the registry with what it
+    /// captured (see [`WindowManager::async_completion_target`](crate::window_manager::WindowManager::async_completion_target)).
     fn try_route_async_completion_payload(
         &mut self,
         payload: Box<dyn std::any::Any + Send>,
         event_loop: &ActiveEventLoop,
     ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        use crate::window_manager::AsyncCompletionTarget;
         use teksilo_core::{AsyncCompletionHandle, AsyncCompletionPayload};
 
         let payload = *payload.downcast::<AsyncCompletionPayload>()?;
-
-        let target_winit = self
-            .wm
-            .teksilo_to_winit_map()
-            .get(&payload.window_id)
-            .copied();
-        let Some(winit_id) = target_winit else {
-            // Window already torn down — drop silently.
-            return Ok(());
-        };
 
         let handle = self
             .wm
@@ -3625,6 +3618,20 @@ impl TeksiloAppHandler {
         let Some(handle) = handle else {
             // No async runtime installed — drop silently.
             return Ok(());
+        };
+
+        let deliver = |ctx: &mut teksilo_core::EventContext| {
+            handle.deliver(payload.id, payload.window_id, ctx)
+        };
+        let winit_id = match self.wm.async_completion_target(&handle, payload.window_id) {
+            None => return Ok(()),
+            Some(AsyncCompletionTarget::AppTree) => {
+                self.run_in_app_tree(event_loop, |tree, ops| {
+                    tree.run_with_event_context(ops, deliver);
+                });
+                return Ok(());
+            }
+            Some(AsyncCompletionTarget::Window(winit_id)) => winit_id,
         };
 
         let Some(mut current) = self.wm.take_managed(winit_id) else {
@@ -3641,9 +3648,7 @@ impl TeksiloAppHandler {
                 current_id,
                 current_arc,
             );
-            current.tree.run_with_event_context(&mut ops, |ctx| {
-                handle.deliver(payload.id, payload.window_id, ctx)
-            });
+            current.tree.run_with_event_context(&mut ops, deliver);
         }
 
         self.wm.reinsert_managed(winit_id, current);

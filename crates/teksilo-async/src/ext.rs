@@ -13,8 +13,10 @@ use crate::executor::{AsyncRuntimeHandle, TaskHandle};
 const NOT_INSTALLED: &str = "teksilo-async: AsyncRuntimeHandle not installed — call \
      TeksiloAppBuilder::install_async() at startup";
 
-/// The window a completion is bound to when the context has no window: the id
-/// `HeadlessApp` gives its stub window.
+/// The window a completion is bound to when the context has no window. In a
+/// running app that is the application tree, which no window hosts: no window
+/// there has id 0, so `teksilo-app` delivers it to the application tree. It is
+/// also the id `HeadlessApp` gives its stub window.
 fn headless_window_id() -> TeksiloWindowId {
     TeksiloWindowId::new(0)
 }
@@ -34,9 +36,11 @@ pub trait EventContextAsyncExt {
     /// a one-shot ambient op (`open_window`, `send_intent`, …) once the work
     /// finishes. The future body itself runs handle-only.
     ///
-    /// Outside a window context (a headless [`WidgetTree`](teksilo_core::WidgetTree)
-    /// driven by `run_with_event_context`) the completion is bound to window
-    /// `0`, the id `HeadlessApp` gives its stub window; deliver it with
+    /// Spawned from the application tree (`TeksiloAppBuilder::app_root`), the
+    /// completion runs there. Outside any app (a headless
+    /// [`WidgetTree`](teksilo_core::WidgetTree) driven by
+    /// `run_with_event_context`) it is bound to window `0`, the id
+    /// `HeadlessApp` gives its stub window; deliver it with
     /// [`AsyncCompletionHandle::drain_into`](teksilo_core::AsyncCompletionHandle::drain_into).
     fn spawn_local_with<R: 'static>(
         &mut self,
