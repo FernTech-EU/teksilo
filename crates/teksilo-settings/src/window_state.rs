@@ -10,7 +10,8 @@
 //! directly from memory without touching disk. On load, the file is
 //! migrated through [`Migrator`] steps (currently v1 → v2: `maximized:
 //! bool` → `placement: WindowPlacement`) before deserializing, and
-//! corrupt files are quarantined automatically by [`SettingsFile`](crate::SettingsFile).
+//! a corrupt file is quarantined with the same policy as
+//! [`SettingsFile::load`](crate::SettingsFile::load).
 //!
 //! ## `record` is debounced, not synchronous
 //!
@@ -77,7 +78,7 @@ use serde::{Deserialize, Serialize};
 use teksilo_core::WindowPlacement;
 
 use crate::DEFAULT_DEBOUNCE;
-use crate::file::{SettingsFileError, disk_stamp, read_toml_with_retry};
+use crate::file::{SettingsFileError, disk_stamp, read_toml_with_retry, recover_from_load_error};
 use crate::flush::{DebouncedWriter, FlushError};
 use crate::migration::{MigrationError, Migrator, Versioned};
 use crate::path::AppPaths;
@@ -378,7 +379,11 @@ impl WindowStateService {
     /// worker's next tick (used by tests).
     pub fn open_at(path: PathBuf, delay: Duration) -> Result<Self, SettingsFileError> {
         let migrator = make_migrator();
-        let current = read_window_state_or_default(&path, &migrator)?;
+        let current = recover_from_load_error(
+            &path,
+            read_window_state_or_default(&path, &migrator),
+            WindowStateFile::default,
+        );
         let stamp = disk_stamp(&path);
         let writer = Rc::new(DebouncedWriter::new(path, delay));
         let pending_write_stamp = Arc::new(Mutex::new(None));
@@ -523,6 +528,29 @@ mod tests {
     fn open(dir: &Path) -> WindowStateService {
         let paths = AppPaths::for_testing(dir);
         WindowStateService::open_with_delay(&paths, Duration::ZERO).unwrap()
+    }
+
+    /// An unparsable window-state file must not fail the open (which
+    /// failed the whole settings bundle on every launch): it is moved
+    /// aside and the service starts empty.
+    #[test]
+    fn unparsable_file_is_quarantined_and_the_service_opens_empty() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("window_state.toml");
+        std::fs::write(&path, "this is = = not toml [[[").unwrap();
+
+        let svc = WindowStateService::open_at(path, Duration::ZERO).unwrap();
+        assert!(svc.state_for("main").is_none());
+        assert!(
+            std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .any(|e| e
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("window_state.toml.broken-")),
+            "the unparsable file must be moved aside"
+        );
     }
 
     #[test]

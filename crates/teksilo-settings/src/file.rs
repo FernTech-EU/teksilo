@@ -192,49 +192,12 @@ where
     /// want to assert on the specific failure instead.
     pub fn load(path: PathBuf, migrator: Migrator<T>) -> Result<Self, SettingsFileError> {
         let lock = FileLock::acquire_exclusive(&path).map_err(SettingsFileError::Io)?;
-        let initial = match Self::read_or_default(&path, &migrator) {
-            Ok(value) => value,
-            Err(SettingsFileError::Migrate(e)) => {
-                // Not corruption: a peer on a newer schema. Leave the file
-                // alone so that peer's data survives; fall back to
-                // in-memory defaults for this session only.
-                eprintln!(
-                    "teksilo-settings: {} is on a schema this build cannot migrate ({}); using in-memory defaults for this session, file left untouched",
-                    path.display(),
-                    e,
-                );
+        let initial =
+            recover_from_load_error(&path, Self::read_or_default(&path, &migrator), || {
                 let mut v = T::default();
                 v.set_version(T::CURRENT_VERSION);
                 v
-            }
-            Err(SettingsFileError::Io(e)) => {
-                // We never even read the content, so we have no basis to
-                // judge it corrupt. Fall back to in-memory defaults for
-                // this session only.
-                eprintln!(
-                    "teksilo-settings: could not read {} ({}); using in-memory defaults for this session, file left untouched",
-                    path.display(),
-                    e,
-                );
-                let mut v = T::default();
-                v.set_version(T::CURRENT_VERSION);
-                v
-            }
-            Err(other) => {
-                // A genuinely unparsable-after-retries document: real
-                // corruption. Quarantine it so the next launch starts
-                // clean instead of repeatedly failing.
-                quarantine(&path);
-                eprintln!(
-                    "teksilo-settings: load failed for {}: {}; quarantined, falling back to defaults",
-                    path.display(),
-                    other,
-                );
-                let mut v = T::default();
-                v.set_version(T::CURRENT_VERSION);
-                v
-            }
-        };
+            });
         let stamp = disk_stamp(&path);
         drop(lock);
         Ok(Self::new_inner(path, initial, stamp, migrator))
@@ -486,6 +449,53 @@ pub(crate) fn read_toml_with_retry(path: &Path) -> Result<Option<toml::Value>, S
         }
     }
     Err(SettingsFileError::Parse(last_parse_err.unwrap()))
+}
+
+/// The load-failure policy every persisted type in this crate shares (see
+/// [`SettingsFile::load`] for the reasoning): a parse error means the file
+/// really is corrupt, so it is quarantined; an I/O or migration error
+/// leaves the file untouched. Either way this session starts from
+/// `default()`.
+pub(crate) fn recover_from_load_error<V>(
+    path: &Path,
+    result: Result<V, SettingsFileError>,
+    default: impl FnOnce() -> V,
+) -> V {
+    match result {
+        Ok(value) => value,
+        Err(SettingsFileError::Parse(e)) => {
+            // A genuinely unparsable-after-retries document: real
+            // corruption. Quarantine it so the next launch starts
+            // clean instead of repeatedly failing.
+            quarantine(path);
+            eprintln!(
+                "teksilo-settings: load failed for {}: {}; quarantined, falling back to defaults",
+                path.display(),
+                e,
+            );
+            default()
+        }
+        Err(SettingsFileError::Migrate(e)) => {
+            // Not corruption: a peer on a newer schema. Leave the file
+            // alone so that peer's data survives.
+            eprintln!(
+                "teksilo-settings: {} is on a schema this build cannot migrate ({}); using in-memory defaults for this session, file left untouched",
+                path.display(),
+                e,
+            );
+            default()
+        }
+        Err(e) => {
+            // We never even read the content, so we have no basis to
+            // judge it corrupt.
+            eprintln!(
+                "teksilo-settings: could not read {} ({}); using in-memory defaults for this session, file left untouched",
+                path.display(),
+                e,
+            );
+            default()
+        }
+    }
 }
 
 /// Rename a broken/unrecoverable settings file out of the way so the next

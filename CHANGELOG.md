@@ -26,6 +26,18 @@ by crate for clarity, not because crates version independently.
   later ones under new ids, with their docks, sizes, selection and hidden
   flags.
 
+#### Settings and windows
+
+- **A settings file holding a plain value where the app stores nested
+  settings (`editor = "x"` next to `editor.font_size`) no longer stops every
+  later settings write in the process.**
+- **A settings or window-state file that cannot be parsed no longer keeps the
+  app's settings from opening on every launch.** It is moved aside as
+  `<name>.broken-<timestamp>` and the app starts with defaults.
+- **A recent-items or other persisted list that cannot be read, or was written
+  by a newer version, is no longer renamed away**; it is left as it is and the
+  session starts with an empty list.
+
 ## [0.29.1] - 2026-11-24
 
 ### Added

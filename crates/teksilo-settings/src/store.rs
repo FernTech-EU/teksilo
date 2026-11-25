@@ -98,7 +98,7 @@ use serde::de::DeserializeOwned;
 use teksilo_core::ObserverHandle;
 use teksilo_core::signal::Signal;
 
-use crate::file::{SettingsFileError, disk_stamp};
+use crate::file::{SettingsFileError, disk_stamp, read_toml_with_retry, recover_from_load_error};
 use crate::flush::{DebouncedWriter, FlushError, Patch};
 use crate::reload::Reloadable;
 
@@ -309,12 +309,21 @@ impl SettingsStore {
     /// Duration::ZERO` is useful for tests — every set writes through
     /// on the next worker iteration, and `flush_now()` is fully
     /// deterministic.
+    ///
+    /// A file that cannot be loaded does not fail the open: it follows
+    /// [`SettingsFile::load`](crate::SettingsFile::load)'s policy (an
+    /// unparsable file is quarantined, an unreadable one left untouched)
+    /// and the store starts empty.
     pub fn open_with_delay(path: PathBuf, delay: Duration) -> Result<Self, SettingsStoreError> {
-        let raw = match fs::read_to_string(&path) {
-            Ok(s) => toml::from_str::<toml::Value>(&s).map_err(SettingsStoreError::Parse)?,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => empty_table(),
-            Err(e) => return Err(SettingsStoreError::Io(e)),
-        };
+        // Same load-failure policy as `SettingsFile::load`: an unparsable
+        // file is quarantined, an unreadable one left alone, and either
+        // way the store opens on an empty document rather than failing
+        // every launch.
+        let raw = recover_from_load_error(
+            &path,
+            read_toml_with_retry(&path).map(|v| v.unwrap_or_else(empty_table)),
+            empty_table,
+        );
 
         // The root must be a table — top-level scalars are nonsense for
         // a multi-key store. Coerce or reject.
@@ -690,16 +699,25 @@ fn get_nested<'a>(raw: &'a toml::Value, key: &str) -> Option<&'a toml::Value> {
 }
 
 /// Insert `value` at the dotted `key`, creating intermediate tables as
-/// needed. Caller must have already verified that the path shape is
-/// compatible via [`check_path_shape`].
+/// needed.
+///
+/// [`check_path_shape`] validates the path at registration, but the
+/// document this runs on can come from disk later (a peer, or a hand
+/// edit, wrote `editor = "x"` where the store keeps `editor.font_size`).
+/// A non-table on the path is then replaced by an empty table: the value
+/// being written wins, as any write does. Panicking here instead would
+/// kill the shared writer thread and drop every later write.
 fn write_nested(raw: &mut toml::Value, key: &str, value: toml::Value) {
     let parts: Vec<&str> = key.split('.').collect();
     let last = parts.len() - 1;
     let mut current = raw;
     for (i, part) in parts.iter().enumerate() {
-        let table = current
-            .as_table_mut()
-            .expect("write_nested: path validated by check_path_shape, but encountered non-table");
+        if !current.is_table() {
+            *current = empty_table();
+        }
+        let Some(table) = current.as_table_mut() else {
+            unreachable!("write_nested: replaced with a table just above");
+        };
         if i == last {
             table.insert((*part).to_string(), value);
             return;
@@ -849,6 +867,62 @@ mod tests {
         let store = SettingsStore::open_with_delay(path, Duration::ZERO).unwrap();
         let sig = store.signal::<f32>("editor.font_size", 14.0);
         assert_eq!(sig.get(), 18.0);
+    }
+
+    /// A peer (or a hand edit) writes `editor = "x"` where this store
+    /// keeps `editor.font_size`. The next write must replace the scalar
+    /// rather than panic: the merge runs on the shared writer thread, and
+    /// a panic there silently dropped every later write in the process.
+    #[test]
+    fn a_scalar_on_disk_where_a_table_is_expected_does_not_stop_writes() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("p.toml");
+        let store = SettingsStore::open_with_delay(path.clone(), Duration::ZERO).unwrap();
+        let size = store.signal::<f32>("editor.font_size", 14.0);
+        store.flush_now().unwrap();
+
+        fs::write(&path, "editor = \"x\"\n").unwrap();
+        // Take the scalar into memory too, so the UI-thread write path
+        // sees it as well as the writer thread's merge.
+        store.reload_from_disk().unwrap();
+
+        let on_disk = |path: &Path| -> Option<toml::Value> {
+            let doc: toml::Value = toml::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+            get_nested(&doc, "editor.font_size").cloned()
+        };
+
+        size.set(18.0);
+        store.flush_now().unwrap();
+        assert_eq!(on_disk(&path), Some(toml::Value::Float(18.0)));
+
+        size.set(20.0);
+        store.flush_now().unwrap();
+        assert_eq!(on_disk(&path), Some(toml::Value::Float(20.0)));
+    }
+
+    /// An unparsable file must not fail the open (which made the bundle
+    /// fail on every launch): it is moved aside and the store starts
+    /// empty, as `SettingsFile::load` does.
+    #[test]
+    fn unparsable_file_is_quarantined_and_the_store_opens_empty() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("general.toml");
+        fs::write(&path, "this is = = not toml [[[").unwrap();
+
+        let store = SettingsStore::open_with_delay(path.clone(), Duration::ZERO).unwrap();
+        let size = store.signal::<f32>("editor.font_size", 14.0);
+        assert_eq!(size.get(), 14.0);
+
+        assert!(
+            fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .any(|e| e
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("general.toml.broken-")),
+            "the unparsable file must be moved aside"
+        );
     }
 
     #[test]

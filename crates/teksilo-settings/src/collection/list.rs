@@ -74,7 +74,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use teksilo_data::ListModel;
 
-use crate::file::{SettingsFileError, disk_stamp, quarantine, read_toml_with_retry};
+use crate::file::{SettingsFileError, disk_stamp, read_toml_with_retry, recover_from_load_error};
 use crate::flush::{DebouncedWriter, FlushError};
 use crate::lock::FileLock;
 use crate::migration::{Migrator, Versioned};
@@ -198,18 +198,11 @@ where
         migrator: Migrator<ListFile<T>>,
     ) -> Result<Self, SettingsFileError> {
         let lock = FileLock::acquire_exclusive(&path).map_err(SettingsFileError::Io)?;
-        let file = match read_list_or_default(&path, &migrator) {
-            Ok(f) => f,
-            Err(other) => {
-                quarantine(&path);
-                eprintln!(
-                    "teksilo-settings: load failed for {}: {}; falling back to an empty list",
-                    path.display(),
-                    other,
-                );
-                ListFile::default()
-            }
-        };
+        let file = recover_from_load_error(
+            &path,
+            read_list_or_default(&path, &migrator),
+            ListFile::default,
+        );
         let stamp = disk_stamp(&path);
         drop(lock);
 
@@ -483,6 +476,30 @@ mod tests {
         let plm: PersistedListModel<Item> =
             PersistedListModel::open(path, Duration::ZERO, Migrator::new()).unwrap();
         assert_eq!(plm.model().len(), 0);
+    }
+
+    /// An I/O error on open (here: the path is a directory, which every
+    /// platform refuses to read as a file) says nothing about the
+    /// content, so the file must be left where it is, as
+    /// `SettingsFile::load` does. Only a parse error quarantines.
+    #[test]
+    fn io_error_on_open_does_not_rename_the_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("list.toml");
+        fs::create_dir(&path).unwrap();
+
+        let plm: PersistedListModel<Item> =
+            PersistedListModel::open(path.clone(), Duration::ZERO, Migrator::new()).unwrap();
+        assert_eq!(plm.model().len(), 0);
+
+        assert!(path.is_dir(), "an unreadable path must not be renamed away");
+        assert!(
+            !fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .any(|e| e.file_name().to_string_lossy().contains(".broken-")),
+            "an I/O error must never produce a quarantine sibling"
+        );
     }
 
     #[test]
