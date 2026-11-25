@@ -26,6 +26,20 @@ by crate for clarity, not because crates version independently.
   later ones under new ids, with their docks, sizes, selection and hidden
   flags.
 
+#### Data models
+
+- **Over a `SortFilterListModel`, a keyed selection or row anchor stays on its
+  row when rows are inserted, removed or moved in the model underneath.** It
+  used to land on the neighbouring row, so a following Delete removed the
+  wrong one.
+- **Shift+arrow keeps extending the selection after a sort, a filter or the
+  removal of the anchor row**, instead of selecting one row per key press.
+- **A `TreeDataSlice` over a very deep tree, or with a key repeated in its
+  rows, no longer crashes or hangs**, and checking the root of a very deep
+  `TreeCheckedModel` / `KeyedTreeCheckedModel` no longer crashes.
+- **A parent's checkbox in `TreeCheckedModel` follows its children when they
+  are added, removed or moved in the tree.**
+
 #### Settings and windows
 
 - **A settings file holding a plain value where the app stores nested

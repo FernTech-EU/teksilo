@@ -159,9 +159,9 @@ The contract is `ListView::from_source_keyed`'s:
   selection;
 - a `ListModel`'s keys are its positions, so over a bare `ListModel` a keyed
   selection stays on positions, through a `replace_all` too, as
-  `ListView::from_source_keyed`'s does; a `SortFilterListModel` over it keys
-  each item by its place in the model underneath, which a sort or a filter does
-  not change;
+  `ListView::from_source_keyed`'s does; a `SortFilterListModel` over it gives
+  each item a key of its own, which a sort, a filter, or an insert or removal
+  in the model underneath does not change;
 - `.on_selection_changed(|set|)` still receives positions: those the selected
   keys have when the selection changes. A sort moves them without changing the
   selection, so it does not fire.

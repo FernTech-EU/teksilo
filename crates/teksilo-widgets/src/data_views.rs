@@ -813,13 +813,10 @@ pub(crate) type SnapshotOutFn = Rc<dyn Fn(&[usize]) -> Box<dyn Fn()>>;
 /// index it was built with — no worse than capturing the index directly.
 ///
 /// A bare `ListModel` has no identity to offer (a `Vec` row *is* its position),
-/// so anchors over one are fixed. `SortFilterListModel` keys rows by their
-/// **source index**, which no sort/filter reprojection renumbers — so anchors
-/// over a projection do track their row across a filter change, which is the
-/// flat fragility in practice. They can still mis-resolve inside the window
-/// between an *upstream* insert/remove and the rebuild it schedules, since that
-/// does renumber source indices; no worse than the captured index they replace.
-/// The tree sources all carry real identity.
+/// so anchors over one are fixed. `SortFilterListModel` gives each source row a
+/// key of its own, which neither a sort/filter reprojection nor an upstream
+/// insert, remove or move changes, so anchors over a projection track their
+/// row through both. The tree sources all carry real identity.
 ///
 /// **Precondition: keys must be unique.** Resolution falls back to a lookup by
 /// key, which returns the *first* match, so a source handing out duplicate keys

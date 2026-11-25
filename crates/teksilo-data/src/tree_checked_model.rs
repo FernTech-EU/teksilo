@@ -38,6 +38,11 @@
 //! assert_eq!(model.check_state(root), CheckState::Checked);
 //! ```
 //!
+//! The model also observes the `TreeModel`: when a node is inserted, removed
+//! or moved, the parents it affects recompute their state from their current
+//! children (an unchecked child added under a `Checked` parent makes it
+//! `Indeterminate`). Under [`AggregateMode::None`] it does nothing.
+//!
 //! ## Limitation: tree-mutation desync
 //!
 //! `signal_for(node)` and `bool_signal_for(node)` cache signals keyed
@@ -67,7 +72,7 @@ use std::rc::Rc;
 use teksilo_core::signal::{ObserverHandle, Signal};
 
 use crate::check_state::CheckState;
-use crate::tree_change::NodeId;
+use crate::tree_change::{NodeId, TreeChange};
 use crate::tree_model::TreeModel;
 
 /// How a parent's [`CheckState`] relates to its descendants.
@@ -106,6 +111,9 @@ struct Inner {
     /// its own id here, knows the write is a cascade-internal echo of a walk
     /// already in progress and skips re-cascading it.
     suppressed: HashSet<NodeId>,
+    /// Keeps the tree-change observer alive: it recomputes the ancestors of
+    /// every node the tree adds, removes or moves.
+    tree_observer: Option<ObserverHandle>,
 }
 
 /// Per-node checkbox state for a [`TreeModel<T>`](crate::TreeModel), with optional
@@ -123,7 +131,7 @@ impl<T: 'static> TreeCheckedModel<T> {
     /// Create a new model wrapping `tree` with the default
     /// [`AggregateMode::DescendantsDriveAncestors`] cascade behaviour.
     pub fn new(tree: TreeModel<T>) -> Self {
-        Self {
+        let model = Self {
             tree,
             inner: Rc::new(RefCell::new(Inner {
                 state: HashMap::new(),
@@ -132,9 +140,51 @@ impl<T: 'static> TreeCheckedModel<T> {
                 bridge_guards: HashMap::new(),
                 bridge_observers: HashMap::new(),
                 suppressed: HashSet::new(),
+                tree_observer: None,
             })),
             mode: Rc::new(Cell::new(AggregateMode::default())),
-        }
+        };
+        let handle = model.make_tree_observer();
+        model.inner.borrow_mut().tree_observer = Some(handle);
+        model
+    }
+
+    /// Build the tree-change observer: when the tree gains, loses or moves a
+    /// node, the parents it affects recompute their aggregate, so a parent
+    /// never keeps a state computed from children it no longer has. The
+    /// closure holds `Weak`s to the model's state (the model owns the
+    /// handle, so a strong one would be a cycle).
+    fn make_tree_observer(&self) -> ObserverHandle {
+        let inner_w = Rc::downgrade(&self.inner);
+        let mode_w = Rc::downgrade(&self.mode);
+        let tree = self.tree.clone();
+        self.tree.observe_changes(move |change| {
+            let (Some(inner_rc), Some(mode_rc)) = (inner_w.upgrade(), mode_w.upgrade()) else {
+                return;
+            };
+            if mode_rc.get() != AggregateMode::DescendantsDriveAncestors {
+                return;
+            }
+            match change {
+                TreeChange::NodeInserted { parent, node, .. } => {
+                    children_changed(&tree, &inner_rc, *parent, Some(*node));
+                }
+                TreeChange::NodeRemoved { parent, .. } => {
+                    children_changed(&tree, &inner_rc, *parent, None);
+                }
+                TreeChange::NodeMoved {
+                    node,
+                    old_parent,
+                    new_parent,
+                    ..
+                } => {
+                    children_changed(&tree, &inner_rc, *old_parent, None);
+                    children_changed(&tree, &inner_rc, *new_parent, Some(*node));
+                }
+                TreeChange::NodeUpdated { .. } => {}
+                TreeChange::Reset => reaggregate_all(&tree, &inner_rc),
+            }
+        })
     }
 
     /// Create a new model wrapping `tree` with an explicit [`AggregateMode`].
@@ -212,11 +262,7 @@ impl<T: 'static> TreeCheckedModel<T> {
                 cascade_descendants(&tree, &inner_rc, node, *new_state);
             }
             // Recompute ancestors.
-            let mut cur = tree.parent(node);
-            while let Some(p) = cur {
-                recompute_from_children(&tree, &inner_rc, p);
-                cur = tree.parent(p);
-            }
+            recompute_ancestors_from(&tree, &inner_rc, tree.parent(node));
         })
     }
 
@@ -407,20 +453,89 @@ fn cascade_descendants<T: 'static>(
     root: NodeId,
     target: CheckState,
 ) {
-    for child in tree.children(root) {
-        write_state(inner, child, target);
-        cascade_descendants(tree, inner, child, target);
+    // Explicit-stack pre-order walk (a deep tree must not overflow the call
+    // stack): children are pushed in reverse so they pop in order.
+    let mut stack: Vec<NodeId> = tree.children(root).into_iter().rev().collect();
+    while let Some(node) = stack.pop() {
+        write_state(inner, node, target);
+        stack.extend(tree.children(node).into_iter().rev());
     }
 }
 
+/// Recompute `start` and every ancestor above it, bottom-up.
+fn recompute_ancestors_from<T: 'static>(
+    tree: &TreeModel<T>,
+    inner: &Rc<RefCell<Inner>>,
+    start: Option<NodeId>,
+) {
+    let mut cur = start;
+    while let Some(p) = cur {
+        recompute_from_children(tree, inner, p);
+        cur = tree.parent(p);
+    }
+}
+
+/// `parent` gained or lost a child (`arrived` is the node it gained, if any):
+/// recompute it, then its ancestors for as long as a state changes (above
+/// the first unchanged one, nothing's children changed).
+///
+/// Nothing to do when `parent` was never given a state and the arrival is
+/// unchecked: such a parent's children were all unchecked, and still are.
+/// That keeps building a tree under an untouched model at one lookup per
+/// insert.
+fn children_changed<T: 'static>(
+    tree: &TreeModel<T>,
+    inner: &Rc<RefCell<Inner>>,
+    parent: Option<NodeId>,
+    arrived: Option<NodeId>,
+) {
+    let Some(parent) = parent else {
+        return;
+    };
+    let parent_tracked = inner.borrow().state.contains_key(&parent);
+    let arrival_counts = arrived.is_some_and(|n| read_state(inner, n) != CheckState::Unchecked);
+    if !parent_tracked && !arrival_counts {
+        return;
+    }
+    let mut cur = Some(parent);
+    while let Some(node) = cur {
+        if !recompute_from_children(tree, inner, node) {
+            break;
+        }
+        cur = tree.parent(node);
+    }
+}
+
+/// Recompute every tracked node and its ancestors from the current tree,
+/// deepest first, so a parent recomputes after its children are final.
+fn reaggregate_all<T: 'static>(tree: &TreeModel<T>, inner: &Rc<RefCell<Inner>>) {
+    let tracked: Vec<NodeId> = inner.borrow().state.keys().copied().collect();
+    let mut nodes: HashSet<NodeId> = HashSet::new();
+    for node in tracked {
+        let mut cur = Some(node);
+        while let Some(n) = cur {
+            if !nodes.insert(n) {
+                break;
+            }
+            cur = tree.parent(n);
+        }
+    }
+    let mut nodes: Vec<NodeId> = nodes.into_iter().collect();
+    nodes.sort_by_key(|&n| std::cmp::Reverse(tree.depth(n)));
+    for node in nodes {
+        recompute_from_children(tree, inner, node);
+    }
+}
+
+/// Recompute `node`'s state from its children; whether it changed.
 fn recompute_from_children<T: 'static>(
     tree: &TreeModel<T>,
     inner: &Rc<RefCell<Inner>>,
     node: NodeId,
-) {
+) -> bool {
     let kids = tree.children(node);
     if kids.is_empty() {
-        return;
+        return false;
     }
     let mut all_checked = true;
     let mut all_unchecked = true;
@@ -442,7 +557,9 @@ fn recompute_from_children<T: 'static>(
     } else {
         CheckState::Indeterminate
     };
+    let changed = read_state(inner, node) != new_state;
     write_state(inner, node, new_state);
+    changed
 }
 
 fn read_state(inner: &Rc<RefCell<Inner>>, node: NodeId) -> CheckState {
@@ -773,5 +890,41 @@ mod tests {
         // root2's only child (c) is Checked, so root2 must have recomputed —
         // not stayed at its stale Unchecked default.
         assert_eq!(m.check_state(root2), CheckState::Checked);
+    }
+
+    #[test]
+    fn a_parent_follows_its_children_when_the_tree_changes() {
+        let t = TreeModel::new();
+        let root = t.insert_root(0, "root");
+        let a = t.insert_child(root, 0, "a");
+        let b = t.insert_child(root, 1, "b");
+        let m = TreeCheckedModel::new(t.clone());
+        m.check(a);
+        let _ = m.signal_for(b);
+        assert_eq!(m.check_state(root), CheckState::Indeterminate);
+
+        // Its one unchecked child goes: every child left is checked.
+        t.remove(b);
+        assert_eq!(m.check_state(root), CheckState::Checked);
+
+        // An unchecked child arrives under the checked parent.
+        t.insert_child(root, 1, "c");
+        assert_eq!(m.check_state(root), CheckState::Indeterminate);
+    }
+
+    /// The cascade is an explicit-stack walk: checking the root of a
+    /// 50,000-deep chain must reach the leaf without overflowing the stack.
+    #[test]
+    fn checking_the_root_of_a_deep_chain_cascades_without_overflow() {
+        const DEPTH: usize = 50_000;
+        let t = TreeModel::new();
+        let root = t.insert_root(0, 0usize);
+        let mut leaf = root;
+        for i in 1..DEPTH {
+            leaf = t.insert_child(leaf, 0, i);
+        }
+        let m = TreeCheckedModel::new(t);
+        m.check(root);
+        assert_eq!(m.check_state(leaf), CheckState::Checked);
     }
 }

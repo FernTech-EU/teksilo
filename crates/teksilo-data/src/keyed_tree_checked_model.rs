@@ -454,9 +454,12 @@ fn cascade_descendants<K: ItemKey>(
     root: &K,
     target: CheckState,
 ) {
-    for child in children(root) {
-        write_state(inner, &child, target);
-        cascade_descendants(children, inner, &child, target);
+    // Explicit-stack pre-order walk (a deep tree must not overflow the call
+    // stack): children are pushed in reverse so they pop in order.
+    let mut stack: Vec<K> = children(root).into_iter().rev().collect();
+    while let Some(key) = stack.pop() {
+        write_state(inner, &key, target);
+        stack.extend(children(&key).into_iter().rev());
     }
 }
 
@@ -855,5 +858,18 @@ mod tests {
         // root2's only child (c) is Checked, so root2 must have recomputed —
         // not stayed at its stale Unchecked default.
         assert_eq!(m.check_state(&"root2"), CheckState::Checked);
+    }
+
+    /// The cascade is an explicit-stack walk: checking the root of a
+    /// 50,000-deep chain must reach the leaf without overflowing the stack.
+    #[test]
+    fn checking_the_root_of_a_deep_chain_cascades_without_overflow() {
+        const DEPTH: usize = 50_000;
+        let m = KeyedTreeCheckedModel::new(
+            |k: &usize| if k + 1 < DEPTH { vec![k + 1] } else { vec![] },
+            |k: &usize| k.checked_sub(1),
+        );
+        m.check(0);
+        assert_eq!(m.check_state(&(DEPTH - 1)), CheckState::Checked);
     }
 }

@@ -220,14 +220,24 @@ impl SelectionModel {
                 if additive && !self.extending.get() {
                     *self.base.borrow_mut() = self.selection.get();
                 }
-                let anchor = self.anchor.get().unwrap_or(index);
+                // With no anchor (a reprojection dropped it, or nothing was
+                // ever picked), the first row the gesture reaches becomes it,
+                // so the next keystroke extends from there instead of
+                // starting over.
+                let anchor = match self.anchor.get() {
+                    Some(anchor) => anchor,
+                    None => {
+                        self.anchor.set(Some(index));
+                        index
+                    }
+                };
                 let start = anchor.min(index);
                 let end = anchor.max(index);
                 let mut set = self.base.borrow().clone();
                 set.extend(start..=end);
                 self.selection.set(set);
                 self.extending.set(true);
-                // Anchor stays at the original position
+                // Otherwise the anchor stays at the original position.
             }
         }
     }
@@ -378,8 +388,9 @@ impl SelectionModel {
     }
 
     /// Drop the range anchor when a projection has renumbered the rows under
-    /// it, so the next `Shift` gesture starts from the cursor rather than from
-    /// a row that has since moved.
+    /// it, so the next `Shift` gesture starts from the first row it reaches
+    /// (the row the cursor moves to, which becomes the new anchor) rather
+    /// than from a row that has since moved.
     ///
     /// A sort/filter proxy signals a blanket reset rather than a per-row
     /// delta, so `adjust_for_*` never runs and an index anchor silently comes
@@ -639,6 +650,17 @@ mod tests {
         // that now means something else, and the stale half of the base is gone.
         model.extend_to(8);
         assert_eq!(model.selected_indices(), vec![2, 8]);
+    }
+
+    #[test]
+    fn a_shift_gesture_after_the_anchor_was_dropped_keeps_extending() {
+        let model = SelectionModel::new(SelectionMode::Multi);
+        model.select(5);
+        model.invalidate_anchor_from(0);
+        // Shift+Down twice from the cursor at 5.
+        model.extend_to(6);
+        model.extend_to(7);
+        assert_eq!(model.selected_indices(), vec![6, 7]);
     }
 
     #[test]

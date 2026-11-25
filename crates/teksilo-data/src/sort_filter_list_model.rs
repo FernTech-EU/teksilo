@@ -39,13 +39,19 @@
 //!
 //! ## Selection semantics
 //!
-//! Selection on a sorted/filtered view is naturally tracked by **visible
-//! index**, not by item identity. After a projection rebuild, a downstream
-//! [`SelectionModel`](crate::SelectionModel) keeps the same numerical
-//! indices selected — meaning the visual selection stays in place even
-//! though it now points at different underlying rows. Apps that want
-//! identity-based selection should observe their model directly and rewrite
-//! the selection from source identifiers on each rebuild.
+//! An index-based [`SelectionModel`](crate::SelectionModel) bound to the
+//! proxy only ever hears the proxy's own changes. A scoped `ItemUpdated`
+//! leaves it alone; every other rebuild (a sort or filter change, and every
+//! upstream insert, remove, move or reset) reaches it as a `Reset`, which
+//! clears the selection. So an index-based selection does not survive a
+//! reprojection at all.
+//!
+//! For a selection that follows its rows, use a keyed one
+//! ([`KeyedSelectionModel`](crate::KeyedSelectionModel), or a view's
+//! `from_source_keyed`). The proxy gives every source row a key of its own
+//! (see [`ListDataSource::Key`] on this type), kept across sorting, filtering
+//! and upstream inserts, removes and moves, so a keyed selection stays on the
+//! same rows through all of them.
 //!
 //! ```rust
 //! # use teksilo_data::{ListModel, SortFilterListModel, SortDirection};
@@ -114,6 +120,16 @@ struct Inner<T: 'static> {
     visible_to_source: Vec<usize>,
     /// Lazy reverse map; rebuilt on demand by `visible_index_of`.
     source_to_visible: RefCell<Option<Vec<Option<usize>>>>,
+    /// The key of each source row, parallel to the source. Minted by the
+    /// proxy and carried through upstream inserts, removes and moves, so a
+    /// row keeps its key while its source index changes. See
+    /// [`ListDataSource::Key`] on [`SortFilterListModel`].
+    row_ids: Vec<usize>,
+    /// The next key `row_ids` hands out. Never reused.
+    next_row_id: usize,
+    /// Lazy map from a row key to its visible index; rebuilt on demand by
+    /// `index_of`.
+    id_to_visible: RefCell<Option<HashMap<usize, usize>>>,
     /// First visible index whose content may differ after the latest
     /// rebuild. See [`SortFilterListModel::first_changed_index`].
     last_divergence: Option<usize>,
@@ -129,8 +145,55 @@ struct Inner<T: 'static> {
 }
 
 impl<T: 'static> Inner<T> {
+    fn mint_row_ids(&mut self, count: usize) -> std::ops::Range<usize> {
+        let start = self.next_row_id;
+        self.next_row_id += count;
+        start..self.next_row_id
+    }
+
+    /// Carry the row keys through an upstream change, before the rebuild
+    /// that follows it reads them.
+    fn apply_upstream_to_row_ids(&mut self, change: &DataChange) {
+        match change {
+            DataChange::ItemsInserted { range } => {
+                let at = range.start.min(self.row_ids.len());
+                let fresh = self.mint_row_ids(range.len());
+                self.row_ids.splice(at..at, fresh);
+            }
+            DataChange::ItemsRemoved { range } => {
+                let end = range.end.min(self.row_ids.len());
+                let start = range.start.min(end);
+                self.row_ids.drain(start..end);
+            }
+            DataChange::ItemsMoved { from, to, count } => {
+                let end = (from + count).min(self.row_ids.len());
+                let start = (*from).min(end);
+                let block: Vec<usize> = self.row_ids.drain(start..end).collect();
+                let at = (*to).min(self.row_ids.len());
+                self.row_ids.splice(at..at, block);
+            }
+            DataChange::Reset => {
+                self.row_ids.clear();
+            }
+            DataChange::ItemUpdated { .. } | DataChange::WindowLoaded { .. } => return,
+        }
+        self.id_to_visible.replace(None);
+    }
+
+    /// Make `row_ids` as long as the source, for a source that changed its
+    /// length without saying how: extra rows get fresh keys.
+    fn sync_row_ids(&mut self, n: usize) {
+        if self.row_ids.len() > n {
+            self.row_ids.truncate(n);
+        } else if self.row_ids.len() < n {
+            let fresh = self.mint_row_ids(n - self.row_ids.len());
+            self.row_ids.extend(fresh);
+        }
+    }
+
     fn rebuild(&mut self, upstream: Option<&DataChange>) {
         let n = (self.len_fn)();
+        self.sync_row_ids(n);
         let predicates: Vec<Box<dyn Fn(&T) -> bool>> = self
             .filters
             .iter()
@@ -208,6 +271,7 @@ impl<T: 'static> Inner<T> {
 
         self.visible_to_source = visible;
         self.source_to_visible.replace(None);
+        self.id_to_visible.replace(None);
     }
 
     fn snapshot_callbacks(&self) -> Vec<Rc<dyn Fn(&DataChange)>> {
@@ -263,6 +327,9 @@ impl<T: 'static> SortFilterListModel<T> {
             filters: HashMap::new(),
             visible_to_source: Vec::new(),
             source_to_visible: RefCell::new(None),
+            row_ids: Vec::new(),
+            next_row_id: 0,
+            id_to_visible: RefCell::new(None),
             last_divergence: None,
             observers: Vec::new(),
             next_observer_id: 1,
@@ -475,6 +542,9 @@ fn rebuild_and_notify_with<T: 'static>(
     inner: &Rc<RefCell<Inner<T>>>,
     upstream: Option<&DataChange>,
 ) {
+    if let Some(change) = upstream {
+        inner.borrow_mut().apply_upstream_to_row_ids(change);
+    }
     // Fast path: a single-row content edit that neither enters/leaves the
     // visible set nor needs to move relative to its sorted neighbours can
     // skip the full O(n) filter pass + O(n log n) sort — patch the one row
@@ -625,31 +695,44 @@ impl<T: 'static> Clone for SortFilterListModel<T> {
 
 impl<T: 'static> ListDataSource for SortFilterListModel<T> {
     type Item = T;
-    /// The **source index** behind a visible row.
+    /// A key the proxy gives each source row, unique for the proxy's life.
     ///
-    /// This is the strongest identity a flat projection can offer: the
-    /// underlying `ListModel` has none of its own (a `Vec` row *is* its
-    /// position). It is stable across every sort/filter reprojection, which is
-    /// what a projection actually does to rows, so a
+    /// The underlying `ListModel` has no identity of its own (a `Vec` row
+    /// *is* its position), so the proxy mints one: when it is built, the rows
+    /// are numbered from 0 in source order, so a key starts out equal to the
+    /// row's source index. A row keeps its key through every sort and filter
+    /// change, and through upstream inserts, removes and moves, which shift
+    /// source indices but not keys; inserted rows get new keys, never one a
+    /// removed row had. An in-place update keeps the key. An upstream
+    /// `Reset`, or a length change the source did not announce, gives every
+    /// affected row a new key, since nothing then says which row is which.
+    ///
+    /// So a keyed selection or a
     /// [`RowAnchor`](../../teksilo_widgets/data_views/struct.RowAnchor.html)
-    /// built over this view tracks its row when a filter changes underneath it.
-    ///
-    /// It is **not** stable across an upstream mutation: an insert, remove or
-    /// move renumbers every source index at or above its change point (see the
-    /// divergence note in `rebuild`). Anchors only have to survive the window
-    /// between a change and the rebuild it schedules, and an upstream mutation
-    /// is exactly what forces that rebuild — but a handler firing inside that
-    /// window may still resolve to a neighbour. That is no worse than the
-    /// captured index it replaced, and strictly better for the sort/filter case.
+    /// over the proxy stays on its row when rows are inserted or removed
+    /// above it. The key is not a source index: use
+    /// [`source_index_of`](SortFilterListModel::source_index_of) for that.
     type Key = usize;
 
     fn key_at(&self, index: usize) -> Option<usize> {
-        self.source_index_of(index)
+        let guard = self.inner.borrow();
+        let src = *guard.visible_to_source.get(index)?;
+        guard.row_ids.get(src).copied()
     }
 
     fn index_of(&self, key: &usize) -> Option<usize> {
         // O(1) after the first call in a projection epoch (lazy reverse index).
-        self.visible_index_of(*key)
+        let guard = self.inner.borrow();
+        let mut rev = guard.id_to_visible.borrow_mut();
+        let map = rev.get_or_insert_with(|| {
+            guard
+                .visible_to_source
+                .iter()
+                .enumerate()
+                .filter_map(|(vi, &si)| guard.row_ids.get(si).map(|&id| (id, vi)))
+                .collect()
+        });
+        map.get(key).copied()
     }
 
     fn len(&self) -> usize {
@@ -1103,6 +1186,22 @@ mod tests {
         );
         let proxy = SortFilterListModel::from_source(src);
         assert_eq!(proxy.len(), 2);
+    }
+
+    #[test]
+    fn a_row_keeps_its_key_when_a_row_is_inserted_above_it() {
+        let model = ListModel::from_vec(vec!["a", "b", "c"]);
+        let proxy = SortFilterListModel::new(model.clone());
+        let b_key = proxy.key_at(1).unwrap();
+
+        model.insert(0, "z");
+
+        // z, a, b, c: b is now at visible index 2.
+        assert_eq!(proxy.with_item(2, |s| *s), Some("b"));
+        assert_eq!(proxy.key_at(2), Some(b_key), "b keeps its key");
+        assert_eq!(proxy.index_of(&b_key), Some(2), "and its key finds it");
+        assert_ne!(proxy.key_at(1), Some(b_key), "a does not inherit b's key");
+        assert_ne!(proxy.key_at(0), Some(b_key), "nor does the new row");
     }
 
     // ── Incremental ItemUpdated fast path ───────────────────────────────

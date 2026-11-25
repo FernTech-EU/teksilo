@@ -654,7 +654,14 @@ impl<K: ItemKey, T> TreeDataSlice<K, T> {
         let mut rows: Vec<Row<K, T>> = Vec::with_capacity(input.len());
         // stack entries: (raw indent depth, key, row index)
         let mut stack: Vec<(usize, K, usize)> = Vec::new();
+        // A key may name one row only. A second row with a key already seen is
+        // dropped: keeping it could make a row its own ancestor
+        // (`[A d0, B d1, A d2]`), and the flatten would never end.
+        let mut keys_in_stream: HashSet<K> = HashSet::with_capacity(input.len());
         for tr in input {
+            if !keys_in_stream.insert(tr.key.clone()) {
+                continue;
+            }
             while let Some((d, _, _)) = stack.last() {
                 if *d >= tr.depth {
                     stack.pop();
@@ -827,48 +834,21 @@ fn flatten<K: ItemKey, T>(
 ) -> (Vec<usize>, HashMap<K, usize>) {
     let mut visible = Vec::with_capacity(rows.len());
     let mut vis_pos = HashMap::with_capacity(rows.len());
-    for &root in roots {
-        flatten_node(
-            root,
-            rows,
-            children,
-            expanded,
-            all_expanded,
-            &mut visible,
-            &mut vis_pos,
-        );
-    }
-    (visible, vis_pos)
-}
-
-fn flatten_node<K: ItemKey, T>(
-    idx: usize,
-    rows: &[Row<K, T>],
-    children: &HashMap<K, Vec<usize>>,
-    expanded: &HashSet<K>,
-    all_expanded: bool,
-    visible: &mut Vec<usize>,
-    vis_pos: &mut HashMap<K, usize>,
-) {
-    let row = &rows[idx];
-    vis_pos.insert(row.key.clone(), visible.len());
-    visible.push(idx);
-    if row.has_children
-        && (all_expanded || expanded.contains(&row.key))
-        && let Some(kids) = children.get(&row.key)
-    {
-        for &child in kids {
-            flatten_node(
-                child,
-                rows,
-                children,
-                expanded,
-                all_expanded,
-                visible,
-                vis_pos,
-            );
+    // Explicit-stack pre-order walk (a deep chain must not overflow the call
+    // stack): children are pushed in reverse so they pop in order.
+    let mut stack: Vec<usize> = roots.iter().rev().copied().collect();
+    while let Some(idx) = stack.pop() {
+        let row = &rows[idx];
+        vis_pos.insert(row.key.clone(), visible.len());
+        visible.push(idx);
+        if row.has_children
+            && (all_expanded || expanded.contains(&row.key))
+            && let Some(kids) = children.get(&row.key)
+        {
+            stack.extend(kids.iter().rev().copied());
         }
     }
+    (visible, vis_pos)
 }
 
 /// Length of the common prefix of the old vs new visible lists, comparing key +
@@ -1484,5 +1464,33 @@ mod tests {
             position: DropPosition::Into,
         });
         assert!(!ok);
+    }
+
+    /// The flatten is an explicit-stack walk: a 50,000-deep chain with
+    /// everything expanded must flatten without overflowing the call stack.
+    #[test]
+    fn deep_chain_flattens_without_overflow() {
+        const DEPTH: usize = 50_000;
+        let slice: TreeDataSlice<usize, usize> = TreeDataSlice::new();
+        slice.set_expand_new_nodes(true);
+        slice.set_rows((0..DEPTH).map(|i| TreeRow::new(i, i, i)).collect());
+        assert_eq!(slice.visible_count(), DEPTH);
+        assert_eq!(slice.flat_index_of(&(DEPTH - 1)), Some(DEPTH - 1));
+    }
+
+    /// A key repeated further down the stream would make a row its own
+    /// ancestor; the repeat is dropped, so the flatten ends.
+    #[test]
+    fn a_repeated_key_in_the_stream_cannot_make_the_flatten_loop() {
+        let slice: TreeDataSlice<u64, &'static str> = TreeDataSlice::new();
+        slice.set_expand_new_nodes(true);
+        slice.set_rows(vec![
+            TreeRow::new(1, "A", 0),
+            TreeRow::new(2, "B", 1),
+            TreeRow::new(1, "A again", 2),
+        ]);
+        assert_eq!(slice.visible_count(), 2);
+        assert_eq!(slice.key_at(0), Some(1));
+        assert_eq!(slice.key_at(1), Some(2));
     }
 }
