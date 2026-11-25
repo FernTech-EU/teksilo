@@ -122,6 +122,16 @@ struct BindingGroup {
 #[derive(Clone, Default)]
 pub struct BindingRegistry {
     by_source: Rc<RefCell<HashMap<usize, BindingGroup>>>,
+    /// Reverse index: the `source_id`s of every group holding a binding
+    /// for a widget, so [`unregister_for_widget`](Self::unregister_for_widget)
+    /// touches only those groups instead of every group in the registry.
+    /// Tearing down a subtree unregisters each of its nodes, and a walk
+    /// over all groups per node made that N x S.
+    by_widget: Rc<RefCell<HashMap<WidgetId, Vec<usize>>>>,
+    /// Groups visited by `unregister_for_widget`, for the test that pins
+    /// the reverse index.
+    #[cfg(test)]
+    groups_visited: Rc<Cell<usize>>,
 }
 
 impl BindingRegistry {
@@ -165,6 +175,11 @@ impl BindingRegistry {
             return;
         }
         group.bindings.push((binding.widget_id, binding.level));
+        let mut by_widget = self.by_widget.borrow_mut();
+        let sources = by_widget.entry(binding.widget_id).or_default();
+        if !sources.contains(&binding.source_id) {
+            sources.push(binding.source_id);
+        }
     }
 
     /// Drop every binding targeting `widget_id`. Called by the widget
@@ -187,9 +202,16 @@ impl BindingRegistry {
     /// to end-of-pass keeps the ledger across a rebuild while still
     /// reclaiming it for a widget that was genuinely destroyed.
     pub(crate) fn unregister_for_widget(&self, widget_id: WidgetId) {
+        let Some(sources) = self.by_widget.borrow_mut().remove(&widget_id) else {
+            return;
+        };
         let mut by_source = self.by_source.borrow_mut();
-        for group in by_source.values_mut() {
-            group.bindings.retain(|(wid, _)| *wid != widget_id);
+        for source_id in sources {
+            #[cfg(test)]
+            self.groups_visited.set(self.groups_visited.get() + 1);
+            if let Some(group) = by_source.get_mut(&source_id) {
+                group.bindings.retain(|(wid, _)| *wid != widget_id);
+            }
         }
     }
 
@@ -856,5 +878,33 @@ mod tests {
         reg.unregister_for_widget(stays);
         reg.reclaim_empty_groups();
         assert_eq!(reg.by_source.borrow().len(), 0, "now it is reclaimed");
+    }
+
+    /// Unregistering a widget visits only the groups it is bound in, not
+    /// every group in the registry: tearing down a subtree of N nodes
+    /// would otherwise cost N times the registry's size.
+    #[test]
+    fn unregister_visits_only_the_widgets_own_groups() {
+        use crate::signal::Signal;
+        let reg = BindingRegistry::new();
+        let others: Vec<Signal<i32>> = (0..500).map(Signal::new).collect();
+        for (i, sig) in others.iter().enumerate() {
+            let id: WidgetId = slotmap::KeyData::from_ffi(1000 + i as u64).into();
+            sig.bind_to(id, &reg, BindingLevel::RepaintOnly);
+        }
+        let mine = [Signal::new(0_i32), Signal::new(1_i32)];
+        let me: WidgetId = slotmap::KeyData::from_ffi(48).into();
+        for sig in &mine {
+            sig.bind_to(me, &reg, BindingLevel::RepaintOnly);
+            sig.bind_to(me, &reg, BindingLevel::AccessibilityOnly);
+        }
+        assert_eq!(reg.len(), 504);
+
+        reg.unregister_for_widget(me);
+        assert_eq!(reg.groups_visited.get(), 2, "only its own two groups");
+        assert_eq!(reg.len(), 500, "and both its entries in each are gone");
+
+        reg.unregister_for_widget(me);
+        assert_eq!(reg.groups_visited.get(), 2, "a second call visits nothing");
     }
 }

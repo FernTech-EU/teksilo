@@ -26,6 +26,14 @@ by crate for clarity, not because crates version independently.
   later ones under new ids, with their docks, sizes, selection and hidden
   flags.
 
+#### Core
+
+- **`Signal::flat_map` can be observed.** Passing one to `Fade`, `Scale`,
+  `Slide` or any widget that watches its property panicked at build; the
+  observer now follows whichever inner signal is selected.
+- **Destroying or rebuilding a large subtree no longer slows down with the
+  number of reactive bindings in the whole window.**
+
 #### Data models
 
 - **Over a `SortFilterListModel`, a keyed selection or row anchor stays on its

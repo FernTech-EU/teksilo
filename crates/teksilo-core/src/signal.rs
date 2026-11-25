@@ -297,12 +297,11 @@ struct DerivedSource {
     /// Register a nullary change callback on this upstream, returning the
     /// guard that unregisters it.
     ///
-    /// `None` where the set of roots is chosen *dynamically* and so cannot
-    /// be subscribed to once and for all — [`Signal::flat_map`], whose
-    /// inner signal is re-selected on every poll. A derived signal with any
-    /// such source stays unobservable, and [`Signal::try_observe`] says so
-    /// with [`SignalAccessError::ReadOnly`] rather than attaching an
-    /// observer that would go quiet the moment the inner switched.
+    /// [`Signal::flat_map`], whose roots change as its inner signal is
+    /// selected again, publishes one that follows the switch (see
+    /// [`flat_map_subscribe`]). `None` would make a derived signal over this
+    /// source unobservable: [`Signal::try_observe`] then answers
+    /// [`SignalAccessError::ReadOnly`].
     subscribe: Option<SubscribeHook>,
 }
 
@@ -384,6 +383,48 @@ fn fan_out_subscribe(sources: &[DerivedSource]) -> Option<SubscribeHook> {
     }))
 }
 
+/// The push side of [`Signal::flat_map`]: one registration on the outer
+/// signal's roots, plus one on the roots of whichever inner signal is
+/// selected right now.
+///
+/// When the outer signal changes, the inner is selected again and its
+/// registration replaced before `notify` runs, so the observer follows the
+/// new inner and stops hearing the old one. A change of the selected inner
+/// just runs `notify`. `None` only when the outer signal itself cannot be
+/// pushed from.
+fn flat_map_subscribe<T: 'static, U: Clone + 'static>(
+    f: Rc<dyn Fn(&T) -> Signal<U>>,
+    outer_compute: Rc<dyn Fn() -> T>,
+    outer_sources: &[DerivedSource],
+) -> Option<SubscribeHook> {
+    let outer_hook = fan_out_subscribe(outer_sources)?;
+    Some(Rc::new(move |notify: Rc<dyn Fn()>| {
+        let inner_handle: Rc<RefCell<Option<ObserverHandle>>> = Rc::new(RefCell::new(None));
+        let attach_inner: Rc<dyn Fn()> = {
+            let f = f.clone();
+            let outer_compute = outer_compute.clone();
+            let inner_handle = inner_handle.clone();
+            let notify = notify.clone();
+            Rc::new(move || {
+                let inner = f(&outer_compute());
+                let new = fan_out_subscribe(&inner.as_sources()).map(|hook| hook(notify.clone()));
+                // No borrow is held while the old guard drops: its remover
+                // takes the inner root's own borrow.
+                let old = inner_handle.replace(new);
+                drop(old);
+            })
+        };
+        attach_inner();
+        let outer_handle = outer_hook(Rc::new(move || {
+            attach_inner();
+            notify();
+        }));
+        // Dropping the keeper detaches the outer registration first (which
+        // frees `attach_inner`), then the current inner one.
+        ObserverHandle::new(Rc::new((outer_handle, inner_handle)), 0, Rc::new(|_| {}))
+    }))
+}
+
 enum SignalKind<T> {
     Mutable {
         inner: Rc<RefCell<MutableInner<T>>>,
@@ -460,8 +501,8 @@ impl<T: 'static> Signal<T> {
     /// Register an observer callback. Returns an `ObserverHandle` — dropping
     /// the handle removes the callback.
     ///
-    /// Works on a derived signal too; see [`try_observe`](Self::try_observe)
-    /// for the one shape that does not, and panics here.
+    /// Works on a derived signal too, [`flat_map`](Self::flat_map) included;
+    /// see [`try_observe`](Self::try_observe).
     pub fn observe(&self, f: impl Fn(&T) + 'static) -> ObserverHandle {
         self.try_observe(f)
             .expect("observe() needs a signal with fixed mutable roots")
@@ -484,9 +525,9 @@ impl<T: 'static> Signal<T> {
     /// therefore be idempotent — which is the same discipline
     /// [`set`](Self::set) already imposes, since it fans out unconditionally.
     ///
-    /// Returns [`SignalAccessError::ReadOnly`] only for a signal whose roots
-    /// are re-chosen as it is read — [`flat_map`](Self::flat_map) — where
-    /// there is nothing stable to attach to.
+    /// A [`flat_map`](Self::flat_map) observer hears the outer signal and the
+    /// inner one selected now; when the outer changes it moves to the newly
+    /// selected inner and stops hearing the old one.
     pub fn try_observe(
         &self,
         f: impl Fn(&T) + 'static,
@@ -733,7 +774,7 @@ impl<T: Clone + 'static> Signal<T> {
         }
         // The coalesced source stands in for a *fixed* set of roots, so it
         // can still be subscribed to — one registration per root, behind the
-        // one hook. (`flat_map` below is the case that cannot.)
+        // one hook.
         let subscribe = fan_out_subscribe(&underlying);
         let coalesced = coalesced_source(
             Rc::new(move || underlying.iter().map(|s| (s.generation)()).collect()),
@@ -774,6 +815,7 @@ impl<T: Clone + 'static> Signal<T> {
         let f: Rc<dyn Fn(&T) -> Signal<U>> = Rc::new(f);
         let outer_compute = self.as_compute();
         let outer_sources = self.as_sources();
+        let outer_sources_for_push = outer_sources.clone();
 
         // compute: select the inner signal from the outer value, read it.
         let compute: Rc<dyn Fn() -> U> = {
@@ -807,9 +849,7 @@ impl<T: Clone + 'static> Signal<T> {
                     gens
                 })
             },
-            // Poll-only: `f` re-selects the inner signal on every poll, so
-            // there is no stable set of roots to attach an observer to.
-            None,
+            flat_map_subscribe(f.clone(), outer_compute.clone(), &outer_sources_for_push),
         );
 
         Signal {
@@ -2097,23 +2137,41 @@ mod tests {
         assert_eq!(*count.borrow(), 2, "and none of them still fires");
     }
 
-    /// `flat_map` re-selects its inner signal as it is read, so there is no
-    /// fixed root to attach to. It reports that rather than attaching an
-    /// observer that would go quiet the moment the inner switched.
+    /// An observer of a `flat_map` hears the selected inner, follows an
+    /// outer switch, stops hearing the old inner, and is observable through
+    /// a `map` stacked on top. Dropping the handle detaches everything.
     #[test]
-    fn observing_a_flat_mapped_signal_is_refused() {
-        let which = Signal::new(0_usize);
-        let inners = [Signal::new(1_i32), Signal::new(2_i32)];
-        let picked = which.flat_map(move |i| inners[*i].clone());
+    fn observing_a_flat_mapped_signal_follows_the_selected_inner() {
+        use std::cell::RefCell;
 
-        assert!(matches!(
-            picked.try_observe(|_| {}),
-            Err(SignalAccessError::ReadOnly)
-        ));
+        let which = Signal::new(0_usize);
+        let a = Signal::new(1_i32);
+        let b = Signal::new(2_i32);
+        let inners = [a.clone(), b.clone()];
+        let picked = which.flat_map(move |i| inners[*i].clone()).map(|v| *v * 10);
+
+        let seen: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let h = picked.observe(move |v| sink.borrow_mut().push(*v));
+
+        a.set(3);
+        which.set(1);
+        a.set(4);
+        b.set(5);
+        assert_eq!(*seen.borrow(), vec![30, 20, 50], "old inner `a` went quiet");
+        assert_eq!(a.observer_count(), 0);
+        assert_eq!(b.observer_count(), 1);
+
+        drop(h);
+        assert_eq!(which.observer_count(), 0, "outer detached");
+        assert_eq!(b.observer_count(), 0, "inner detached");
+        which.set(0);
+        a.set(6);
+        assert_eq!(seen.borrow().len(), 3);
     }
 
-    /// `map_coalesced` folds a *fixed* set of roots into one source, so
-    /// unlike `flat_map` it stays observable.
+    /// `map_coalesced` folds a *fixed* set of roots into one source, and
+    /// stays observable.
     #[test]
     fn observing_a_coalesced_signal_still_works() {
         use std::cell::RefCell;
