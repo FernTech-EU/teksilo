@@ -4896,3 +4896,239 @@ fn a_window_holding_a_dock_opens_with_the_first_focus_it_had() {
         "a modal holding the dock starts on the top panel's tab, its first Tab stop"
     );
 }
+
+// ─── Tab ids restored by import_state ──────────────────────────────────────
+
+/// A dock whose content is one field named `content`, so a test can tell
+/// which dock a side shows.
+fn marked_dock(title: &'static str, content: &'static str) -> (DockWidgetId, DockWidget) {
+    let id = DockWidgetId::fresh();
+    (
+        id,
+        DockWidget::new(id, lit!(title), move |_| FocusField(content)),
+    )
+}
+
+/// A saved tab holding one dock.
+fn saved_tab(id: u64, dock: DockWidgetId, hidden: bool) -> super::DockTabState {
+    super::DockTabState {
+        id,
+        splitter: Default::default(),
+        panes: vec![dock.raw()],
+        hidden,
+    }
+}
+
+/// A saved side showing `tabs`, with `selected_tab` selected.
+fn saved_side(
+    presentation: super::TabPresentation,
+    selected_tab: usize,
+    tabs: Vec<super::DockTabState>,
+) -> super::DockSideState {
+    super::DockSideState {
+        presentation,
+        size_px: 260.0,
+        visible: true,
+        selected_tab,
+        tabs,
+        ..Default::default()
+    }
+}
+
+fn settle_layout(t: &mut WidgetTree) {
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+    t.tick_animations(Duration::from_millis(600));
+    t.layout(SizeProposal::exact(1000.0, 800.0));
+}
+
+/// Activate the rail item titled `title` as a click does.
+fn click_rail_item(t: &mut WidgetTree, root: WidgetId, title: &str) {
+    let item = find_role_name(t, root, Role::Tab, title).expect("a rail item");
+    t.dispatch_event(WidgetEvent::AccessAction {
+        action: accesskit::Action::Click,
+        target: Some(item),
+        target_node: widget_id_to_node_id(item),
+        data: None,
+    });
+    settle_layout(t);
+}
+
+/// Whether the dock content field named `content` is shown: reached through
+/// active nodes only, since a parked page keeps its last bounds.
+fn shows(t: &WidgetTree, id: WidgetId, content: &str) -> bool {
+    if !t.is_active(id) {
+        return false;
+    }
+    let node = t.accessibility_node(id);
+    if node.role() == Role::TextInput && node.name() == Some(content) {
+        return t.bounds(id).height > 0.0;
+    }
+    t.children(id).iter().any(|&c| shows(t, c, content))
+}
+
+/// The ids of every tab of the model, all sides.
+fn all_tab_ids(model: &DockingModel) -> Vec<super::DockTabId> {
+    DockSide::ALL
+        .into_iter()
+        .flat_map(|side| (0..model.tab_count(side)).filter_map(move |i| model.tab_id_at(side, i)))
+        .collect()
+}
+
+fn assert_distinct(ids: &[super::DockTabId]) {
+    let set: std::collections::HashSet<_> = ids.iter().collect();
+    assert_eq!(
+        set.len(),
+        ids.len(),
+        "every tab has an id of its own: {ids:?}"
+    );
+}
+
+#[test]
+fn a_tab_opened_after_an_import_gets_an_id_no_restored_tab_has() {
+    // A layout saved by an earlier run holds ids that run's counter minted
+    // from 1, which are the ids this run's counter hands out next. The tab
+    // opened after the import got one of them: the rail showed the new item
+    // selected and the panel of the restored tab that shared its id.
+    let model = DockingModel::new();
+    let docks = [
+        marked_dock("Files", "Files panel"),
+        marked_dock("Outline", "Outline panel"),
+        marked_dock("Notes", "Notes panel"),
+        marked_dock("Scratchpad", "Scratchpad panel"),
+    ];
+    let ids: Vec<DockWidgetId> = docks.iter().map(|(id, _)| *id).collect();
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .docks(docks.into_iter().map(|(_, dw)| dw)),
+    );
+
+    let next = super::DockTabId::fresh().raw() + 1;
+    let state = super::DockLayoutState {
+        leading: saved_side(
+            super::TabPresentation::Rail,
+            0,
+            (0..3)
+                .map(|i| saved_tab(next + i as u64, ids[i], false))
+                .collect(),
+        ),
+        ..Default::default()
+    };
+    model.import_state(&state);
+    model.set_side_rail(DockSide::Leading, 48.0);
+    model.open_dock(ids[3], DockOpenLocation::side(DockSide::Leading).new_tab());
+    settle_layout(&mut t);
+
+    let tab_ids = all_tab_ids(&model);
+    assert_eq!(tab_ids.len(), 4);
+    assert_distinct(&tab_ids);
+    for (i, id) in tab_ids.iter().take(3).enumerate() {
+        assert_eq!(
+            id.raw(),
+            next + i as u64,
+            "a restored tab keeps its saved id"
+        );
+    }
+
+    let titles = ["Files", "Outline", "Notes", "Scratchpad"];
+    let contents = [
+        "Files panel",
+        "Outline panel",
+        "Notes panel",
+        "Scratchpad panel",
+    ];
+    assert_eq!(model.side_selected_tab(DockSide::Leading), 3, "the new tab");
+    assert!(shows(&t, root, "Scratchpad panel"));
+    assert!(!shows(&t, root, "Files panel"));
+    for (i, title) in titles.iter().enumerate() {
+        click_rail_item(&mut t, root, title);
+        assert_eq!(
+            model.side_selected_tab(DockSide::Leading),
+            i,
+            "clicking {title} selects it"
+        );
+        for (j, content) in contents.iter().enumerate() {
+            assert_eq!(
+                shows(&t, root, content),
+                i == j,
+                "with {title} selected, {content} is shown only if it is {title}'s"
+            );
+        }
+    }
+
+    // A tab minted later still clears the restored ids.
+    assert!(!tab_ids.contains(&super::DockTabId::fresh()));
+}
+
+#[test]
+fn a_saved_layout_with_a_repeated_tab_id_restores_every_tab() {
+    // A file saved by a run that had the bug above holds two tabs with one
+    // id. Both are restored, the later one under a fresh id, each showing
+    // its own dock, with the saved selection, visibility and hidden flags.
+    let model = DockingModel::new();
+    let (a, dwa) = marked_dock("Files", "Files panel");
+    let (b, dwb) = marked_dock("Outline", "Outline panel");
+    let (c, dwc) = marked_dock("Scratchpad", "Scratchpad panel");
+    let (d, dwd) = marked_dock("Console", "Console panel");
+    let mut t = tree();
+    let root = t.add(
+        DockingLayout::new(model.clone())
+            .center(FixedLeaf(200.0, 200.0))
+            .docks([dwa, dwb, dwc, dwd]),
+    );
+
+    // Leading: Files (15), Outline (16, hidden), Scratchpad (15 again),
+    // with the repeated one selected. Bottom: Console (16 again).
+    let state = super::DockLayoutState {
+        leading: saved_side(
+            super::TabPresentation::Rail,
+            2,
+            vec![
+                saved_tab(15, a, false),
+                saved_tab(16, b, true),
+                saved_tab(15, c, false),
+            ],
+        ),
+        bottom: saved_side(
+            super::TabPresentation::Strip,
+            0,
+            vec![saved_tab(16, d, false)],
+        ),
+        ..Default::default()
+    };
+    model.import_state(&state);
+    model.set_side_rail(DockSide::Leading, 48.0);
+    settle_layout(&mut t);
+
+    assert_eq!(model.tab_count(DockSide::Leading), 3, "no tab is lost");
+    assert_eq!(model.tab_count(DockSide::Bottom), 1);
+    let tab_ids = all_tab_ids(&model);
+    assert_distinct(&tab_ids);
+    assert_eq!(tab_ids[0].raw(), 15, "the first tab with 15 keeps it");
+    assert_eq!(tab_ids[1].raw(), 16, "so does the first with 16");
+    for (i, dock) in [a, b, c].into_iter().enumerate() {
+        assert_eq!(model.dock_location(dock).map(|l| l.tab_idx), Some(i));
+    }
+    assert!(model.is_tab_hidden(tab_ids[1]), "Outline stays hidden");
+    assert!(!model.is_tab_hidden(tab_ids[3]), "Console stays shown");
+    assert!(model.is_side_visible(DockSide::Leading));
+    assert!(model.is_side_visible(DockSide::Bottom));
+
+    // The saved selection, the repeated tab, shows its own dock.
+    assert_eq!(model.side_selected_tab(DockSide::Leading), 2);
+    assert!(shows(&t, root, "Scratchpad panel"));
+    assert!(!shows(&t, root, "Files panel"));
+    assert!(shows(&t, root, "Console panel"));
+
+    click_rail_item(&mut t, root, "Files");
+    assert_eq!(model.side_selected_tab(DockSide::Leading), 0);
+    assert!(shows(&t, root, "Files panel"));
+    assert!(!shows(&t, root, "Scratchpad panel"));
+
+    click_rail_item(&mut t, root, "Scratchpad");
+    assert_eq!(model.side_selected_tab(DockSide::Leading), 2);
+    assert!(shows(&t, root, "Scratchpad panel"));
+    assert!(!shows(&t, root, "Files panel"));
+    assert!(shows(&t, root, "Console panel"));
+}

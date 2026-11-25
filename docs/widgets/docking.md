@@ -853,6 +853,11 @@ Mint a fresh, process-unique id.
 
 Process-unique identity for a dock tab (a tab of a side's TabWidget).
 
+The ids of a `DockingModel`'s tabs are distinct, and `fresh`
+never returns one in use: `DockingModel::import_state` gives a fresh id to
+a restored tab whose id another restored tab already has, and moves the
+counter past the ids it keeps.
+
 ```rust
 pub struct DockTabId(pub u64);
 ```
@@ -862,6 +867,9 @@ pub struct DockTabId(pub u64);
 <a id="docktabid-fresh"></a>
 
 #### `pub fn fresh() -> Self`
+
+Mint a fresh, process-unique id, greater than every id minted so far
+and every id a `DockingModel::import_state` has restored.
 
 <a id="docktabid-from_raw"></a>
 
@@ -1435,6 +1443,12 @@ thickness, mins, content factories) is reconstructed each run.
 
 Restore a previously-exported state. Unknown dock ids are dropped,
 emptied panes / tabs pruned, selections clamped. Bumps `version`.
+
+Each tab keeps the id it was saved with, unless a tab restored before
+it (in side order leading, trailing, top, bottom; a pruned tab does not
+count) already has it, or it is 0 or out of range: such a tab gets a
+fresh id, and keeps its place, docks, sizes, selection and hidden flag.
+Every id minted after the import differs from the restored ones.
 
 <a id="dockwidget"></a>
 

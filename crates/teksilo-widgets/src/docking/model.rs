@@ -59,16 +59,34 @@ impl DockWidgetId {
     }
 }
 
+/// The next id [`DockTabId::fresh`] hands out. A module item rather than a
+/// local of `fresh`, because [`DockingModel::import_state`] moves it past the
+/// ids a restored layout brings back from an earlier run.
+static NEXT_TAB_ID: AtomicU64 = AtomicU64::new(1);
+
+/// The largest tab id [`DockingModel::import_state`] keeps from a saved
+/// layout; a larger one is replaced by a fresh id. A run mints its ids from 1,
+/// so no run reaches it, and a larger saved id comes from a damaged or edited
+/// file. Kept ids move the counter, so the cap keeps every id minted after
+/// them far below `i64::MAX`, the largest integer a TOML layout file holds.
+const MAX_RESTORED_TAB_ID: u64 = u32::MAX as u64;
+
 /// Process-unique identity for a dock tab (a tab of a side's TabWidget).
+///
+/// The ids of a [`DockingModel`]'s tabs are distinct, and [`fresh`](Self::fresh)
+/// never returns one in use: [`DockingModel::import_state`] gives a fresh id to
+/// a restored tab whose id another restored tab already has, and moves the
+/// counter past the ids it keeps.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
 pub struct DockTabId(pub u64);
 
 impl DockTabId {
+    /// Mint a fresh, process-unique id, greater than every id minted so far
+    /// and every id a [`DockingModel::import_state`] has restored.
     pub fn fresh() -> Self {
-        static COUNTER: AtomicU64 = AtomicU64::new(1);
-        Self(COUNTER.fetch_add(1, Ordering::Relaxed))
+        Self(NEXT_TAB_ID.fetch_add(1, Ordering::Relaxed))
     }
     pub fn from_raw(v: u64) -> Self {
         Self(v)
@@ -1778,8 +1796,53 @@ impl DockingModel {
         }
     }
 
+    /// Give the tabs [`import_state`](Self::import_state) just restored
+    /// distinct ids, none of which a later [`DockTabId::fresh`] can return.
+    ///
+    /// The ids come from the file, minted by an earlier process whose counter
+    /// started at 1 like this one's, so left alone they are the very ids this
+    /// run's next tabs get: two tabs with one id, and every lookup by id (the
+    /// rail's selection, the strip's `TabId`, hide, move, close) finds the
+    /// first. The counter is moved past the ids kept, and only then are the
+    /// rest re-minted, so a replacement cannot land on a kept id further on.
+    /// A file an affected run saved can already hold a repeated id; the first
+    /// tab keeps it.
+    fn settle_restored_tab_ids(inner: &mut Inner) {
+        let mut kept: std::collections::HashSet<DockTabId> = std::collections::HashSet::new();
+        let mut remint: Vec<(DockSide, usize)> = Vec::new();
+        for side in DockSide::ALL {
+            let Some(st) = inner.sides.get(&side) else {
+                continue;
+            };
+            for (ti, tab) in st.tabs.iter().enumerate() {
+                let in_range = (1..=MAX_RESTORED_TAB_ID).contains(&tab.id.raw());
+                if !(in_range && kept.insert(tab.id)) {
+                    remint.push((side, ti));
+                }
+            }
+        }
+        if let Some(max) = kept.iter().map(|id| id.raw()).max() {
+            NEXT_TAB_ID.fetch_max(max + 1, Ordering::Relaxed);
+        }
+        for (side, ti) in remint {
+            if let Some(tab) = inner
+                .sides
+                .get_mut(&side)
+                .and_then(|st| st.tabs.get_mut(ti))
+            {
+                tab.id = DockTabId::fresh();
+            }
+        }
+    }
+
     /// Restore a previously-exported state. Unknown dock ids are dropped,
     /// emptied panes / tabs pruned, selections clamped. Bumps `version`.
+    ///
+    /// Each tab keeps the id it was saved with, unless a tab restored before
+    /// it (in side order leading, trailing, top, bottom; a pruned tab does not
+    /// count) already has it, or it is 0 or out of range: such a tab gets a
+    /// fresh id, and keeps its place, docks, sizes, selection and hidden flag.
+    /// Every id minted after the import differs from the restored ones.
     pub fn import_state(&self, state: &super::state::DockLayoutState) {
         use super::state::*;
         {
@@ -1853,6 +1916,7 @@ impl DockingModel {
             restore(&mut inner, DockSide::Trailing, &state.trailing);
             restore(&mut inner, DockSide::Top, &state.top);
             restore(&mut inner, DockSide::Bottom, &state.bottom);
+            Self::settle_restored_tab_ids(&mut inner);
 
             inner.locations.clear();
             for side in DockSide::ALL {
@@ -2448,6 +2512,53 @@ mod tests {
         assert_eq!(sig.get(), DockRailItemSize::Compact, "mode signal fires");
         m.set_side_rail_size(DockSide::Leading, DockRailItemSize::Labeled);
         assert_eq!(sig.get(), DockRailItemSize::Labeled);
+    }
+
+    #[test]
+    fn import_moves_the_tab_id_counter_past_the_restored_ids() {
+        // No test process mints ids anywhere near the cap, so this holds
+        // whatever other test threads mint meanwhile: without the counter
+        // move, the replacements and the new tab get small ids.
+        use crate::docking::{DockLayoutState, DockSideState, DockTabState};
+        let m = model();
+        let [a, b, c, d] = [(); 4].map(|_| reg(&m, DockSide::Leading));
+        let far = MAX_RESTORED_TAB_ID - 1;
+        let tab = |id, dock: DockWidgetId| DockTabState {
+            id,
+            splitter: Default::default(),
+            panes: vec![dock.raw()],
+            hidden: false,
+        };
+        let state = DockLayoutState {
+            leading: DockSideState {
+                visible: true,
+                tabs: vec![tab(far, a), tab(u64::MAX, b), tab(0, c)],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        m.import_state(&state);
+        m.open_dock(d, DockOpenLocation::side(DockSide::Leading).new_tab());
+
+        let ids: Vec<u64> = (0..4)
+            .filter_map(|i| m.tab_id_at(DockSide::Leading, i))
+            .map(DockTabId::raw)
+            .collect();
+        assert_eq!(ids[0], far, "an id under the cap is kept");
+        assert!(
+            ids[1..].iter().all(|&id| id > far),
+            "out-of-range ids and the new tab are minted past the kept one: {ids:?}"
+        );
+        assert_eq!(
+            ids.iter().collect::<std::collections::HashSet<_>>().len(),
+            4,
+            "{ids:?}"
+        );
+        assert!(DockTabId::fresh().raw() > far);
+        assert!(
+            toml::Value::try_from(m.export_state()).is_ok(),
+            "every id still fits a TOML integer"
+        );
     }
 
     #[test]

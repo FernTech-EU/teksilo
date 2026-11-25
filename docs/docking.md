@@ -638,7 +638,10 @@ Four consequences:
 
 Otherwise `import_state` is forgiving: unknown ids dropped, emptied panes and
 activities pruned, selections clamped (including off a hidden tab). A file from
-a newer build is refused rather than truncated.
+a newer build is refused rather than truncated. Activities keep their saved
+`DockTabId`s, except one whose id an activity restored before it already has,
+which gets a new id; an activity opened after the import never gets one of the
+restored ids.
 
 ## 11. Accessibility and keyboard
 

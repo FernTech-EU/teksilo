@@ -13,6 +13,19 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+### Fixed
+
+#### Widgets
+
+- **A dock activity opened after `DockingModel::import_state` no longer
+  shares its id with a restored one.** Restored activities keep their saved
+  ids and every id minted afterwards differs from them. Two activities with
+  one id selected and showed as one: clicking the new activity's rail item
+  highlighted it and showed the panel of the restored activity. A saved
+  layout that already holds a repeated id restores every activity, the
+  later ones under new ids, with their docks, sizes, selection and hidden
+  flags.
+
 ## [0.29.1] - 2026-11-24
 
 ### Added
