@@ -37,6 +37,8 @@ by crate for clarity, not because crates version independently.
 - **A recent-items or other persisted list that cannot be read, or was written
   by a newer version, is no longer renamed away**; it is left as it is and the
   session starts with an empty list.
+- **A window closed while maximized or full screen keeps its normal size and
+  position**: un-maximizing it after a relaunch gives back the size it had.
 
 ## [0.29.1] - 2026-11-24
 

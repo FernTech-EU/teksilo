@@ -4816,6 +4816,11 @@ impl TeksiloAppHandler {
                     // button (bound to `WindowState::placement`) stays
                     // in sync.
                     let placement = query_window_placement(managed.platform_window.window());
+                    // The placement goes first: the saved geometry keeps the
+                    // normal size of a maximised or full-screen window, and
+                    // it can only tell that the new size is the screen's if
+                    // it already reads the window as maximised.
+                    managed.state.set_placement_from_os(placement);
                     // A minimised window keeps the size it has when shown:
                     // Windows reports a minimise as a resize to zero, which
                     // the saved geometry would keep, so the window came
@@ -4826,7 +4831,6 @@ impl TeksiloAppHandler {
                         let logical_h = (new_size.height as f64 / sf).round().max(0.0) as u32;
                         managed.state.set_size_from_os((logical_w, logical_h));
                     }
-                    managed.state.set_placement_from_os(placement);
                     // Windows reports a minimise as a resize to zero, and a
                     // restore as a resize back.
                     managed.minimized = placement.is_minimized();
@@ -4860,6 +4864,14 @@ impl TeksiloAppHandler {
                     let sf = managed.platform_window.scale_factor();
                     let lx = (pos.x as f64 / sf).round() as i32;
                     let ly = (pos.y as f64 / sf).round() as i32;
+                    // On Windows a maximise moves the window before it
+                    // resizes it: read the placement now, so the saved
+                    // geometry does not take the maximised position as the
+                    // normal one.
+                    let placement = query_window_placement(managed.platform_window.window());
+                    if managed.state.placement().get() != placement {
+                        managed.state.set_placement_from_os(placement);
+                    }
                     managed.state.set_position_from_os((lx, ly));
                     // It may have moved to a display with another refresh
                     // rate, at the same scale.

@@ -322,18 +322,42 @@ struct Geometry {
 
 impl Geometry {
     /// The row to save, or `None` while the window has no id.
-    fn row(&self) -> Option<PerWindowState> {
+    fn row(&self, service: &WindowStateService) -> Option<PerWindowState> {
         let label = self.label.get()?;
-        let (width, height) = self.size.get();
-        let (x, y) = self.position.get();
-        Some(PerWindowState {
+        Some(row_to_save(
+            service,
             label,
-            x,
-            y,
-            width,
-            height,
-            placement: self.placement.get(),
-        })
+            self.size.get(),
+            self.position.get(),
+            self.placement.get(),
+        ))
+    }
+}
+
+/// The row to save for `label`. While the window is maximised or full
+/// screen its size and position are the screen's, not the ones it comes
+/// back to when restored, so the saved size and position are kept and only
+/// the placement changes. With no saved row yet, the current ones are all
+/// there is.
+fn row_to_save(
+    service: &WindowStateService,
+    label: String,
+    (width, height): (u32, u32),
+    (x, y): (i32, i32),
+    placement: teksilo_core::WindowPlacement,
+) -> PerWindowState {
+    if (placement.is_maximized() || placement.is_fullscreen())
+        && let Some(saved) = service.state_for(&label)
+    {
+        return PerWindowState { placement, ..saved };
+    }
+    PerWindowState {
+        label,
+        x,
+        y,
+        width,
+        height,
+        placement,
     }
 }
 
@@ -343,7 +367,7 @@ fn observe<T: Clone + 'static>(
     geometry: Geometry,
 ) -> ObserverHandle {
     signal.observe(move |_| {
-        if let Some(row) = geometry.row() {
+        if let Some(row) = geometry.row(&service) {
             let _ = service.record(row);
         }
     })
@@ -353,17 +377,14 @@ fn record_snapshot(service: &WindowStateService, state: &WindowState) {
     let Some(label) = state.string_id() else {
         return;
     };
-    let (w, h) = state.size().get();
-    let (x, y) = state.position().get();
-    let placement = state.placement().get();
-    let _ = service.record(PerWindowState {
+    let row = row_to_save(
+        service,
         label,
-        x,
-        y,
-        width: w,
-        height: h,
-        placement,
-    });
+        state.size().get(),
+        state.position().get(),
+        state.placement().get(),
+    );
+    let _ = service.record(row);
 }
 
 #[cfg(test)]
@@ -379,6 +400,43 @@ mod tests {
             height,
             placement: teksilo_core::WindowPlacement::Floating,
         }
+    }
+
+    /// While a window is maximised its size is the screen's: saving it
+    /// over the normal size made a relaunched window that is then
+    /// un-maximised come back screen-sized. Only the placement changes.
+    #[test]
+    fn a_maximized_window_keeps_its_saved_normal_size_and_position() {
+        use teksilo_core::WindowPlacement;
+
+        let dir = tempfile::tempdir().unwrap();
+        let service = WindowStateService::open_at(
+            dir.path().join("window_state.toml"),
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        let normal = row_to_save(
+            &service,
+            "main".into(),
+            (800, 600),
+            (100, 80),
+            WindowPlacement::Floating,
+        );
+        service.record(normal).unwrap();
+
+        let maximized = row_to_save(
+            &service,
+            "main".into(),
+            (1920, 1080),
+            (0, 0),
+            WindowPlacement::Maximized,
+        );
+        service.record(maximized).unwrap();
+
+        let row = service.state_for("main").unwrap();
+        assert_eq!((row.width, row.height), (800, 600));
+        assert_eq!((row.x, row.y), (100, 80));
+        assert_eq!(row.placement, WindowPlacement::Maximized);
     }
 
     /// A window smaller than the default floor (a tool palette) comes back
