@@ -254,8 +254,9 @@ Selected indices follow their items, so a dragged row stays selected.
 #### `pub fn invalidate_anchor_from(&self, first_changed: usize)`
 
 Drop the range anchor when a projection has renumbered the rows under
-it, so the next `Shift` gesture starts from the cursor rather than from
-a row that has since moved.
+it, so the next `Shift` gesture starts from the first row it reaches
+(the row the cursor moves to, which becomes the new anchor) rather
+than from a row that has since moved.
 
 A sort/filter proxy signals a blanket reset rather than a per-row
 delta, so `adjust_for_*` never runs and an index anchor silently comes

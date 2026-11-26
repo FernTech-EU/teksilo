@@ -70,6 +70,11 @@ model.check(child_b);
 assert_eq!(model.check_state(root), CheckState::Checked);
 ```
 
+The model also observes the `TreeModel`: when a node is inserted, removed
+or moved, the parents it affects recompute their state from their current
+children (an unchecked child added under a `Checked` parent makes it
+`Indeterminate`). Under `AggregateMode::None` it does nothing.
+
 #### Limitation: tree-mutation desync
 
 `signal_for(node)` and `bool_signal_for(node)` cache signals keyed

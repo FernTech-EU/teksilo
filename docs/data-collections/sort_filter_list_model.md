@@ -73,13 +73,19 @@ map:
 
 #### Selection semantics
 
-Selection on a sorted/filtered view is naturally tracked by **visible
-index**, not by item identity. After a projection rebuild, a downstream
-`SelectionModel` keeps the same numerical
-indices selected — meaning the visual selection stays in place even
-though it now points at different underlying rows. Apps that want
-identity-based selection should observe their model directly and rewrite
-the selection from source identifiers on each rebuild.
+An index-based `SelectionModel` bound to the
+proxy only ever hears the proxy's own changes. A scoped `ItemUpdated`
+leaves it alone; every other rebuild (a sort or filter change, and every
+upstream insert, remove, move or reset) reaches it as a `Reset`, which
+clears the selection. So an index-based selection does not survive a
+reprojection at all.
+
+For a selection that follows its rows, use a keyed one
+(`KeyedSelectionModel`, or a view's
+`from_source_keyed`). The proxy gives every source row a key of its own
+(see `ListDataSource::Key` on this type), kept across sorting, filtering
+and upstream inserts, removes and moves, so a keyed selection stays on the
+same rows through all of them.
 
 ```rust
 # use teksilo_data::{ListModel, SortFilterListModel, SortDirection};

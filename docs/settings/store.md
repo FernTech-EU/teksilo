@@ -240,6 +240,11 @@ Duration::ZERO` is useful for tests — every set writes through
 on the next worker iteration, and `flush_now()` is fully
 deterministic.
 
+A file that cannot be loaded does not fail the open: it follows
+`SettingsFile::load`'s policy (an
+unparsable file is quarantined, an unreadable one left untouched)
+and the store starts empty.
+
 <a id="settingsstore-path"></a>
 
 #### `pub fn path(&self) -> &Path`

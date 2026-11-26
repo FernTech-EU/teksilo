@@ -13,6 +13,8 @@ by crate for clarity, not because crates version independently.
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-26
+
 ### Removed
 
 - **`RepaintWindowRequest`** (teksilo-core), deprecated since 0.16.0, and its
@@ -8097,7 +8099,8 @@ building them exposed.
 Entries before this file was introduced are not backfilled; see `git log`
 for the full history.
 
-[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.29.1...HEAD
+[Unreleased]: https://github.com/FernTech-EU/teksilo/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/FernTech-EU/teksilo/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/FernTech-EU/teksilo/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/FernTech-EU/teksilo/compare/v0.28.1...v0.29.0
 [0.28.1]: https://github.com/FernTech-EU/teksilo/compare/v0.28.0...v0.28.1

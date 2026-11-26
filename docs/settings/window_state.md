@@ -46,7 +46,8 @@ sessions. In-memory is the source of truth: `state_for` reads
 directly from memory without touching disk. On load, the file is
 migrated through `Migrator` steps (currently v1 → v2: `maximized:
 bool` → `placement: WindowPlacement`) before deserializing, and
-corrupt files are quarantined automatically by `SettingsFile`.
+a corrupt file is quarantined with the same policy as
+`SettingsFile::load`.
 
 #### `record` is debounced, not synchronous
 
