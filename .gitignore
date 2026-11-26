@@ -208,3 +208,5 @@ docs/plans
 # artifact, not source. `build-vectors` honours FASTEMBED_CACHE_DIR if you
 # would rather it lived outside the repository entirely.
 .fastembed_cache/
+
+graphify-out/
