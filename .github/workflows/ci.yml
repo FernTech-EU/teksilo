@@ -90,7 +90,7 @@ jobs:
       TEKSILO_TEST_REQUIRE_ADAPTER: lavapipe
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # This is the only job that builds every test binary in the workspace,
       # and it is the one that ran the runner's root filesystem out of space at
@@ -206,7 +206,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
@@ -322,7 +322,7 @@ jobs:
       TEKSILO_TEST_REQUIRE_ADAPTER: any
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -401,7 +401,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Linux system dependencies
         if: matrix.os == 'ubuntu-latest'
@@ -600,7 +600,7 @@ jobs:
             flags: "--release"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
@@ -857,7 +857,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
@@ -879,7 +879,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -904,7 +904,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Linux system dependencies
         uses: ./.github/actions/install-linux-deps
@@ -945,7 +945,7 @@ jobs:
       CARGO_PROFILE_TEST_OPT_LEVEL: 3
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       # teksilo-platform links winit.
       - name: Install Linux system dependencies
@@ -986,7 +986,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # The checker derives each file's copyright year from its first
           # commit (`git log --diff-filter=A`); a shallow clone would lose
@@ -1009,7 +1009,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
