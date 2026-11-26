@@ -17,8 +17,11 @@ members = [
 # available.
 #
 # `teksilo-collector-proto` itself lives in a sibling repo at
-# `../teksilo-collector-proto` — its wire-format version stream is
-# decoupled from this workspace's release version.
+# `../teksilo-collector-proto`: its wire-format version stream is
+# decoupled from this workspace's release version. Neither it nor
+# `teksilo-analytics-native` is listed in `[workspace.dependencies]`: no
+# member uses them, and a path outside the repository there stops
+# Dependabot's cargo updates, which cannot fetch it.
 exclude = [
     "crates/teksilo-analytics-native",
     "examples/telemetry_teksilo",
@@ -225,15 +228,6 @@ teksilo-theme-kde = { path = "crates/teksilo-theme-kde", version = "0.30.0" }
 # dependant is packaged.
 teksilo-target-conformance = { path = "crates/teksilo-target-conformance" }
 
-# gRPC proto crate — lives in a sibling repo at `../teksilo-collector-proto`
-# so the wire-format spec has its own version stream (and the
-# `teksilo-collector` server can consume it without needing the entire
-# teksilo checkout). Path-dep into the sibling for now; promote to a
-# git-rev / crates.io dep once the schema stabilises. The only teksilo
-# consumer (`teksilo-analytics-native`) owns its own tonic / prost / tokio
-# versions since no other framework crate uses them.
-teksilo-collector-proto = { path = "../teksilo-collector-proto", version = "0.1.0" }
-teksilo-analytics-native = { path = "crates/teksilo-analytics-native", version = "0.7.0" }
 teksilo-telemetry-codegen = { path = "crates/teksilo-telemetry-codegen", version = "0.30.0" }
 
 

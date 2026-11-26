@@ -11,6 +11,6 @@ publish = false
 [dependencies]
 teksilo = { workspace = true, features = [
     "automation","telemetry"] }
-teksilo-analytics-native = { workspace = true }
+teksilo-analytics-native = { path = "../../crates/teksilo-analytics-native" }
 teksilo-telemetry = { workspace = true }
 uuid = { workspace = true }
