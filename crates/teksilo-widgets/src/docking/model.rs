@@ -2534,13 +2534,18 @@ mod tests {
 
     #[test]
     fn import_moves_the_tab_id_counter_past_the_restored_ids() {
-        // No test process mints ids anywhere near the cap, so this holds
-        // whatever other test threads mint meanwhile: without the counter
-        // move, the replacements and the new tab get small ids.
+        // The counter is shared by every test in the process, and this test
+        // moves it past `far` for all of them. `far` is far above what any
+        // test mints, so without the counter move the replacements and the
+        // new tab get smaller ids, and far below the cap, so the ids other
+        // tests mint afterwards are still kept by their own imports. Kept at
+        // the cap, it made them mint ids over the cap, which their round
+        // trips then replaced (a test that ran after it failed).
         use crate::docking::{DockLayoutState, DockSideState, DockTabState};
         let m = model();
-        let [a, b, c, d] = [(); 4].map(|_| reg(&m, DockSide::Leading));
-        let far = MAX_RESTORED_TAB_ID - 1;
+        let [a, b, c, d, e] = [(); 5].map(|_| reg(&m, DockSide::Leading));
+        let far = 1 << 30;
+        const { assert!(1 << 30 < MAX_RESTORED_TAB_ID / 2) };
         let tab = |id, dock: DockWidgetId| DockTabState {
             id,
             splitter: Default::default(),
@@ -2550,15 +2555,20 @@ mod tests {
         let state = DockLayoutState {
             leading: DockSideState {
                 visible: true,
-                tabs: vec![tab(far, a), tab(u64::MAX, b), tab(0, c)],
+                tabs: vec![
+                    tab(far, a),
+                    tab(MAX_RESTORED_TAB_ID + 1, b),
+                    tab(u64::MAX, c),
+                    tab(0, d),
+                ],
                 ..Default::default()
             },
             ..Default::default()
         };
         m.import_state(&state);
-        m.open_dock(d, DockOpenLocation::side(DockSide::Leading).new_tab());
+        m.open_dock(e, DockOpenLocation::side(DockSide::Leading).new_tab());
 
-        let ids: Vec<u64> = (0..4)
+        let ids: Vec<u64> = (0..5)
             .filter_map(|i| m.tab_id_at(DockSide::Leading, i))
             .map(DockTabId::raw)
             .collect();
@@ -2569,7 +2579,7 @@ mod tests {
         );
         assert_eq!(
             ids.iter().collect::<std::collections::HashSet<_>>().len(),
-            4,
+            5,
             "{ids:?}"
         );
         assert!(DockTabId::fresh().raw() > far);
