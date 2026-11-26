@@ -79,6 +79,8 @@ by crate for clarity, not because crates version independently.
   session starts with an empty list.
 - **A window closed while maximized or full screen keeps its normal size and
   position**: un-maximizing it after a relaunch gives back the size it had.
+  One minimized from maximized or full screen and closed comes back at its
+  normal size, as it was before it was minimized, instead of screen-sized.
 
 #### Async
 

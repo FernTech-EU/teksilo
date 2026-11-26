@@ -337,8 +337,11 @@ impl Geometry {
 /// The row to save for `label`. While the window is maximised or full
 /// screen its size and position are the screen's, not the ones it comes
 /// back to when restored, so the saved size and position are kept and only
-/// the placement changes. With no saved row yet, the current ones are all
-/// there is.
+/// the placement changes. A minimised window keeps the whole saved row: its
+/// size and position are still the screen's when it was minimised from
+/// maximised (and an off-screen position on Windows), and the placement it
+/// comes back in is the one it had before. With no saved row yet, the
+/// current ones are all there is.
 fn row_to_save(
     service: &WindowStateService,
     label: String,
@@ -346,9 +349,12 @@ fn row_to_save(
     (x, y): (i32, i32),
     placement: teksilo_core::WindowPlacement,
 ) -> PerWindowState {
-    if (placement.is_maximized() || placement.is_fullscreen())
+    if !placement.is_floating()
         && let Some(saved) = service.state_for(&label)
     {
+        if placement.is_minimized() {
+            return saved;
+        }
         return PerWindowState { placement, ..saved };
     }
     PerWindowState {
@@ -432,6 +438,37 @@ mod tests {
             WindowPlacement::Maximized,
         );
         service.record(maximized).unwrap();
+
+        let row = service.state_for("main").unwrap();
+        assert_eq!((row.width, row.height), (800, 600));
+        assert_eq!((row.x, row.y), (100, 80));
+        assert_eq!(row.placement, WindowPlacement::Maximized);
+    }
+
+    /// Minimising a maximised window keeps its size the screen's, and the
+    /// placement went to `Minimized` before the size write was skipped: the
+    /// screen size was saved, and the next launch, which restores a
+    /// minimised window as floating, opened it screen-sized. The saved row
+    /// is kept whole, so it comes back maximised at its normal size.
+    #[test]
+    fn minimising_a_maximized_window_keeps_its_saved_row() {
+        use teksilo_core::WindowPlacement;
+
+        let dir = tempfile::tempdir().unwrap();
+        let service = WindowStateService::open_at(
+            dir.path().join("window_state.toml"),
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
+        let rows = [
+            ((800, 600), (100, 80), WindowPlacement::Floating),
+            ((1920, 1080), (0, 0), WindowPlacement::Maximized),
+            ((1920, 1080), (-32000, -32000), WindowPlacement::Minimized),
+        ];
+        for (size, position, placement) in rows {
+            let row = row_to_save(&service, "main".into(), size, position, placement);
+            service.record(row).unwrap();
+        }
 
         let row = service.state_for("main").unwrap();
         assert_eq!((row.width, row.height), (800, 600));
