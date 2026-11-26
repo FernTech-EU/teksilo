@@ -93,8 +93,10 @@ by crate for clarity, not because crates version independently.
 - **No event is recorded or sent while the anonymous usage metrics scope is
   off**, including after the user granted consent and then turned every scope
   off, or turned on only crash reports or feature flags.
-- **"Reject all" and "Withdraw consent" drop the events already queued**,
-  including those saved for a later launch.
+- **Turning the anonymous usage metrics scope off, "Reject all" and "Withdraw
+  consent" drop the events already queued**, including those saved for a
+  later launch and those recorded just before, and a launch after the app
+  ended without dropping them drops them then.
 - **The teksilo-collector adapter no longer freezes the app while the collector
   is unreachable.**
 - **The OTLP adapter sends every queued event when the app exits**, not only

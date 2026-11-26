@@ -56,6 +56,8 @@ pub struct TeksiloAdapter {
     worker_tx: mpsc::Sender<WorkerCommand>,
     worker_handle: Option<JoinHandle<()>>,
     runtime: Arc<Runtime>,
+    /// The worker's queue, shared so a discard reaches a saved queue at once.
+    queue: Arc<dyn EventQueue>,
     stats: Arc<WorkerStats>,
 }
 
@@ -88,15 +90,19 @@ impl TeksiloAdapter {
         // Called on the Teksilo UI thread. An event is not worth blocking
         // it for: while the collector is unreachable the worker spends a
         // connect timeout per attempt and the channel fills, so a full
-        // channel drops the event and counts it. `Flush` and `Discard`
-        // wait for room: a flush reply is awaited anyway, and a lost
-        // discard would send data the user refused. Any send fails only
+        // channel drops the event and counts it. A `Discard` is only a
+        // wake-up (the worker reads `WorkerStats::discards` before every
+        // send), so a full channel loses nothing there either. `Flush`
+        // waits for room: its reply is awaited anyway. Any send fails only
         // once the worker has shut down, when dropping is correct.
         match cmd {
-            WorkerCommand::Record(_) => {
+            WorkerCommand::Record(..) => {
                 if let Err(mpsc::error::TrySendError::Full(_)) = self.worker_tx.try_send(cmd) {
                     self.stats.dropped.fetch_add(1, Ordering::Relaxed);
                 }
+            }
+            WorkerCommand::Discard => {
+                let _ = self.worker_tx.try_send(cmd);
             }
             _ => {
                 let _ = self.worker_tx.blocking_send(cmd);
@@ -119,7 +125,8 @@ impl std::fmt::Debug for TeksiloAdapter {
 
 impl UsageReporter for TeksiloAdapter {
     fn record(&self, event: &Event<'_>) {
-        self.send(WorkerCommand::Record(event.to_owned()));
+        let discards = self.stats.discards.load(Ordering::Acquire);
+        self.send(WorkerCommand::Record(event.to_owned(), discards));
     }
 
     /// **Blocks the calling thread** until the worker drains or the bound
@@ -142,7 +149,12 @@ impl UsageReporter for TeksiloAdapter {
         }
     }
 
+    /// Drops the queue here, so a saved queue is gone before this returns,
+    /// and tells the worker, which drops what it still holds (events in the
+    /// channel, a batch whose request fails) before it sends anything else.
     fn discard_pending(&self) -> Result<(), TelemetryError> {
+        self.stats.discards.fetch_add(1, Ordering::AcqRel);
+        self.queue.discard_all();
         self.send(WorkerCommand::Discard);
         Ok(())
     }
@@ -444,13 +456,19 @@ impl TeksiloAdapterBuilder {
         });
 
         let stats = Arc::new(WorkerStats::default());
-        let (tx, handle) = spawn_worker(self.config.clone(), queue, runtime.clone(), stats.clone());
+        let (tx, handle) = spawn_worker(
+            self.config.clone(),
+            queue.clone(),
+            runtime.clone(),
+            stats.clone(),
+        );
 
         TeksiloAdapter {
             config: self.config,
             worker_tx: tx,
             worker_handle: Some(handle),
             runtime,
+            queue,
             stats,
         }
     }

@@ -152,7 +152,8 @@ impl std::fmt::Debug for OtlpAdapter {
 
 impl UsageReporter for OtlpAdapter {
     fn record(&self, event: &Event<'_>) {
-        self.send(WorkerCommand::Record(event.to_owned()));
+        let discards = self.stats.discards.load(Ordering::Acquire);
+        self.send(WorkerCommand::Record(event.to_owned(), discards));
     }
 
     fn flush(&self) -> Result<(), TelemetryError> {
@@ -165,7 +166,10 @@ impl UsageReporter for OtlpAdapter {
         }
     }
 
+    /// The worker drops what it holds before it sends anything else, the
+    /// events still in the channel included.
     fn discard_pending(&self) -> Result<(), TelemetryError> {
+        self.stats.discards.fetch_add(1, Ordering::AcqRel);
         self.send(WorkerCommand::Discard);
         Ok(())
     }

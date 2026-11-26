@@ -13,7 +13,7 @@
 //! next batch. Events stay in the queue across the gap.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::thread;
 use std::time::Instant;
 
@@ -30,8 +30,12 @@ use crate::config::TeksiloConfig;
 
 #[derive(Debug)]
 pub(crate) enum WorkerCommand {
-    Record(OwnedEvent),
+    /// An event, with the count of discards asked for when it was recorded:
+    /// one asked for since is not sent.
+    Record(OwnedEvent, u64),
     Flush(oneshot::Sender<Result<(), String>>),
+    /// Wakes the worker to apply [`WorkerStats::discards`]. The count is
+    /// what decides, so a wake-up lost to a full channel loses nothing.
     Discard,
     Shutdown,
 }
@@ -41,6 +45,24 @@ pub(crate) struct WorkerStats {
     pub accepted: AtomicUsize,
     pub dropped: AtomicUsize,
     pub queued: AtomicUsize,
+    /// Discards asked for so far. The worker compares it with the last one
+    /// it applied before every send, and before putting a failed batch back,
+    /// so nothing queued before "Reject all" goes out after it, whatever
+    /// sits in the channel ahead of the wake-up.
+    pub discards: AtomicU64,
+}
+
+/// Drop everything queued when a discard was asked for since the last one
+/// this worker applied. `true` when it did.
+fn apply_discard(queue: &Arc<dyn EventQueue>, stats: &WorkerStats, seen: &mut u64) -> bool {
+    let asked = stats.discards.load(Ordering::Acquire);
+    if asked == *seen {
+        return false;
+    }
+    *seen = asked;
+    queue.discard_all();
+    stats.queued.store(0, Ordering::Relaxed);
+    true
 }
 
 pub(crate) fn spawn_worker(
@@ -80,6 +102,8 @@ async fn worker_loop(
     // so an outage costs one attempt per flush interval (the timer below
     // still retries at that pace), not one per event.
     let mut retry_at: Option<Instant> = None;
+    // The last discard applied: see `WorkerStats::discards`.
+    let mut seen = 0_u64;
 
     loop {
         // Wait either for a command or for the flush interval to
@@ -93,13 +117,24 @@ async fn worker_loop(
         let cmd = tokio::time::timeout(wait, rx.recv()).await;
 
         match cmd {
-            Ok(Some(WorkerCommand::Record(ev))) => {
+            Ok(Some(WorkerCommand::Record(ev, discards))) => {
+                apply_discard(&queue, &stats, &mut seen);
+                if discards < seen {
+                    continue;
+                }
                 queue.push(ev);
                 stats.queued.store(queue.len(), Ordering::Relaxed);
                 let backing_off = retry_at.is_some_and(|t| Instant::now() < t);
                 if queue.len() >= config.max_batch_size && !backing_off {
-                    let result =
-                        drain_once(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
+                    let result = drain_once(
+                        &config,
+                        &queue,
+                        &mut channel,
+                        &mut next_batch_id,
+                        &stats,
+                        &mut seen,
+                    )
+                    .await;
                     retry_at = result
                         .is_err()
                         .then(|| Instant::now() + config.flush_interval);
@@ -107,8 +142,15 @@ async fn worker_loop(
                 }
             }
             Ok(Some(WorkerCommand::Flush(reply))) => {
-                let result =
-                    drain_all(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
+                let result = drain_all(
+                    &config,
+                    &queue,
+                    &mut channel,
+                    &mut next_batch_id,
+                    &stats,
+                    &mut seen,
+                )
+                .await;
                 retry_at = result
                     .is_err()
                     .then(|| Instant::now() + config.flush_interval);
@@ -116,17 +158,31 @@ async fn worker_loop(
                 last_flush = Instant::now();
             }
             Ok(Some(WorkerCommand::Discard)) => {
-                queue.discard_all();
-                stats.queued.store(0, Ordering::Relaxed);
+                apply_discard(&queue, &stats, &mut seen);
             }
             Ok(Some(WorkerCommand::Shutdown)) | Ok(None) => {
-                let _ = drain_all(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
+                let _ = drain_all(
+                    &config,
+                    &queue,
+                    &mut channel,
+                    &mut next_batch_id,
+                    &stats,
+                    &mut seen,
+                )
+                .await;
                 break;
             }
             Err(_elapsed) => {
                 if !queue.is_empty() {
-                    let result =
-                        drain_once(&config, &queue, &mut channel, &mut next_batch_id, &stats).await;
+                    let result = drain_once(
+                        &config,
+                        &queue,
+                        &mut channel,
+                        &mut next_batch_id,
+                        &stats,
+                        &mut seen,
+                    )
+                    .await;
                     retry_at = result
                         .is_err()
                         .then(|| Instant::now() + config.flush_interval);
@@ -144,7 +200,11 @@ async fn drain_once(
     channel: &mut Option<Channel>,
     next_batch_id: &mut u64,
     stats: &Arc<WorkerStats>,
+    seen: &mut u64,
 ) -> Result<(), String> {
+    if apply_discard(queue, stats, seen) {
+        return Ok(());
+    }
     let batch = queue.drain_batch(config.max_batch_size);
     if batch.is_empty() {
         return Ok(());
@@ -165,11 +225,14 @@ async fn drain_once(
             Ok(())
         }
         Err((events, reason)) => {
-            // Re-queue everything; reset the channel so the next
-            // attempt re-dials.
+            // Re-queue everything, unless a discard was asked for while
+            // the request was out; reset the channel so the next attempt
+            // re-dials.
             *channel = None;
-            for ev in events {
-                queue.push(ev);
+            if !apply_discard(queue, stats, seen) {
+                for ev in events {
+                    queue.push(ev);
+                }
             }
             stats.queued.store(queue.len(), Ordering::Relaxed);
             tracing_log(format!(
@@ -187,10 +250,11 @@ async fn drain_all(
     channel: &mut Option<Channel>,
     next_batch_id: &mut u64,
     stats: &Arc<WorkerStats>,
+    seen: &mut u64,
 ) -> Result<(), String> {
     let mut last_err: Option<String> = None;
     while !queue.is_empty() {
-        if let Err(e) = drain_once(config, queue, channel, next_batch_id, stats).await {
+        if let Err(e) = drain_once(config, queue, channel, next_batch_id, stats, seen).await {
             // On hard failure, stop draining — events stay queued
             // for the next opportunity.
             last_err = Some(e);
@@ -522,5 +586,98 @@ fn proto_event_to_remote(ev: &proto::Event) -> RemoteEvent {
         name: ev.name.clone(),
         timestamp,
         properties,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use teksilo_core::telemetry::EventCategory;
+    use teksilo_telemetry::InMemoryEventQueue;
+
+    /// An in-memory queue that counts the events handed out to be sent.
+    struct CountingQueue {
+        inner: InMemoryEventQueue,
+        handed_out: AtomicUsize,
+    }
+
+    impl EventQueue for CountingQueue {
+        fn push(&self, event: OwnedEvent) {
+            self.inner.push(event);
+        }
+        fn drain_batch(&self, n: usize) -> Vec<OwnedEvent> {
+            let batch = self.inner.drain_batch(n);
+            self.handed_out.fetch_add(batch.len(), Ordering::Relaxed);
+            batch
+        }
+        fn len(&self) -> usize {
+            self.inner.len()
+        }
+        fn discard_all(&self) {
+            self.inner.discard_all();
+        }
+        fn peek_recent(&self, n: usize) -> Vec<OwnedEvent> {
+            self.inner.peek_recent(n)
+        }
+    }
+
+    fn event() -> OwnedEvent {
+        OwnedEvent {
+            name: "intent.dispatched".into(),
+            category: EventCategory::Intent,
+            timestamp: std::time::SystemTime::UNIX_EPOCH,
+            install_id: None,
+            session_id: "s".into(),
+            schema_version: 1,
+            props: Vec::new(),
+        }
+    }
+
+    /// Events recorded before a discard and still in the channel when it is
+    /// asked for are never sent, even though they fill a batch before the
+    /// worker reads the wake-up; one recorded after it is.
+    #[test]
+    fn a_discard_drops_the_events_still_in_the_channel() {
+        let queue = Arc::new(CountingQueue {
+            inner: InMemoryEventQueue::with_capacity(1000),
+            handed_out: AtomicUsize::new(0),
+        });
+        let config = TeksiloConfig {
+            // Nothing listens there: every send fails fast.
+            endpoint: "http://127.0.0.1:1".into(),
+            product_id: "test".into(),
+            max_batch_size: 50,
+            flush_interval: Duration::from_secs(3600),
+            request_timeout: Duration::from_millis(200),
+            ..TeksiloConfig::default()
+        };
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(1)
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let stats = Arc::new(WorkerStats::default());
+        // The adapter counts the discard before the worker reads any of the
+        // events recorded ahead of it.
+        stats.discards.store(1, Ordering::Release);
+        let queue_dyn: Arc<dyn EventQueue> = queue.clone();
+        let (tx, handle) = spawn_worker(config, queue_dyn, runtime, stats);
+
+        for _ in 0..60 {
+            tx.blocking_send(WorkerCommand::Record(event(), 0)).unwrap();
+        }
+        tx.blocking_send(WorkerCommand::Discard).unwrap();
+        tx.blocking_send(WorkerCommand::Record(event(), 1)).unwrap();
+        tx.blocking_send(WorkerCommand::Shutdown).unwrap();
+        handle.join().unwrap();
+
+        assert_eq!(
+            queue.handed_out.load(Ordering::Relaxed),
+            1,
+            "a refused event was handed out to be sent"
+        );
     }
 }

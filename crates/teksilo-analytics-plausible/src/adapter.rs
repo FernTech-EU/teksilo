@@ -29,6 +29,8 @@ pub struct PlausibleAdapter {
     worker_tx: mpsc::Sender<WorkerCommand>,
     worker_handle: Option<JoinHandle<()>>,
     stats: Arc<WorkerStats>,
+    /// The worker's queue, shared so a discard reaches a saved queue at once.
+    queue: Arc<dyn EventQueue>,
 }
 
 impl PlausibleAdapter {
@@ -78,7 +80,8 @@ impl UsageReporter for PlausibleAdapter {
         // Best-effort send; channel only fails if the worker is
         // gone, which means the adapter is being dropped — drop the
         // event silently.
-        let _ = self.worker_tx.send(WorkerCommand::Record(owned));
+        let discards = self.stats.discards.load(Ordering::Acquire);
+        let _ = self.worker_tx.send(WorkerCommand::Record(owned, discards));
     }
 
     fn flush(&self) -> Result<(), TelemetryError> {
@@ -95,7 +98,12 @@ impl UsageReporter for PlausibleAdapter {
         }
     }
 
+    /// Drops the queue here, so a saved queue is gone before this returns,
+    /// and tells the worker, which drops what it still holds (events in the
+    /// channel, ones whose send fails) before it sends anything else.
     fn discard_pending(&self) -> Result<(), TelemetryError> {
+        self.stats.discards.fetch_add(1, Ordering::AcqRel);
+        self.queue.discard_all();
         if self.worker_tx.send(WorkerCommand::Discard).is_err() {
             return Err(TelemetryError::Other(
                 "plausible worker has exited".to_string(),
@@ -287,12 +295,13 @@ impl PlausibleAdapterBuilder {
             )),
         };
         let stats = Arc::new(WorkerStats::default());
-        let (tx, handle) = spawn_worker(self.config.clone(), queue, stats.clone());
+        let (tx, handle) = spawn_worker(self.config.clone(), queue.clone(), stats.clone());
         PlausibleAdapter {
             config: self.config,
             worker_tx: tx,
             worker_handle: Some(handle),
             stats,
+            queue,
         }
     }
 }

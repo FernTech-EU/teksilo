@@ -14,15 +14,19 @@
 //! scope that covers every [`Event`] category (usage counts, lifecycle,
 //! census). Otherwise it short-circuits without touching the recent log
 //! or the inner adapter. The other scopes have no event stream yet.
+//!
+//! The queues follow the same rule: when that scope goes off (a toggle,
+//! "Reject all", a withdrawal), the adapters drop what they hold, and a
+//! reporter built while it is off drops what a previous run left queued.
 
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use teksilo_core::Signal;
 use teksilo_core::telemetry::{
-    ConsentScope, Event, RemoteDataExport, TelemetryError, UsageReporter,
+    ConsentScope, ConsentState, Event, RemoteDataExport, TelemetryError, UsageReporter,
 };
+use teksilo_core::{ObserverHandle, Signal};
 
 use crate::bundle::TelemetryMode;
 use crate::consent::ConsentStore;
@@ -53,6 +57,44 @@ pub struct DynamicReporter {
     /// honored — record() is called only from the UI-thread
     /// dispatch tap.
     recent_log_revision: Signal<u64>,
+    /// Drops the queues when the consent stops covering events.
+    _consent_watch: Option<ObserverHandle>,
+}
+
+/// `true` when `state` lets events be recorded and sent.
+fn allows_events(state: &ConsentState) -> bool {
+    state.scope().is_some_and(|s| s.anonymous_metrics)
+}
+
+/// Every adapter's queue, the recent log, and the revision that announces
+/// it. Shared by [`UsageReporter::discard_pending`] and the consent watch.
+#[derive(Clone)]
+struct Queues {
+    anonymous: Option<Rc<dyn UsageReporter>>,
+    pseudonymous: Option<Rc<dyn UsageReporter>>,
+    recent_log: Arc<InMemoryEventQueue>,
+    revision: Signal<u64>,
+}
+
+impl Queues {
+    fn discard(&self) -> Result<(), TelemetryError> {
+        // Drop the user-facing recent-log ring buffer alongside the
+        // adapters' outbound buffers so the privacy widget's
+        // "Inspect data sent" panel reflects the wipe immediately.
+        self.recent_log.discard_all();
+        let v = self.revision.get();
+        self.revision.set(v.wrapping_add(1));
+        // Both adapters, even when the first fails: the user refused both.
+        let a = self
+            .anonymous
+            .as_ref()
+            .map_or(Ok(()), |a| a.discard_pending());
+        let p = self
+            .pseudonymous
+            .as_ref()
+            .map_or(Ok(()), |p| p.discard_pending());
+        a.and(p)
+    }
 }
 
 impl DynamicReporter {
@@ -67,13 +109,37 @@ impl DynamicReporter {
             anonymous.is_some() || pseudonymous.is_some(),
             "DynamicReporter needs at least one adapter",
         );
+        let recent_log_revision = Signal::new(0);
+        let queues = Queues {
+            anonymous: anonymous.clone(),
+            pseudonymous: pseudonymous.clone(),
+            recent_log: recent_log.clone(),
+            revision: recent_log_revision.clone(),
+        };
+        let state = consent.state_signal();
+        let allowed = Cell::new(allows_events(&state.get()));
+        // A persistent queue outlives the run that filled it. If consent was
+        // withdrawn and the process ended before the worker dropped the
+        // queue, the next run would send it on its first timer.
+        if !allowed.get() {
+            let _ = queues.discard();
+        }
+        let consent_watch = state
+            .try_observe(move |state| {
+                let now = allows_events(state);
+                if allowed.replace(now) && !now {
+                    let _ = queues.discard();
+                }
+            })
+            .ok();
         Self {
             anonymous,
             pseudonymous,
             active: Cell::new(default),
             consent,
             recent_log,
-            recent_log_revision: Signal::new(0),
+            recent_log_revision,
+            _consent_watch: consent_watch,
         }
     }
 
@@ -163,18 +229,13 @@ impl UsageReporter for DynamicReporter {
     }
 
     fn discard_pending(&self) -> Result<(), TelemetryError> {
-        // Drop the user-facing recent-log ring buffer alongside the
-        // adapters' outbound buffers so the privacy widget's
-        // "Inspect data sent" panel reflects the wipe immediately.
-        self.recent_log.discard_all();
-        self.bump_revision();
-        if let Some(a) = &self.anonymous {
-            a.discard_pending()?;
+        Queues {
+            anonymous: self.anonymous.clone(),
+            pseudonymous: self.pseudonymous.clone(),
+            recent_log: self.recent_log.clone(),
+            revision: self.recent_log_revision.clone(),
         }
-        if let Some(p) = &self.pseudonymous {
-            p.discard_pending()?;
-        }
-        Ok(())
+        .discard()
     }
 
     fn erase_remote_data(&self) -> Result<(), TelemetryError> {
@@ -364,6 +425,59 @@ mod tests {
         r.record(&e);
         assert_eq!(stub.recorded_count(), 0, "no event may reach the adapter");
         assert_eq!(recent_log.len(), 0, "a blocked event was never emitted");
+    }
+
+    fn with_stub(consent: &ConsentStore, stub: &Rc<StubReporter>) -> DynamicReporter {
+        DynamicReporter::new(
+            Some(stub.clone() as Rc<dyn UsageReporter>),
+            None,
+            TelemetryMode::Anonymous,
+            consent.clone(),
+            Arc::new(InMemoryEventQueue::with_capacity(64)),
+        )
+    }
+
+    /// Switching the metrics scope off on its own drops what is queued: the
+    /// record gate alone left it to go out on the worker's next send.
+    #[test]
+    fn turning_the_metrics_scope_off_discards_the_queue() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let consent = ConsentStore::open(&paths, Duration::ZERO, 1, "stub://").unwrap();
+        let stub = Rc::new(StubReporter::anonymous());
+        let r = with_stub(&consent, &stub);
+        consent.grant(ConsentScope::all(), "stub://").unwrap();
+        let (e, _) = make_event("intent.dispatched");
+        r.record(&e);
+
+        consent.set_scope(|s| s.crash_reports = false).unwrap();
+        assert_eq!(stub.recorded_count(), 1, "another scope keeps the queue");
+
+        consent.set_scope(|s| s.anonymous_metrics = false).unwrap();
+        assert_eq!(stub.recorded_count(), 0, "the queued event survived");
+        assert_eq!(r.recent_log().len(), 0);
+    }
+
+    /// A saved queue outlives a run that withdrew consent and ended before
+    /// the worker dropped it. A reporter built while consent does not cover
+    /// events drops it; one built under consent keeps it.
+    #[test]
+    fn a_reporter_built_without_consent_drops_a_saved_queue() {
+        let dir = tempdir().unwrap();
+        let paths = AppPaths::for_testing(dir.path());
+        let consent = ConsentStore::open(&paths, Duration::ZERO, 1, "stub://").unwrap();
+        let (e, _) = make_event("intent.dispatched");
+
+        let stub = Rc::new(StubReporter::anonymous());
+        stub.record(&e);
+        let _r = with_stub(&consent, &stub);
+        assert_eq!(stub.recorded_count(), 0, "unknown consent kept the queue");
+
+        consent.grant(ConsentScope::all(), "stub://").unwrap();
+        let stub = Rc::new(StubReporter::anonymous());
+        stub.record(&e);
+        let _r = with_stub(&consent, &stub);
+        assert_eq!(stub.recorded_count(), 1, "granted consent lost the queue");
     }
 
     #[test]

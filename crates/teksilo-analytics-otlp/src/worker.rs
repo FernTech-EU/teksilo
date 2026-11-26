@@ -7,7 +7,7 @@
 
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,8 +20,11 @@ use crate::wire::WireBuilder;
 
 #[derive(Debug)]
 pub(crate) enum WorkerCommand {
-    Record(OwnedEvent),
+    /// An event, with the count of discards asked for when it was recorded:
+    /// one asked for since is not sent.
+    Record(OwnedEvent, u64),
     Flush(mpsc::SyncSender<Result<(), String>>),
+    /// Wakes the worker to apply [`WorkerStats::discards`].
     Discard,
     Shutdown,
 }
@@ -31,6 +34,24 @@ pub(crate) struct WorkerStats {
     pub accepted: AtomicUsize,
     pub dropped: AtomicUsize,
     pub queued: AtomicUsize,
+    /// Discards asked for so far. The worker compares it with the last one
+    /// it applied before every send, and before putting a failed batch back,
+    /// so nothing recorded before "Reject all" goes out after it, however
+    /// many events sit in the channel ahead of the wake-up.
+    pub discards: AtomicU64,
+}
+
+/// Empty the buffer when a discard was asked for since the last one this
+/// worker applied. `true` when it did.
+fn apply_discard(buffer: &mut VecDeque<OwnedEvent>, stats: &WorkerStats, seen: &mut u64) -> bool {
+    let asked = stats.discards.load(Ordering::Acquire);
+    if asked == *seen {
+        return false;
+    }
+    *seen = asked;
+    buffer.clear();
+    stats.queued.store(0, Ordering::Relaxed);
+    true
 }
 
 pub(crate) fn spawn_worker(
@@ -57,6 +78,8 @@ fn worker_loop(rx: mpsc::Receiver<WorkerCommand>, config: OtlpConfig, stats: Arc
     // so an outage costs one request per backoff, not one per event.
     let mut retry_at: Option<Instant> = None;
     let mut last_flush = Instant::now();
+    // The last discard applied: see `WorkerStats::discards`.
+    let mut seen = 0_u64;
 
     loop {
         let wait = if buffer.is_empty() {
@@ -66,7 +89,7 @@ fn worker_loop(rx: mpsc::Receiver<WorkerCommand>, config: OtlpConfig, stats: Arc
             until_flush.min(current_backoff)
         };
 
-        let mut drain_now = |buffer: &mut VecDeque<OwnedEvent>| {
+        let mut drain_now = |buffer: &mut VecDeque<OwnedEvent>, seen: &mut u64| {
             drain(
                 buffer,
                 &agent,
@@ -75,22 +98,25 @@ fn worker_loop(rx: mpsc::Receiver<WorkerCommand>, config: OtlpConfig, stats: Arc
                 &stats,
                 &mut current_backoff,
                 &mut retry_at,
+                seen,
             )
         };
 
         match rx.recv_timeout(wait) {
-            Ok(WorkerCommand::Record(event)) => {
-                push_with_cap(&mut buffer, event, config.max_queue_size);
-                stats.queued.store(buffer.len(), Ordering::Relaxed);
+            Ok(WorkerCommand::Record(event, discards)) => {
+                apply_discard(&mut buffer, &stats, &mut seen);
+                if discards >= seen {
+                    push_with_cap(&mut buffer, event, config.max_queue_size);
+                    stats.queued.store(buffer.len(), Ordering::Relaxed);
+                }
             }
             Ok(WorkerCommand::Flush(reply)) => {
-                let result = drain_now(&mut buffer);
+                let result = drain_now(&mut buffer, &mut seen);
                 let _ = reply.send(result);
                 last_flush = Instant::now();
             }
             Ok(WorkerCommand::Discard) => {
-                buffer.clear();
-                stats.queued.store(0, Ordering::Relaxed);
+                apply_discard(&mut buffer, &stats, &mut seen);
             }
             Ok(WorkerCommand::Shutdown) | Err(mpsc::RecvTimeoutError::Disconnected) => {
                 // `drain` sends at most `max_batch_size` events, so one call
@@ -101,7 +127,7 @@ fn worker_loop(rx: mpsc::Receiver<WorkerCommand>, config: OtlpConfig, stats: Arc
                 // request.
                 loop {
                     let before = buffer.len();
-                    let _ = drain_now(&mut buffer);
+                    let _ = drain_now(&mut buffer, &mut seen);
                     if buffer.len() >= before {
                         break;
                     }
@@ -110,7 +136,7 @@ fn worker_loop(rx: mpsc::Receiver<WorkerCommand>, config: OtlpConfig, stats: Arc
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 if !buffer.is_empty() {
-                    let _ = drain_now(&mut buffer);
+                    let _ = drain_now(&mut buffer, &mut seen);
                     last_flush = Instant::now();
                 }
             }
@@ -126,6 +152,7 @@ fn worker_loop(rx: mpsc::Receiver<WorkerCommand>, config: OtlpConfig, stats: Arc
                 &stats,
                 &mut current_backoff,
                 &mut retry_at,
+                &mut seen,
             );
             last_flush = Instant::now();
         }
@@ -144,7 +171,12 @@ fn push_with_cap(buffer: &mut VecDeque<OwnedEvent>, event: OwnedEvent, cap: usiz
 /// - `Accepted` → empty the buffer, reset backoff
 /// - `Retry` → leave events in the buffer, double the backoff and set
 ///   `retry_at` to the end of it
-/// - `Drop` → empty the buffer (events are unrecoverable), reset
+/// - `Drop` → the batch is gone (events are unrecoverable)
+///
+/// A discard asked for before the request empties the buffer and sends
+/// nothing; one asked for while it is out drops a batch that failed rather
+/// than putting it back.
+#[allow(clippy::too_many_arguments)]
 fn drain(
     buffer: &mut VecDeque<OwnedEvent>,
     agent: &ureq::Agent,
@@ -153,8 +185,9 @@ fn drain(
     stats: &WorkerStats,
     current_backoff: &mut Duration,
     retry_at: &mut Option<Instant>,
+    seen: &mut u64,
 ) -> Result<(), String> {
-    if buffer.is_empty() {
+    if apply_discard(buffer, stats, seen) || buffer.is_empty() {
         return Ok(());
     }
     let take = config.max_batch_size.min(buffer.len());
@@ -173,8 +206,10 @@ fn drain(
         SendOutcome::Retry(why) => {
             // Push back to the *front* so order is preserved on
             // the next attempt.
-            for event in events.into_iter().rev() {
-                buffer.push_front(event);
+            if !apply_discard(buffer, stats, seen) {
+                for event in events.into_iter().rev() {
+                    buffer.push_front(event);
+                }
             }
             stats.queued.store(buffer.len(), Ordering::Relaxed);
             *current_backoff = next_backoff(*current_backoff, config.max_backoff);
@@ -306,10 +341,10 @@ mod tests {
         let (tx, handle) = spawn_worker(config(&collector.endpoint), stats.clone());
 
         for _ in 0..50 {
-            tx.send(WorkerCommand::Record(event())).unwrap();
+            tx.send(WorkerCommand::Record(event(), 0)).unwrap();
         }
         wait_until("the full batch's failed send", || collector.requests() == 1);
-        tx.send(WorkerCommand::Record(event())).unwrap();
+        tx.send(WorkerCommand::Record(event(), 0)).unwrap();
         wait_until("the 51st event", || {
             stats.queued.load(Ordering::Relaxed) == 51
         });
@@ -324,6 +359,30 @@ mod tests {
         handle.join().unwrap();
     }
 
+    /// Events recorded before a discard and still in the channel when it is
+    /// asked for are never sent, even though they fill a batch before the
+    /// worker reads the wake-up; one recorded after it is.
+    #[test]
+    fn a_discard_drops_the_events_still_in_the_channel() {
+        let collector = Collector::start(200);
+        let stats = Arc::new(WorkerStats::default());
+        // The adapter counts the discard before the worker reads any of the
+        // events recorded ahead of it.
+        stats.discards.store(1, Ordering::Release);
+        let (tx, handle) = spawn_worker(config(&collector.endpoint), stats.clone());
+
+        for _ in 0..60 {
+            tx.send(WorkerCommand::Record(event(), 0)).unwrap();
+        }
+        tx.send(WorkerCommand::Discard).unwrap();
+        tx.send(WorkerCommand::Record(event(), 1)).unwrap();
+        tx.send(WorkerCommand::Shutdown).unwrap();
+        handle.join().unwrap();
+
+        assert_eq!(collector.requests(), 1, "the refused batch was sent");
+        assert_eq!(stats.accepted.load(Ordering::Relaxed), 1);
+    }
+
     /// Shutdown sends everything queued, not just one batch.
     #[test]
     fn shutdown_sends_every_queued_event() {
@@ -334,7 +393,7 @@ mod tests {
         let (tx, handle) = spawn_worker(config(&collector.endpoint), stats.clone());
 
         for _ in 0..200 {
-            tx.send(WorkerCommand::Record(event())).unwrap();
+            tx.send(WorkerCommand::Record(event(), 0)).unwrap();
         }
         wait_until("all 200 events queued", || {
             stats.queued.load(Ordering::Relaxed) == 200
