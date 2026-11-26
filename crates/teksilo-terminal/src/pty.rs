@@ -139,9 +139,12 @@ impl InputQueue {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Queue `bytes` whole if they fit under [`INPUT_QUEUE_CAP`], else drop
-    /// them whole: a write cut short could end inside an escape sequence, a
-    /// paste's end marker or a character. Nothing once closed.
+    /// Queue `bytes` whole if they fit under [`INPUT_QUEUE_CAP`]. A bracketed
+    /// paste that does not is cut to the room left, at a character, and
+    /// closed again ([`fit_paste`](crate::input::fit_paste)). Any other write
+    /// that does not fit is dropped whole: cut short, it could end inside an
+    /// escape sequence or a character, or hand the shell part of a command
+    /// line. Nothing once closed.
     fn push(&self, bytes: &[u8]) {
         let mut state = self.lock();
         if state.closed {
@@ -149,6 +152,11 @@ impl InputQueue {
         }
         let room = INPUT_QUEUE_CAP.saturating_sub(state.bytes.len());
         if bytes.len() > room {
+            if let Some(cut) = crate::input::fit_paste(bytes, room) {
+                state.bytes.extend(cut);
+                drop(state);
+                self.ready.notify_one();
+            }
             return;
         }
         state.bytes.extend(bytes);
@@ -573,6 +581,38 @@ mod tests {
         assert!(sent.ends_with(b"\x1b[201~"), "and is closed");
         let body = &sent[6..sent.len() - 6];
         assert!(std::str::from_utf8(body).is_ok(), "no character is cut");
+    }
+
+    /// A paste the queue has no room for whole, behind input the child has
+    /// not read yet, is cut to the room left and still closed; it was
+    /// dropped whole, end marker and all.
+    #[test]
+    fn a_bracketed_paste_behind_a_backlog_is_cut_to_the_room_left() {
+        let mode = crate::engine::TermMode {
+            bracketed_paste: true,
+            ..Default::default()
+        };
+        let queue = InputQueue::new();
+        queue.push(&vec![b'x'; 1000]);
+        queue.push(&crate::input::encode_paste(
+            &"€".repeat(INPUT_QUEUE_CAP / 3),
+            mode,
+        ));
+        let queued = queue.len();
+        assert!(
+            queued <= INPUT_QUEUE_CAP && queued > INPUT_QUEUE_CAP - 3,
+            "cut to the room left, back to a whole character: {queued}"
+        );
+        let sent = queue.wait_take(usize::MAX).expect("queued");
+        let paste = &sent[1000..];
+        assert!(paste.starts_with(b"\x1b[200~"), "the paste opens");
+        assert!(paste.ends_with(b"\x1b[201~"), "and is closed");
+        assert!(std::str::from_utf8(&paste[6..paste.len() - 6]).is_ok());
+
+        // An unbracketed write that does not fit is still dropped whole.
+        queue.push(&vec![b'x'; INPUT_QUEUE_CAP - 3]);
+        queue.push(b"ls -la\r");
+        assert_eq!(queue.len(), INPUT_QUEUE_CAP - 3);
     }
 
     #[test]

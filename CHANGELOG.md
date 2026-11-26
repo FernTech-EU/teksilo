@@ -63,8 +63,9 @@ by crate for clarity, not because crates version independently.
 
 - **The terminal no longer cuts its input in the middle of an escape sequence,
   a bracketed-paste end marker or a character** when the child is not reading.
-  A paste larger than 4 MiB is shortened and still closed properly, and a
-  pasted end marker hidden inside another one is removed too.
+  A bracketed paste larger than 4 MiB, or larger than the room left behind
+  input the child has not read yet, is shortened and still closed properly,
+  and a pasted end marker hidden inside another one is removed too.
 
 #### Settings and windows
 

@@ -344,9 +344,15 @@ fn names_key(typed: char, own: char) -> bool {
 }
 
 /// The most bytes one paste encodes to, markers included: the PTY's whole input
-/// queue. The queue drops a write that does not fit whole, so a longer paste
-/// is cut here, at a character, rather than lost or cut inside its end marker.
+/// queue. A longer paste is cut here, at a character, rather than lost or cut
+/// inside its end marker; the queue cuts a bracketed one again, the same way,
+/// to the room it has left (see [`fit_paste`]).
 pub(crate) const MAX_PASTE_BYTES: usize = 4 << 20;
+
+/// Opens a bracketed paste.
+const PASTE_START: &[u8] = b"\x1b[200~";
+/// Closes a bracketed paste.
+const PASTE_END: &[u8] = b"\x1b[201~";
 
 /// Wrap pasted text in bracketed-paste markers when the child enabled the mode
 /// (`ESC [ 200 ~` … `ESC [ 201 ~`); otherwise return the bytes unchanged.
@@ -359,17 +365,13 @@ pub fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
     // Ctrl+J.) The PTY's line discipline maps CR→NL for cooked-mode shells.
     let normalized: String = text.replace("\r\n", "\r").replace('\n', "\r");
     if mode.bracketed_paste {
-        let mut out = Vec::with_capacity(normalized.len().min(MAX_PASTE_BYTES) + 12);
-        out.extend_from_slice(b"\x1b[200~");
-        // Strip the paste-end marker if it somehow appears in the payload, so a
-        // malicious clipboard can't break out of bracketed paste. Until none is
-        // left: one pass over "\x1b[20\x1b[201~1~" leaves a marker behind.
-        let mut safe = normalized;
-        while safe.contains("\x1b[201~") {
-            safe = safe.replace("\x1b[201~", "");
-        }
-        out.extend_from_slice(cut_at_char(&safe, MAX_PASTE_BYTES - 12).as_bytes());
-        out.extend_from_slice(b"\x1b[201~");
+        let room = MAX_PASTE_BYTES - PASTE_START.len() - PASTE_END.len();
+        let mut out = Vec::with_capacity(normalized.len().min(room) + 12);
+        out.extend_from_slice(PASTE_START);
+        // Cut first, so a clipboard far past the cap costs no more than the
+        // cap; stripping only shortens what is left.
+        out.extend_from_slice(&strip_paste_end(cut_at_char(&normalized, room)));
+        out.extend_from_slice(PASTE_END);
         out
     } else {
         let end = cut_at_char(&normalized, MAX_PASTE_BYTES).len();
@@ -377,6 +379,47 @@ pub fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
         bytes.truncate(end);
         bytes
     }
+}
+
+/// `text` with every paste-end marker taken out, so a malicious clipboard
+/// can't break out of bracketed paste, including one that taking out another
+/// would form (`"\x1b[20\x1b[201~1~"`). One pass: a marker is dropped as soon
+/// as its last byte is copied, so the copy never holds one. Removing a
+/// replacement until none was left took one pass over the whole text per
+/// level of nesting, on the UI thread.
+fn strip_paste_end(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    for &byte in text.as_bytes() {
+        out.push(byte);
+        if out.ends_with(PASTE_END) {
+            out.truncate(out.len() - PASTE_END.len());
+        }
+    }
+    out
+}
+
+/// A bracketed paste (as [`encode_paste`] makes it) cut to `room` bytes: its
+/// text cut at a character and closed again. `None` for any other write, and
+/// for a room too small to hold the two markers: such a write is not cut,
+/// because a cut could end inside an escape sequence or hand the shell part
+/// of a command line.
+#[cfg(feature = "alacritty")]
+pub(crate) fn fit_paste(bytes: &[u8], room: usize) -> Option<Vec<u8>> {
+    let markers = PASTE_START.len() + PASTE_END.len();
+    if bytes.len() < markers
+        || room < markers
+        || !bytes.starts_with(PASTE_START)
+        || !bytes.ends_with(PASTE_END)
+    {
+        return None;
+    }
+    let text =
+        std::str::from_utf8(&bytes[PASTE_START.len()..bytes.len() - PASTE_END.len()]).ok()?;
+    let mut out = Vec::with_capacity(room);
+    out.extend_from_slice(PASTE_START);
+    out.extend_from_slice(cut_at_char(text, room - markers).as_bytes());
+    out.extend_from_slice(PASTE_END);
+    Some(out)
 }
 
 /// The longest prefix of `text` of at most `max` bytes that ends on a
@@ -542,5 +585,13 @@ mod tests {
         // A marker nested in a marker comes back after one strip.
         let nested = encode_paste("x\x1b[20\x1b[201~1~rm -rf", mode);
         assert_eq!(nested, b"\x1b[200~xrm -rf\x1b[201~");
+        // Nested many levels deep: none is left, and in one pass.
+        let depth = 100_000;
+        let deep = format!(
+            "x{}\x1b[201~{}y",
+            "\x1b[20".repeat(depth),
+            "1~".repeat(depth)
+        );
+        assert_eq!(encode_paste(&deep, mode), b"\x1b[200~xy\x1b[201~");
     }
 }
