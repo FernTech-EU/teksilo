@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: MPL-2.0
 # SPDX-FileCopyrightText: 2026 FernTech
+#
+# Advisories `cargo audit` may skip, each one checked against how Teksilo
+# actually reaches the crate. Every entry waits on a crate Teksilo does not
+# own; delete it as soon as that crate moves. Anything new still fails the
+# Security Audit workflow.
 
 [advisories]
 ignore = [
@@ -11,4 +16,37 @@ ignore = [
     # Re-check when servo-script relaxes the pin or rsa ships a fix:
     # https://rustsec.org/advisories/RUSTSEC-2023-0071
     "RUSTSEC-2023-0071",
+
+    # cookie 0.16.2, through webdriver 0.53 in Servo's embedder traits, only
+    # with `servo-backend`. The advisory is in `PrivateJar`, which needs
+    # cookie's `private` feature; nothing enables it for this copy. Servo
+    # 0.8 still depends on webdriver 0.54, which still requires cookie 0.16.
+    "RUSTSEC-2026-0594",
+
+    # libsqlite3-sys 0.36 (bundled SQLite 3.53), through rusqlite 0.38 in
+    # servo-storage, only with `servo-backend`; Servo 0.8 still requires
+    # rusqlite 0.38. The bug needs a database and `-wal` pair written by a
+    # less trusted party. teksilo-webview never gives Servo a config
+    # directory, so Servo keeps web storage in memory or in a temporary
+    # directory it creates itself for the process, and opens nothing else.
+    "RUSTSEC-2026-0459",
+
+    # zip 6.0.0 (epub-builder) and zip 8.6.0 (docx-rs), through
+    # text-document-io's EPUB and DOCX exporters (its own archives are on
+    # zip 9, which is patched). Neither crate has a release on zip 9 yet.
+    # Not reachable from Teksilo, which calls zip nowhere:
+    # - extraction: neither crate nor text-document calls `extract`, and
+    #   epub-builder only writes; docx-rs's reader goes through
+    #   `ZipArchive::by_name`, and text-document never calls it;
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+    "RUSTSEC-2026-0429",
+    "RUSTSEC-2026-0546",
+    # - AES entries: the `aes-crypto` feature is off for both copies;
+    "RUSTSEC-2026-0545",
+    # - Shrink, Reduce and Implode: the `legacy-zip` feature is off;
+    "RUSTSEC-2026-0547",
+    # - `ZipStreamReader`: no crate in the tree uses it.
+    "RUSTSEC-2026-0548",
 ]

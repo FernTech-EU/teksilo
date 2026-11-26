@@ -5,18 +5,55 @@ name: Security Audit
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - ".cargo/audit.toml"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".cargo/audit.toml"
+      - ".github/workflows/audit.yml"
   schedule:
-    - cron: "0 0 * * *" # Daily
+    - cron: "0 0 * * *" # Daily: new advisories land against an unchanged Cargo.lock
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: taiki-e/install-action@cargo-audit
-      - run: cargo audit
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      # Advisories checked and found unreachable are listed, with the reason,
+      # in .cargo/audit.toml. Any other advisory fails this step.
+      - name: Audit dependencies
+        run: |
+          set -o pipefail
+          cargo audit --color never 2>&1 | tee audit.txt
+
+      # The full report, with the unmaintained, unsound and yanked warnings
+      # that never fail the run, on the run's summary page.
+      - name: Report
+        if: always()
+        run: |
+          [ -f audit.txt ] || exit 0
+          {
+            echo '## cargo audit'
+            echo '```'
+            cat audit.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
