@@ -36,6 +36,10 @@ by crate for clarity, not because crates version independently.
   layout that already holds a repeated id restores every activity, the
   later ones under new ids, with their docks, sizes, selection and hidden
   flags.
+- **A dock or dock activity dragged from one `DockingLayout` and dropped on
+  another no longer moves one of the receiving layout's own activities.** Two
+  layouts restored from the same saved file share activity ids; such a drop
+  is now ignored.
 
 #### Core
 

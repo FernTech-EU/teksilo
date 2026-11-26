@@ -59,6 +59,16 @@ impl DockWidgetId {
     }
 }
 
+/// Which layout a [`DockingModel`] is, so a drag payload can say which one it
+/// left. Tab ids are unique in one layout but not across layouts: two that
+/// import the same saved file keep the same ids. A drop names its layout, and
+/// a layout ignores a payload from another one rather than moving its own tab
+/// with the same id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DockLayoutId(u64);
+
+static NEXT_LAYOUT_ID: AtomicU64 = AtomicU64::new(1);
+
 /// The next id [`DockTabId::fresh`] hands out. A module item rather than a
 /// local of `fresh`, because [`DockingModel::import_state`] moves it past the
 /// ids a restored layout brings back from an earlier run.
@@ -386,6 +396,8 @@ fn default_side_state(side: DockSide) -> SideState {
 }
 
 struct Inner {
+    /// Never changes, not even on an import: see [`DockLayoutId`].
+    layout_id: DockLayoutId,
     sides: HashMap<DockSide, SideState>,
     docks: HashMap<DockWidgetId, DockWidgetMeta>,
     locations: HashMap<DockWidgetId, DockLoc>,
@@ -465,6 +477,7 @@ impl DockingModel {
             sides.insert(side, default_side_state(side));
         }
         Self(Rc::new(RefCell::new(Inner {
+            layout_id: DockLayoutId(NEXT_LAYOUT_ID.fetch_add(1, Ordering::Relaxed)),
             sides,
             docks: HashMap::new(),
             locations: HashMap::new(),
@@ -480,6 +493,11 @@ impl DockingModel {
             layout_rtl: false,
             app_side_labels: HashMap::new(),
         })))
+    }
+
+    /// This layout's identity, carried by its drag payloads.
+    pub(crate) fn layout_id(&self) -> DockLayoutId {
+        self.0.borrow().layout_id
     }
 
     /// Structural version — bump on tab / pane / section / side add-remove.

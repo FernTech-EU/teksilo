@@ -46,7 +46,7 @@ use teksilo_core::overlay::OverlayPlacement;
 use super::context_menu::{
     DockMenuKind, activity_context_menu, background_menu, dock_has_options, dock_options_menu,
 };
-use super::drag::{DockDragData, dropped_dock_tab, dropped_dock_widget};
+use super::drag::{DockDragData, DockTabPayload, dropped_dock_tab, dropped_dock_widget};
 use super::geometry::DockSide;
 use super::model::{
     DockHeaderActionsFactory, DockIconFactory, DockOpenLocation, DockTabId, DockTabView,
@@ -245,14 +245,6 @@ pub(crate) type DockContent = Rc<RefCell<DockContentRegistry>>;
 /// Kind tag for a side's dynamic dock tabs (so `dynamic_tab` registers them).
 const DOCK_TAB_KIND: &str = "__dock_tab__";
 
-/// The dynamic-tab payload carried by a side's `TabWidget` — identifies the
-/// DockTab so cross-side whole-tab drag (`accept_external_tabs`) can relocate
-/// it via [`DockingModel::move_tab`].
-#[derive(Clone, Copy)]
-struct DockTabPayload {
-    tab_id: DockTabId,
-}
-
 // ───────────────────────────────────────────────────────────────────────
 // DockSidePanel — a side's content: optional in-side tab strip + Switcher.
 // ───────────────────────────────────────────────────────────────────────
@@ -356,20 +348,23 @@ fn empty_side_drop_target(
     );
     let label = ctx.add(Center::new().child(text));
     let m = model.clone();
+    let accept = model.clone();
     ctx.add(
         DropTarget::new()
             .child(label)
-            .accept_when(|p| dropped_dock_tab(p).is_some() || dropped_dock_widget(p).is_some())
+            .accept_when(move |p| {
+                dropped_dock_tab(p, &accept).is_some() || dropped_dock_widget(p, &accept).is_some()
+            })
             .on_drop(move |p, _pos, ctx| {
                 if !m.is_side_enabled(side) {
                     return false;
                 }
-                if let Some(tab_id) = dropped_dock_tab(&p) {
+                if let Some(tab_id) = dropped_dock_tab(&p, &m) {
                     m.move_tab(tab_id, side, 0);
                     m.set_side_visible(side, true);
                     ctx.request_accessibility_update();
                     true
-                } else if let Some(dock_id) = dropped_dock_widget(&p) {
+                } else if let Some(dock_id) = dropped_dock_widget(&p, &m) {
                     m.move_dock(dock_id, DockOpenLocation::side(side));
                     m.set_side_visible(side, true);
                     ctx.request_accessibility_update();
@@ -386,7 +381,6 @@ impl Widget for DockSidePanel {
         use crate::tab_widget::{
             TabBarVisibility, TabDisplayMode, TabHandle, TabId, TabInfo, TabWidget,
         };
-        use std::any::Any;
         use std::num::NonZeroU64;
         use teksilo_data::ListModel;
 
@@ -555,7 +549,10 @@ impl Widget for DockSidePanel {
                 to_tab_id(tab),
                 DOCK_TAB_KIND,
                 info,
-                DockTabPayload { tab_id: tab.id },
+                DockTabPayload {
+                    tab_id: tab.id,
+                    layout: self.model.layout_id(),
+                },
             ));
         }
         let list: ListModel<TabHandle> = ListModel::from_vec(handles);
@@ -616,11 +613,11 @@ impl Widget for DockSidePanel {
                     return false;
                 }
                 let at = ext_indices.get(idx).copied().unwrap_or(after_last_visible);
-                if let Some(tab_id) = dropped_dock_tab(payload) {
+                if let Some(tab_id) = dropped_dock_tab(payload, &ext_model) {
                     ext_model.move_tab(tab_id, side, at);
                     ctx.request_accessibility_update();
                     true
-                } else if let Some(dock_id) = dropped_dock_widget(payload) {
+                } else if let Some(dock_id) = dropped_dock_widget(payload, &ext_model) {
                     // A lone dock becomes a new activity at the drop position.
                     ext_model.promote_to_tab(dock_id, side, at);
                     ctx.request_accessibility_update();
@@ -650,11 +647,11 @@ impl Widget for DockSidePanel {
                 })
                 // Cross-side drop: relocate the whole tab to this side.
                 .on_tab_received(move |handle, idx, ctx| {
-                    if let Some(p) =
-                        (handle.payload.as_ref() as &dyn Any).downcast_ref::<DockTabPayload>()
-                    {
+                    // A tab from another layout's strip is not one of ours:
+                    // its id would name one of this layout's tabs.
+                    if let Some(tab_id) = DockTabPayload::of(&handle, &recv_model) {
                         let at = recv_indices.get(idx).copied().unwrap_or(after_last_visible);
-                        recv_model.move_tab(p.tab_id, side, at);
+                        recv_model.move_tab(tab_id, side, at);
                         ctx.request_accessibility_update();
                     }
                 })
@@ -698,12 +695,12 @@ impl Widget for DockSidePanel {
                     }
                     // A drop landing on non-pane chrome (the strip, gaps): a tab
                     // relocates to this side; a single dock joins it too.
-                    if let Some(tab_id) = dropped_dock_tab(&payload) {
+                    if let Some(tab_id) = dropped_dock_tab(&payload, &drop_model) {
                         let at = drop_model.side_append_index(drop_side);
                         drop_model.move_tab(tab_id, drop_side, at);
                         ctx.request_accessibility_update();
                         true
-                    } else if let Some(dock_id) = dropped_dock_widget(&payload) {
+                    } else if let Some(dock_id) = dropped_dock_widget(&payload, &drop_model) {
                         drop_model.move_dock(dock_id, DockOpenLocation::side(drop_side));
                         ctx.request_accessibility_update();
                         true
@@ -954,8 +951,15 @@ impl DockTabContentWidget {
         // The accordion header is the dock's drag handle — only when the policy
         // allows dragging a single dock out of a split pane.
         if self.model.policy().allow_dock_drag {
+            let layout = self.model.layout_id();
             accordion = accordion.on_header_drag(move |ctx| {
-                ctx.start_drag(content, DragPayload::typed(DockDragData { dock_id: dock }));
+                ctx.start_drag(
+                    content,
+                    DragPayload::typed(DockDragData {
+                        dock_id: dock,
+                        layout,
+                    }),
+                );
             });
         }
         ctx.add(accordion.content(content))
@@ -1173,6 +1177,7 @@ impl Widget for DockPanePane {
         // It accepts only a single DockWidget, so a whole-tab drag falls through
         // (NoFeedback) to this pane's own tab handler below and shows no zones.
         let split_model = self.model.clone();
+        let accept_model = self.model.clone();
         let target = DropTarget::new()
             .child(self.inner)
             .zone_size_factor(0.2)
@@ -1181,9 +1186,9 @@ impl Widget for DockPanePane {
             .region(DropRegion::Trailing, |z| z)
             .region(DropRegion::Top, |z| z)
             .region(DropRegion::Bottom, |z| z)
-            .accept_when(|p| dropped_dock_widget(p).is_some())
+            .accept_when(move |p| dropped_dock_widget(p, &accept_model).is_some())
             .on_region_drop(move |region, payload, _pos, ctx| {
-                let Some(dock) = dropped_dock_widget(&payload) else {
+                let Some(dock) = dropped_dock_widget(&payload, &split_model) else {
                     return false;
                 };
                 match region {
@@ -1208,17 +1213,18 @@ impl Widget for DockPanePane {
         // DropTarget already engaged for a single dock, so this only ever fires
         // for a tab. (Dock-widget drops never reach this handler.)
         let tab_model = self.model.clone();
+        let hover_model = self.model.clone();
         ctx.apply_self_handlers(
             HandlerSet::new()
                 .on_drag_hover(move |payload, _pos, _ctx| {
-                    if dropped_dock_tab(payload).is_some() {
+                    if dropped_dock_tab(payload, &hover_model).is_some() {
                         DropFeedback::Accept
                     } else {
                         DropFeedback::NoFeedback
                     }
                 })
                 .on_drop(move |payload, _pos, ctx| {
-                    if let Some(tab_id) = dropped_dock_tab(&payload) {
+                    if let Some(tab_id) = dropped_dock_tab(&payload, &tab_model) {
                         // Append after the last *visible* tab (not past trailing
                         // hidden ones).
                         let at = tab_model.side_append_index(side);

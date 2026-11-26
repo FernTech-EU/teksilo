@@ -813,6 +813,7 @@ impl Widget for DockActivityBar {
         // recorded item bounds; the overlay paints the line.
         let side = self.side;
         let model = self.model.clone();
+        let model_hover = self.model.clone();
         let item_bounds_hover = self.item_bounds.clone();
         let item_bounds_drop = self.item_bounds.clone();
         let self_bounds_hover = self.self_bounds.clone();
@@ -834,7 +835,8 @@ impl Widget for DockActivityBar {
                     )))
                 })
                 .on_drag_hover(move |payload, pos, _ctx| {
-                    if dropped_dock_tab(payload).is_none() && dropped_dock_widget(payload).is_none()
+                    if dropped_dock_tab(payload, &model_hover).is_none()
+                        && dropped_dock_widget(payload, &model_hover).is_none()
                     {
                         indicator_hover.set_if_changed(None);
                         return DropFeedback::NoFeedback;
@@ -875,12 +877,12 @@ impl Widget for DockActivityBar {
                         .get(vpos)
                         .copied()
                         .unwrap_or_else(|| model.side_append_index(side));
-                    if let Some(tab_id) = dropped_dock_tab(&payload) {
+                    if let Some(tab_id) = dropped_dock_tab(&payload, &model) {
                         model.move_tab(tab_id, side, at);
                         model.set_side_visible(side, true);
                         ctx.request_accessibility_update();
                         true
-                    } else if let Some(dock_id) = dropped_dock_widget(&payload) {
+                    } else if let Some(dock_id) = dropped_dock_widget(&payload, &model) {
                         model.promote_to_tab(dock_id, side, at);
                         model.set_side_visible(side, true);
                         ctx.request_accessibility_update();
@@ -2123,6 +2125,7 @@ impl Widget for DockRailItem {
         let policy = self.model.policy();
         let side = self.side;
         let tab_id = self.tab_id;
+        let layout = self.model.layout_id();
         let menu_model = self.model.clone();
         let allow_collapse = policy.allow_side_collapse;
 
@@ -2210,6 +2213,7 @@ impl Widget for DockRailItem {
                         DragPayload::typed(DockTabDragData {
                             tab_id,
                             source_side: side,
+                            layout,
                         }),
                     );
                 }

@@ -579,31 +579,45 @@ fn dock_drop_recognizes_both_tab_drag_sources() {
     use teksilo_core::DragPayload;
 
     use super::DockTabId;
-    use super::drag::{DockDragData, DockTabDragData, dropped_dock_tab, dropped_dock_widget};
-    use crate::tab_widget::{TabBarDragData, TabHandle, TabId};
+    use super::drag::{
+        DockDragData, DockTabDragData, DockTabPayload, dropped_dock_tab, dropped_dock_widget,
+    };
+    use crate::tab_widget::{TabBarDragData, TabHandle, TabId, TabInfo};
+
+    let model = DockingModel::new();
+    let layout = model.layout_id();
 
     // 1. An activity-rail item drag carries `DockTabDragData`.
     let rail = DragPayload::typed(DockTabDragData {
         tab_id: DockTabId::from_raw(7),
         source_side: DockSide::Leading,
+        layout,
     });
-    assert_eq!(dropped_dock_tab(&rail).map(|t| t.raw()), Some(7));
-    assert!(dropped_dock_widget(&rail).is_none());
+    assert_eq!(dropped_dock_tab(&rail, &model).map(|t| t.raw()), Some(7));
+    assert!(dropped_dock_widget(&rail, &model).is_none());
 
     // 2. A tab dragged from the in-strip TabWidget carries
-    //    `TabBarDragData<TabHandle>` — whose `source_id` the dock builds from
-    //    the same `DockTabId`. Both must resolve to the SAME dock tab (this is
-    //    the bug: the strip drag used to be rejected by dock drop targets).
+    //    `TabBarDragData<TabHandle>`, whose item holds the same `DockTabId`.
+    //    Both must resolve to the SAME dock tab (this is the bug: the strip
+    //    drag used to be rejected by dock drop targets).
     let mut t = tree();
     let bar = t.add(FixedLeaf(1.0, 1.0));
     let strip = DragPayload::typed(TabBarDragData::<TabHandle> {
         source_index: 0,
         source_bar_id: bar,
         source_id: TabId::from_raw(NonZeroU64::new(7).unwrap()),
-        item: None,
+        item: Some(TabHandle::dynamic(
+            TabId::from_raw(NonZeroU64::new(7).unwrap()),
+            "__dock_tab__",
+            TabInfo::new(),
+            DockTabPayload {
+                tab_id: DockTabId::from_raw(7),
+                layout,
+            },
+        )),
     });
     assert_eq!(
-        dropped_dock_tab(&strip).map(|t| t.raw()),
+        dropped_dock_tab(&strip, &model).map(|t| t.raw()),
         Some(7),
         "an in-strip tab drag must resolve to the same dock tab as a rail drag"
     );
@@ -611,9 +625,21 @@ fn dock_drop_recognizes_both_tab_drag_sources() {
     // 3. A single-dock (split-pane header) drag carries `DockDragData`.
     let widget = DragPayload::typed(DockDragData {
         dock_id: DockWidgetId::from_raw(3),
+        layout,
     });
-    assert_eq!(dropped_dock_widget(&widget).map(|d| d.raw()), Some(3));
-    assert!(dropped_dock_tab(&widget).is_none());
+    assert_eq!(
+        dropped_dock_widget(&widget, &model).map(|d| d.raw()),
+        Some(3)
+    );
+    assert!(dropped_dock_tab(&widget, &model).is_none());
+
+    // 4. Every one of them dragged from another layout is not this layout's:
+    //    two layouts that import one saved file keep the same tab ids, so the
+    //    id would name this layout's own tab 7 and move it instead.
+    let other = DockingModel::new();
+    assert!(dropped_dock_tab(&rail, &other).is_none());
+    assert!(dropped_dock_tab(&strip, &other).is_none());
+    assert!(dropped_dock_widget(&widget, &other).is_none());
 }
 
 #[test]
@@ -2279,11 +2305,12 @@ fn tab_dropped_on_a_pane_relocates_to_its_side() {
     let tab_id = model.side_tabs(DockSide::Trailing)[0].id;
 
     #[derive(Debug)]
-    struct TabSource(DockTabId);
+    struct TabSource(DockTabId, super::model::DockLayoutId);
     impl Widget for TabSource {
         fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
             let self_id = ctx.self_id();
             let tab = self.0;
+            let layout = self.1;
             let hs = HandlerSet::new().on_drag(move |phase, ctx| {
                 if let DragPhase::Started { .. } = phase {
                     ctx.start_drag(
@@ -2291,6 +2318,7 @@ fn tab_dropped_on_a_pane_relocates_to_its_side() {
                         DragPayload::typed(DockTabDragData {
                             tab_id: tab,
                             source_side: DockSide::Trailing,
+                            layout,
                         }),
                     );
                 }
@@ -2312,7 +2340,7 @@ fn tab_dropped_on_a_pane_relocates_to_its_side() {
         model.clone(),
         inner,
     ));
-    let src = t.add(TabSource(tab_id));
+    let src = t.add(TabSource(tab_id, model.layout_id()));
     let es = t.add(Expand::new().flex(1.0).child(src));
     let ep = t.add(Expand::new().flex(1.0).child(pane));
     t.add(HStack::new().child(es).child(ep));
@@ -2359,14 +2387,18 @@ fn dock_dropped_on_a_pane_centre_stacks_into_its_tab() {
     assert_eq!(model.tab_count(DockSide::Bottom), 1, "D opens on Bottom");
 
     #[derive(Debug)]
-    struct DockSource(DockWidgetId);
+    struct DockSource(DockWidgetId, super::model::DockLayoutId);
     impl Widget for DockSource {
         fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
             let self_id = ctx.self_id();
             let dock_id = self.0;
+            let layout = self.1;
             let hs = HandlerSet::new().on_drag(move |phase, ctx| {
                 if let DragPhase::Started { .. } = phase {
-                    ctx.start_drag(self_id, DragPayload::typed(DockDragData { dock_id }));
+                    ctx.start_drag(
+                        self_id,
+                        DragPayload::typed(DockDragData { dock_id, layout }),
+                    );
                 }
             });
             ctx.apply_self_handlers(hs);
@@ -2386,7 +2418,7 @@ fn dock_dropped_on_a_pane_centre_stacks_into_its_tab() {
         model.clone(),
         inner,
     ));
-    let src = t.add(DockSource(d));
+    let src = t.add(DockSource(d, model.layout_id()));
     let es = t.add(Expand::new().flex(1.0).child(src));
     let ep = t.add(Expand::new().flex(1.0).child(pane));
     t.add(HStack::new().child(es).child(ep));
@@ -2421,14 +2453,18 @@ fn pane_droptarget_chrome_is_at_hidden_and_highlights() {
     use teksilo_core::widget_builder::HandlerSet;
 
     #[derive(Debug)]
-    struct DockSource(DockWidgetId);
+    struct DockSource(DockWidgetId, super::model::DockLayoutId);
     impl Widget for DockSource {
         fn build(&mut self, ctx: &mut BuildContext) -> Vec<WidgetId> {
             let self_id = ctx.self_id();
             let dock_id = self.0;
+            let layout = self.1;
             let hs = HandlerSet::new().on_drag(move |phase, ctx| {
                 if let DragPhase::Started { .. } = phase {
-                    ctx.start_drag(self_id, DragPayload::typed(DockDragData { dock_id }));
+                    ctx.start_drag(
+                        self_id,
+                        DragPayload::typed(DockDragData { dock_id, layout }),
+                    );
                 }
             });
             ctx.apply_self_handlers(hs);
@@ -2449,7 +2485,7 @@ fn pane_droptarget_chrome_is_at_hidden_and_highlights() {
         model.clone(),
         inner,
     ));
-    let src = t.add(DockSource(DockWidgetId::fresh()));
+    let src = t.add(DockSource(DockWidgetId::fresh(), model.layout_id()));
     let es = t.add(Expand::new().flex(1.0).child(src));
     let ep = t.add(Expand::new().flex(1.0).child(pane));
     t.add(HStack::new().child(es).child(ep));
