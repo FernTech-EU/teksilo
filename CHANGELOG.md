@@ -120,6 +120,16 @@ by crate for clarity, not because crates version independently.
 - **An interrupted `cargo teksilo` run no longer leaves `AGENTS.md`,
   `Cargo.toml` or the probe manifest empty.**
 
+### Security
+
+- **`Cargo.lock` moves rmcp, tokio, cookie, url, pulldown-cmark, libz-sys
+  and rustix past their RustSec advisories**, which matters to the binaries
+  installed with `cargo install --locked` (`cargo-teksilo`,
+  `teksilo-automation-mcp`). The `zip` advisories remain: `zip` 6 and 8 come
+  from text-document's EPUB and DOCX exporters. So do two that reach only
+  the `servo-backend` feature of teksilo-webview: `cookie` 0.16 and the
+  SQLite bundled by `libsqlite3-sys` 0.36, both through Servo.
+
 ## [0.29.1] - 2026-11-24
 
 ### Added
