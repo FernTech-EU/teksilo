@@ -117,8 +117,10 @@ by crate for clarity, not because crates version independently.
 
 #### cargo-teksilo
 
-- **`cargo teksilo probe install` no longer deletes files outside
-  `scripts/teksilo_probe/`** when its manifest lists an absolute or `..` path.
+- **`cargo teksilo probe install` no longer deletes or writes files outside
+  `scripts/teksilo_probe/`** when its manifest lists an absolute or `..` path,
+  or a path through a symbolic link. A generated file replaced by a symbolic
+  link stops the install with an error instead of being written through.
 - **`cargo teksilo` no longer deletes text in `AGENTS.md` or
   `.github/copilot-instructions.md` when the teksilo markers there are
   unbalanced**: it reports the file as blocked and leaves it untouched.

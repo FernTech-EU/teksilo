@@ -66,6 +66,13 @@ pub enum ProbeError {
 
     #[error("could not update {0}: {1}")]
     Manifest(PathBuf, String),
+
+    #[error(
+        "{} is a symbolic link, and the probe harness is only written inside \
+         the project.\nRemove the link and run again.",
+        .0.display()
+    )]
+    Symlink(PathBuf),
 }
 
 /// Outcome of a materialisation, for reporting.
@@ -104,6 +111,18 @@ pub fn materialise(project: &Path, force: bool) -> Result<Written, ProbeError> {
         }
     }
 
+    // A committed link on the way to a file would have the write land outside
+    // the project, so none is followed. Checked for every file before any is
+    // written, so a refusal leaves the tree as it was.
+    let mut ours: Vec<PathBuf> = walk(&PROBE)
+        .iter()
+        .map(|file| Path::new(DEST).join(shipped_path(file.path())))
+        .collect();
+    ours.push(Path::new(DEST).join(MANIFEST));
+    if let Some(link) = ours.iter().find_map(|rel| symlink_on_path(project, rel)) {
+        return Err(ProbeError::Symlink(link));
+    }
+
     let mut written = Written::default();
     let mut manifest = BTreeMap::new();
 
@@ -133,9 +152,12 @@ pub fn materialise(project: &Path, force: bool) -> Result<Written, ProbeError> {
 
     // Anything we wrote last time and no longer ship is ours to remove; a file
     // the consumer added under the generated tree is not in the manifest and
-    // so is left alone.
+    // so is left alone, and so is an entry reached through a link, which
+    // could point anywhere.
     for old in previous.keys() {
-        if !manifest.contains_key(old) {
+        if !manifest.contains_key(old)
+            && symlink_on_path(project, &Path::new(DEST).join(old)).is_none()
+        {
             let _ = std::fs::remove_file(dest.join(old));
         }
     }
@@ -287,6 +309,22 @@ fn walk<'a>(dir: &'a Dir<'a>) -> Vec<&'a include_dir::File<'a>> {
 
 /// A content digest that needs no dependency.
 ///
+/// The first symbolic link met going from `root` down `rel`, the last
+/// component included; `None` once a component does not exist yet, since
+/// nothing below it can be a link.
+fn symlink_on_path(root: &Path, rel: &Path) -> Option<PathBuf> {
+    let mut at = root.to_path_buf();
+    for component in rel.components() {
+        at.push(component);
+        match std::fs::symlink_metadata(&at) {
+            Ok(meta) if meta.file_type().is_symlink() => return Some(at),
+            Ok(_) => {}
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
 /// FNV-1a: this detects an accidental edit, which is all it is for. It is not
 /// a security boundary and nothing here pretends otherwise.
 fn digest(bytes: &[u8]) -> String {
@@ -444,6 +482,58 @@ mod tests {
         materialise(&proj, true).unwrap();
         assert!(absolute.exists(), "an absolute manifest path was deleted");
         assert!(escaping.exists(), "a `..` manifest path was deleted");
+    }
+
+    /// A committed link to a directory outside the project does not let a
+    /// stale manifest entry through it delete what is there.
+    #[cfg(unix)]
+    #[test]
+    fn a_manifest_entry_through_a_link_is_never_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let proj = root.path().join("proj");
+        std::fs::create_dir(&proj).unwrap();
+        std::fs::copy(project().path().join("Cargo.toml"), proj.join("Cargo.toml")).unwrap();
+        materialise(&proj, false).unwrap();
+
+        let outside = root.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("authorized_keys"), "keep").unwrap();
+        std::os::unix::fs::symlink(&outside, proj.join(DEST).join("link")).unwrap();
+        let manifest = proj.join(DEST).join(MANIFEST);
+        let mut text = std::fs::read_to_string(&manifest).unwrap();
+        text.push_str(&format!("{}  link/authorized_keys\n", digest(b"keep")));
+        std::fs::write(&manifest, text).unwrap();
+
+        materialise(&proj, true).unwrap();
+        assert!(
+            outside.join("authorized_keys").exists(),
+            "a file outside the project was deleted through a link"
+        );
+    }
+
+    /// A shipped file replaced by a link is not written through, even with
+    /// `--force`: the install is refused and nothing is written.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_on_a_shipped_file_is_refused() {
+        let root = tempfile::tempdir().unwrap();
+        let proj = root.path().join("proj");
+        std::fs::create_dir(&proj).unwrap();
+        std::fs::copy(project().path().join("Cargo.toml"), proj.join("Cargo.toml")).unwrap();
+        materialise(&proj, false).unwrap();
+
+        let outside = root.path().join("bashrc");
+        std::fs::write(&outside, "keep").unwrap();
+        let shipped = proj.join(DEST).join("session.py");
+        std::fs::remove_file(&shipped).unwrap();
+        std::os::unix::fs::symlink(&outside, &shipped).unwrap();
+
+        let err = materialise(&proj, true).unwrap_err();
+        assert!(
+            matches!(err, ProbeError::Symlink(ref p) if *p == shipped),
+            "{err}"
+        );
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
     }
 
     #[test]
